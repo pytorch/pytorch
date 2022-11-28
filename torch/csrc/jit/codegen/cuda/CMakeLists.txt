@@ -145,43 +145,42 @@ set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_python torch_cuda ${CUDA_NVRTC_LIB} ${PYTHON_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_python torch_cuda ${CUDA_NVRTC_LIB} ${TORCH_PYTHON_LIBRARY})
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
                            PRIVATE ${TORCH_ROOT} # replace this one with nvfuser_srcs_dir?!
-                           PRIVATE ${CUDA_INCLUDE_DIRS}
-                           PRIVATE ${PYTHON_INCLUDE_DIRS})
+                           PRIVATE ${CUDA_INCLUDE_DIRS})
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # --- pybind11
+if(BUILD_PYTHON)
+  set(NVFUSER_PYTHON "${PROJECT_NAME}_python")
+  #find_package(pybind11 REQUIRED)
 
-set(NVFUSER_PYTHON "${PROJECT_NAME}_python")
-#find_package(pybind11 REQUIRED)
+  set(NVFUSER_PYTHON_SRCS)
+  list(APPEND NVFUSER_PYTHON_SRCS
+      ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
+      ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_register.cpp
+  )
 
-set(NVFUSER_PYTHON_SRCS)
-list(APPEND NVFUSER_PYTHON_SRCS
-    ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
-    ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_register.cpp
-)
-
-#pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
-add_library(${NVFUSER_PYTHON} MODULE ${NVFUSER_PYTHON_SRCS})
-message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
-message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
-message(STATUS "python module prefix: " ${PYTHON_MODULE_PREFIX})
-message(STATUS "python module extention: " ${PYTHON_MODULE_EXTENSION})
-target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
-target_include_directories(${NVFUSER_PYTHON}
-	                   PRIVATE ${TORCH_ROOT}
-			   #PRIVATE ${pybind11_INCLUDE_DIRS}
-                           PRIVATE ${PYTHON_INCLUDE_DIRS})
-target_compile_options(${NVFUSER_PYTHON} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
-if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    message(STATUS "somehow this is happening")
-    set_target_properties(${NVFUSER_PYTHON} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+  #pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
+  #add_library(${NVFUSER_PYTHON} MODULE ${NVFUSER_PYTHON_SRCS})
+  add_library(${NVFUSER_PYTHON} SHARED ${NVFUSER_PYTHON_SRCS})
+  message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
+  message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
+  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python python::python pybind::pybind11)
+  target_include_directories(${NVFUSER_PYTHON}
+  	                   PRIVATE ${TORCH_ROOT})
+  			   #PRIVATE ${pybind11_INCLUDE_DIRS}
+                           #PRIVATE ${PYTHON_INCLUDE_DIRS})
+  target_compile_options(${NVFUSER_PYTHON} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+  if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+      message(STATUS "somehow this is happening")
+      set_target_properties(${NVFUSER_PYTHON} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+  endif()
+  install(TARGETS ${NVFUSER_PYTHON} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
-install(TARGETS ${NVFUSER_PYTHON} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # --- generate runtime files
 
