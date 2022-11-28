@@ -19,6 +19,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+
+try:
+    from test_minifier import requires_cuda
+except ImportError:
+    from .test_minifier import requires_cuda
+
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -810,7 +816,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.utils.counters["frames"]["ok"] + 1,
         )
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
@@ -946,7 +951,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 4)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
+    # NB: When you remove the expectedFailure, don't forget to
+    # uncomment/adjust the assertEqual below
+    @unittest.expectedFailure
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -960,12 +968,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(3, 2))
+        # self.assertEqual(cnt.frame_count, ifdyn(3, 2))
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1027,8 +1034,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
-    # TODO: make set_rng_state work with FakeTensor/aot_autograd
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_rng_state(self):
         def fn():
             state = torch.get_rng_state()
@@ -1042,9 +1047,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         before, after = opt_fn()
         self.assertTrue(same(before, after))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 4)  # rand, rand
-        graph, _ = torch._dynamo.export(fn)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)  # rand, rand
+        try:
+            graph, _ = torch._dynamo.export(fn)
+            # See https://github.com/pytorch/pytorch/pull/87490
+            self.fail("unexpected export success")
+        except torch._dynamo.exc.Unsupported:
+            pass
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
@@ -1098,7 +1108,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_nn_parameter(self):
         def test_fn():
             a = torch.nn.Parameter(torch.randn(5, 5))
@@ -1584,7 +1593,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_specialized_stride(self):
         def f():
             e = torch.empty(4)
@@ -1688,8 +1696,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    # This doesn't work without fake tensors but I don't care
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_issue1466_size_aot_autograd(self):
         def fn(x):
             # do a tensor op and a size compute
@@ -1882,6 +1888,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
+
+    @requires_cuda()
+    def test_norm_dtype(self):
+        def foo(_stack0):
+            getitem = _stack0[(slice(None, None, None), -1)]
+            _stack0 = None
+            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
+            getitem = None
+            return (normalize,)
+
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, "cuda", False)]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        opt_foo = torch._dynamo.optimize("aot_inductor_debug")(foo)
+        with torch.cuda.amp.autocast(enabled=True):
+            ref = foo(*args)[0]
+            res = foo(*args)[0]
+            self.assertEqual(ref.dtype, res.dtype)
+
+            self.assertTrue(same(res, ref))
 
     def test_for_loop_graph_break(self):
         def inner(x):

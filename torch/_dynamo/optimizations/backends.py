@@ -53,9 +53,6 @@ def create_backend(fn):
             return fn(model, **kwargs)
         except KeyboardInterrupt:
             raise
-        except Exception:
-            log.exception(f"{fn.__name__} error")
-            return None
 
     BACKENDS[fn.__name__] = inner
     return inner
