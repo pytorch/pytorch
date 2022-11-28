@@ -517,22 +517,6 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
     return run
 
 
-@create_backend
-def aot_autograd(subgraph, **kwargs):
-    def _wrapped_bw_compiler(*args, **kwargs):
-        # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(disable(bw_compiler)(*args, **kwargs))
-
-    bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
-    kwargs["bw_compiler"] = _wrapped_bw_compiler
-
-    from functorch.compile import aot_module_simplified
-
-    from .. import disable
-
-    return aot_module_simplified(subgraph.model, **kwargs)
-
-
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
     if jit_mod is None:
         return None
