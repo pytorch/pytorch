@@ -82,6 +82,18 @@ def _pop_mode_temporarily():
     finally:
         _push_mode(old)
 
+
+@contextlib.contextmanager
+def _disable_current_modes():
+    mode_len = _len_torch_dispatch_stack()
+    old_modes = [_pop_mode() for _ in range(mode_len)]
+    try:
+        yield old_modes
+    finally:
+        for mode in reversed(old_modes):
+            _push_mode(mode)
+
+
 class BaseTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:

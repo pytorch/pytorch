@@ -8,13 +8,14 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/constant_map.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
-
 namespace torch {
 namespace jit {
 
@@ -326,10 +327,20 @@ void NodeToONNX(
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          // ConstantValueMap has been set in shape inference,
-          // set_constant_value_map = false here to avoid redundancy.
+          // An update in ConstantValueMap is also needed here, since
+          // the user setType can be only accessed in this step, and it
+          // should be reliable.
           MergeInferredTypeAndSetMap(
-              outputs[i], old->type(), outputs[i]->type(), false);
+              outputs[i], old->type(), outputs[i]->type());
+          // non ONNX node with no type given will throw out the warnings here.
+          UpdateReliable(
+              outputs[i],
+              AreInputsReliableOrStatic(outputs[i]->node()),
+              /*no_type_warning=*/true);
+          // For the node type that does not have ComputeConstant logic, it may
+          // have reliable shape but its shape is not in ConstantValueMap. So we
+          // need to update ConstantValueMap.
+          UpdateShapeConstantIfReliable(outputs[i]);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic

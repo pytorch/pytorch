@@ -18,7 +18,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
-from typing import List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
@@ -42,29 +42,35 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
+VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
+VersionMap = Dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
 # summarizes the minimum valid major versions of g++/clang++ for each supported
 # CUDA version: https://gist.github.com/ax3l/9489132
-CUDA_GCC_VERSIONS = {
-    '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
-    '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 2, 1)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 2, 1)),
-    '11.4': ((6, 0, 0), (11, 5, 0)),
-    '11.5': ((6, 0, 0), (11, 5, 0)),
-    '11.6': ((6, 0, 0), (11, 5, 0)),
-    '11.7': ((6, 0, 0), (11, 5, 0)),
+# Or from include/crt/host_config.h in the CUDA SDK
+# The second value is the exclusive(!) upper bound, i.e. min <= version < max
+CUDA_GCC_VERSIONS: VersionMap = {
+    '10.2': (MINIMUM_GCC_VERSION, (9, 0)),
+    '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
+    '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.3': (MINIMUM_GCC_VERSION, (11, 0)),
+    '11.4': ((6, 0, 0), (12, 0)),
+    '11.5': ((6, 0, 0), (12, 0)),
+    '11.6': ((6, 0, 0), (12, 0)),
+    '11.7': ((6, 0, 0), (12, 0)),
 }
 
-CUDA_CLANG_VERSIONS = {
-    '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (9, 0, 0)),
-    '11.2': ((6, 0, 0), (9, 0, 0)),
-    '11.3': ((6, 0, 0), (11, 0, 0)),
-    '11.4': ((6, 0, 0), (11, 0, 0)),
-    '11.5': ((6, 0, 0), (12, 0, 0)),
-    '11.6': ((6, 0, 0), (12, 0, 0)),
-    '11.7': ((6, 0, 0), (13, 0, 0)),
+MINIMUM_CLANG_VERSION = (3, 3, 0)
+CUDA_CLANG_VERSIONS: VersionMap = {
+    '10.2': (MINIMUM_CLANG_VERSION, (9, 0)),
+    '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
+    '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
+    '11.4': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.5': (MINIMUM_CLANG_VERSION, (13, 0)),
+    '11.6': (MINIMUM_CLANG_VERSION, (14, 0)),
+    '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
@@ -388,20 +394,19 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             _is_binary_build()):
         return
 
-    cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
+    cuda_compiler_bounds: VersionMap = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
     if cuda_str_version not in cuda_compiler_bounds:
         warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
     else:
-        min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
-        # Special case for 11.4.0, which has lower compiler bounds that 11.4.1
+        min_compiler_version, max_excl_compiler_version = cuda_compiler_bounds[cuda_str_version]
+        # Special case for 11.4.0, which has lower compiler bounds than 11.4.1
         if "V11.4.48" in cuda_version_str and cuda_compiler_bounds == CUDA_GCC_VERSIONS:
-            max_compiler_version = (10, 0, 0)
+            max_excl_compiler_version = (11, 0)
         min_compiler_version_str = '.'.join(map(str, min_compiler_version))
-        max_compiler_version_str = '.'.join(map(str, max_compiler_version))
+        max_excl_compiler_version_str = '.'.join(map(str, max_excl_compiler_version))
 
-        version_bound_str = f'>={min_compiler_version_str}'
-        version_bound_str = f'{version_bound_str}, <={max_compiler_version_str}'
+        version_bound_str = f'>={min_compiler_version_str}, <{max_excl_compiler_version_str}'
 
         if compiler_version < TorchVersion(min_compiler_version_str):
             raise RuntimeError(
@@ -409,10 +414,10 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
                 f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version_str}). '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-        if compiler_version > TorchVersion(max_compiler_version_str):
+        if compiler_version >= TorchVersion(max_excl_compiler_version_str):
             raise RuntimeError(
                 f'The current installed version of {compiler_name} ({compiler_version}) is greater '
-                f'than the maximum required version by CUDA {cuda_str_version} ({max_compiler_version_str}). '
+                f'than the maximum required version by CUDA {cuda_str_version}. '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
 
@@ -1686,7 +1691,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, "lib", "x64"))
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')
@@ -1730,10 +1735,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Turing', '7.5+PTX'),
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
+        ('Hopper', '9.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9', '9.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

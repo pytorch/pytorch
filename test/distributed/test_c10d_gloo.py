@@ -23,28 +23,35 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import (
-    LOOPBACK,
     gpus_for_rank,
-    Task,
+    LOOPBACK,
     ModuleForDdpCommHook,
     SparseGradientModule,
+    Task,
 )
 from torch import nn
+from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
+    Shard,
+    ShardedTensor,
+    ShardMetadata,
+)
 from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 from torch.testing._internal.common_distributed import (
+    create_device,
     MultiProcessTestCase,
     requires_gloo,
-    skip_if_lt_x_gpu,
     simple_sparse_reduce_tests,
+    skip_if_lt_x_gpu,
     skip_if_win32,
-    create_device,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
     retry_on_connect_failures,
+    run_tests,
     sandcastle_skip,
+    TestCase,
 )
 
 
@@ -1754,6 +1761,49 @@ class DistributedDataParallelTest(
             loss = criterion(output, target)
             loss.backward()
 
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_sharded_tensor(self):
+        class MyModule(nn.Module):
+            def __init__(self, shard_tensor: ShardedTensor) -> None:
+                super().__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.st = nn.Parameter(shard_tensor)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                return F.softmax(x, dim=1)
+        pg = dist.init_process_group(
+            "gloo",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        local_shard_metadata = ShardMetadata(
+            shard_offsets=[(self.rank % 2) * 5, 0],
+            shard_sizes=[5, 10],
+            placement=f"rank:{self.rank}/cuda:{self.rank}"
+        )
+        local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
+        st = init_from_local_shards(local_shards, [10, 10])
+        m = MyModule(st)
+        with _ddp_replicated_tensor(False):
+            DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                module=m,
+                params_and_buffers_to_ignore={'st'}
+            )
+            # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
+            DistributedDataParallel(
+                m,
+                device_ids=[device] if device.type == "gpu" else None,
+                process_group=pg,
+                gradient_as_bucket_view=True,
+                broadcast_buffers=False,
+                static_graph=True,
+            )
+
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
@@ -2362,6 +2412,35 @@ class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     @requires_gloo()
     def test_collectives(self):
         self._test_collectives(backend="gloo")
+
+    @requires_gloo()
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="gloo")
+
+    @requires_gloo()
+    def test_allgather_coalesced(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        input_tensor = torch.ones(10, 10, dtype=torch.float32)
+        output_tensor_list = [torch.zeros_like(input_tensor)]
+        dist.all_gather_coalesced([output_tensor_list], [input_tensor])
+        self.assertEqual(output_tensor_list, [input_tensor])
+
+    @requires_gloo()
+    def test_monitored_barrier(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        dist.monitored_barrier()
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
