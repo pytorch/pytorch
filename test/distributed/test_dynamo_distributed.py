@@ -20,7 +20,6 @@ from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
