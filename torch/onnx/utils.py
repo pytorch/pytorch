@@ -50,6 +50,8 @@ from torch.onnx._internal import (
     registration,
 )
 
+from torch.onnx.onnxscript_graph import OSGraph
+
 __all__ = [
     "is_in_onnx_export",
     "select_model_mode_for_export",
@@ -563,6 +565,7 @@ def _split_tensor_list_constants(g, block):
 @_beartype.beartype
 def _optimize_graph(
     graph: _C.Graph,
+    os_graph: OSGraph,
     operator_export_type: _C_onnx.OperatorExportTypes,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
@@ -662,7 +665,15 @@ def _optimize_graph(
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
 
+    print("===================")
+    print("ATEN graph: ", graph)
+
+    # We should pass "os_graph" into this function so that it will be used in further
+    # call to each ATEN op symbolic function in those symbolic_opsetXX.py files.
     graph = _C._jit_pass_onnx(graph, operator_export_type)
+
+    print("===================")
+    print("ONNX graph: ", graph)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
 
@@ -689,7 +700,7 @@ def _optimize_graph(
         _C._jit_pass_onnx_graph_shape_type_inference(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
-    return graph
+    return graph, os_graph
 
 
 @_beartype.beartype
@@ -872,7 +883,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     )
     warn_on_static_input_change(inputs_states)
 
-    trace_graph = _optimize_graph(trace_graph, operator_export_type, params_dict={})
+    trace_graph, _ = _optimize_graph(trace_graph, operator_export_type, params_dict={})
     if return_outs:
         return trace_graph, torch_out
     return trace_graph
@@ -952,6 +963,7 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
 ) -> Tuple[_C.Graph, List[_C.IValue], Optional[Any], Optional[_C.ScriptModule]]:
+    os_graph = OSGraph()
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
@@ -974,7 +986,9 @@ def _create_jit_graph(
             graph = _C._propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), param_count_list, False, False
             )
-            return graph, params, torch_out, module
+
+            os_graph.initialize(graph.inputs, graph.outputs)
+            return graph, params, torch_out, module, os_graph
 
         # torch.jit.ScriptFunction
         params = []
@@ -984,7 +998,9 @@ def _create_jit_graph(
         graph = _C._propagate_and_assign_input_shapes(
             graph, flattened_args, param_count_list, False, False
         )
-        return graph, params, torch_out, None
+
+        os_graph.initialize(graph.inputs, graph.outputs)
+        return graph, params, torch_out, None, os_graph
 
     graph, torch_out = _trace_and_get_graph_from_model(model, args)
     _C._jit_pass_onnx_lint(graph)
@@ -997,7 +1013,9 @@ def _create_jit_graph(
         if i >= user_input_num:
             inp.setDebugName(param_names[i - user_input_num])
     _C._jit_pass_onnx_function_substitution(graph)
-    return graph, params, torch_out, None
+
+    os_graph.initialize(graph_inputs, graph.outputs)
+    return graph, params, torch_out, None, os_graph
 
 
 @_beartype.beartype
@@ -1081,6 +1099,7 @@ def _model_to_graph(
     fixed_batch_size=False,
     training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
+    use_onnx_script_graph=False,
 ) -> Tuple[
     _C.Graph,
     Dict[str, torch.Tensor],
@@ -1110,12 +1129,13 @@ def _model_to_graph(
         args = (args,)
 
     model = _pre_trace_quant_model(model, args)
-    graph, params, torch_out, module = _create_jit_graph(model, args)
+    graph, params, torch_out, module, os_graph = _create_jit_graph(model, args)
     params_dict = _get_named_param_dict(graph, params)
 
     try:
-        graph = _optimize_graph(
+        graph, os_graph = _optimize_graph(
             graph,
+            os_graph,
             operator_export_type,
             _disable_torch_constant_prop=_disable_torch_constant_prop,
             fixed_batch_size=fixed_batch_size,
@@ -1124,6 +1144,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
+        os_graph.run_optimizers()
     except Exception as e:
         torch.onnx.log("Torch IR graph at exception: ", graph)
         raise
@@ -1195,7 +1216,11 @@ def _model_to_graph(
     # give them a legible name for debugging purposes
     _apply_friendly_debug_names(graph, params_dict)
 
+    if use_onnx_script_graph:
+        return graph, params_dict, torch_out, os_graph
+
     return graph, params_dict, torch_out
+
 
 
 @_beartype.beartype
@@ -1313,7 +1338,7 @@ def unconvertible_ops(
             # of the ops in the graph.
             args = _decide_input_format(model, args)
             model = _pre_trace_quant_model(model, args)
-            graph, _, _, module = _create_jit_graph(model, args)
+            graph, _, _, module, _ = _create_jit_graph(model, args)
             _C._jit_pass_inline(graph)
             _C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
             _C._jit_pass_erase_number_types(graph)
@@ -1530,7 +1555,7 @@ def _export(
                 dynamic_axes = {}
             _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
-            graph, params_dict, torch_out = _model_to_graph(
+            graph, params_dict, torch_out, os_graph = _model_to_graph(
                 model,
                 args,
                 verbose,
@@ -1541,7 +1566,10 @@ def _export(
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 dynamic_axes=dynamic_axes,
+                use_onnx_script_graph=True,
             )
+
+            os_graph.save_model_file(f)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = (
