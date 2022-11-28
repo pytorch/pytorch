@@ -241,13 +241,11 @@ For patch releases issue tracker needs to be created. For patch release, we requ
 * https://github.com/pytorch/pytorch/issues/51886
 
 Only following issues are accepted:
-1. Fixes to regressions against previous major version
+1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
 2. Critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
 3. Fixes to new features being introduced in this release
-4. Compilation fixes or ifdefs required for different versions of the compilers or third-party libraries
-5. Test/CI fixes or improvements
-6. Documentation improvements
-7. Release branch specific changes (e.g. change version identifiers, remove/hide features that aren’t ready for release)
+4. Documentation improvements
+5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
 
 ### Building a release schedule / cherry picking
 
