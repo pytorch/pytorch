@@ -681,10 +681,6 @@ class SyncBatchNorm(_BatchNorm):
             )
 
     def forward(self, input: Tensor) -> Tensor:
-        # currently only GPU input is supported
-        if not input.is_cuda:
-            raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
-
         self._check_input_dim(input)
         self._check_non_zero_input_channels(input)
 
@@ -727,8 +723,13 @@ class SyncBatchNorm(_BatchNorm):
         )
 
         # Don't sync batchnorm stats in inference mode (model.eval()).
-        need_sync = (bn_training and self.training)
+        need_sync = (bn_training and self.training and
+                     torch.distributed.is_available() and torch.distributed.is_initialized())
         if need_sync:
+            # currently only GPU input is supported
+            if not input.is_cuda:
+                raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
+
             process_group = torch.distributed.group.WORLD
             if self.process_group:
                 process_group = self.process_group
