@@ -1174,7 +1174,7 @@ if(BUILD_JNI)
 endif()
 
 if(NOT USE_CUDA)
-  set(BUILD_NVFUSER OFF)
+  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
 endif()
 
 if(BUILD_NVFUSER)
