@@ -15,12 +15,7 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
-from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
-    TorchPatcher,
-    WrapperBackend,
-)
+from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
@@ -86,18 +81,6 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_compiler_fn(compiler_fn):
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
-
-
 def wrap_convert_context(fn):
     """
     Context manager to:
@@ -156,16 +139,17 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj])
             return seen_ids[obj_id]
         elif istype(obj, dict):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.values()])
+            # Some packages like pytest can be updated during runtime. So, make a
+            # copy of values to avoid issues like "RuntimeError: dictionary
+            # changed size during iteration"
+            values = list(obj.values())
+            seen_ids[obj_id] = any([has_tensor(v) for v in values])
             return seen_ids[obj_id]
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
-            return seen_ids[obj_id]
-        elif not is_allowed(obj) and hasattr(obj, "__dict__") and len(obj.__dict__):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
             # if config.debug:
@@ -213,6 +197,8 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
                     stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
+            msg += "\n"
+            msg += "=" * 10
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
@@ -222,20 +208,27 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
 
 def augment_exc_message(exc, msg="\n"):
-    if hasattr(exc, "real_stack") and len(exc.real_stack) > 0 and not config.verbose:
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+    if (
+        hasattr(exc, "real_stack")
+        and len(exc.real_stack) > 0
+        and not (config.verbose and config.suppress_errors)
+    ):
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack[0:2])))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  {config.dynamo_import}.replay('{exc.record_filename}').\n"
 
-    msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+    if not config.verbose:
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
     ):
         msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run"
+            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
@@ -243,10 +236,9 @@ def augment_exc_message(exc, msg="\n"):
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
-            "    torchdynamo.config.suppress_errors = True\n"
+            "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    msg += "=" * 10
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
     new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
@@ -272,8 +264,6 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     init_logging()
 
-    compiler_fn = wrap_compiler_fn(compiler_fn)
-
     @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
@@ -294,6 +284,7 @@ def convert_frame_assert(
             # setattr could be tricky to handle generally,
             # but also not likely useful to compile- skip the whole frame
             return None
+
         # Check if the frame is generated by an exec builtin call
         # TODO - Running exec generated frame seems propagates f_globals to the
         # next frames.

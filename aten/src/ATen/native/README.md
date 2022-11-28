@@ -47,10 +47,9 @@ signature.
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s).
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
-  In general annotations can be defined via the following four situations:
-  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  In general annotations can be defined via the following situations:
+  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data. The set could have a size of one.
   - `Tensor(a!)` - members of `a` may be written to thus mutating the underlying data.
-  - `Tensor!` - shorthand for Tensor(fresh\_identifier!)
   - `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
