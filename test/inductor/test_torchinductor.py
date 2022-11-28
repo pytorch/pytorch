@@ -229,8 +229,9 @@ def compute_grads(args, kwrags, results, grads):
 def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
-    buffer = torch.as_strided(x, (x.numel(),), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
 
 
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
