@@ -27,7 +27,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
 
-aot_autograd = dynamo_optimizations.backends.aot_autograd
+aot_autograd = dynamo_optimizations.training.aot_autograd
 normalize_ir = dynamo_optimizations.normalize.normalize_ir
 is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
 count_calls = dynamo_utils.count_calls
@@ -394,12 +394,10 @@ def compile_fx(
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
-            model_,
-            example_inputs_,
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-        )
+        )(model_, example_inputs_)
