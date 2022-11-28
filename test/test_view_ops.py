@@ -9,7 +9,7 @@ import random
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
+    IS_FBCODE, TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
@@ -102,7 +102,7 @@ class TestViewOps(TestCase):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base._storage().data_ptr() != other._storage().data_ptr():
                 return False
 
         return True
@@ -857,6 +857,7 @@ class TestViewOps(TestCase):
         nv[1, 1] = 0
         self.assertNotEqual(t[2, 2], nv[1, 1])
 
+    @unittest.skipIf(IS_FBCODE, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds")
     def test_advanced_indexing_assignment(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
