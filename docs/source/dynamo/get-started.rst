@@ -41,7 +41,7 @@ we can inspect them by running ``TORCHINDUCTOR_TRACE=1 python trig.py``
 with the actual generated kernel being
 
 .. code:: python
-   
+
    @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
    @triton.jit
    def kernel(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
@@ -68,7 +68,7 @@ As a next step let’s try a real model like resnet50 from the PyTorch
 hub.
 
 .. code:: python
-   
+
    import torch
    import torch._dynamo as dynamo
    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True)
@@ -142,9 +142,9 @@ Some of the most commonly used backend include:
   Uses TorchInductor backend with AotAutograd and cudagraphs by leveraging
   codegened Triton kernels `Read
   more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-  
+
   * ``dynamo.optimize("nvfuser")`` - nvFuser with TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  
+
   * ``dynamo.optimize("aot_nvfuser")`` - nvFuser with AotAutograd. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
 
   * ``dynamo.optimize("aot_cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
@@ -152,7 +152,7 @@ Some of the most commonly used backend include:
 * **Inference-only backend**\ s: \* ``dynamo.optimize("ofi")`` - Uses
   Torchscript optimize_for_inference. `Read
   more <https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html>`__
-  
+
   * ``dynamo.optimize("fx2trt")`` - Uses Nvidia TensorRT for inferenc optimizations. `Read more <https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst>`__
 
   * ``dynamo.optimize("onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__ \* ``dynamo.optimize("ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
@@ -178,4 +178,4 @@ existing methods and their limitations:
    but allows a smoother transition where partial graphs can be
    optimized without code modification
 
-.. |image0| image:: ../_static/img/TorchDynamo.png
+.. |image0| image:: ../_static/img/dynamo/TorchDynamo.png

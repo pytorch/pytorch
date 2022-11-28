@@ -16,7 +16,7 @@ TorchDynamo makes it easy to experiment with different compiler
 backends to make PyTorch code faster with a single line decorator
 ``torch._dynamo.optimize()``
 
-.. image:: ../_static/img/TorchDynamo.png
+.. image:: ../_static/img/dynamo/TorchDynamo.png
 
 For more information about `TorchInductor`, one of the backends
 supported by `TorchDynamo Graph <https://pytorch.org/docs/stable/fx.html>`__
@@ -43,5 +43,3 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    api
    troubleshooting
    faq
-
-
