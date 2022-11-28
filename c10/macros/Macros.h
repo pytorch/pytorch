@@ -255,13 +255,13 @@ using namespace c10::hip;
 // constants from
 // (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
 // The maximum number of threads per multiprocessor is 1024 for Turing
-// architecture (7.5), 1536 for Geforce Ampere (8.6), and 2048 for all other
-// architectures. You'll get warnings if you exceed these constants. Hence, the
-// following macros adjust the input values from the user to resolve potential
-// warnings.
+// architecture (7.5), 1536 for Geforce Ampere (8.6)/Jetson Orin (8.7), and
+// 2048 for all other architectures. You'll get warnings if you exceed these
+// constants. Hence, the following macros adjust the input values from the user
+// to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -326,9 +326,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) ||  \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
-    (defined(USE_ROCM) && defined(ROCM_DISABLE_GPU_ASSERTS))
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
@@ -368,7 +367,9 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+#if (                                                                       \
+    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
+    !defined(TORCH_DISABLE_GPU_ASSERTS))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -386,7 +387,7 @@ __host__ __device__
         const char* function) throw() __attribute__((__noreturn__));
 
 #if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(ROCM_DISABLE_GPU_ASSERTS)
+    !defined(TORCH_DISABLE_GPU_ASSERTS)
 // ROCm supports __assert_fail only as a device side function.
 __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion,

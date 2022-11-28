@@ -840,3 +840,24 @@ class TestSubgraphRewriter(JitTestCase):
             [second_input_is_scalar])
         self.assertEqual(len(matches), 1)
         self.assertEqual(num_repalcement_node_found(traced), 1)
+
+    def test_matching_pattern_with_list_type_arg(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten._reshape_alias_copy.default(x, [1, 2], [3, 4])
+
+        def pattern(x, arg0, arg1):
+            return torch.ops.aten._reshape_alias_copy.default(x, arg0, arg1)
+
+        def replacement(x, arg0, arg1):
+            return torch.ops.aten._reshape_alias_copy.default(x, arg1, arg0)
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        self.assertEqual(len(matches), 1)
+
+        self.assertExpectedInline(traced.code.strip(), """\
+def forward(self, x):
+    _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
+    return _reshape_alias_copy_default_1""")  # noqa: B950
