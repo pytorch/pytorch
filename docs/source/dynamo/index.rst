@@ -40,6 +40,5 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    guards-overview
    custom-backends
    deep-dive
-   api
    troubleshooting
    faq
