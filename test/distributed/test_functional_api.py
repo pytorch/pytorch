@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
+from torch.testing._internal.common_distributed import exit_if_lt_x_accelerators
 
 
 if not dist.is_available():
@@ -486,15 +487,6 @@ class TestAllGatherViewOptimization(TestCase):
         t = torch.randn(2, 8)
         res = ft_c.all_gather_single(t, gather_dim=1, group=dist.group.WORLD)
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
-
-
-# allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format
-# and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
-    if torch.accelerator.is_available():
-        if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
 
 
 def with_comms(func=None):
