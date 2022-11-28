@@ -454,10 +454,8 @@ DISPATCH_TRACE_ERROR_PRINT_GRAPH:
 {gm_printed}
 """)
         else:
-            log.warning("""
-Dispatch trace exception, set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
-to print the incomplete graph.
-""")
+            log.warning("""Dispatch trace exception, set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
+to print the incomplete graph.""")
         raise
     return GraphModule(tracer.root, graph, name)
 
