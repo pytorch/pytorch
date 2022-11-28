@@ -1,6 +1,8 @@
 #pragma once
 
+#include <ATen/Dispatch.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
@@ -8,10 +10,12 @@
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/ones_native.h>
 #include <ATen/ops/prod.h>
 #include <ATen/ops/stack_native.h>
@@ -56,10 +60,11 @@ inline at::Tensor wrap_buffer(
     at::Tensor nested_stride_tensor,
     const std::vector<int64_t>& offsets) {
   std::vector<int64_t> offsets_copy(offsets);
-  return wrap_buffer(buffer,
-                     nested_size_tensor,
-                     nested_stride_tensor,
-                     std::move(offsets_copy));
+  return wrap_buffer(
+      buffer,
+      nested_size_tensor,
+      nested_stride_tensor,
+      std::move(offsets_copy));
 }
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
@@ -320,17 +325,84 @@ inline Tensor wrap_tensor_node(
   if (tensor_node.degree() == 0) {
     return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
-  std::vector<Tensor> sizes;
-  std::vector<Tensor> flat_tensors;
+
+  // Fast path: if all tensors are on CPU, have contiguous memory, and the same
+  // dtype, copying can be done much faster.
+  bool all_tensors_cpu = true;
+  bool all_tensors_contiguous = true;
+  bool all_tensors_same_dtype = true;
+  auto first_dtype = tensor_node.children(0).dtype();
+  std::vector<long> start_offsets(tensor_node.degree());
+  start_offsets[0] = 0;
+  long total_size = 0;
   for (const auto i : c10::irange(tensor_node.degree())) {
-    flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
-    sizes.push_back(tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
+    all_tensors_cpu = all_tensors_cpu && tensor_node.children(i).is_cpu();
+    all_tensors_contiguous =
+        all_tensors_contiguous && tensor_node.children(i).is_contiguous();
+    all_tensors_same_dtype = all_tensors_same_dtype &&
+        (first_dtype == tensor_node.children(i).dtype());
+    if (!(all_tensors_cpu && all_tensors_contiguous &&
+          all_tensors_same_dtype)) {
+      break;
+    }
+    if (i > 0) {
+      start_offsets[i] =
+          start_offsets[i - 1] + tensor_node.children(i - 1).numel();
+    }
+    total_size += tensor_node.children(i).numel();
   }
 
-  TensorOptions options = flat_tensors[0].options().merge_in(options_);
+  TensorOptions options;
+  Tensor nt_buffer, nt_sizes;
+  if (all_tensors_cpu && all_tensors_contiguous && all_tensors_same_dtype) {
+    nt_buffer = at::empty({total_size}, tensor_node.children(0).options());
+    nt_sizes = at::empty(
+        {static_cast<long>(tensor_node.degree()),
+         static_cast<long>(tensor_node.children(0).sizes().size())},
+        TensorOptions().dtype(kLong));
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half,
+        at::ScalarType::Bool,
+        at::ScalarType::BFloat16,
+        c10::typeMetaToScalarType(first_dtype),
+        "create_nt_buffer",
+        [&]() {
+          at::parallel_for(
+              0, tensor_node.degree(), 1, [&](int64_t begin, int64_t end) {
+                for (int64_t i = begin; i < end; ++i) {
+                  // Only try copying memory if there is more than 0 elements
+                  // for a certain tensor
+                  if (tensor_node.children(i).numel() > 0) {
+                    memcpy(
+                        nt_buffer.data_ptr<scalar_t>() + start_offsets[i],
+                        tensor_node.children(i).data_ptr<scalar_t>(),
+                        tensor_node.children(i).numel() * sizeof(scalar_t));
+                  }
+                }
+              });
+        });
+    long sizes_offset = 0;
+    for (size_t i = 0; i < tensor_node.degree(); ++i) {
+      auto tensor_sizes = tensor_node.children(i).sizes();
+      for (size_t j = 0; j < tensor_sizes.size(); ++j) {
+        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_sizes[j];
+      }
+    }
+    options = nt_buffer.options().merge_in(options_);
+  } else { // Slow path
+    std::vector<Tensor> flat_tensors;
+    std::vector<Tensor> sizes;
+    for (const auto i : c10::irange(tensor_node.degree())) {
+      flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
+      sizes.push_back(
+          tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
+    }
+    options = flat_tensors[0].options().merge_in(options_);
+    nt_buffer = at::cat(flat_tensors);
+    nt_sizes = at::native::stack(sizes);
+  }
 
-  return wrap_buffer(
-      at::cat(flat_tensors).to(options), at::native::stack(sizes));
+  return wrap_buffer(nt_buffer.to(options), nt_sizes);
 }
 
 } // namespace impl

@@ -86,6 +86,12 @@ namespace torch {
 struct NoInferSchemaTag {};
 #endif
 
+// For multipy/torchdeploy use case
+enum class _RegisterOrVerify {
+  REGISTER,
+  VERIFY
+};
+
 template <class CurClass>
 class class_;
 
@@ -591,9 +597,9 @@ class TORCH_API Library final {
   /// ```
 
   template <typename Schema>
-  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}) & {
+  Library& def(Schema&& raw_schema, const std::vector<at::Tag>& tags = {}, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
-    return _def(std::move(s), nullptr, tags);
+    return _def(std::move(s), nullptr, tags, rv);
   }
   /// Define an operator for a schema and then register an implementation for
   /// it.  This is typically what you would use if you aren't planning
@@ -644,7 +650,7 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename Name, typename Func>
-  Library& impl(Name name, Func&& raw_f) & {
+  Library& impl(Name name, Func&& raw_f, _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
 #if defined C10_MOBILE
@@ -652,7 +658,7 @@ class TORCH_API Library final {
 #else
     CppFunction f(std::forward<Func>(raw_f));
 #endif
-    return _impl(name, std::move(f));
+    return _impl(name, std::move(f), rv);
   }
 
 #if defined C10_MOBILE
@@ -672,6 +678,10 @@ class TORCH_API Library final {
     return _impl(name, std::move(f));
   }
 #endif
+
+  // Helper for getting an OperatorName for a const char*.  You probably
+  // don't need this.
+  c10::OperatorName _resolve(const char* name) const;
 
   /// \private
   ///
@@ -809,12 +819,17 @@ class TORCH_API Library final {
   Library& _def(
       c10::FunctionSchema&& schema,
       c10::OperatorName* out_name = nullptr,
-      const std::vector<at::Tag>& tags = {}) &;
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER
+      ) &;
   Library& _def(
       c10::either<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;
-  Library& _impl(const char* name, CppFunction&& f) &;
+  Library& _impl(const char* name, CppFunction&& f,
+    _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _fallback(CppFunction&& f) &;
+
+  at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
 namespace detail {
