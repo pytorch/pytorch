@@ -124,6 +124,20 @@ class AllocateLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class CppAllocateLine(AllocateLine):
+    def plan(self, state: MemoryPlanningState):
+        if self.node.get_name() in V.graph.removed_buffers:
+            return NullLine()
+
+        # try to reuse a recently freed buffer
+        key = buffer_reuse_key(self.node)
+
+        if key in state:
+            free_line = state.pop(key)
+            free_line.is_reused = True
+            return CppReuseLine(free_line.node, self.node)
+
+        return self
+
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         code.writeline(make_cpp_buffer_allocation(self.node))
@@ -145,6 +159,17 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
             code.writeline(f"del {self.node.get_name()}")
+
+
+@dataclasses.dataclass
+class CppFreeIfNotReusedLine(FreeIfNotReusedLine):
+    node: ir.Buffer
+    is_reused: bool = False
+
+    def codegen(self, code: IndentedBuffer):
+        assert (self.node.get_name()) not in V.graph.removed_buffers
+        if not self.is_reused:
+            code.writeline(f"{self.node.get_name()}.reset();")
 
 
 @dataclasses.dataclass
@@ -592,6 +617,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return
 
     def write_free_if_not_reused_line(self, buffer):
+        self.writeline(CppFreeIfNotReusedLine(buffer))
         return
 
     def write_reuse_line(self, input_buffer, output_buffer):
