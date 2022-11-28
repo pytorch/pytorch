@@ -24,6 +24,9 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
 from torch import SymInt, SymFloat
+import logging
+
+log = logging.getLogger(__name__)
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy", "py_sym_types"]
 aten = torch.ops.aten
@@ -445,14 +448,17 @@ def dispatch_trace(
         graph = tracer.trace(root, concrete_args)
     except Exception:
         if DISPATCH_TRACE_ERROR_PRINT_GRAPH:
-            print("DISPATCH_TRACE_ERROR_PRINT_GRAPH: \n")
-            GraphModule(tracer.root, tracer.graph, name).print_readable()
-            print("\n")
+            gm_printed = GraphModule(tracer.root, tracer.graph, name).print_readable(print_output=False)
+            log.info(f"""
+            DISPATCH_TRACE_ERROR_PRINT_GRAPH: \n
+            {gm_printed} \n
+            """)
         else:
-            print("""
+            log.warning("""
             Dispatch trace exception,
             set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
-            to print the incomplete graph.""")
+            to print the incomplete graph.
+            """)
         raise
     return GraphModule(tracer.root, graph, name)
 
