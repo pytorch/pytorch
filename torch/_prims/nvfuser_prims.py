@@ -343,11 +343,21 @@ def _clone_nvfuser(fd: Any, input: TensorLikeType, *, memory_format=None):
 
 
 def _full_nvfuser(
-    fd: Any, shape: ShapeType, fill_value: NumberType, *, dtype: torch.dtype
+    fd: Any,
+    shape: ShapeType,
+    fill_value: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
 ):
-    constant = fd.define_constant(fill_value)
+    assert device != torch.device("cpu")
+    assert layout is None
+    assert pin_memory is False
+    dtype = torch.float32 if dtype is None else dtype
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.full(shape, constant, nvfuser_dtype)
+    return fd.full(shape, fill_value, nvfuser_dtype)
 
 
 _nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser

@@ -236,6 +236,46 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_full(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        def func1(size, value, b):
+            return (torch.full(size, value, dtype=dtype, device=device),)
+
+        def func2(size, value, b):
+            a = torch.full(size, value, dtype=dtype, device=device)
+            b_sin = b.sin()
+            return (torch.add(a, b_sin),)
+
+        def func3(size, value, b):
+            return (torch.full(size, value, dtype=dtype, device=device), b)
+
+        def func4(size, value, b):
+            b_sin = b.sin()
+            return (torch.full(size, value, dtype=dtype, device=device), b_sin)
+
+        def func5(size, value, b):
+            b_sin = b.sin()
+            a = torch.full(size, value, dtype=dtype, device=device)
+            a_sin = a.sin()
+            return (a, b_sin, a_sin)
+
+        for func in (func1, func3, func2, func3, func4, func5):
+            size = (3, 3)
+            value = 10
+            b = torch.randn(*size, dtype=dtype, device=device)
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(size, value, b)
+
+            out = execute(gm, size, value, b, executor="strictly_nvfuser")
+            self.assertEqual(out, func(size, value, b))
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     def test_nvfuser_empty_fusion(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
