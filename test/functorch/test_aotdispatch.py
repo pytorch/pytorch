@@ -996,11 +996,11 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         y = torch.randn(3, 3, requires_grad=True)
 
-        fxy = aot_module_simplified(F(), nop)
+        fxy = aot_module_simplified(F(), (x, y), nop)
         fxy(x, y)
         fxy(x, x)  # is ok!
 
-        fxx = aot_module_simplified(F(), nop)
+        fxx = aot_module_simplified(F(), (x, x), nop)
         fxx(x, x)
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
@@ -1025,11 +1025,11 @@ def forward(self, primals_1, primals_2):
             self.assertEqual(r1, r2)
             self.assertEqual(g1, g2)
 
-        fxy = aot_module_simplified(F(), nop)
+        fxy = aot_module_simplified(F(), (x, y), nop)
         compare(F(), fxy, (x, y))
         compare(F(), fxy, (x, z))
 
-        fxz = aot_module_simplified(F(), nop)
+        fxz = aot_module_simplified(F(), (x, z), nop)
         compare(F(), fxz, (x, z))
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxz(x, y),
@@ -1653,14 +1653,14 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod_fake = torch.fx.GraphModule(tracer.root, graph)
 
         self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
             """Unexpected fake buffer y"""
         )
         # Counterfactual to ensure that the raise is only due to real vs fake
         # Run the same exact thing except with a real buffer.
         graph = tracer.trace(MockModule(real_y))
         mod_real = torch.fx.GraphModule(tracer.root, graph)
-        aot_module_simplified(MockModule(real_y), nop)
+        aot_module_simplified(MockModule(real_y), (real_x,), nop)
 
     def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
         class MockModule(torch.nn.Module):
@@ -1682,7 +1682,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
         self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
             """Unexpected fake param linear.weight"""
         )
 
