@@ -10,7 +10,6 @@ from ..codecache import cpp_compile_command, get_code_path
 from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
-from .cpp import DTYPE_TO_ATEN
 from .triton import texpr
 
 pexpr = texpr
@@ -58,6 +57,7 @@ def make_buffer_allocation(buffer):
 
 
 def make_cpp_buffer_allocation(buffer):
+    from .cpp import DTYPE_TO_ATEN
     # TODO: map layout and device here
     dtype = buffer.get_dtype()
     shape = tuple(buffer.get_size())
@@ -341,8 +341,8 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
 
-    def next_kernel_name(self):
-        return f"kernel{next(self._names_iter)}"
+    def next_kernel_suffix(self):
+        return f"{next(self._names_iter)}"
 
     def write_allocate_line(self, buffer):
         self.writeline(AllocateLine(buffer))
@@ -620,8 +620,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def get_kernel_path(self, code):
+        from ..codecache import pick_vec_isa
+        picked_vec_isa = pick_vec_isa()
         ext = "so"
-        extra = cpp_compile_command("i", "o")
+        extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
         # \n is required to match with the CodeCache behavior
         source_code = "\n" + code.getvalue()
         _, _, kernel_path = get_code_path(source_code, ext, extra)
@@ -647,19 +649,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 self.wrapper_call.writeline(
                     "return std::vector<at::Tensor>({"
-                    + ", ".join(output_refs)
+                    + ", ".join(self.output_refs)
                     + "}); }''' )"
                 )
         else:
             self.wrapper_call.writeline("return; }''' )")
 
     def generate_end(self, result):
-        shared = codecache.shared()
+        shared = codecache.get_shared()
+        warning_all_flag = codecache.get_warning_all_flag()
         cpp_flags = codecache.cpp_flags()
+        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths()
         optimization_flags = codecache.optimization_flags()
-        ipaths, lpaths, libs = codecache.get_include_and_linking_paths()
+        use_custom_generated_macros = codecache.use_custom_generated_macros()
 
-        extra_cflags = f"{cpp_flags} {optimization_flags}"
+        extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
         extra_ldflags = f"{shared} {lpaths} {libs}"
         extra_include_paths = f"{ipaths}"
 
