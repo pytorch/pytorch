@@ -15,7 +15,6 @@ from torch.utils._pytree import tree_map
 
 from .. import config
 from ..utils import clone_inputs, count_calls, counters
-from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
 
@@ -41,48 +40,12 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
             log.warning(msg)
         return False
 
-    import functorch.compile
-
     # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
             return raise_or_warn("LSTM")
 
-    # 2) Mutation in the graph
-    mutated = False
-    try:
-        if not torch.is_inference_mode_enabled():
-            if functorch.compile.config.use_functionalize:
-                # There are two problematic classes we still exclude for now with
-                # functionalization:
-                #   - data mutation of inputs (fixed when we stop recording the
-                #   copy_ directly into the graph)
-                #   - metadata mutation of inputs (fixed if we do an extra partition
-                #   to avoid AotAutograd on the mutated inputs, or if we some how
-                #   get custom autograd function to reflect metadata changes to the
-                #   original tensor)
-                mutated = has_mutation(gm, example_inputs, inputs_only=True)
-            else:
-                mutated = has_mutation(gm, example_inputs)
-        else:
-            log.info(
-                "inference_mode enabled. TorchDynamo could not check for mutation."
-            )
-    except NotImplementedError as e:
-        if "SparseTensorImpl" not in str(e):
-            # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
-            # So, there is a chance that we could call Aot Autograd when it is
-            # unsafe.
-            # The exception is fairly guarded with string check, so any other
-            # mutation analysis bugs will raise exceptions and will be caught.
-            raise e
-        pass
-
-    # TODO: delete the logic for this later.
-    # Now that aot autograd supports aliasing and mutation, we don't need it.
-    # if mutated:
-    # return raise_or_warn("mutation")
-
+    # 2) Mutation in the graphs are now always handled by AOT Autograd.
     return True
 
 
@@ -148,7 +111,7 @@ class AotNop(AotAutogradStrategy):
         DEBUG = False
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=debug_nop if DEBUG else nop
-        )
+        )  # type: ignore[call-arg]
 
 
 aot_eager = AotNop.compile_fn
@@ -164,7 +127,7 @@ class AotTorchscript(AotAutogradStrategy):
 
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=ts_compile
-        )
+        )  # type: ignore[call-arg]
 
 
 aot_ts = AotTorchscript.compile_fn
@@ -214,7 +177,7 @@ class AotMemEfficientFusion(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
@@ -222,7 +185,7 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 class AotInductorDebug(AotAutogradStrategy):
@@ -247,7 +210,7 @@ class AotInductorDebug(AotAutogradStrategy):
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         }
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 aot_inductor_debug = AotInductorDebug.compile_fn
@@ -346,7 +309,7 @@ def create_nvprims_backend(*, executor):
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
                 partition_fn=disable(nvprims_fw_bw_partition_fn),
-            )
+            )  # type: ignore[call-arg]
 
     return NvPrims
 
