@@ -76,8 +76,8 @@ namespace cuda {
 /// In the event of a CUDA failure, formats a nice error message about that
 /// failure and also checks for device-side assertion failures
 C10_CUDA_API void c10_cuda_check_implementation(
-    const std::string& filename,
-    const std::string& function_name,
+    const char* filename,
+    const char* function_name,
     const int line_number,
     const bool include_device_assertions);
 

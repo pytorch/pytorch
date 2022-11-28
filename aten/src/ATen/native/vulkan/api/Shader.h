@@ -3,8 +3,12 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {
@@ -54,15 +58,39 @@ struct ShaderSource final {
     } spirv;
   } src_code;
 
-  std::string kernel_name;
-  ShaderLayout::Signature kernel_layout;
+  std::string kernel_name{""};
+  ShaderLayout::Signature kernel_layout{};
 
+  // Shader Metadata
+  utils::uvec3 out_tile_size{1u, 1u, 1u};
+
+  explicit ShaderSource();
   explicit ShaderSource(std::string, const char*);
   explicit ShaderSource(
       std::string,
       const uint32_t*,
       const uint32_t,
       const std::vector<VkDescriptorType>&);
+};
+
+bool operator==(const ShaderSource& _1, const ShaderSource& _2);
+
+struct ShaderInfo final {
+  ShaderSource shader_src;
+  c10::SmallVector<uint32_t, 4> tile_size;
+  StorageType bias_storage_type{StorageType::UNKNOWN};
+  StorageType weight_storage_type{StorageType::UNKNOWN};
+
+  explicit ShaderInfo() = default;
+  explicit ShaderInfo(std::string, const char*);
+  explicit ShaderInfo(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&,
+      const std::vector<uint32_t>& tile_size,
+      const StorageType bias_storage_type,
+      const StorageType weight_storage_type);
 };
 
 class ShaderModule final {
