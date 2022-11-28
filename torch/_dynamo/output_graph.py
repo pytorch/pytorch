@@ -22,6 +22,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
+    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -482,6 +483,7 @@ class OutputGraph(fx.Tracer):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
+        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
