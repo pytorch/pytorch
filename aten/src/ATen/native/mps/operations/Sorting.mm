@@ -13,6 +13,12 @@ namespace native {
 
 Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
 
+  if(!is_macos_13_or_newer()){
+        TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performace implications.");
+        return std::get<1>(at::sort(self, stable, dim, descending));
+  }
+
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
   Tensor result = std::get<1>(at::sort(self, stable, dim, descending));
