@@ -6,8 +6,8 @@
 #include <iostream>
 #include <thread>
 
-#include <c10d/HashStore.hpp>
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 

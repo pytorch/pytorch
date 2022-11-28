@@ -11,6 +11,7 @@ namespace cuda {
 
 enum class TORCH_CUDA_CU_API ScheduleHeuristic {
   None,
+  NoOp,
   PointWise,
   Reduction,
   Persistent,

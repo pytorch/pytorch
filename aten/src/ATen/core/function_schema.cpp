@@ -27,7 +27,8 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
     if (
       *a.real_type() == *getTypePtr<c10::SymInt>() ||
       *a.real_type() == *getTypePtr<c10::optional<c10::SymInt>>() ||
-      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>()
+      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>() ||
+      *a.real_type() == *getTypePtr<at::OptionalSymIntArrayRef>()
     ) {
       // Keep the fake type
       return a.cloneWithType(a.type());

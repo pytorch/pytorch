@@ -13,9 +13,9 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <c10/util/CallOnce.h>
 

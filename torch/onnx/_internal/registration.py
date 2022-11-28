@@ -33,26 +33,27 @@ def _dispatch_opset_version(
     """
     if not registered_opsets:
         return None
-    registered_versions = sorted(registered_opsets)
+
+    descending_registered_versions = sorted(registered_opsets, reverse=True)
     # Linear search for the opset version, which is fine since the number of opset
     # versions is small.
 
-    # Always round toward opset 9 (ONNX_BASE_OPSET).
-    # Count down until opset 9 is reached.
-    for version in reversed(registered_versions):
-        if _constants.ONNX_BASE_OPSET <= version <= target:
-            return version
+    if target >= _constants.ONNX_BASE_OPSET:
+        # Always look down toward opset 1 when the target is >= ONNX_BASE_OPSET (opset 9).
+        # When a custom op is register at opset 1, we want to be able to discover it as a
+        # fallback for all opsets >= ONNX_BASE_OPSET.
+        for version in descending_registered_versions:
+            if version <= target:
+                return version
+        return None
 
-    for version in registered_versions:
+    # target < opset 9. This is the legacy behavior to support opset 7 and opset 8.
+    # for caffe2 support. We search up toward opset 9.
+    for version in reversed(descending_registered_versions):
         # Count back up until _constants.ONNX_BASE_OPSET
         if target <= version <= _constants.ONNX_BASE_OPSET:
             return version
 
-    assert (
-        not registered_versions
-        or _constants.ONNX_BASE_OPSET <= target < registered_versions[0]
-        or registered_versions[-1] < _constants.ONNX_BASE_OPSET <= target
-    )
     return None
 
 

@@ -236,7 +236,6 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
       }
     }
   }
-  __syncthreads();
 
   // At this point each thread in the block has a local gradient, which we need to
   // accumulate prior to writing the global value

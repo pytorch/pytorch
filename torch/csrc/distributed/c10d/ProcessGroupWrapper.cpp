@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupWrapper.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 #ifdef USE_C10D_GLOO
 
@@ -10,8 +10,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <stdexcept>
 
 namespace c10d {

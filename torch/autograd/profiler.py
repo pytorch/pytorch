@@ -30,14 +30,16 @@ from torch.autograd.profiler_util import (
 )
 from torch.futures import Future
 
+__all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
+           "parse_nvprof_trace", "kineto_step", "EventList", "FunctionEvent", "MemRecordsAcc"]
 
 try:
     # Available in Python >= 3.2
-    from contextlib import ContextDecorator
+    from contextlib import ContextDecorator as _ContextDecorator
 except ImportError:
     import functools
 
-    class ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator(object):  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -52,7 +54,6 @@ except ImportError:
                     return func(*args, **kwargs)
 
             return wrapped
-
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
@@ -440,7 +441,7 @@ class profile(object):
         return function_events
 
 
-class record_function(ContextDecorator):
+class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a block of
     Python code (or function) when running autograd profiler. It is
     useful when tracing the code profile.
@@ -480,17 +481,29 @@ class record_function(ContextDecorator):
         self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # Stores underlying RecordFunction as a tensor. TODO: move to custom
-        # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: torch.Tensor = torch.zeros(1)
+        # TODO: TorchScript ignores standard type annotation here
+        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
+        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
+        self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if self.run_callbacks_on_exit:
-            torch.ops.profiler._record_function_exit(self.handle)
+        if not self.run_callbacks_on_exit:
+            return
+
+        # Local variable is needed by TorchScript to refine Optional[T] to T
+        record = self.record
+        assert record is not None
+
+        # TODO: Too slow with __torch_function__ handling enabled
+        # See https://github.com/pytorch/pytorch/issues/76410
+        if not torch.jit.is_scripting():
+            with torch._C.DisableTorchFunction():
+                torch.ops.profiler._record_function_exit._RecordFunction(record)
+        else:
+            torch.ops.profiler._record_function_exit(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -517,7 +530,19 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+
+        # Local variable is needed by TorchScript to refine Optional[T] to T
+        record = self.record
+        assert record is not None
+
+        # TODO: Too slow with __torch_function__ handling enabled
+        # See https://github.com/pytorch/pytorch/issues/76410
+        if not torch.jit.is_scripting():
+            with torch._C.DisableTorchFunction():
+                profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
+                    record, fut)
+        else:
+            profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
         return profiled_future
 
 

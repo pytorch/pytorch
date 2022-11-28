@@ -456,7 +456,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
 C10_ALWAYS_INLINE bool has_same_shape(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
-    IntArrayRef normalized_shape) {
+    c10::SymIntArrayRef normalized_shape) {
   if (!tensor.defined()) {
     return true;
   }
@@ -479,7 +479,7 @@ C10_ALWAYS_INLINE bool has_same_shape(
 
 C10_ALWAYS_INLINE void check_same_shape(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
-    IntArrayRef normalized_shape, const std::string& name) {
+    c10::SymIntArrayRef normalized_shape, const std::string& name) {
   TORCH_CHECK(has_same_shape(tensor, tensor_bdim, normalized_shape),
       "Expected ", name, " to be of same shape as normalized_shape, but got ",
       name, " of shape ",
@@ -490,7 +490,7 @@ C10_ALWAYS_INLINE void check_same_shape(
 
 // Ugh, hard to deduplicate
 C10_ALWAYS_INLINE void _check_layer_norm_inputs(
-    IntArrayRef normalized_shape,
+    SymIntArrayRef normalized_shape,
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& bias, optional<int64_t> bias_bdim) {
 
@@ -507,13 +507,13 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 native_layer_norm_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
     double eps) {
   auto input_ = moveBatchDimToFront(input, input_bdim);
   if (!weight_bdim && !bias_bdim) {
-    const auto result = at::native_layer_norm(input_, normalized_shape, weight_opt, bias_opt, eps);
+    const auto result = at::native_layer_norm_symint(input_, normalized_shape, weight_opt, bias_opt, eps);
     const auto mean = std::get<1>(result);
     const auto rstd = std::get<2>(result);
     const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
@@ -528,7 +528,7 @@ native_layer_norm_batch_rule(
   _check_layer_norm_inputs(normalized_shape, weight, weight_bdim, bias, bias_bdim);
 
   const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
-  const auto result = at::native_layer_norm(input_, normalized_shape, nullopt, nullopt, eps);
+  const auto result = at::native_layer_norm_symint(input_, normalized_shape, nullopt, nullopt, eps);
   auto result0 = std::get<0>(result);
   const auto mean = std::get<1>(result);
   const auto rstd = std::get<2>(result);
@@ -875,10 +875,28 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     return at::miopen_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
   }
 
+// NB: This is NOT good. In the ideal world, we do NOT want to convert the new legit op back into native_batch_norm
+// as native_batch_norm has a problematic schema--it promises it is functional when it is not. However, vmap doesn't
+// work with dynamo anyway so we gain some buffer room to do wrong things here. The (reasonable) hope is that we will
+// make native_batch_norm composite implicit within a few weeks and we can fix this before vmap works with dynamo.
+std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_batch(
+  const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
+    return at::native_batch_norm(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_no_stats_batch(
+  const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  bool train, double momentum, double eps) {
+    return at::native_batch_norm(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
+  m.impl("_native_batch_norm_legit", _native_batch_norm_legit_batch);
+  m.impl("_native_batch_norm_legit.no_stats", _native_batch_norm_legit_no_stats_batch);
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
   m.impl("cudnn_batch_norm_backward", CUDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::cudnn_batch_norm_backward_wrapper));
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));
