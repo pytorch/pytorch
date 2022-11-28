@@ -25,7 +25,7 @@ namespace c10d {
           ucc_status_string(result),              \
           ", system error code ",                 \
           errno);                                 \
-  } while (0)                                     \
+  } while (0)
 
 // Macro to throw on a non-successful UCC return value.
 #define TORCH_UCC_CHECK(_cmd, _error_msg)       \
