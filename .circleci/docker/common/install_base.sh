@@ -156,8 +156,6 @@ case "$ID" in
 esac
 
 # Install Valgrind separately since the apt-get version is too old.
-OS_VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
-if [[ $ID == centos && $OS_VERSION == 7 ]]; then WGET_FLAG="--no-check-certificate" ; else WGET_FLAG=""; fi
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.16.1
 wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2

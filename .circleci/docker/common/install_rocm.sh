@@ -70,17 +70,6 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 5.4) ]]; then
-        MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
-        if [[ "x${MIOPENHIPGFX}" = x ]]; then
-          echo "miopen-hip-gfx package not available"
-        else
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
-        fi
-    fi
-
-    install_magma
-
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
