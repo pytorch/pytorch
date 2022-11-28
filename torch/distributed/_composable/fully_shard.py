@@ -17,6 +17,7 @@ from torch.distributed.fsdp._init_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
+    _register_root_pre_forward_hook,
 )
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -77,4 +78,5 @@ def fully_shard(
     modules = list(module.modules())
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
+    _register_root_pre_forward_hook(state, module)  # prepend last
     return module
