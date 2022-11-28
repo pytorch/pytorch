@@ -877,7 +877,14 @@ class BenchmarkRunner:
             # Since we are not running a long iteration, default value of
             # init_scale 65536 is going to turn all gradients to inf. Therefore,
             # we just use a init_scale of 2.0 for benchmarking purpose.
-            self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+
+            # Disabling Gradscaler because
+            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+            #  2) Current setup shares grad_scaler for eager and dynamo model,
+            #  which is bad as Gradscaler has state and can adjust the scaling
+            #  factor between eager and dynamo run, making accuracy check
+            #  harder.
+            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
