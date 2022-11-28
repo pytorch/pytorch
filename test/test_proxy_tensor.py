@@ -430,6 +430,17 @@ def forward(self, x_1):
             )
         )
 
+    def test_allclose_wrapping_message(self):
+        def f(a, b):
+            return torch.allclose(a, b)
+
+        self.assertRaisesRegex(
+            RuntimeError, "Dispatch trace exception",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+                torch.zeros(3), torch.zeros(3)
+            )
+        )
+
     def test_constant_proxy_tensor_mut(self):
         def f():
             val = torch.tensor(float(1))
