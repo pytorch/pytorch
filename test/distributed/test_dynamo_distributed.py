@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import logging
 import os
 import random
 import unittest
@@ -258,8 +257,6 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
-    # TODO(voz): Flaky on CI failure, consistent failure on local master.
-    @unittest.skipIf(True, "Flaky on CI failure, consistent failure on local master")
     def test_hf_bert_fsdp(self):
         from transformers.models.bert.modeling_bert import BertLayer
 
@@ -325,7 +322,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
