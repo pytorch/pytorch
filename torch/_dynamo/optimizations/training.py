@@ -142,7 +142,7 @@ class AotNop(AotAutogradStrategy):
     """Useful for debugging purpose"""
 
     def candidate(self):
-        from functorch._src.compilers import debug_nop
+        from torch._functorch.compilers import debug_nop
         from functorch.compile import nop
 
         DEBUG = False

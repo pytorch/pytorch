@@ -11,7 +11,7 @@ from copy import deepcopy
 from typing import List
 from unittest.mock import patch
 
-import functorch._src.config
+import torch._functorch.config
 
 import numpy as np
 import torch
@@ -1676,7 +1676,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    @patch.object(functorch._src.config, "use_dynamic_shapes", True)
+    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
