@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import functools
 import inspect
 import logging
@@ -22,7 +21,7 @@ from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
-from .utils import checkpoint_params, clone_inputs, compile_times, same
+from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +99,17 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+@contextlib.contextmanager
+def enable_dynamic(enable: bool = True):
+    if not enable:
+        yield
+        return
+    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
+        "functorch._src.config.use_dynamic_shapes", True
+    ):
+        yield
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -108,6 +118,8 @@ class _TorchDynamoContext:
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
         first_ctx=False,
+        *,
+        dynamic=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -116,6 +128,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.dynamic = dynamic
         patch_fn()
 
     def __enter__(self):
@@ -129,10 +142,14 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
+        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         set_eval_frame(self.prior)
         self.prior = unset
+        # TODO: This is totally not the right way to chain contexts manually
+        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
@@ -170,10 +187,13 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
+            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
+                dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
@@ -229,7 +249,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False):
+    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
             if (
@@ -247,6 +267,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            dynamic=dynamic,
         )
 
 
@@ -289,53 +310,13 @@ def catch_errors_wrapper(callback):
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
+def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=False):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        dynamic=dynamic,
     )
-
-
-class WrapperBackend:
-    def __init__(self, backend=None):
-        self.backend = backend
-
-    @property
-    def example_inputs(self):
-        return clone_inputs(self.original_example_inputs)
-
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-
-        self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
-        self.gm = gm
-        copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, self.original_example_inputs)
-
-        if self.candidate is None or self.candidate is self.gm.forward:
-            return self.gm.forward
-
-        if not config.verify_correctness:
-            return self.candidate
-
-        # if verify_correctness=True
-        try:
-            correct = self.gm.forward(*self.example_inputs)
-            result = self.candidate(*self.example_inputs)
-
-            # TODO: replace `same` function with the one in testing
-            if same(correct, result):
-                return self.candidate
-
-            raise RuntimeError(f"incorrect results of backend {self}")
-            return self.gm.forward
-
-        except Exception:
-            log.exception("error in verify_correctness")
-            raise
-        finally:
-            self.restore()
 
 
 def get_compiler_fn(compiler_fn):
@@ -375,7 +356,12 @@ class _NullDecorator(contextlib.nullcontext):
 
 
 def optimize(
-    backend="inductor", *, nopython=False, guard_export_fn=None, disable=False
+    backend="inductor",
+    *,
+    nopython=False,
+    guard_export_fn=None,
+    disable=False,
+    dynamic=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -393,8 +379,9 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
+        dynamic: If True, turn on dynamic shapes support
 
-    Example Usage:
+    Example Usage::
 
         @torch._dynamo.optimize()
         def toy_example(a, b):
@@ -422,10 +409,13 @@ def optimize(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, guard_export_fn=guard_export_fn)
+        return optimize_assert(
+            backend, guard_export_fn=guard_export_fn, dynamic=dynamic
+        )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
         backend_ctx_ctor,
+        dynamic=dynamic,
     )
 
 
@@ -655,7 +645,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, guard_export_fn=None, export=False):
+def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -667,6 +657,7 @@ def optimize_assert(backend, *, guard_export_fn=None, export=False):
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
         backend_ctx_ctor,
+        dynamic=dynamic,
     )
 
 
