@@ -33,8 +33,8 @@
 
 namespace at { namespace native {
 
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
+                        c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
@@ -53,18 +53,21 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 }
 
 Tensor embedding_backward_symint(
-    const Tensor & grad, const Tensor & indices, SymInt num_weights,
-    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+    const Tensor & grad, const Tensor & indices, c10::SymInt num_weights,
+    c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (sparse) {
     // TODO: if we teach sparse tensor how to propagate symints, the guard
     // here is not strictly necessary.  However, we think it is fine as is
     // because num weights is derived from a parameter and therefore
     // typically not varying.
     return at::embedding_sparse_backward(
-    grad, indices, num_weights.guard_int(__FILE__, __LINE__), padding_idx, scale_grad_by_freq);
+      grad, indices,
+      num_weights.guard_int(__FILE__, __LINE__),
+      padding_idx.guard_int(__FILE__, __LINE__),
+      scale_grad_by_freq);
   } else {
     return at::embedding_dense_backward_symint(
-        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+      grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   }
 }
 
@@ -89,20 +92,20 @@ Tensor embedding_sparse_backward(
     grad = grad.index(c);
   }
 
-  int64_t num_features = grad_.size(-1);
-  auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+  auto num_features = grad_.sym_size(-1);
+  auto weight_size = std::array<c10::SymInt, 2>{{ num_weights, num_features }};
   auto dense_options = grad.options();
 
   // check if all our grad come from padding_idx
-  if (grad.numel() == 0) {
-    return at::_sparse_coo_tensor_unsafe(at::empty({1, 0}, indices_.options().dtype(kLong)),
-                                         at::empty({0, num_features}, dense_options),
+  if (grad.sym_numel() == 0) {
+    return at::_sparse_coo_tensor_unsafe_symint(at::empty({1, 0}, indices_.options().dtype(kLong)),
+                                         at::empty_symint({c10::SymInt(0), num_features}, dense_options),
                                          weight_size);
   }
 
   auto index = indices.reshape({1, -1});
-  auto values = grad.reshape({-1, num_features});
-  return at::_sparse_coo_tensor_unsafe(index.to(kLong), values, weight_size);
+  auto values = grad.reshape_symint({c10::SymInt(-1), num_features});
+  return at::_sparse_coo_tensor_unsafe_symint(index.to(kLong), values, weight_size);
 }
 
 Tensor embedding_dense_backward_cpu(

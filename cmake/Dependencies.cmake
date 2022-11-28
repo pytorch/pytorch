@@ -1248,6 +1248,16 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
+# ---[ Kernel asserts
+# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
+# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
+if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Forcefully enabling kernel asserts on ROCM")
+elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Disabling kernel asserts for ROCm")
+  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
+endif()
+
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1942,6 +1952,7 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        ${CUDA_SOURCE_DIR}/lib
         ${CUDA_SOURCE_DIR}/lib64
         NO_DEFAULT_PATH)
 

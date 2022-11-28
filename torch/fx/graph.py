@@ -140,6 +140,9 @@ class _Namespace:
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
 
+        if not candidate:
+            candidate = '_unnamed'
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
