@@ -13,6 +13,7 @@ from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import exit_if_lt_x_accelerators
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -477,15 +478,6 @@ if TEST_HPU:
     BACKEND = dist.Backend.HCCL
 elif TEST_XPU:
     BACKEND = dist.Backend.XCCL
-
-
-# allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format
-# and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
-    if torch.accelerator.is_available():
-        if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
 def with_comms(func=None):
