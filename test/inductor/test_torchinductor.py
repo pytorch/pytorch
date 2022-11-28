@@ -682,6 +682,11 @@ class CommonTemplate:
             return (torch.maximum(a, b), torch.minimum(a, b))
 
         self.common(fn, (torch.randn(8), torch.randn(8)))
+        t1 = torch.randn(8)
+        t1[0] = float("nan")
+        t2 = torch.randn(8)
+        t2[1] = float("nan")
+        self.common(fn, (t1, t2))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -3222,6 +3227,16 @@ class CommonTemplate:
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
         self.assertTrue(same(out, out_eager))
 
+    @patch.object(config.triton, "ordered_kernel_names", True)
+    @patch.object(config.triton, "descriptive_kernel_names", False)
+    def test_kernel_names(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            return 2 * x
+
+        inputs = (rand_strided((8,), (1,), device=self.device),)
+        self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
+
     @patch.object(config.triton, "cudagraphs", True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -4994,6 +5009,24 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            sys.platform != "linux", "cpp kernel profile only support linux now"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        @patch.object(config.cpp, "enable_kernel_profile", True)
+        def test_cpp_kernel_profile(self):
+            from torch.profiler import profile
+
+            @torch._dynamo.optimize("inductor", nopython=True)
+            def fn(a, b):
+                return a + b
+
+            a = torch.rand((100,))
+            b = torch.rand((100,))
+            with profile() as prof:
+                fn(a, b)
+            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
 
 
 if HAS_CUDA:
