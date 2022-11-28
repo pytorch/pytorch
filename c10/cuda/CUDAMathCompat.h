@@ -149,15 +149,15 @@ __MATH_FUNCTIONS_DECL__ double normcdf(double x) {
   return ::normcdf(x);
 }
 
-} // namespace compat
-} // namespace cuda
-} // namespace c10
-
 __MATH_FUNCTIONS_DECL__ float exp(c10::complex<float> x) {
   return ::cexpf(x);
 }
 __MATH_FUNCTIONS_DECL__ double exp(c10::complex<double> x) {
   return ::cexp(x);
 }
+
+} // namespace compat
+} // namespace cuda
+} // namespace c10
 
 #endif
