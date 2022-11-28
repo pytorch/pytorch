@@ -317,8 +317,8 @@ def _post_forward_reshard(
 def _root_pre_forward(
     state: _FSDPState,
     module: nn.Module,
-    *args,
-    **kwargs,
+    args,
+    kwargs,
 ):
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
@@ -893,7 +893,9 @@ def _register_pre_forward_hooks(
             hook = functools.partial(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
-            state._pre_forward_handles.append(module.register_forward_pre_hook(hook))
+            state._pre_forward_handles.append(
+                module.register_forward_pre_hook(hook, prepend=True)
+            )
 
 
 @no_type_check
@@ -928,25 +930,27 @@ def _register_post_forward_hooks(
 
 
 @no_type_check
-def _register_root_pre_forward_hooks(
+def _register_root_pre_forward_hook(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ):
     """
-    # TODO (awgu): This requires kwarg support for hooks registered by
-    ``register_forward_pre_hook()``. ``_root_pre_forward()`` does not have the
-    supported hook signature right now.
+    Registers root pre-forward hook on ``module``, which should be the local
+    FSDP root.
+
+    NOTE: For the current composable FSDP design, we have each application of
+    ``fully_shard()`` to a module to indicate that that module is the local
+    FSDP root. We may remove this assumption in the future, in which case we
+    will need to register this root pre-forward hook on any candidate module
+    that may be the local FSDP root.
     """
     for forward_handle in state._root_pre_forward_handles:
         forward_handle.remove()
     state._root_pre_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._module_to_handles[module]
-        if module_param_handles:
-            hook = functools.partial(_root_pre_forward, state, module)
-            state._root_pre_forward_handles.append(
-                module.register_forward_pre_hook(hook)
-            )
+    hook = functools.partial(_root_pre_forward, state)
+    state._root_pre_forward_handles.append(
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
+    )
 
 
 @no_type_check
