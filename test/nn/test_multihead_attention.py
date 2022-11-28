@@ -3,7 +3,6 @@ import contextlib
 import random
 import unittest
 import unittest.mock as mock
-import collections
 
 from torch.nn import MultiheadAttention
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
