@@ -7,20 +7,10 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    OrderedDict,
-    Protocol,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
 
 import sympy
+from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
@@ -110,8 +100,8 @@ def wrap_compiler_fn(compiler_fn: CompilerFn) -> CompilerFn:
 
 
 class WrapperBackend:
-    def __init__(self, backend=None):
-        self.backend = backend
+    def __init__(self, backend: CompilerFn):
+        self.backend: CompilerFn = backend
 
     @property
     def example_inputs(self):
@@ -557,13 +547,13 @@ class OutputGraph(fx.Tracer):
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
-    def example_inputs(self):
+    def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result
 
-    def remove_unused_graphargs(self):
+    def remove_unused_graphargs(self) -> None:
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
@@ -590,7 +580,7 @@ class OutputGraph(fx.Tracer):
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
-    def add_output_instructions(self, prefix: List[Instruction]):
+    def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
@@ -598,10 +588,10 @@ class OutputGraph(fx.Tracer):
         self.output_instructions.extend(prefix)
         self.should_exit = True
 
-    def install_global(self, name, value):
+    def install_global(self, name, value) -> None:
         self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 

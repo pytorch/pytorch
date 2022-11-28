@@ -144,8 +144,10 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
+    'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
     'torch/_dynamo/output_graph.py',
+    'torch/_C/_dynamo/**/*.py',
 ]
 exclude_patterns = [
 ]
