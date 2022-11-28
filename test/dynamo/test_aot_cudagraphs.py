@@ -71,7 +71,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, device="cuda")
         fn(x, y)
 
-    @patch("torch._dynamo.config.suppress_errors", True)
     @patch_all()
     def test_dtoh(self):
         def model(x, y):
@@ -105,9 +104,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn((), device="cpu")
         fn(x, y)
 
-    @patch("torch._dynamo.config.suppress_errors", True)
     @patch("functorch._src.config.use_functionalize", True)
-    @patch_all(ok=False)  # input mutation not supported yet
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
@@ -145,7 +142,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn(1, device="cuda")
         fn(x, y)
 
-    @patch("torch._dynamo.config.suppress_errors", True)
     @patch_all()
     def test_factory(self):
         def model(y):

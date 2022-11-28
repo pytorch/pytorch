@@ -14,7 +14,11 @@ from torch.distributed.fsdp._common_utils import (
     _is_composable,
     TrainingState,
 )
-from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
+from torch.distributed.fsdp._utils import (
+    _apply_to_tensors,
+    _no_dispatch_record_stream,
+    p_assert,
+)
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -533,8 +537,12 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                padded_unsharded_grad = F.pad(unsharded_grad, [0, numel_to_pad])
-                new_sharded_grad = torch.zeros_like(chunks[0])  # padded
+                padded_unsharded_grad = (
+                    F.pad(unsharded_grad, [0, numel_to_pad])
+                    if numel_to_pad > 0
+                    else unsharded_grad
+                )
+                new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
@@ -572,12 +580,16 @@ def _post_backward_hook(
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
-                sharded_grad.data.record_stream(torch.cuda.current_stream())
+                _no_dispatch_record_stream(
+                    sharded_grad.data, torch.cuda.current_stream()
+                )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
-            unsharded_grad_data.record_stream(state._streams["post_backward"])
+            _no_dispatch_record_stream(
+                unsharded_grad_data, state._streams["post_backward"]
+            )
 
             if handle._use_orig_params:
                 # Since the handle's `FlatParameter` completed its gradient
@@ -630,7 +642,7 @@ def _cast_grad_to_param_dtype(
         # caching allocator; for the sharded strategies, the gradient is
         # produced in the post-backward stream, so this `record_stream()`
         # should be a no-op
-        low_prec_grad_data.record_stream(torch.cuda.current_stream())
+        _no_dispatch_record_stream(low_prec_grad_data, torch.cuda.current_stream())
 
 
 def _check_comm_hook(
@@ -1101,28 +1113,23 @@ def _get_buffers_and_dtypes_for_computation(
 
 
 @no_type_check
-def _get_buffers_and_dtypes_for_checkpoint(
+def _get_buffer_dtypes(
     state: _FSDPState,
-    root_module: nn.Module,
-) -> Tuple[List[torch.Tensor], List[torch.dtype]]:
+    buffer_names: List[str],
+) -> List[torch.dtype]:
     """
-    Returns all buffers in the module tree rooted at ``root_module`` and a
-    corresponding list of the buffer dtypes for checkpointing. Each buffer
-    dtype is the original buffer dtype ignoring any buffer mixed precision.
+    Returns the original buffer types of the given buffer names.
     """
-    p_assert(state._is_root, "Expects the root to cast buffers")
-    buffers: List[torch.Tensor] = []
-    buffer_dtypes: List[Optional[torch.dtype]] = []
-    for buffer_name, buffer in root_module.named_buffers():
+    buffer_dtypes: List[torch.dtype] = []
+    for buffer_name in buffer_names:
         p_assert(
             buffer_name in state._buffer_name_to_orig_dtype,
             f"{buffer_name} is missing from pre-computed dict on rank "
             f"{state.rank}, which only has keys "
             f"{state._buffer_name_to_orig_dtype.keys()}",
         )
-        buffers.append(buffer)
         buffer_dtypes.append(state._buffer_name_to_orig_dtype[buffer_name])
-    return buffers, buffer_dtypes
+    return buffer_dtypes
 
 
 def _cast_buffers_to_dtype_and_device(
