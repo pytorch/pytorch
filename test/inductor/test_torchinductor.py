@@ -3367,17 +3367,6 @@ class CommonTemplate:
             ],
         )
 
-    def test_isinf2(self):
-        def fn(x):
-            y = torch.tensor(
-                [1, float("inf"), 2, float("-inf"), float("nan")], device=self.device
-            )
-            return x == y
-
-        self.common(
-            fn, (torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")]),)
-        )
-
     def test_any(self):
         def fn(x):
             return (
@@ -4848,29 +4837,6 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
-        def test_masked_fill_softmax(self):
-            def fn(value, mask):
-                mask = mask.to(torch.bool)
-                x = torch.masked_fill(value, mask, -33.0)
-                return torch.softmax(x, -1)
-
-            value = torch.randn((2, 17))
-            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
-            with patch.object(config.cpp, "simdlen", None):
-                torch._dynamo.reset()
-                metrics.reset()
-                opt_fn = torch._dynamo.optimize("inductor")(fn)
-                opt_fn(value, mask)
-
-                real_out = fn(value, mask)
-                compiled_out = opt_fn(value, mask)
-                assert same(real_out, compiled_out, equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count >= 1
-
-        @unittest.skipIf(
-            not codecache.valid_vec_isa_list(), "Does not support vectorization"
-        )
-        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -5376,24 +5342,6 @@ if HAS_CUDA:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a), fn_optimized(a))
-
-        @requires_cuda()
-        def test_indirect_indexing_dense_mask(self):
-            def fn(x, y):
-                ne = torch.ops.aten.ne.Scalar(x, 1)
-                sum_1 = torch.ops.aten.sum.dim_IntList(ne, [1])
-                sub = torch.ops.aten.sub.Tensor(sum_1, 1)
-                unsqueeze = torch.ops.aten.unsqueeze.default(sub, -1)
-                gather = torch.ops.aten.gather.default(x, 1, unsqueeze)
-                squeeze = torch.ops.aten.squeeze.default(gather)
-                out = torch.ops.aten.multiply(y, squeeze)
-                return (out,)
-
-            a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
-            b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
-
-            fn_optimized = torch._dynamo.optimize("inductor")(fn)
-            assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner

@@ -93,7 +93,6 @@ class DispatchKey(Enum):
     Batched = auto()
     VmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
-    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 

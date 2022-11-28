@@ -11,14 +11,18 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
 from torch.distributed._tensor import (
+    distribute_module,
     DeviceMesh,
     Replicate,
 )
 from torch.distributed._tensor.parallel import (
-    PairwiseParallel,
     TensorParallelMultiheadAttention,
-    parallelize_module,
+    tp_shard_self_attn,
+    replicate_input,
+    replicate_output,
 )
+from torch.distributed._tensor.parallel import PairwiseParallel
+from torch.distributed._tensor.parallel.api import _parallelize_mlp
 
 
 class MLPModule(torch.nn.Module):
@@ -66,7 +70,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
-        model_tp = parallelize_module(model_tp, device_mesh, PairwiseParallel())
+        _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
@@ -178,7 +182,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         # Shard module and initialize optimizer.
         device_mesh = DeviceMesh(self.device_type, list(range(NUM_DEVICES)))
-        parallelize_module(model_tp, device_mesh, PairwiseParallel())
+        distribute_module(
+            model_tp,
+            device_mesh,
+            partition_fn=tp_shard_self_attn,
+            input_fn=replicate_input,
+            output_fn=replicate_output,
+        )
 
         device_mesh = model_tp.qkv.weight.device_mesh
         replicate = [Replicate()] * device_mesh.ndim
@@ -329,7 +339,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         # Shard module and initialize optimizer.
         device_mesh = DeviceMesh(self.device_type, list(range(NUM_DEVICES)))
-        parallelize_module(model_tp, device_mesh, PairwiseParallel())
+        distribute_module(
+            model_tp,
+            device_mesh,
+            partition_fn=tp_shard_self_attn,
+            input_fn=replicate_input,
+            output_fn=replicate_output,
+        )
 
         device_mesh = model_tp.attn.qkv.weight.device_mesh
         replicate = [Replicate()] * device_mesh.ndim

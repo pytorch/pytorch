@@ -3,7 +3,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
-#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -467,16 +466,6 @@ void initDispatchBindings(PyObject* module) {
       [](c10::DispatchKey dispatch_key) {
         return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
       });
-  m.def(
-      "_dispatch_tls_set_dispatch_key_included",
-      [](c10::DispatchKey dispatch_key, bool desired_state) {
-        c10::impl::tls_set_dispatch_key_included(dispatch_key, desired_state);
-      });
-  m.def(
-      "_dispatch_tls_is_dispatch_key_included",
-      [](c10::DispatchKey dispatch_key) {
-        return c10::impl::tls_is_dispatch_key_included(dispatch_key);
-      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
@@ -561,9 +550,6 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
-  });
-  m.def("_functionalization_reapply_views_tls", []() {
-    return at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   });
   m.def(
       "_dispatch_is_included_in_alias",

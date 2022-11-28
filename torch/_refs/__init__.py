@@ -4637,6 +4637,7 @@ def randn(
 
     dtype = utils.dtype_or_default(dtype)
     device = utils.device_or_default(device)
+    layout = utils.layout_or_default(layout)
 
     return prims.normal(
         shape_,

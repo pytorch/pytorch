@@ -1310,13 +1310,7 @@ Arguments:
 
           .def(
               "allgather_coalesced",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<std::vector<at::Tensor>>& output_lists,
-                 const std::vector<at::Tensor>& input_list,
-                 const ::c10d::AllgatherOptions& opts) {
-                return ::c10d::ops::allgather_coalesced(
-                    self, output_lists, input_list, opts);
-              },
+              &::c10d::ProcessGroup::allgather_coalesced,
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1539,7 +1533,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return ::c10d::ops::monitored_barrier(self, opts, waitAllRanks);
+                return self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
