@@ -96,6 +96,7 @@ ALL_MODULES = {
     TestVersionedLogspaceOutV8(): "aten::logspace.out",
     TestVersionedGeluV9(): "aten::gelu",
     TestVersionedGeluOutV9(): "aten::gelu.out",
+    TestVersionedRandomV10(): "aten::random_.from",
 }
 
 """

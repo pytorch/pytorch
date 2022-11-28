@@ -57,3 +57,11 @@ class TestVersionedGeluOutV9(torch.nn.Module):
     def forward(self, x):
         out = torch.zeros_like(x)
         return torch._C._nn.gelu(x, out=out)
+
+class TestVersionedRandomV10(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        out = torch.zeros_like(x)
+        return out.random_(0, 10)
