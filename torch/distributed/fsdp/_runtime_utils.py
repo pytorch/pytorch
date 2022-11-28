@@ -483,7 +483,7 @@ def _post_backward_hook(
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
         # For reentrant AC, the post-backward hook may run multiple times in
-        # one iteration, in which case we permit the state to already in
+        # one iteration, in which case we permit the state to already be in
         # `BACKWARD_POST`.
         p_assert(
             handle._training_state
