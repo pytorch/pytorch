@@ -372,3 +372,148 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             'Linear',
         ]
         self._test_function_import('linear', module_list, base='nn.qat.dynamic.modules')
+
+
+class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
+    def test_package_import_nn_intrinsic_modules(self):
+        r"""Tests the migration of the torch.nn.intrinsic.modules"""
+        self._test_package_import('modules', base='nn.intrinsic')
+        self._test_package_import('modules.fused', base='nn.intrinsic')
+
+    def test_package_import_nn_intrinsic(self):
+        skip = []
+        self._test_package_import('intrinsic', base='nn', skip=skip)
+
+    def test_modules_import_nn_intrinsic(self):
+        module_list = [
+            # Modules
+            '_FusedModule',
+            'ConvBn1d',
+            'ConvBn2d',
+            'ConvBn3d',
+            'ConvBnReLU1d',
+            'ConvBnReLU2d',
+            'ConvBnReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+            'BNReLU2d',
+            'BNReLU3d',
+            'LinearBn1d',
+        ]
+        self._test_function_import('intrinsic', module_list, base='nn')
+
+    def test_modules_nn_intrinsic_fused(self):
+        function_list = [
+            '_FusedModule',
+            'ConvBn1d',
+            'ConvBn2d',
+            'ConvBn3d',
+            'ConvBnReLU1d',
+            'ConvBnReLU2d',
+            'ConvBnReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+            'BNReLU2d',
+            'BNReLU3d',
+            'LinearBn1d',
+        ]
+        self._test_function_import('fused', function_list,
+                                   base='nn.intrinsic.modules')
+
+    def test_package_import_nn_intrinsic_qat(self):
+        r"""Tests the migration of the torch.nn.intrinsic.modules"""
+        self._test_package_import('qat', base='nn.intrinsic')
+        self._test_package_import('qat.modules', base='nn.intrinsic')
+
+    def test_modules_import_nn_intrinsic_qat(self):
+        module_list = [
+            "LinearReLU",
+            "LinearBn1d",
+            "ConvReLU1d",
+            "ConvReLU2d",
+            "ConvReLU3d",
+            "ConvBn1d",
+            "ConvBn2d",
+            "ConvBn3d",
+            "ConvBnReLU1d",
+            "ConvBnReLU2d",
+            "ConvBnReLU3d",
+            "update_bn_stats",
+            "freeze_bn_stats",
+        ]
+        self._test_function_import('qat', module_list, base='nn.intrinsic')
+
+    def test_modules_intrinsic_qat_conv_fused(self):
+        function_list = [
+            'ConvBn1d',
+            'ConvBnReLU1d',
+            'ConvReLU1d',
+            'ConvBn2d',
+            'ConvBnReLU2d',
+            'ConvReLU2d',
+            'ConvBn3d',
+            'ConvBnReLU3d',
+            'ConvReLU3d',
+            'update_bn_stats',
+            'freeze_bn_stats'
+        ]
+        self._test_function_import('conv_fused', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_modules_intrinsic_qat_linear_fused(self):
+        function_list = [
+            'LinearBn1d',
+        ]
+        self._test_function_import('linear_fused', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_modules_intrinsic_qat_linear_relu(self):
+        function_list = [
+            'LinearReLU',
+        ]
+        self._test_function_import('linear_relu', function_list,
+                                   base='nn.intrinsic.qat.modules')
+
+    def test_package_import_nn_intrinsic_quantized(self):
+        r"""Tests the migration of the torch.nn.intrinsic.quantized"""
+        self._test_package_import('quantized', base='nn.intrinsic')
+        self._test_package_import('quantized.modules', base='nn.intrinsic')
+
+    def test_modules_import_nn_intrinsic_quantized(self):
+        module_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+        ]
+        self._test_function_import('quantized', module_list, base='nn.intrinsic')
+
+    def test_modules_intrinsic_quantized_bn_relu(self):
+        function_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+        ]
+        self._test_function_import('bn_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_conv_relu(self):
+        function_list = [
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+        ]
+        self._test_function_import('conv_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_linear_relu(self):
+        function_list = [
+            'LinearReLU',
+        ]
+        self._test_function_import('linear_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')

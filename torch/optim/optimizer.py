@@ -114,6 +114,19 @@ class Optimizer(object):
                       "instance, capturable=True can impair performance, and you should set capturable=False.")
                 self._warned_capturable_if_run_uncaptured = True
 
+    def _optimizer_step_code(self):
+        """Entry point for `torch.profile.profiler`.
+
+        When python tracing is enabled the profiler will hook into this
+        function at the CPython level to inspect the optimizer's parameters and
+        param groups. It is called it after `step()` since many optimizers
+        lazily initialize state.
+
+        This is a workaround due to lack of a proper step hook on the optimizer,
+        and will be removed if it exists.
+        """
+        pass
+
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
@@ -124,7 +137,10 @@ class Optimizer(object):
                 obj, *_ = args
                 profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
-                    return func(*args, **kwargs)
+                    out = func(*args, **kwargs)
+                    obj._optimizer_step_code()
+                    return out
+
             return wrapper
 
         hooked = getattr(self.__class__.step, "hooked", None)

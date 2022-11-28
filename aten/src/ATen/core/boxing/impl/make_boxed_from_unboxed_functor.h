@@ -371,6 +371,19 @@ namespace impl {
       }
     }
   };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes> final {
+    static OptionalArray<c10::SymInt> call(IValue& v) {
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return OptionalArray<c10::SymInt>(r);
+      } else {
+        return std::move(v).to<OptionalArray<c10::SymInt>>();
+      }
+    }
+  };
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that

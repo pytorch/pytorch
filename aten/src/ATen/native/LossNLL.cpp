@@ -1,12 +1,31 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cross_entropy_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/nll_loss.h>
+#include <ATen/ops/nll_loss2d.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/nll_loss_native.h>
+#include <ATen/ops/nll_loss_nd.h>
+#include <ATen/ops/nll_loss_nd_native.h>
+#endif
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
@@ -530,11 +549,11 @@ Tensor cross_entropy_loss_label_smoothing(
     const Tensor& target,
     const Tensor& weight,
     int64_t reduction,
-    int64_t ignore_index,
+    c10::SymInt ignore_index,
     double label_smoothing) {
     auto class_dim = self.dim() == 1 ? 0 : 1;
     auto input = at::log_softmax(self, class_dim, self.scalar_type());
-    auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
+    auto nllloss = at::nll_loss_nd_symint(input, target, weight, reduction, ignore_index);
 
     auto n_classes = input.size(class_dim);
 
@@ -577,15 +596,15 @@ Tensor cross_entropy_loss_label_smoothing(
     return (1 - label_smoothing) * nllloss + ret * (label_smoothing / n_classes);
 }
 
-Tensor cross_entropy_loss(
+Tensor cross_entropy_loss_symint(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction,
-    int64_t ignore_index,
+    c10::SymInt ignore_index,
     double label_smoothing) {
   Tensor ret;
-  if (self.sizes() == target.sizes()) {
+  if (self.sym_sizes() == target.sym_sizes()) {
     // Assume soft targets when input and target shapes are the same
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
@@ -604,7 +623,7 @@ Tensor cross_entropy_loss(
     ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, ignore_index, label_smoothing);
   } else {
     auto class_dim = self.dim() == 1 ? 0 : 1;
-    ret = at::nll_loss_nd(
+    ret = at::nll_loss_nd_symint(
         at::log_softmax(self, class_dim, self.scalar_type()),
         target,
         weight,
@@ -623,32 +642,41 @@ Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::opt
   return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
+Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
 Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss_nd(
+Tensor nll_loss_nd_symint(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction,
-    int64_t ignore_index) {
+    c10::SymInt ignore_index) {
   if (self.dim() < 1) {
     TORCH_CHECK_VALUE(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sizes()[0] != target.sizes()[0]) {
+  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
     TORCH_CHECK_VALUE(
         false,
         "Expected input batch_size (",
-        self.sizes()[0],
+        self.sym_sizes()[0],
         ") to match target batch_size (",
-        target.sizes()[0],
+        target.sym_sizes()[0],
         ").");
   }
 
@@ -656,42 +684,42 @@ Tensor nll_loss_nd(
   Tensor input_ = self;
   Tensor target_ = target;
   if (input_.dim() == 1 || input_.dim() == 2) {
-    ret = at::nll_loss(input_, target_, weight, reduction, ignore_index);
+    ret = at::nll_loss_symint(input_, target_, weight, reduction, ignore_index);
   } else if (input_.dim() == 4) {
-    ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+    ret = at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
   } else {
     // dim == 3 or dim > 4
-    auto n = input_.sizes()[0];
-    auto c = input_.sizes()[1];
-    auto out_size = input_.sizes().slice(2).vec();
+    auto n = input_.sym_sizes()[0];
+    auto c = input_.sym_sizes()[1];
+    auto out_size = input_.sym_sizes().slice(2).vec();
     out_size.insert(out_size.begin(), n);
-    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+    if (target_.sym_sizes().slice(1) != input_.sym_sizes().slice(2)) {
       TORCH_CHECK(
           false,
           "Expected target size ",
-          IntArrayRef(out_size),
+          SymIntArrayRef(out_size),
           ", got ",
-          target_.sizes());
+          target_.sym_sizes());
     }
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
     if (input_.numel() > 0) {
-      input_ = input_.view({n, c, 1, -1});
+      input_ = input_.view_symint({n, c, 1, -1});
     } else {
-      input_ = input_.view({n, c, 0, 0});
+      input_ = input_.view_symint({n, c, 0, 0});
     }
     if (target_.numel() > 0) {
-      target_ = target_.view({n, 1, -1});
+      target_ = target_.view_symint({n, 1, -1});
     } else {
-      target_ = target_.view({n, 0, 0});
+      target_ = target_.view_symint({n, 0, 0});
     }
     if (reduction != Reduction::None) {
-      ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+      ret = at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
     } else {
       auto out =
-          at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-      ret = out.view(out_size);
+          at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
+      ret = out.view_symint(out_size);
     }
   }
   return ret;
