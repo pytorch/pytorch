@@ -4,9 +4,10 @@ import torch
 import inspect
 import operator
 import traceback
+import collections
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
+from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -98,7 +99,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: Dict[str, str]
+    module_stack: OrderedDict[str, str]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -288,7 +289,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
-        self.module_stack: Dict[str, str] = {}
+        self.module_stack = collections.OrderedDict()
         self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)

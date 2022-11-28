@@ -5,6 +5,7 @@ import inspect
 import math
 import os
 import warnings
+import collections
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -253,7 +254,7 @@ class Tracer(TracerBase):
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
         # Records the module call stack
-        self.module_stack: Dict[str, str] = {}
+        self.module_stack = collections.OrderedDict()
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
@@ -444,7 +445,8 @@ class Tracer(TracerBase):
                 ret_val = forward(*args, **kwargs)
             else:
                 ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
-            del self.module_stack[_scope.module_path]
+            key, _ = self.module_stack.popitem(last=True)
+            assert key == _scope.module_path, f" Unexpected key {key}"
 
         return ret_val
 
