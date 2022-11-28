@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 
@@ -57,7 +57,7 @@ const Tensor& value){
 }
 
 static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
@@ -82,6 +82,12 @@ static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
       indice = indice.to(self.device());
     }
   }
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.dtype() == at::kInt) {
+      indice = indice.to(at::kLong);
+    }
+  }
+
   return AdvancedIndex(self, indices);
 }
 

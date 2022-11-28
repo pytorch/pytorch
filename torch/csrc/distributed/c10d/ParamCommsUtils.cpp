@@ -1,6 +1,6 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#include <c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
 namespace torch {
 
