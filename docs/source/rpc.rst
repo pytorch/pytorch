@@ -16,7 +16,7 @@ machines.
     CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
     Not all features of the RPC package are yet compatible with CUDA support and
     thus their use is discouraged. These unsupported features include: RRefs,
-    JIT compatibility, dist autograd and dist optimizier, and profiling. These
+    JIT compatibility, dist autograd and dist optimizer, and profiling. These
     shortcomings will be addressed in future releases.
 
 .. note ::

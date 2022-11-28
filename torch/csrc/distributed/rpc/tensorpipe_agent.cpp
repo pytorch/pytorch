@@ -495,8 +495,7 @@ void TensorPipeAgent::startImpl() {
 
   // Store our own url.
   const auto address = listener_->url(lowestPriorityTransport);
-  const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
-  nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
+  nameToAddressStore_.set(workerInfo_.name_, address);
 
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
           << address;
@@ -1261,18 +1260,22 @@ void TensorPipeAgent::updateGroupMembership(
     workerNameToInfo_.erase(name);
     workerNameToURL_.erase(name);
 
-    for (const auto& it : reverseDeviceMaps_) {
-      if (reverseDeviceMaps.find(it.first) == reverseDeviceMaps.end()) {
-        reverseDeviceMaps_.erase(it.first);
+    // remove reverse device maps that are no longer used
+    for (auto it = reverseDeviceMaps_.begin();
+         it != reverseDeviceMaps_.end();) {
+      if (reverseDeviceMaps.find(it->first) == reverseDeviceMaps.end()) {
+        it = reverseDeviceMaps_.erase(it);
+      } else {
+        it++;
       }
     }
 
-    auto iter = devices_.begin();
-    while (iter != devices_.end()) {
-      if (std::find(devices.begin(), devices.end(), *iter) == devices.end()) {
-        iter = devices_.erase(iter);
+    // remove devices that are no longer used
+    for (auto it = devices_.begin(); it != devices_.end();) {
+      if (std::find(devices.begin(), devices.end(), *it) == devices.end()) {
+        it = devices_.erase(it);
       } else {
-        iter++;
+        it++;
       }
     }
   }

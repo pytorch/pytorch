@@ -8,6 +8,10 @@ except ImportError:
         def _fail(*args, **kwargs):
             raise RuntimeError("ITT functions not installed. Are you sure you have a ITT build?")
 
+        @staticmethod
+        def is_available():
+            return False
+
         rangePush = _fail
         rangePop = _fail
         mark = _fail
@@ -15,7 +19,14 @@ except ImportError:
     _itt = _ITTStub()  # type: ignore[assignment]
 
 
-__all__ = ['range_push', 'range_pop', 'mark', 'range']
+__all__ = ['is_available', 'range_push', 'range_pop', 'mark', 'range']
+
+
+def is_available():
+    """
+    Check if ITT feature is available or not
+    """
+    return _itt.is_available()
 
 
 def range_push(msg):

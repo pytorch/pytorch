@@ -1,5 +1,5 @@
 #include <c10/util/Logging.h>
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <mutex>
 
