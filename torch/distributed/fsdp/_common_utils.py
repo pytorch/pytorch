@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, List, no_type_check, Union
+from typing import Any, Callable, Dict, List, no_type_check, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -18,15 +18,11 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-class ComposableFSDPState:
-    """
-    This encompasses all FSDP state for composable FSDP.
-    """
-
-
 # We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches.
-_FSDPState = Union[nn.Module, ComposableFSDPState]
+# management for the wrapper and non-wrapper approaches. The `Any` represents
+# the `_State` object in _composable/contract.py, but we do not import it to
+# avoid circular imports.
+_FSDPState = Union[nn.Module, Any]
 
 
 class TrainingState(Enum):
@@ -63,6 +59,24 @@ def _all_handles(state: _FSDPState) -> List:
         if _is_composable(state)
         else state._fsdp_handles(state)  # `FullyShardedDataParallel`
     )
+
+
+@no_type_check
+def _module_handles(state: _FSDPState, module: nn.Module) -> List:
+    """
+    Given a module and returns the flat handles that map to this module. If the
+    module is FullyShardedDataParallel, the module._handles will be returned.
+    """
+    if _is_composable(state):
+        return state._module_to_handles[module][:]
+    else:
+        return module._handles[:]
+
+
+@no_type_check
+def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
+    """Given a module and returns if this module has parameters sharded by FSDP."""
+    return len(_module_handles(state, module)) > 0
 
 
 def clean_tensor_name(tensor_name: str) -> str:

@@ -877,7 +877,7 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
 /**
  * @brief Recursively multiplies the tensors i...j using the given order
  *
- * @param tensors matrices to multiply togther
+ * @param tensors matrices to multiply together
  * @param order optimal chain multiplication order from #matrix_chain_order
  * @param i index of first tensor to be multiplied
  * @param j index of last tensor to be multiplied
@@ -2770,7 +2770,7 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Frobenius Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self) {
@@ -2816,7 +2816,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Nuclear Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//              Just used in torch.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {

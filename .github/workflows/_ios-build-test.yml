@@ -68,7 +68,7 @@ jobs:
       - name: Install conda and dependencies
         run: |
           # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
@@ -106,7 +106,7 @@ jobs:
 
       - name: Build TestApp
         if: inputs.ios-platform == 'SIMULATOR'
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           # run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
