@@ -205,6 +205,10 @@ def parse_args():
         "--extra-args", default="", help="Append commandline with these args"
     )
 
+    parser.add_argument(
+        "--env-flags", default="", help="Add the env flags to the command"
+    )
+
     # Choose either inference or training
     group_mode = parser.add_mutually_exclusive_group(required=True)
     group_mode.add_argument(
@@ -320,6 +324,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
                     cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
+                    cmd = f"{args.env_flags} {cmd}"
 
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
