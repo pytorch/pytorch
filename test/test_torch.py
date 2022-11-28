@@ -3912,7 +3912,6 @@ else:
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
 
-
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @unittest.skipIf(is_cuda_sm86, "OOMs on sm86 configuration")
