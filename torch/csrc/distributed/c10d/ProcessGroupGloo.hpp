@@ -18,7 +18,7 @@
 
 #include <c10/util/hash.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -178,13 +178,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
     int srcRank_;
   };
 
-  struct TORCH_API Options : public ProcessGroup::Options {
+  struct TORCH_API Options : public Backend::Options {
     explicit Options(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout) {
       return c10::make_intrusive<Options>(timeout);
     }
 

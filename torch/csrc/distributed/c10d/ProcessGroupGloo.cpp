@@ -608,7 +608,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : ProcessGroup::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
 
 namespace {
 

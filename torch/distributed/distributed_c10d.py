@@ -991,6 +991,7 @@ def _new_process_group_helper(
                     " source on a host that has MPI installed."
                 )
             backend_pg = ProcessGroupMPI.create(global_ranks_in_group)
+            backend_pg_type = ProcessGroup.BackendType.MPI
             if not backend_pg:
                 return GroupMember.NON_GROUP_MEMBER
 
@@ -999,6 +1000,7 @@ def _new_process_group_helper(
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
             backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
+            backend_pg_type = ProcessGroup.BackendType.GLOO
         elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL " "built in")
@@ -1013,12 +1015,14 @@ def _new_process_group_helper(
                 pg_options._timeout = timeout
 
             backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
+            backend_pg_type = ProcessGroup.BackendType.NCCL
         elif backend == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
             # is_ucc_available() from above elif-condition and raise
             # RuntimeError if is_ucc_available() returns false.
 
             backend_pg = ProcessGroupUCC(prefix_store, group_rank, group_size, timeout=timeout)
+            backend_pg_type = ProcessGroup.BackendType.UCC
         else:
             assert backend.upper() in Backend._plugins, (
                 f"Unknown c10d backend type {backend.upper()}"
@@ -1074,8 +1078,9 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
 
+        print("set backend")
+        pg._set_backend(torch.device(device), backend_pg_type, backend_pg)
         print(f"finished creating {backend_pg} for device {device}")
-        pg._set_backend(torch.device(device), backend_pg)
 
     # update global state
     _world.pg_map[pg] = (backend, store)

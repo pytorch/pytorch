@@ -10,7 +10,7 @@
 #include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 
@@ -244,7 +244,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options : ProcessGroup::Options {
+  struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(

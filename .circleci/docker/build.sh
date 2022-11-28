@@ -75,13 +75,12 @@ elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
-if [[ "$image" == *bionic* ]]; then
-  CMAKE_VERSION=3.13.5
-fi
+# CMake 3.18 is needed to support CUDA17 language variant
+CMAKE_VERSION=3.18.5
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 _UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
-_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
+_UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -209,7 +208,6 @@ case "$image" in
     ;;
   pytorch-linux-focal-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.16.9  # Required for precompiled header support
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes

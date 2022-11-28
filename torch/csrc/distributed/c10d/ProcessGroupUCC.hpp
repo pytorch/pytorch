@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -153,7 +153,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank = -1,
       int size = -1,
-      std::chrono::duration<float> timeout = kProcessGroupDefaultTimeout);
+      std::chrono::duration<float> timeout = kBackendDefaultTimeout);
 
   void initComm(c10::Device dev);
 

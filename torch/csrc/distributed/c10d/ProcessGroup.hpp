@@ -63,6 +63,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     const std::string backend;
   };
 
+  enum BackendType {
+    UNDEFINED = 0,
+    GLOO = 1,
+    NCCL = 2,
+    UCC = 3,
+    MPI = 4,
+    TCP = 5,
+    CUSTOM = 6,
+  };
+
   // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
   explicit ProcessGroup(int rank, int size);
 
@@ -260,6 +270,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto backendName = getBackendName();
 
     // TODO: HACK for backend name to get sequence number for that backend.
+    if (backendName == "gloo") {
+      backendTypeToBackend_.at(ProcessGroup::BackendType::GLOO)->setSequenceNumberForGroup();
+    }
+    else if (backendName == "nccl") {
+      backendTypeToBackend_.at(ProcessGroup::BackendType::NCCL)->setSequenceNumberForGroup();
+    }
+    else if (backendName == "ucc") {
+      backendTypeToBackend_.at(ProcessGroup::BackendType::UCC)->setSequenceNumberForGroup();
+    }
 
     TORCH_CHECK(
         false,
@@ -276,6 +295,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto backendName = getBackendName();
 
     // TODO: HACK for backend name to get sequence number for that backend.
+    if (backendName == "gloo") {
+      return backendTypeToBackend_.at(ProcessGroup::BackendType::GLOO)->getSequenceNumberForGroup();
+    }
+    else if (backendName == "nccl") {
+      return backendTypeToBackend_.at(ProcessGroup::BackendType::NCCL)->getSequenceNumberForGroup();
+    }
+    else if (backendName == "ucc") {
+      return backendTypeToBackend_.at(ProcessGroup::BackendType::UCC)->getSequenceNumberForGroup();
+    }
 
     TORCH_CHECK(
         false,
@@ -322,33 +350,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), " does not support barrier"));
   }
 
-  void setBackend(c10::DeviceType device_type, const c10::intrusive_ptr<Backend>& backend) {
-    backends_[device_type] = backend;
+  void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::intrusive_ptr<Backend>& backend) {
+    deviceTypeToBackendType_[deviceType] = backendType;
+    deviceTypeToBackend_[deviceType] = backend;
+    backendTypeToBackend_[backendType] = backend;
   }
 
-  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType device_type) const {
-    TORCH_CHECK(
-        backends_.find(device_type) != backends_.end(),
-        "Backend for device type ",
-        device_type,
-        " is not registered");
-    return backends_.at(device_type);
-  }
+  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType) const;
 
-  c10::intrusive_ptr<Backend> getBackend(std::string name) const {
+  c10::intrusive_ptr<Backend> getBackend(BackendType backendType) const {
     TORCH_CHECK(
-        backendNames_.find(name) != backendNames_.end(),
-        "Backend with name ",
-        name,
-        " is not registered");
-    return backendNames_.at(name);
+        backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
+        "Could not find backend type ",
+        backendType,
+        ".");
+    return backendTypeToBackend_.at(backendType);
   }
 
  protected:
+  void createBackends();
+
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
+  const c10::intrusive_ptr<c10d::Store> store_;
   const int rank_;
   const int size_;
   const c10::intrusive_ptr<Options> options_;
@@ -360,8 +386,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   DebugLevel dist_debug_level_;
 
   // Backend classes for this ProcessGroup
-  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> backends_;
-  std::unordered_map<std::string, c10::intrusive_ptr<Backend>> backendNames_;
+  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> deviceTypeToBackend_;
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> backendTypeToBackend_;
 };
 
 } // namespace c10d

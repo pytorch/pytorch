@@ -16,13 +16,62 @@
 #include <torch/csrc/distributed/c10d/debug.h>
 #include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
-constexpr auto kDefaultTimeout =
+constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
 
+// template<typename T> Backend * createT() { return c10::make_intrusive<Backend>T; }
+
+// struct BackendFactory {
+//     typedef std::map<std::string, Backend*(*)()> map_type;
+
+//     static Backend * createInstance(std::string const& s) {
+//         map_type::iterator it = getMap()->find(s);
+//         if(it == getMap()->end())
+//             return 0;
+//         return it->second();
+//     }
+
+// protected:
+//     static map_type * getMap() {
+//         // never delete'ed. (exist until program termination)
+//         // because we can't guarantee correct destruction order
+//         if(!map) { map = new map_type; }
+//         return map;
+//     }
+
+// private:
+//     static map_type * map;
+// };
+
+// template<typename T>
+// struct DerivedRegister : BackendFactory {
+//     DerivedRegister(std::string const& s) {
+//         getMap()->insert(std::make_pair(s, &createT<T>));
+//     }
+// };
+
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
+
+  // Backend Options is a base struct that defines the basic options
+  // when constructing a Backend. Each Backend subclass should
+  // extend this struct and define its options if it wants to provide more
+  // config options (beyond basic ones defined here) to end user.
+  struct TORCH_API Options : torch::CustomClassHolder {
+    explicit Options(
+        std::string backend,
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout)
+        : timeout(timeout), backend(backend) {}
+    virtual ~Options() = default;
+
+    std::chrono::milliseconds timeout;
+
+    // backend name
+    const std::string backend;
+  };
+
   explicit Backend(int rank, int size);
   virtual ~Backend() = 0;
 

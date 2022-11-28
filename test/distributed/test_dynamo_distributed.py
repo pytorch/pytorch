@@ -21,6 +21,7 @@ from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
@@ -99,10 +100,11 @@ def get_custom_model(device):
 
 def get_hf_bert(rank):
     # Note: use @import_transformers_or_skip on your test case if you use this
+    # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
     except ImportError:
-        unittest.skip("Unable to import transformers")
+        raise unittest.SkipTest("Unable to import transformers")
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
@@ -136,6 +138,68 @@ def _per_rank_init(rank, world_size):
     dist.destroy_process_group()
 
 
+# This simulates DDP, but it doesn't actually do any process communication;
+# it just has enough properties so that the dynamo distributed optimization is
+# able to optimize.  Feel free to simulate more properties as necessary.  The
+# other important thing is patching _active_ddp_module, which is what actually
+# triggers DDP optimization
+class FakeDDP(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+        bucket_cap_mb = 25
+        self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+
+    @contextmanager
+    def _inside_ddp_forward(self):
+        DDP._active_ddp_module = self
+        try:
+            yield
+        except Exception:
+            raise
+        finally:
+            DDP._active_ddp_module = None
+
+    def forward(self, *inputs, **kwargs):
+        with self._inside_ddp_forward():
+            return self.module.forward(*inputs, **kwargs)
+
+def run_hf_bert_ddp(self, model, inputs, backend):
+    reset_rng_state()
+    correct_outputs = model(**inputs)
+    correct_loss = correct_outputs.loss
+    correct_loss.backward()
+
+    reset_rng_state()
+    opt_model = torch._dynamo.optimize(backend)(model)
+    opt_outputs = opt_model(**inputs)
+    opt_loss = opt_outputs.loss
+    opt_loss.backward()
+
+    inputs_flat = [inputs[k] for k in inputs]
+    correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
+    opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+    self.assertTrue(same(correct_results, opt_results))
+
+class TestFakeDistributedSingleProc(TestCase):
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(config, "optimize_ddp", True)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_ddp_inductor(self):
+        model, inputs = get_hf_bert(0)
+        model = FakeDDP(model)
+        run_hf_bert_ddp(self, model, inputs, "inductor")
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_hf_bert_ddp_aot_eager(self):
+        model, inputs = get_hf_bert(0)
+        model = FakeDDP(model)
+        run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
+
+# Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
+# single process version; if it's just a problem in the Dynamo distributed
+# optimizer, you should be able to repro it single process!
 @requires_nccl()
 class TestDistributedMultiProc(MultiProcessTestCase):
     def setUp(self):
@@ -182,31 +246,23 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
-    def test_hf_bert_ddp(self):
+    def test_hf_bert_ddp_inductor(self):
 
         with _per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
+            run_hf_bert_ddp(self, model, inputs, "inductor")
 
-            reset_rng_state()
-            correct_outputs = model(**inputs)
-            correct_loss = correct_outputs.loss
-            correct_loss.backward()
-
-            reset_rng_state()
-            opt_model = torch._dynamo.optimize("inductor")(model)
-            opt_outputs = opt_model(**inputs)
-            opt_loss = opt_outputs.loss
-            opt_loss.backward()
-
-            inputs_flat = [inputs[k] for k in inputs]
-            correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
-            opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
-            self.assertTrue(same(correct_results, opt_results))
-
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @patch.object(config, "optimize_ddp", True)
+    def test_hf_bert_ddp_aot_eager(self):
+        with _per_rank_init(self.rank, self.world_size):
+            model, inputs = get_hf_bert(self.rank)
+            model = DDP(model)
+            run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(1)
-    # TODO(whc)  delete aot_eager test, if inductor test lands stably
     def test_fsdp_aot_eager(self):
         with _per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)

@@ -1571,10 +1571,12 @@ Arguments:
               "_set_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
+                 const ::c10d::ProcessGroup::BackendType& backendType,
                  const c10::intrusive_ptr<::c10d::Backend>& backend) {
-                self->setBackend(device.type(), backend);
+                self->setBackend(device.type(), backendType, backend);
               },
               py::arg("device"),
+              py::arg("backend_type"),
               py::arg("backend"),
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -1585,6 +1587,16 @@ Arguments:
               },
               py::arg("device"),
               py::call_guard<py::gil_scoped_release>());
+
+  py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
+      .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
+      .value("GLOO", ::c10d::ProcessGroup::BackendType::GLOO)
+      .value("NCCL", ::c10d::ProcessGroup::BackendType::NCCL)
+      .value("UCC", ::c10d::ProcessGroup::BackendType::UCC)
+      .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
+      .value("TCP", ::c10d::ProcessGroup::BackendType::TCP)
+      .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
+      .export_values();
 
   // base ProcessGroup::Options binding
   auto processGroupOptions =

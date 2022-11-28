@@ -1488,7 +1488,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : ProcessGroup::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 void ProcessGroupNCCL::startCoalescing() {

@@ -2106,7 +2106,7 @@ class ReducerTest(TestCase):
     def tearDown(self):
         c10d.destroy_process_group()
         try:
-            os.remove(self.file_name)
+            os.remove(self.file.name)
         except OSError:
             pass
 
