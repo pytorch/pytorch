@@ -81,6 +81,10 @@ class TORCH_API CounterData {
     value_ = 0;
   }
 
+  bool IsValid() const {
+    return value_ > 0;
+  }
+
  private:
   std::atomic<int64_t> value_;
 };

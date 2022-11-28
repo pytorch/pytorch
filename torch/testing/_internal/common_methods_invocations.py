@@ -439,6 +439,23 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
 
 
+def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
+    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        training = sample.kwargs.get('training', True)
+        momentum = sample.kwargs.get('momentum', 0.5)
+        eps = sample.kwargs.get('eps', 1e-5)
+        if args[0] is not None and args[1] is not None:
+            yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
+        else:
+            yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
+
+
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -510,7 +527,7 @@ def error_inputs_prelu(op, device):
     inp = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
     weight = make_tensor((2, 4), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(inp, kwargs={'weight': weight}),
-                     error_regex="prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = 2")
+                     error_regex="prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = 2")
 
     # src and index tensors must have the same # of dimensions
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
@@ -2411,7 +2428,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
 
-def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
+def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
     shape = (S, 0, S)
@@ -2444,7 +2461,15 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
     min_values = torch.empty(L, dtype=torch.double, device=device)
     illegal_values = torch.empty(L, dtype=torch.int, device=device)
 
-    err_msg_amax_amin2 = "Expected the dtype for input and out to match"
+    # Unlike regular PyTorch, amax and amin refs don't require input and out
+    # dtypes to match exactly:
+    # https://github.com/pytorch/pytorch/pull/87765#pullrequestreview-1162023824
+    if is_ref:
+        err_msg_amax_amin2 = ("Attempting to cast from torch.float32 to out tensor with dtype "
+                              "torch.int32, but this can't be cast because it is not safe!")
+    else:
+        err_msg_amax_amin2 = ("Expected the dtype for input and out to match, but got Float "
+                              "for input's dtype and Int for out's dtype.")
     err_msg_aminmax2 = "Expected out tensor to have dtype float, but got double instead"
 
     if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
@@ -7319,7 +7344,7 @@ def error_inputs_poisson_nll_loss(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5, 4),),
                      kwargs={'reduction': 'abc'}),
                      error_type=ValueError,
-                     error_regex='abc is not valid')
+                     error_regex='abc is not a valid value for reduction')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
                      error_regex=(r'(Attempting to broadcast a dimension of length|'
@@ -8121,18 +8146,28 @@ def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
         numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
         yield ((), {'correction': numel // 2})
 
-def error_inputs_mean(op_info, device, **kwargs):
-    err_msg1 = (r"mean\(\): could not infer output dtype. "
-                r"Input dtype must be either a floating point or complex dtype. "
-                r"Got: Long")
+def error_inputs_mean(op_info, device, is_ref=False, **kwargs):
+    if is_ref:
+        err_msg1 = (r"mean\(\): could not infer output dtype. "
+                    r"Input dtype must be either a floating point or complex dtype. "
+                    r"Got: torch.int64")
+    else:
+        err_msg1 = (r"mean\(\): could not infer output dtype. "
+                    r"Input dtype must be either a floating point or complex dtype. "
+                    r"Got: Long")
     yield ErrorInput(
         SampleInput(make_tensor((3, 4, 5), dtype=torch.int64, device=device), []),
         error_regex=err_msg1,
     )
 
-    err_msg2 = (r"mean\(\): could not infer output dtype. "
-                r"Optional dtype must be either a floating point or complex dtype. "
-                r"Got: Long")
+    if is_ref:
+        err_msg2 = (r"mean\(\): could not infer output dtype. "
+                    r"Optional dtype must be either a floating point or complex dtype. "
+                    r"Got: torch.int64")
+    else:
+        err_msg2 = (r"mean\(\): could not infer output dtype. "
+                    r"Optional dtype must be either a floating point or complex dtype. "
+                    r"Got: Long")
     yield ErrorInput(
         SampleInput(
             make_tensor((3, 4, 5), dtype=torch.float32, device=device),
@@ -8141,7 +8176,10 @@ def error_inputs_mean(op_info, device, **kwargs):
         error_regex=err_msg2
     )
 
-    err_msg3 = "Expected out tensor to have dtype double, but got float instead"
+    if is_ref:
+        err_msg3 = "Expected out tensor to have dtype torch.float64, but got torch.float32 instead"
+    else:
+        err_msg3 = "Expected out tensor to have dtype double, but got float instead"
     yield ErrorInput(
         SampleInput(
             make_tensor((3, 4, 5), dtype=torch.int64, device=device),
@@ -10779,6 +10817,34 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )
            ),
+    OpInfo('_native_batch_norm_legit',
+           aten_name='_native_batch_norm_legit',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs__native_batch_norm_legit,
+           skips=(
+               # NotImplementedError: Could not run
+               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # https://github.com/pytorch/pytorch/issues/85960
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                            "TestCompositeCompliance", "test_forward_ad"),
+               # Extremal value issue on aten::native_batch_norm, which returns 'nan' for mean on 'inf' inputs
+               # possibly because of the welford implementation.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+           )
+           ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
@@ -13374,9 +13440,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
-                       # alias, nn.functional.tanh, will produce (because of warning string saved):
-                       # "RuntimeError: Expected to not find "tanh" but found it"
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
@@ -15502,10 +15565,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
-                       # alias, nn.functional.sigmoid, will produce (because of warning string saved):
-                       # "RuntimeError: Expected to not find "sigmoid" but found it"
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
+                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
@@ -17080,9 +17140,6 @@ python_ref_db = [
         aliases=('moveaxis',),
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.bucketize",
@@ -17278,9 +17335,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -17523,16 +17577,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
         torch_opinfo_name="nn.functional.poisson_nll_loss",
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -18294,9 +18342,6 @@ python_ref_db = [
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.diag",
@@ -18420,9 +18465,6 @@ python_ref_db = [
         "_refs.reshape",
         torch_opinfo_name="reshape",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.reshape_as",
@@ -18471,9 +18513,6 @@ python_ref_db = [
         "_refs.vsplit",
         torch_opinfo_name="vsplit",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.transpose",
@@ -18507,9 +18546,6 @@ python_ref_db = [
         "_refs.view",
         torch_opinfo_name="view",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.view_as",
@@ -18534,9 +18570,6 @@ python_ref_db = [
         "_refs.unbind",
         torch_opinfo_name="unbind",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     #
     # Reduction Reference OpInfos
@@ -18548,16 +18581,12 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
+        error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
+        error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
@@ -18567,9 +18596,7 @@ python_ref_db = [
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
+        error_inputs_func=partial(error_inputs_mean, is_ref=True),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
