@@ -541,15 +541,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 if len(output_refs) == 1:
                     output_types = "at::Tensor"
                 else:
-                    output_return_type = "at::Tensor"
-                    output_return_types = [output_return_type] * len(output_refs)
-                    output_return_types = ", ".join(output_return_types)
-                    output_types = f"std::tuple<{output_return_types}>"
+                    output_types = "std::vector<at::Tensor>"
             else:
                 output_types = "void"
 
             if inputs_len != 0:
-                inputs_args = ["at::Tensor"] * len(V.graph.graph_inputs.keys())
+                inputs_args = ["at::Tensor&"] * len(V.graph.graph_inputs.keys())
                 inputs_args = ", ".join(inputs_args)
                 inputs_args = f"std::tuple<{inputs_args}>"
 
@@ -557,8 +554,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{output_types} call_{self._call_func_id}({inputs_args} args) {{"
                 )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
-                self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
-                self.wrapper_call.writeline(f"std::tie({inputs_keys_str}) = args;")
+                self.wrapper_call.writeline(f"auto& [{inputs_keys_str}] = args;")
             else:
                 self.wrapper_call.writeline(
                     f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
@@ -613,7 +609,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.wrapper_call.writeline("return " + output_refs[0] + "; }''' )")
             else:
                 self.wrapper_call.writeline(
-                    "return std::make_tuple(" + ", ".join(output_refs) + "); }''' )"
+                    "return std::vector<at::Tensor>({"
+                    + ", ".join(output_refs)
+                    + "}); }''' )"
                 )
         else:
             self.wrapper_call.writeline("return; }''' )")
