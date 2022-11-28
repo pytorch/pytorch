@@ -144,7 +144,7 @@ set by ``env TORCHDYNAMO_REPRO_DIR`` so make you have right access to
 that directory. You can then run ``python repro.py`` and confirm that
 you are getting the same error.
 
-.. note:: 
+.. note::
    For other compilers such as nvfuser, the process is similar but
    instead you would leverage ``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``.
 
@@ -238,7 +238,7 @@ There are 3 major ways to accelerat PyTorch code:
 
 2. Out of order execution: A general optimization for compilers, by looking ahead
    at the exact data dependencies within a graph we can decide on the most
-   opportune time to execute a node and which buffers can be reused 
+   opportune time to execute a node and which buffers can be reused
 
 3. Automatic work placement: Similar of the out of order execution point,
    but by matching nodes of a graph to resources like physical hardware or
@@ -310,13 +310,13 @@ that are encountered. Here is an example usage:
    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
    print(explanation)
    """
-   Dynamo produced 3 graphs, with 2 graph break and 6 ops. 
-    Break reasons: 
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {} 
+   Dynamo produced 3 graphs, with 2 graph break and 6 ops.
+    Break reasons:
+   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
       File "t2.py", line 16, in toy_example
        print("woo")
 
-   2. generic_jump 
+   2. generic_jump
       File "t2.py", line 17, in toy_example
        if b.sum() < 0:
     """

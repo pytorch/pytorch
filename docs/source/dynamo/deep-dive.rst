@@ -25,7 +25,7 @@ checks the following torch.Tensor properties:
 - device
 - requires_grad
 - dispatch_key (with thread-local includes/excludes applied)
-- ndim 
+- ndim
 - sizes\* (optional)
 - strides\* (optional)
 
