@@ -1182,4 +1182,6 @@ endif()
 
 if(USE_CUDA AND BUILD_NVFUSER)
   add_subdirectory(torch/csrc/jit/codegen/cuda)
+else()
+  set(BUILD_NVFUSER OFF)
 endif()
