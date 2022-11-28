@@ -338,7 +338,9 @@ def use_custom_generated_macros():
     return "-D C10_USING_CUSTOM_GENERATED_MACROS"
 
 
-def get_include_and_linking_paths(include_pytorch=False, vec_isa: VecISA = invalid_vec_isa):
+def get_include_and_linking_paths(
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
+):
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
@@ -365,7 +367,8 @@ def get_include_and_linking_paths(include_pytorch=False, vec_isa: VecISA = inval
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
-    return ipaths, lpaths, libs, macros        
+    return ipaths, lpaths, libs, macros
+
 
 def cpp_compile_command(
     input,
@@ -375,7 +378,9 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    ipaths, lpaths, libs, macros = get_include_and_linking_paths(include_pytorch, vec_isa)
+    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+        include_pytorch, vec_isa
+    )
 
     return re.sub(
         r"[ \n]+",
@@ -473,10 +478,10 @@ class CppWrapperCodeCache:
             if not os.path.exists(cpp_wrapper_dir):
                 os.mkdir(cpp_wrapper_dir)
 
-            ipaths, lpaths, libs = get_include_and_linking_paths()
+            ipaths, lpaths, libs, macros = get_include_and_linking_paths()
 
-            extra_cflags = f"{cpp_flags()} -ftemplate-depth-5000 -fconstexpr-depth=1024 { optimization_flags()}"
-            extra_ldflags = f"{shared()} {lpaths} {libs}"
+            extra_cflags = f"{cpp_flags()} -ftemplate-depth-5000 -fconstexpr-depth=1024 {optimization_flags()} {get_warning_all_flag()} {macros} {use_custom_generated_macros()}"
+            extra_ldflags = f"{get_shared()} {lpaths} {libs}"
             extra_include_paths = f"{ipaths}"
 
             mod = torch.utils.cpp_extension.load_inline(
