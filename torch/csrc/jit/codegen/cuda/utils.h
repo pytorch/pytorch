@@ -97,6 +97,7 @@ enum class EnableOption {
   KernelProfile, //! Enable intra-kernel performance profiling
   LinearDecomposition, //! Enable linear-bias decomposition
   ConvDecomposition, //! Enable conv-bias decomposition
+  GraphOp, //! Enable graphOps(index_select/gather/scatter)
 };
 
 TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);

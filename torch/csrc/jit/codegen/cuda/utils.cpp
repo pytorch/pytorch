@@ -207,6 +207,8 @@ auto parseEnableOptions() {
         options_map[EnableOption::LinearDecomposition] = true;
       } else if (token == "conv_decomposition") {
         options_map[EnableOption::ConvDecomposition] = true;
+      } else if (token == "graph_op_fusion") {
+        options_map[EnableOption::GraphOp] = true;
       } else {
         TORCH_CHECK(
             false,
