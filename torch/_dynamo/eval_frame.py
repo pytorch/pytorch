@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import functools
 import inspect
 import logging
@@ -22,7 +21,7 @@ from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
-from .utils import checkpoint_params, clone_inputs, compile_times, same
+from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
@@ -320,47 +319,6 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=Fa
     )
 
 
-class WrapperBackend:
-    def __init__(self, backend=None):
-        self.backend = backend
-
-    @property
-    def example_inputs(self):
-        return clone_inputs(self.original_example_inputs)
-
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-
-        self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
-        self.gm = gm
-        copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, self.original_example_inputs)
-
-        if self.candidate is None or self.candidate is self.gm.forward:
-            return self.gm.forward
-
-        if not config.verify_correctness:
-            return self.candidate
-
-        # if verify_correctness=True
-        try:
-            correct = self.gm.forward(*self.example_inputs)
-            result = self.candidate(*self.example_inputs)
-
-            # TODO: replace `same` function with the one in testing
-            if same(correct, result):
-                return self.candidate
-
-            raise RuntimeError(f"incorrect results of backend {self}")
-            return self.gm.forward
-
-        except Exception:
-            log.exception("error in verify_correctness")
-            raise
-        finally:
-            self.restore()
-
-
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
@@ -423,7 +381,7 @@ def optimize(
         disable: If True, turn this decorator into a no-op
         dynamic: If True, turn on dynamic shapes support
 
-    Example Usage:
+    Example Usage::
 
         @torch._dynamo.optimize()
         def toy_example(a, b):
