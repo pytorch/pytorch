@@ -114,6 +114,8 @@ class TestVitalSignsCuda(TestCase):
             self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
+is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
+
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -3910,8 +3912,10 @@ else:
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
 
+
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
+    @unittest.skipIf(is_cuda_sm86, "OOMs on sm86 configuration")
     @skipIfRocm
     @onlyCUDA
     @largeTensorTest('12GB', device='cpu')
