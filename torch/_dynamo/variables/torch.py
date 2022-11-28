@@ -241,7 +241,17 @@ class TorchVariable(VariableTracker):
         elif self.value in REWRITE_OPS_TO_TENSOR_SIZE_METHOD:
             assert len(args) == 1
             assert isinstance(args[0], TensorVariable)
-            return args[0].call_method(tx, "size", [], {})
+            size = args[0].call_method(tx, "size", [], {})
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.tensor,
+                    *proxy_args_kwargs([size], {}),
+                    current_tx=tx,
+                ),
+                **options,
+            )
         elif self.value in (
             torch.nn.modules.utils._single,
             torch.nn.modules.utils._pair,

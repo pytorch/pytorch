@@ -2313,25 +2313,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_onnx_shape_as_tensor(self):
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f(x):
-            return 1 + torch._shape_as_tensor(x)[0]
+        input1 = torch.ones(5, 8)
+        input2 = torch.ones(2, 3, 4, 5)
 
-        gm, _ = torch._dynamo.export(f, torch.ones(6))
+        def f1(x):
+            return 1 + torch._shape_as_tensor(x)[0].view(1)
 
-        input_one_dim = torch.ones(6)
-        input_two_dims = torch.ones(7, 4)
-        self.assertEqual(f(input_one_dim), 7)
-        self.assertEqual(f(input_two_dims), 8)
-        self.assertEqual(f(input_two_dims), 8)
+        opt_f1 = torch._dynamo.optimize("eager", nopython=True)(f1)
+        self.assertEqual(f1(input1), opt_f1(input1))
+        self.assertEqual(f1(input2), opt_f1(input2))
 
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f_onnx(x):
-            return 1 + torch.onnx.operators.shape_as_tensor(x)[0]
+        graph, _ = torch._dynamo.export(f1, input1)
+        self.assertEqual(f1(input1), graph(input1))
+        self.assertEqual(f1(input2), graph(input2))
 
-        self.assertEqual(f_onnx(input_one_dim), 7)
-        self.assertEqual(f_onnx(input_two_dims), 8)
-        self.assertEqual(f_onnx(input_two_dims), 8)
+        def f2(x):
+            return 1 + torch.onnx.operators.shape_as_tensor(x)[0].view(1)
+
+        opt_f2 = torch._dynamo.optimize("eager", nopython=True)(f2)
+        self.assertEqual(f2(input1), opt_f2(input1))
+        self.assertEqual(f2(input2), opt_f2(input2))
 
     def test_cond(self):
         from functorch.experimental.cond import cond
