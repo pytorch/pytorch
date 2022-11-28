@@ -162,15 +162,37 @@ def _functorch_unwrap_to_level_no_rewrap(tensor: torch.Tensor, target_level: int
     while current_level > target_level:
         tensor = torch._C._functorch._unwrap_for_grad(tensor, current_level)
         current_level = torch._C._functorch.maybe_get_level(tensor)
-    assert current_level == target_level, (current_level, target_level)
+    assert max(current_level, -1) == max(target_level, -1), (current_level, target_level)
     return tensor
+
+def _functorch_unwrap_to_level_no_rewrap_alltheway(tensor: torch.Tensor) -> torch.Tensor:
+    # I clearly don't know how wrapper level work, but this works lol!
+    #
+    # We're running into TensorWrapper(lvl=-2, inner=TensorWrapper(lvl=1, inner=Tensor(1.))
+    # We cannot use unwrap_for_grad here, but get_unwrapped works ok.
+    current_level = torch._C._functorch.maybe_get_level(tensor)
+    prev_level = 9999
+    while True:
+        try:
+            tensor = torch._C._functorch.get_unwrapped(tensor)
+            # tensor = torch._C._functorch._unwrap_for_grad(tensor, current_level)
+            current_level = torch._C._functorch.maybe_get_level(tensor)
+            if current_level == prev_level:
+                break
+            else:
+                prev_level = current_level
+        except Exception as e:
+            print("error", e)
+            break
+    return tensor
+
 
 # It might be better to do more things in cpp:
 # https://github.com/pytorch/pytorch/pull/88976
 def _functorch_unwrap_to_level(tensor: torch.Tensor, target_level: int) -> torch.Tensor:
     assert target_level != 0, "level 0 is not supported, you should pass -1 instead"
     current_level = torch._C._functorch.maybe_get_level(tensor)
-    assert current_level >= target_level, (current_level, target_level)
+    assert max(current_level, -1) >= max(target_level, -1), (current_level, target_level)
     rewrap_fns = []
     for _ in range(max(current_level, 0), max(target_level, 0), -1):
         current_level = torch._C._functorch.maybe_get_level(tensor)
@@ -181,7 +203,7 @@ def _functorch_unwrap_to_level(tensor: torch.Tensor, target_level: int) -> torch
         rewrap_fns.append(rewrap_fn)
 
     result_level = torch._C._functorch.maybe_get_level(tensor)
-    assert result_level == target_level, (result_level, target_level)
+    assert max(result_level, -1) == max(target_level, -1), (result_level, target_level)
     return tensor, rewrap_fns
 
 class save_on_cpu(saved_tensors_hooks):

@@ -2,7 +2,7 @@ import torch
 import warnings
 import weakref
 from typing import Any, Iterable, List, Tuple
-from torch.autograd.graph import _get_tid, _functorch_unwrap_to_level
+from torch.autograd.graph import _get_tid, _functorch_unwrap_to_level, _functorch_unwrap_to_level_no_rewrap, _functorch_unwrap_to_level_no_rewrap_alltheway
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -451,7 +451,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 
         # Wrap all the way to the inner-most tensor, and rewrap using the
         # rewrap function saved from forward
-        ret = _functorch_unwrap_to_level(storage[handle], -1)[0]
+        ret = _functorch_unwrap_to_level_no_rewrap_alltheway(storage[handle])
         for fn in reversed(rewrap_fns):
             ret = fn(ret)
         return ret
