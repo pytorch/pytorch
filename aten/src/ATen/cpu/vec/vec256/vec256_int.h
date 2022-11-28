@@ -761,7 +761,7 @@ public:
   Vectorized<uint8_t> neg() const;
 
   Vectorized<uint8_t> abs() const {
-   return *this;
+    return *this;
   }
 
   Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
