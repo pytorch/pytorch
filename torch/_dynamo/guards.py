@@ -448,26 +448,41 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
-        else:
-            value = self.get(guard.name)
-            tensor_name = self.arg_ref(guard)
-            self.tensor_check_names.append(tensor_name)
-            self.tensor_check_examples.append(value)
+            if not config.dynamic_shapes:
+                # For dynamic shapes, we want to proceed to record tensor names
+                return
 
-            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
-            self.tensor_check_ids[tensor_name] = id(value)
+        value = self.get(guard.name)
+        tensor_name = self.arg_ref(guard)
+        self.tensor_check_names.append(tensor_name)
+        self.tensor_check_examples.append(value)
 
-            # Note: Guard code produced for tensor_match is a little different.
-            # We accumulate tensor names, then do a single install of `___check_tensors`.
-            # See _guards.cpp and TensorGuard for more information.
-            # TODO(voz): Add tensor matching code to export
-            # Note: this is a bit of a special case, and so does not use _produce_guard_code
-            guard.set_export_info(
-                "TENSOR_MATCH",
-                weakref.ref(type(value)),
-                None,
-                weakref.ref(value),
+        # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
+        self.tensor_check_ids[tensor_name] = id(value)
+        if value._base is not None:
+            assert (
+                id(value._base)
+                in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
             )
+            refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[
+                id(value._base)
+            ]
+            for ref in refs:
+                self.guarded_code.output_graph.base_symbols.update(
+                    {ref.expr: f"{tensor_name}._base"}
+                )
+
+        # Note: Guard code produced for tensor_match is a little different.
+        # We accumulate tensor names, then do a single install of `___check_tensors`.
+        # See _guards.cpp and TensorGuard for more information.
+        # TODO(voz): Add tensor matching code to export
+        # Note: this is a bit of a special case, and so does not use _produce_guard_code
+        guard.set_export_info(
+            "TENSOR_MATCH",
+            weakref.ref(type(value)),
+            None,
+            weakref.ref(value),
+        )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
@@ -545,13 +560,19 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+        self,
+        expr_to_tensor_ref,
+        id_to_name_map,
+        shape_env,
+        intermediary_symbols,
+        base_symbols,
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
         self.shape_env = shape_env
         self.intermediary_symbols = intermediary_symbols
+        self.base_symbols = base_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol)
@@ -559,7 +580,14 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
+        expr_found = expr in (self.expr_to_tensor_ref) or (
+            expr in self.intermediary_symbols
+        )
+        if not expr_found:
+            if config.dynamic_shapes_ignore_assert or expr in (self.base_symbols):
+                return f"{self.shape_env.var_to_val[expr]}"
+
+        assert expr_found
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -648,12 +676,13 @@ class CheckFunctionManager:
             id_to_name_map,
             self.output_graph.shape_env,
             self.output_graph.intermediary_symbols,
+            self.output_graph.base_symbols,
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
+        # tensor_check_ids is the names from tensor_check_names + their ._bases as keys
         # All other guards installations are driven off of it, so these ones will too.
-        for name in tensor_check_names:
-            tensor_id = tensor_check_ids[name]
+        for name, tensor_id in tensor_check_ids.items():
             id_to_name_map[tensor_id] = name
 
             if tensor_id in self.output_graph.tensor_id_to_sym_shape_ref:
