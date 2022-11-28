@@ -38,7 +38,7 @@ Tensor empty_strided_meta(
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  return empty_strided_meta_symint(c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  return empty_strided_meta_symint(c10::fromIntArrayRefSlow(size), c10::fromIntArrayRefSlow(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor empty_strided_meta_symint(

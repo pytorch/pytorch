@@ -1321,7 +1321,7 @@ class IrParser {
               }
             }
 
-            auto out = randlike(operand);
+            auto out = rand_like(operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -3043,8 +3043,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumAminAmaxOps> BinaryFloatOp = {
-          "aten::amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor",
-          "aten::amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor"};
+          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor",
+          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor"};
       for (auto signature : BinaryFloatOp) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -3371,6 +3371,115 @@ class IrParser {
             // expand_sizes needs to be constant
             auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
             if (!expand_sizes.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::permute_copy.int(Tensor(a) self, int[] dims) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dims.has_value(), "The dims parameter is required.");
+            TORCH_INTERNAL_ASSERT(
+                dims.value().size() == self->getMaybeRFactorDomain().size());
+
+            auto output = permute(self, dims->vec());
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            if (!dims.has_value()) {
+              return false;
+            }
+
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            auto dim0 = constant_as<int>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dim0.has_value(), "dim0 in transpose is not valid.");
+
+            auto dim1 = constant_as<int>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                dim1.has_value(), "dim1 in transpose is not valid.");
+
+            auto output = transpose(self, dim0.value(), dim1.value());
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            if (node->input(1)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            if (node->input(2)->node()->kind() != prim::Constant) {
+              return false;
+            }
+            return true;
+          },
+          nullptr);
+    }
+
+    {
+      auto ptr_op =
+          getOperatorForLiteral("prim::t_copy(Tensor(a) self) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto self_t = list_val.front();
+            list_val.pop_front();
+            auto self = self_t->as<TensorView>();
+
+            TORCH_INTERNAL_ASSERT(self->getMaybeRFactorDomain().size() <= 2);
+
+            auto output = transpose(self);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(output, format));
+          },
+          [](const Node* node) -> bool {
+            if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
 
@@ -4008,11 +4117,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto amax_schema =
       getOperatorForLiteral(
-          "aten::amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor")
+          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
           ->schema();
   static auto amin_schema =
       getOperatorForLiteral(
-          "aten::amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor")
+          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
           ->schema();
   if (node->matches(amax_schema) || node->matches(amin_schema)) {
     switch (offset) {
@@ -4133,6 +4242,49 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 1: unsqueeze dim;
       case 1:
+        profileInt(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto permute_schema =
+      getOperatorForLiteral(
+          "aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)")
+          ->schema();
+  static auto permute_copy_schema =
+      getOperatorForLiteral(
+          "prim::permute_copy(Tensor(a) self, int[] dims) -> Tensor")
+          ->schema();
+  if (node->matches(permute_schema) || node->matches(permute_copy_schema)) {
+    switch (offset) {
+      // argument 1: dims;
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto transpose_int_copy_schema =
+      getOperatorForLiteral(
+          "aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)")
+          ->schema();
+  static auto transpose_int_schema =
+      getOperatorForLiteral(
+          "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor")
+          ->schema();
+  if (node->matches(transpose_int_copy_schema) ||
+      node->matches(transpose_int_schema)) {
+    switch (offset) {
+      // argument 1: dim0;
+      // argument 2: dim1;
+      case 1:
+      case 2:
         profileInt(pr, node, offset);
         break;
       default:
@@ -4346,6 +4498,30 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         return true;
       case 3:
         profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static auto var_dim_schema =
+      getOperatorForLiteral(
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  static auto std_dim_schema =
+      getOperatorForLiteral(
+          "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  if (node->matches(var_dim_schema) || node->matches(std_dim_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        return true;
+      case 2:
+        profileBool(pr, node, offset);
+        return true;
+      case 3:
+        profileBool(pr, node, offset);
         return true;
       default:
         return false;

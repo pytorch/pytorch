@@ -1,9 +1,9 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
-#include <c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
 #include <sys/stat.h>
 #include <cstdlib>
@@ -112,7 +112,7 @@ void CommTraceLogger::recordComms(
       ",\n\t\t\"req\": ",
       workReq,
       ",\n\t\t\"seqnum\": ",
-      seqnum++,
+      seqnum,
       ",\n\t\t\"world_size\": ",
       world_size);
 
@@ -149,6 +149,8 @@ void CommTraceLogger::recordComms(
 
   // record the trace to kineto trace if applicable
   RECORD_PARAM_COMMS(
+      static_cast<int64_t>(seqnum), // seq
+      0, // process group ptr
       rank,
       commName.c_str(),
       inSize,
@@ -156,6 +158,8 @@ void CommTraceLogger::recordComms(
       dtype,
       curInSplitSizes_,
       curOutSplitSizes_);
+
+  ++seqnum;
 
   // reset optional field
   curRoot_ = -1;

@@ -55,9 +55,10 @@ runs:
         .circleci/scripts/windows_cudnn_install.sh
 
     - name: Setup Python3
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
-        python-version: "3.x"
+        python-version: '3.x'
+        check-latest: false
         cache: pip
         cache-dependency-path: |
           **/requirements.txt

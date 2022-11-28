@@ -1,11 +1,25 @@
 from collections import deque
 from dataclasses import dataclass
+import functools
 import re
 from typing import Dict, List
 
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
+
+
+def _traverse(tree, next_fn, children_fn=lambda x: x.children, reverse: bool = False):
+    order = reversed if reverse else lambda x: x
+    remaining = deque(order(tree))
+    while remaining:
+        curr_event = next_fn(remaining)
+        yield curr_event
+        for child_event in order(children_fn(curr_event)):
+            remaining.append(child_event)
+
+traverse_dfs = functools.partial(_traverse, next_fn=lambda x: x.pop(), reverse=True)
+traverse_bfs = functools.partial(_traverse, next_fn=lambda x: x.popleft(), reverse=False)
 
 
 @dataclass
@@ -41,7 +55,7 @@ class EventKey:
         return self.event.id == other.event.id
 
     def __repr__(self):
-        return f"{self.event.name()}"
+        return f"{self.event.name}"
 
     def intervals_overlap(self, intervals: List[Interval]):
         overlap_time = 0
@@ -105,7 +119,7 @@ class BasicEvaluation:
                 stack.append(child_event)
             assert EventKey(
                 curr_event
-            ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name()}"
+            ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name}"
             self.metrics[EventKey(curr_event)] = EventMetrics(
                 self_time_ns=self_time)
             self.metrics[EventKey(
@@ -122,12 +136,11 @@ class BasicEvaluation:
 
         def is_cuda_launch_kernel(e):
             # TODO: find a better way to identify cudaLaunchKernel
-            return e.name() == "cudaLaunchKernel"
+            return e.name == "cudaLaunchKernel"
 
         def is_cuda_kernel(e):
             # TODO: find a better way to identify CUDA Kernel
-            return e.device_type() == DeviceType.CUDA and "mem" not in e.name(
-            ).lower()
+            return e.device_type() == DeviceType.CUDA and "mem" not in e.name.lower()
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -326,9 +339,9 @@ def argmax(seq, key=lambda x: x, start=0, end=None):
 
 def source_code_location(event):
     while (event is not None):
-        match = re.search(r"\.py\(.*\)", event.name())
+        match = re.search(r"\.py\(.*\)", event.name)
         if (match is None):
             event = event.parent
             continue
-        return event.name()
+        return event.name
     return "No source code location found"
