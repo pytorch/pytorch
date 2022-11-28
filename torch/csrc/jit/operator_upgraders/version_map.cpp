@@ -88,7 +88,11 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersi
      {"aten::gelu.out",
       {{10,
         "gelu_out_0_9",
-        "aten::gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor"}}}});
+        "aten::gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor"}}},
+     {"aten::random_.from_int",
+      {{11,
+        "random__from_0_10",
+        "aten::random_.from(Tensor self, int from, int? to, *, Generator? generator=None) -> Tensor"}}}});
 
 const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {
