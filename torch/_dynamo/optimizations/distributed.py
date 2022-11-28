@@ -242,6 +242,7 @@ class DDPOptimizer:
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
                 submod.recompile()
+
                 wrapper = WrapperModule(
                     self.compiler(submod, args),
                     unwrap_singleton_tuple,

@@ -1149,7 +1149,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
         # Redudant with the check above, but worth having in case tracing introduced
         # a fake tensor. Unlikely.
-        # See note: Fake Modules and AOTAutograd
+        # See Note: [Fake Modules and AOTAutograd]
         torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
@@ -1700,7 +1700,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         :attr:`mod`, but with forward and backward graph compiled.
 
     """
-    # See note: Fake Modules and AOTAutograd
+    # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
@@ -1751,16 +1751,21 @@ def aot_module_simplified(
 
     # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
 
-    # Fake Modules and AOTAutograd
+    # Note [Fake Modules and AOTAutograd]
     #
-    # Passing a module with *any* fake tensors on it is invalid, as it will
-    # fake-tensor poison the runtime component of aot_autograd.
-    # Compilation will be done with fake tensors, and runtime will be invoked with real tensors.
-    # The module passed in here is utilized again as input for compiling the
-    # fx graph, from the joint forward backward function passed to make_fx.
-    # If a fake tensor got into the fx graph, it will get into the fw_module or bw_module
-    # and we will fail due to mixed real/fake tensors in runtime, or, produce a fake tensor output which will
-    # poison the next subsequent call.
+    # A simple heuristic for when to use fake versus real tensors is that fake tensors are for compile time
+    # (when we don't want to actually run the compute, but we do want to know about metadata), 
+    # and real tensors are for runtime (when we actually want to do the compute.) However, in AOTAutograd, 
+    # modules are the exception: we always pass AOTAutograd modules with real tensors. 
+    # This is because AOTAutograd will produce a compiled function which needs to directly access any 
+    # parameters the compiled function may need, but these parameters will NOT be passed in by the caller (aka Dynamo). 
+    # So at compile time, the compiled function we produce must close over any parameters, and those parameters must be
+    # real parameters, and we cannot do this unless at compile time we get a module with real tensors.
+
+    # Even if Dynamo did pass all parameters explicitly at runtime, which would eliminate the need to close over 
+    # the parameters, it would still be profitable to pass real tensor parameters to the compiler at compile time,
+    # because some compilation strategies like CUDA graphs want to burn in the pointer addresses where the parameter data live, 
+    # and of course we can't do that unless we give the backend a real tensor.
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
