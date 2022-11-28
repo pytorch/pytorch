@@ -1585,6 +1585,70 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = aot_mod(*inputs)
         res[0].sum().backward()
 
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.y = y
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z + self.y
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_y = fake_mode.from_tensor(real_y)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        # This test uses tracing to lift the fake_y into a constant buffer,
+        # so we have a contrived trace example.
+        # For a traceless example closer to how dynamo would call us, see
+        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
+        graph = tracer.trace(MockModule(fake_y))
+        mod_fake = torch.fx.GraphModule(tracer.root, graph)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            """Unexpected fake buffer y"""
+        )
+        # Counterfactual to ensure that the raise is only due to real vs fake
+        # Run the same exact thing except with a real buffer.
+        graph = tracer.trace(MockModule(real_y))
+        mod_real = torch.fx.GraphModule(tracer.root, graph)
+        aot_module_simplified(MockModule(real_y), nop)
+
+    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear.bias = torch.nn.Parameter(torch.ones(4))
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            """Unexpected fake param linear.weight"""
+        )
+
+
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
 aot_autograd_failures = {
