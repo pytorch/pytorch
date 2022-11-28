@@ -31,10 +31,11 @@ from torch.distributed.fsdp.wrap import _FSDPPolicy
 @contract
 def fully_shard(
     module: nn.Module,
+    *,
     process_group: Optional[dist.ProcessGroup] = None,
+    policy: Optional[_FSDPPolicy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
-    policy: Optional[_FSDPPolicy] = None,
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     device_id: Optional[Union[int, torch.device]] = None,
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
