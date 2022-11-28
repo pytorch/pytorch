@@ -16,6 +16,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
+from torch.distributed.fsdp import ShardingStrategy
+
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
 from torch.testing._internal.common_utils import (
@@ -275,6 +277,84 @@ class TestFSDPCheckpoint(FSDPTest):
                 self._verify_parity(losses, outputs, models)
 
         dist.barrier()
+
+
+class CheckpointModule(nn.Module):
+    def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
+        super().__init__()
+        self.seq = nn.Sequential(*[nn.Linear(100, 100) for _ in range(4)])
+        self.checkpoint = checkpoint
+        self.use_reentrant = use_reentrant
+
+    def forward(self, x):
+        return (
+            checkpoint(self.seq, x, use_reentrant=self.use_reentrant)
+            if self.checkpoint
+            else self.seq(x)
+        )
+
+
+class ModelWithCheckpointSubmodule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.s1 = CheckpointModule()
+        self.s2 = CheckpointModule()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.s2(self.s1(self.l1(x))))
+
+
+class TestModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.m1 = ModelWithCheckpointSubmodule()
+        self.m2 = ModelWithCheckpointSubmodule()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.m2(self.m1(self.l1(x))))
+
+
+class TestFSDPCheckpointSubmodule(FSDPTest):
+
+    @skip_if_lt_x_gpu(2)
+    def test_nonreentrant_checkpoint_submodule(self):
+        model = TestModel().cuda()
+        model_ac = deepcopy(model)
+        model_ac.checkpoint = True
+
+        model.m1 = FSDP(
+            module=model.m1,
+            device_id=torch.cuda.current_device(),
+            sharding_strategy=ShardingStrategy.NO_SHARD,
+        )
+        model.m2 = FSDP(
+            module=model.m2,
+            device_id=torch.cuda.current_device(),
+            sharding_strategy=ShardingStrategy.NO_SHARD,
+        )
+
+        model_ac.m1 = FSDP(
+            module=model_ac.m1,
+            device_id=torch.cuda.current_device(),
+            sharding_strategy=ShardingStrategy.NO_SHARD,
+        )
+        model_ac.m2 = FSDP(
+            module=model_ac.m2,
+            device_id=torch.cuda.current_device(),
+            sharding_strategy=ShardingStrategy.NO_SHARD,
+        )
+
+        x = torch.randn(2, 100).cuda()
+
+        model(x).sum().backward()
+        model_ac(x).sum().backward()
+
+        for p1, p2 in zip(model.parameters(), model_ac.parameters()):
+            self.assertTrue(p1.grad.allclose(p2.grad))
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
