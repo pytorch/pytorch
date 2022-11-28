@@ -26,6 +26,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+#ifdef USE_CUDA
 class LoadingNvfuserLibrary {
  public:
   LoadingNvfuserLibrary() {
@@ -48,6 +49,7 @@ class LoadingNvfuserLibrary {
 };
 
 static LoadingNvfuserLibrary loading_nvfuser_library_;
+#endif // USE_CUDA
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 

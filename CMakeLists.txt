@@ -1180,6 +1180,6 @@ if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
 endif()
 
-if(BUILD_NVFUSER)
+if(USE_CUDA AND BUILD_NVFUSER)
   add_subdirectory(torch/csrc/jit/codegen/cuda)
 endif()
