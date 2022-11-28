@@ -1,4 +1,5 @@
 import collections
+import copy
 import functools
 import itertools
 import logging
@@ -21,11 +22,14 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
+    assert_no_fake_params_or_buffers,
+    checkpoint_params,
     CleanupHook,
+    clone_inputs,
     count_calls,
     counters,
-    fake_tensors_available,
     format_graph_tabular,
+    same,
 )
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
@@ -71,6 +75,59 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
+def wrap_compiler_fn(compiler_fn):
+    """WrapperBackend if config.verify_correctness is True"""
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
+
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
+        return wrapper_backend_compiler_fn
+
+    return compiler_fn
+
+
+class WrapperBackend:
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            raise RuntimeError(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            raise
+        finally:
+            self.restore()
+
+
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -110,6 +167,10 @@ class OutputGraph(fx.Tracer):
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
 
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input = collections.OrderedDict()
+
     @property
     def output(self):
         return self
@@ -147,6 +208,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -162,22 +224,22 @@ class OutputGraph(fx.Tracer):
         return obj
 
     def create_graph_input(self, name, type_expr=None):
-        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
-
         # unique
-        used_names = {n.target for n in placeholders}
-        if name in used_names:
+        if name in self.name_to_input:
             for i in itertools.count():
-                if f"{name}_{i}" not in used_names:
+                if f"{name}_{i}" not in self.name_to_input:
                     name = f"{name}_{i}"
                     break
 
-        if placeholders:
-            ctx = self.graph.inserting_after(placeholders[-1])
+        if self.name_to_input:
+            prev_name = next(reversed(self.name_to_input))
+            ctx = self.graph.inserting_after(self.name_to_input[prev_name])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            self.name_to_input[name] = proxy.node
+            return proxy
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -421,6 +483,7 @@ class OutputGraph(fx.Tracer):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
+        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -453,7 +516,10 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            compiler_fn = self.compiler_fn
+            if config.verify_correctness:
+                compiler_fn = wrap_compiler_fn(compiler_fn)
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -490,6 +556,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -509,8 +576,7 @@ class OutputGraph(fx.Tracer):
         # some of the tensor objects to be held alive for longer than necessary.
 
         # Clear cache for conversion of real -> fake tensors
-        if fake_tensors_available:
-            self.root_tx.fake_mode.fake_tensor_converter = None
+        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
@@ -525,6 +591,7 @@ class OutputGraph(fx.Tracer):
             if "example_value" in node.meta:
                 del node.meta["example_value"]
         self.real_value_cache.clear()
+        self.name_to_input.clear()
 
     def create_proxy(
         self,
