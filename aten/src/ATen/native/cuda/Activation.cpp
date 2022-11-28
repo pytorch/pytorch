@@ -114,7 +114,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
   Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   TORCH_CHECK(weight_dim == 0 || weight_dim == 1,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ",
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = ",
       weight_dim);
 
   // case1: shared weight for all channels

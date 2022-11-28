@@ -9,12 +9,10 @@ CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 
 OFFICE_HOURS_LINK = "https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours"
-CONTACT_US = f"Please reach out to the [PyTorch DevX Team]({OFFICE_HOURS_LINK}) with feedback or questions!"
+CONTACT_US = f"Questions? Feedback? Please reach out to the [PyTorch DevX Team]({OFFICE_HOURS_LINK})"
 ALTERNATIVES = (
-    "If this is not the intended behavior, feel free to use some "
-    + f"of the other merge options in the [wiki]({BOT_COMMANDS_WIKI})."
+    f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
 )
-LAND_CHECK_ROLLOUT = "https://github.com/pytorch/test-infra/blob/main/torchci/lib/bot/rolloutUtils.ts#L1-L34"
 
 
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
@@ -62,68 +60,49 @@ class TryMergeExplainer(object):
 
     def _get_flag_msg(self) -> str:
         if self.force:
-            return " the force (-f) flag."
+            return "Your change will be merged immediately since you used the force (-f) flag, " + \
+                "**bypassing any CI checks** (ETA: 1-5 minutes)."
         elif self.on_green:
-            return " the green (-g) flag."
+            return "Your change will be merged once all checks on your PR pass since you used the green (-g) flag (ETA: 0-4 Hours)."
         elif self.land_checks:
-            return (
-                " the land checks (-l) flag."
-                + " If you did not specify this flag yourself, "
-                + f" you are likely enrolled in the [land checks rollout]({LAND_CHECK_ROLLOUT})."
-            )
+            flag_msg = \
+                "**The `-l` land checks flag is deprecated and no longer needed.** Instead we now automatically " + \
+                "add the `ciflow\\trunk` label to your PR once it's approved\n\n"
+
+            if self.has_trunk_label:
+                flag_msg += "Your change will be merged once all checks on your PR pass (ETA 0-4 Hours)."
+            else:
+                flag_msg += "Your change will be merged once the land checks pass (**ETA 4 Hours**)."
+
+            return flag_msg
         else:
-            return "out a flag."
+            return "Your change will be merged once all checks pass (ETA 0-4 Hours)."
 
     def _get_land_check_progress(self, commit: Optional[str]) -> str:
         if commit is not None:
             return (
                 " and land check "
-                + f"progress [here](https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit})"
+                + f"progress <a href=\"https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}\">here</a>"
             )
         else:
             return ""
 
-    def _get_flag_explanation_message(self) -> str:
-        if self.force:
-            return "This means your change will be merged **immediately**, bypassing any CI checks (ETA: 1-5 minutes)."
-        elif self.on_green:
-            return "This means that your change will be merged once all checks on your PR have passed (ETA: 0-4 Hours)."
-        elif self.land_checks:
-            if self.has_trunk_label:
-                land_check_msg_suffix = "have passed since you have added the `ciflow/trunk` label to your PR (ETA 0-4 Hours)."
-            else:
-                land_check_msg_suffix = (
-                    "and the land checks have passed (**ETA 4 Hours**). "
-                )
-                land_check_msg_suffix += "If you need to coordinate lands between different changes and cannot risk a land race, "
-                land_check_msg_suffix += "please add the `ciflow/trunk` label to your PR and wait for signal to complete, "
-                land_check_msg_suffix += "and then land your changes in proper order."
-                land_check_msg_suffix += (
-                    " Having `trunk`, `pull`, and `Lint` pre-run on a "
-                )
-                land_check_msg_suffix += (
-                    "PR will bypass land checks and the ETA should be immediate."
-                )
-
-            return (
-                "This means that your change will be merged once all checks on your PR "
-                + land_check_msg_suffix
-            )
-        else:
-            return "This means that your change will be merged once all checks on your PR have passed (ETA: 0-4 Hours)."
-
     def get_merge_message(self, commit: Optional[str] = None) -> str:
-        message_prefix = "@pytorchbot successfully started a merge job."
-        progress_links = f"Check the current status [here]({os.getenv('GH_RUN_URL')}){self._get_land_check_progress(commit)}."
-        flag_message = f"The merge job was triggered with{self._get_flag_msg()}"
-        explanation_message = self._get_flag_explanation_message()
+        title = "### Merge started"
+        main_message = self._get_flag_msg()
 
-        msg = message_prefix + " "
-        msg += progress_links + "\n"
-        msg += flag_message + " "
-        msg += explanation_message + " "
-        msg += ALTERNATIVES + "\n"
+        advanced_debugging = "\n".join((
+            "<details><summary>Advanced Debugging</summary>",
+            "Check the merge workflow status ",
+            f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>{self._get_land_check_progress(commit)}",
+            "</details>"
+        ))
+
+        msg = title + "\n"
+        msg += main_message + "\n\n"
+        msg += ALTERNATIVES + "\n\n"
         msg += CONTACT_US
+        msg += advanced_debugging
         return msg
 
 
@@ -134,13 +113,3 @@ def get_revert_message(org: str, project: str, pr_num: int) -> str:
     )
     msg += CONTACT_US
     return msg
-
-
-def get_land_check_troubleshooting_message() -> str:
-    return (
-        " If you believe this is an error, you can use the old behavior with `@pytorchbot merge -g`"
-        + " (optionally with the `ciflow/trunk` to get land checks)"
-        + ' or use `@pytorchbot merge -f "some reason here"`.'
-        + f" For more information, see the [bot wiki]({BOT_COMMANDS_WIKI}). \n\n"
-        + CONTACT_US
-    )

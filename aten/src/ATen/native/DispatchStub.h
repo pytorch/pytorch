@@ -1,11 +1,10 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
+#include <c10/core/DeviceType.h>
+#include <c10/macros/Export.h>
 
-#include <type_traits>
 #include <atomic>
+#include <utility>
 
 // Implements instruction set specific function dispatch.
 //

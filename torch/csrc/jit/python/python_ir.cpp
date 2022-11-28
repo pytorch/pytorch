@@ -382,7 +382,11 @@ void initPythonIRBindings(PyObject* module_) {
           "Find all nodes",
           py::arg("kind"),
           py::arg("recurse") = true)
-      .def("addInput", [](Graph& g) { return g.addInput(); })
+      .def(
+          "addInput",
+          [](Graph& g, const std::string& name) { return g.addInput(name); },
+          "Add input to graph with optional name seed",
+          py::arg("name") = "")
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
       .GS(eraseOutput)
@@ -768,10 +772,16 @@ void initPythonIRBindings(PyObject* module_) {
             return n.ty_(Symbol::attr(name), type);
           })
       .def(
+          "ty",
+          [](Node& n, const char* name) { return n.ty(Symbol::attr(name)); })
+      .def(
           "tys_",
           [](Node& n, const char* name, const std::vector<TypePtr>& types) {
             return n.tys_(Symbol::attr(name), types);
           })
+      .def(
+          "tys",
+          [](Node& n, const char* name) { return n.tys(Symbol::attr(name)); })
       .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {

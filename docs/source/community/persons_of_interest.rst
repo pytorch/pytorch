@@ -7,7 +7,7 @@ Responsibilities
 * Triage and fix high priority issues assigned to the module or library
 * Triage, review, and land high priority pull requests assigned to the module or library
 * Answer module or library questions on `discuss.pytorch.org <https://discuss.pytorch.org/>`__
-  and `dev-discuss.pytorch.org <dev-discuss.pytorch.org>`__
+  and `dev-discuss.pytorch.org <https://dev-discuss.pytorch.org/>`__
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
@@ -289,6 +289,11 @@ TorchVision
 
 -  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
 -  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
+-  Nicolas Hug (`NicolasHug <https://github.com/NicolasHug>`__)
+-  Yosua Michael Maranatha (`YosuaMichael <https://github.com/YosuaMichael>`__)
+-  Joao Gomes (`jdsgomes <https://github.com/jdsgomes>`__)
+-  Philip Meier (`pmeier <https://github.com/pmeier>`__)
+-  Victor Fomin (`vfdev-5 <https://github.com/vfdev-5>`__)
 
 TorchText
 ~~~~~~~~~

@@ -33,7 +33,7 @@ LoopNestGenerator::LoopNestGenerator(const std::vector<Expr*>& exprs) {
 namespace {
 
 kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
-  auto extent_with_halo = GpuLower::current()->haloInfo().getExtent(id);
+  auto extent_with_halo = GpuLower::current()->haloInfo()->getExtent(id);
   kir::ForLoop* new_scope = nullptr;
   if (extent_with_halo) {
     // When an axis is extended with halo, unrolling and vectorization
@@ -252,7 +252,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     std::sort(
         loop_structure.rbegin(),
         loop_structure.rend(),
-        IterDomainDependencySorter(
+        ir_utils::IterDomainDependencySorter(
             concrete_id_dependencies, GpuLower::current()->caMap()));
     loop_structures_[tv] = loop_structure;
   }
