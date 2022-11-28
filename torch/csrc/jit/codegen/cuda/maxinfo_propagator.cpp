@@ -373,7 +373,7 @@ MaxRootDomainInfoSpanningTree::getReferenceRootIDInfo(
     leaf_pos += int64_t(tv->nDims()) + 1;
   }
   TORCH_CHECK(
-      leaf_pos >= 0 && leaf_pos <= tv->nDims(),
+      leaf_pos >= 0 && leaf_pos <= int64_t(tv->nDims()),
       "MaxRootDomainInfoSpanningTree called on an leaf_pos outside valid range.");
   RootDomainInfo result;
   const auto& root_domain = tv->getMaybeRFactorDomain();

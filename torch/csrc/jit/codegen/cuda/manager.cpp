@@ -285,7 +285,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     // make a copy of the stack
     int64_t inputs_size =
         static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
-    TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
+    TORCH_INTERNAL_ASSERT(int64_t(stack.size()) >= inputs_size);
     stack_copy = Stack();
     stack_copy->insert(
         stack_copy->end(), stack.begin(), stack.end() - inputs_size);
@@ -350,7 +350,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     int64_t output_count =
         static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
     TORCH_CHECK(
-        output_count <= stack.size(),
+        output_count <= int64_t(stack.size()),
         "Expected ",
         output_count,
         " outputs but found only ",

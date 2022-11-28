@@ -120,11 +120,11 @@ TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
     end_dim += inp_domain.size();
   }
   TORCH_CHECK(
-      start_dim >= 0 && start_dim < inp_domain.size(),
+      start_dim >= 0 && start_dim < int64_t(inp_domain.size()),
       "Invalid start_dim ",
       start_dim);
   TORCH_CHECK(
-      end_dim >= 0 && end_dim < inp_domain.size(), "Invalid end_dim ", end_dim);
+      end_dim >= 0 && end_dim < int64_t(inp_domain.size()), "Invalid end_dim ", end_dim);
   TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
 
   if (start_dim == end_dim) {
@@ -145,7 +145,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   TORCH_INTERNAL_ASSERT(
-      ndims == sizes.size(),
+      ndims == int(sizes.size()),
       "Invalid sizes for squeeze: ",
       sizes,
       ". Input tensor: ",
@@ -169,7 +169,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
 
   TORCH_INTERNAL_ASSERT(
-      ndims == sizes.size(),
+      ndims == int(sizes.size()),
       "Invalid sizes for squeeze: ",
       sizes,
       ". Input tensor: ",
