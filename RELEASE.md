@@ -237,7 +237,7 @@ Patch releases should be considered if a regression meets the following criteria
 
 ### Issue Tracker for Patch releases
 
-For patch releases issue tracker needs to be created. An example of this would look like:
+For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority Github issue or a CI failure from previous RC. An example of this would look like:
 * https://github.com/pytorch/pytorch/issues/51886
 
 Only following issues are accepted:
