@@ -2607,7 +2607,7 @@ def max_pool2d_with_indices(
             val = x_loader([*prefix, ih, iw])
             if return_index:
                 index = ops.index_expr(ih * w + iw, torch.int64)
-                if maxval is None:
+                if maxindex is None:
                     maxindex = index
                 else:
                     maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
