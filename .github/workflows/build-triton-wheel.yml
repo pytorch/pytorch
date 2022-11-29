@@ -197,7 +197,7 @@ jobs:
       - name: Publish artifacts to PyTorchNightly
         run: |
           container_name=$(docker container ps --format '{{.ID}}')
-          docker exec -it "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
+          docker exec -t "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
 
       - name: Chown artifacts
         run: |
