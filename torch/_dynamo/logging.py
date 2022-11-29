@@ -1,7 +1,6 @@
 import itertools
 import logging
 import os
-import time
 
 from tqdm import tqdm
 
@@ -95,7 +94,6 @@ pbar = tqdm(total=3, desc="torch.compile()")
 def get_step_logger(logger):
     pbar.set_postfix_str(f"{logger.name}")
     pbar.update(1)
-    time.sleep(1)
     step = next(_step_counter)
 
     def log(level, msg):
