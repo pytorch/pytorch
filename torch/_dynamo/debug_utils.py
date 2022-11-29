@@ -545,7 +545,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
             (
                 "While minifying the program in accuracy minification mode,"
                 "ran into a runtime exception which is likely an unrelated issue."
-                f" Logging the exception and moving on. Exception: {e}"
+                " Skipping this graph."
             )
         )
         return True
@@ -731,7 +731,7 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
             (
                 "While minifying the program in accuracy minification mode,"
                 "ran into a runtime exception which is likely an unrelated issue."
-                f" Logging the exception and moving on. Exception: {e}"
+                " Skipping this graph"
             )
         )
         return False
