@@ -159,7 +159,8 @@ class ListVariable(BaseListVariable):
             assert not kwargs
             (arg,) = args
             new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
-            new_rec_contains.add(arg.mutable_local)
+            if arg.mutable_local is not None:
+                new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
                 ListVariable(
