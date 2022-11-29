@@ -17,7 +17,10 @@ class TestVerification(pytorch_test_common.ExportTestCase):
 
     @common_utils.parametrize(
         "onnx_backend",
-        [verification.OnnxBackend.ONNX, verification.OnnxBackend.ONNX_RUNTIME_CPU],
+        [
+            verification.OnnxBackend.ONNX,
+            verification.OnnxBackend.ONNX_RUNTIME_CPU,
+        ],
     )
     def test_verify_found_mismatch_when_export_is_wrong(
         self, onnx_backend: verification.OnnxBackend

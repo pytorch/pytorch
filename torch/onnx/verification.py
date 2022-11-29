@@ -15,16 +15,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -356,27 +347,6 @@ def _prepare_input_for_onnx(
         return [onnx_inputs[i] for i in remained_onnx_input_idx]
     else:
         return onnx_inputs
-
-
-# @_beartype.beartype
-# def _prepare_input_for_onnx_reference_evaluator(args, kwargs, remained_onnx_input_idx: Optional[Sequence[int]], flatten: bool):
-#     """Prepare input for ONNX model execution in ONNX Reference Evaluator.
-
-#     Any future changes/formatting to the input before dispatching to the ONNX Reference
-#     Evaluator run should be made in this function.
-
-#     Args:
-#         args: positional arguments for PyTorch model forward method.
-#         kwargs: keyword arguments for PyTorch model forward method.
-#         remained_onnx_input_idx: indices of inputs to be used for ONNX model execution.
-#         flatten: whether to flatten the input before dispatching to the ONNX Reference
-#             Evaluator.
-
-#     Returns:
-#         onnx_inputs: keyword arguments for ONNX model execution in ONNX Runtime.
-#     """
-#     onnx_inputs = _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten)
-#     return
 
 
 @_beartype.beartype
