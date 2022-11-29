@@ -97,11 +97,11 @@ def profile_sizes(
     sizes: List[int] = []
 
     tensor_idx = batch.find_tensor_idx()
-    latent_scale = batch[tensor_idx].size(0) // chunks
+    latent_scale = batch[tensor_idx].size(0) / chunks
     for i, x in enumerate(batch):
         if not torch.is_tensor(x):
             continue
-        batch[i] = x[:latent_scale].detach().to(device).requires_grad_(x.requires_grad)
+        batch[i] = x[:1].detach().to(device).requires_grad_(x.requires_grad)
 
     for layer in layerwise_sandbox(module, device):
         detach(batch)
@@ -116,7 +116,7 @@ def profile_sizes(
         param_size = sum(p.storage().nbytes() for p in layer.parameters())
 
         # Combine size of parameters and activations with normalize scales.
-        size = latent_size * chunks + param_size * param_scale
+        size = latent_size * latent_scale + param_size * param_scale
         sizes.append(int(size))
 
     return sizes
