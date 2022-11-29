@@ -189,13 +189,13 @@ def test_not_training():
 
 @skip_if_no_cuda
 def test_balance_by_size_tuple():
-    class Skip(nn.Module):
-        def forward(self, a, b):
-            return a, b
-
     class Add(nn.Module):
         def forward(self, a, b):
             return a + b
+
+    class Skip(nn.Module):
+        def forward(self, a, b):
+            return a, b
 
     model = nn.Sequential(Skip(), Add())
     sample = (torch.rand(1, requires_grad=True), 0)
