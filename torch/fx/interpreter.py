@@ -119,9 +119,6 @@ class Interpreter:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
-        ## Add max delay of 15s
-        ## Horace feedback: Increment log for each start and end of dynamo, AOT and inductor as default, below seems more useful for profiling. 
-        # Check out codecache.py instead as a better place to instrument stuff
         for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True):
             if node in self.env:
                 # Short circuit if we have this value. This could
