@@ -695,6 +695,13 @@ class CommonTemplate:
 
         self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
 
+    def test_sgn_autograd(self):
+        def fn(a, b):
+            return torch.sgn(a * b),
+
+        inputs = [torch.randn(10, requires_grad=True) for _ in range(2)]
+        self.common(fn, inputs)
+
     def test_max_min(self):
         def fn(a, b):
             return (torch.maximum(a, b), torch.minimum(a, b))
