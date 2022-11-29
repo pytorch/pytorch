@@ -502,7 +502,7 @@ class SizeVarAllocator(object):
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         return self.codegen_shape_tuple(shape)
 
 
@@ -586,7 +586,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
 
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+    def codegen_benchmark_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         return super().codegen_shape_tuple(shape)
 
 
