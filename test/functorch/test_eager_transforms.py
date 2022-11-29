@@ -3568,7 +3568,7 @@ def construct_sum_pyop():
     def mysum_grad_rule(interpreter, x, dim):
         level = interpreter.level()
 
-        class MySum(torch.autograd.Function):
+        class MySum(torch.autograd.function._SingleLevelFunction):
             @staticmethod
             def forward(ctx, x, dim):
                 ctx.x_shape = x.shape

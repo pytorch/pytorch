@@ -291,6 +291,14 @@ DynamicLayer popDynamicLayerAndDeleteMetadata() {
   return result;
 }
 
+bool isDeadTensorWrapper(const Tensor& tensor) {
+  auto* wrapped = maybeGetTensorWrapper(tensor);
+  if (!wrapped) {
+    return false;
+  }
+  return !wrapped->is_alive();
+}
+
 Tensor unwrapIfDead(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (!wrapped) {
