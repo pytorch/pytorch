@@ -442,6 +442,8 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.tls = threading.local()
+        # Set holds symbols which definitely are not 0 or 1.
+        self.definitely_not_01: Set["sympy.Symbol"] = set()
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -519,6 +521,7 @@ class ShapeEnv(object):
         sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
         self.var_to_val[sympy_expr] = sympy.Integer(val)
         self.val_to_var[val] = sympy_expr
+        self.definitely_not_01.add(sympy_expr)
         return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
@@ -565,6 +568,7 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
+            if k in self.definitely_not_01
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
