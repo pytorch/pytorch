@@ -4096,7 +4096,7 @@ TEST_F(NVFuserTest, FusionUnsqueeze1_CUDA) {
   fusion.addOutput(tv2);
 
   TORCH_CHECK(
-      tv2->nDims() == 2, "Unpected unsqueeze result: ", tv2->toString());
+      tv2->nDims() == 2, "Unexpected unsqueeze result: ", tv2->toString());
   TORCH_CHECK(
       tv2->axis(1)->isBroadcast(),
       "Unexpected unsqueeze result: ",
@@ -5945,6 +5945,9 @@ TEST_F(NVFuserTest, AsyncCompilation_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction1_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
