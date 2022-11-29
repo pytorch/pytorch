@@ -75,7 +75,7 @@ LstmResult lstm(
 
 namespace {
 template <typename T>
-TORCH_CUDA_CU_API T* sign(T* x) {
+T* sign(T* x) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   auto zero = IrBuilder::create<Double>(x->container(), 0.);
   auto one = IrBuilder::create<Double>(x->container(), 1.);
@@ -85,11 +85,11 @@ TORCH_CUDA_CU_API T* sign(T* x) {
 }
 } // namespace
 
-TORCH_CUDA_CU_API TensorView* sign(TensorView* x) {
+TensorView* sign(TensorView* x) {
   return sign<TensorView>(x);
 }
 
-TORCH_CUDA_CU_API Val* sign(Val* x) {
+Val* sign(Val* x) {
   return sign<Val>(x);
 }
 

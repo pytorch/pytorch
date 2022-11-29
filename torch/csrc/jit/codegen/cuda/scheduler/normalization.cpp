@@ -791,7 +791,7 @@ std::shared_ptr<ReductionParams> persistentHeuristic(
   return rparams;
 }
 
-TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
+std::shared_ptr<ReductionParams> getPersistentHeuristics(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     HeuristicSummary* data_cache) {
@@ -946,7 +946,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
       project_persistent_buffers);
 }
 
-TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
+std::shared_ptr<ReductionParams> getPersistentHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs,
     HeuristicSummary* data_cache) {
@@ -956,7 +956,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
 }
 
 // fusion is the input IR that will be modified by this function
-TORCH_CUDA_CU_API void schedulePersistentKernel(
+void schedulePersistentKernel(
     Fusion* fusion,
     const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("schedulePersistentKernel");

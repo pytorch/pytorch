@@ -69,7 +69,7 @@ TensorView* variance(
   return y;
 }
 
-TORCH_CUDA_CU_API VarMeanResult variance_mean(
+VarMeanResult variance_mean(
     TensorView* x,
     const std::vector<int>& dims,
     int64_t correction,
