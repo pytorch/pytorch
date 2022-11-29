@@ -1019,7 +1019,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
         caffe2/quantization/server/norm_minimization.cc
         """
-        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        assert self.histogram.size()[0] == self.bins, "bins mismatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -1316,26 +1316,38 @@ class PlaceholderObserver(ObserverBase):
     Args:
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec.
+        quant_min: minimum value in quantized domain (TODO: align behavior with other observers)
+        quant_min: maximum value in quantized domain
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
-        compute_dtype: if set, marks the future quantize function to use
+        compute_dtype (deprecated): if set, marks the future quantize function to use
                        dynamic quantization instead of static quantization.
-                       Note: this field will be removed in the near future and
-                       replaced with `is_dynamic`.
+                       This field is deprecated, use `is_dynamic=True` instead.
+        is_dynamic: if True, the `quantize` function in the reference model
+                    representation taking stats from this observer instance will
+                    use dynamic quantization.
     """
 
     def __init__(
-        self, dtype=torch.float32, custom_op_name="", compute_dtype=None
+        self, dtype=torch.float32, custom_op_name="", compute_dtype=None,
+        quant_min=None, quant_max=None, is_dynamic=False,
     ) -> None:
-        super(PlaceholderObserver, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
+        self.quant_min = quant_min
+        self.quant_max = quant_max
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
-        # TODO(future PR): replace this with `is_dynamic`
         if compute_dtype:
-            self.compute_dtype = compute_dtype
+            is_dynamic = True
+            warnings.warn(
+                "Please use `is_dynamic` instead of `compute_dtype`. \
+                    `compute_dtype` will be deprecated in a future release \
+                    of PyTorch."
+            )
+        self.is_dynamic = is_dynamic
 
     def forward(self, x):
         return x
@@ -1551,7 +1563,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.quint8, compute_dtype=torch.quint8
+    dtype=torch.quint8, quant_min=0, quant_max=255, is_dynamic=True,
 )
 """
 Default observer for dynamic quantization.
