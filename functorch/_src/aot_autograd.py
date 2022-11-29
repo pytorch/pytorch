@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import warnings
+import itertools
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
@@ -14,9 +15,8 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo import disable as disable_torchdynamo
 from torch._dynamo.utils import dynamo_timed
-from torch._subclasses import FakeTensorMode, CrossRefFakeMode
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode, FakeTensor
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -46,6 +46,18 @@ pytree._register_pytree_node(
 
 aten = torch.ops.aten
 
+# This global counter increments every time we compile a graph with
+# AOTAutograd.  You can use this to correlate runtime error messages
+# with compile time (e.g., if you get an error at runtime saying
+# compiled graph 3 failed, you can set a breakpoint at compile time
+# for this graph number to investigate further at compile time.)
+#
+# NB: this is different from get_aot_compilation_context, which tracks
+# each underlying graph that is compiled.  In contrast, AOT_COUNTER
+# corresponds to top-level invocations of aot_module/aot_function;
+# one counter is allocated per entire compiled block (but this block
+# may involve compiling multiple subgraphs; e.g., for forwards/backwards)
+AOT_COUNTER = itertools.count()
 
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
@@ -747,6 +759,11 @@ aot_autograd_decompositions = {}
 
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
+# TODO: It would be nice to reset the numbering every time aot_id goes
+# up, but this is annoying to do right now (because we don't know if
+# an aot_id will come back from the dead), so right now this also happens
+# to be a globally unique number too (at the cost of wobbling if you change
+# how the graphs compile)
 nth_graph: int = 0
 model_name: str = "model"
 
@@ -765,20 +782,20 @@ def get_aot_graph_name() -> str:
     Returns the name of the graph being compiled.
     """
     global model_name, graph_being_compiled, nth_graph
-    return f"{model_name}_{'_'.join(graph_being_compiled)}_{nth_graph}"
+    return f"{model_name}__{'_'.join(graph_being_compiled)}_{nth_graph}"
 
 
 get_graph_being_compiled = get_aot_graph_name
 
 
 @contextmanager
-def track_graph_compiling(graph_name, increment_index=False):
+def track_graph_compiling(aot_config, graph_name):
     global graph_being_compiled
-    graph_being_compiled = [graph_name]
+    # TODO: Don't shove the aot_id in here; set it in the context
+    graph_being_compiled = [f"{aot_config.aot_id}_{graph_name}"]
     yield
-    if increment_index:
-        global nth_graph
-        nth_graph += 1
+    global nth_graph
+    nth_graph += 1
     graph_being_compiled = []
 
 
@@ -836,19 +853,20 @@ class AOTConfig:
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
     num_params_buffers: int
+    aot_id: int
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
-        print("====== Forward (only) graph ======")
+        print("====== Forward (only) graph {aot_config.aot_id} ======")
         fw_module.print_readable()
 
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
 
-    with context(), track_graph_compiling("inference"):
+    with context(), track_graph_compiling(aot_config, "inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
@@ -1040,9 +1058,12 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
-GUARD_BUG_BOILERPLATE = (
-    "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
-)
+def format_guard_bug_msg(aot_config, expected):
+    return (
+        f"At compilation time, graph {aot_config.aot_id} was compiled under the "
+        f"assumption that {expected}, but at runtime this was not the case.  "
+        "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
+    )
 
 
 # Wraps aot_dispatch_deduplicated_autograd, ensuring that duplicate arguments
@@ -1123,11 +1144,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             seen = {}
             for i, (x, y) in enumerate(zip(new_args, args)):
                 seen[y] = None
-                assert x is y, (
-                    "At compilation time, this graph was compiled under the "
-                    "assumption that some inputs were duplicate, but at runtime "
-                    f"input {i} was not a duplicate of {add_dupe_map[i]}.  " +
-                    GUARD_BUG_BOILERPLATE
+                assert x is y, format_guard_bug_msg(
+                    aot_config,
+                    f"{describe_input(i, aot_config)} would be a duplicate of "
+                    f"{describe_input(add_dupe_map[i], aot_config)}"
                 )
             # This is only an error if there is metadata mutation on both of
             # the duped arguments; in this case, we need to know what order
@@ -1136,11 +1156,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             # you dupe the inputs (the gradient contributions from each input
             # will get summed up appropriately.)
             """
-            assert len(seen) == unique_args, (
-                "At compilation time, this graph was compiled under the assumption "
-                f"that there would be {unique_args} distinct arguments, but at "
-                f"runtime there were only {len(seen)} distinct arguments.  " +
-                GUARD_BUG_BOILERPLATE
+            assert len(seen) == unique_args, format_guard_bug_msg(aot_config,
+                f"there would be {unique_args} distinct arguments"
             )
             """
             return f(*args)
@@ -1166,11 +1183,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     return maybe_wrap_debug(wrapped_compiled_fn)
 
 
+def describe_input(i, aot_config):
+    if i < aot_config.num_params_buffers:
+        return f"parameter/buffer {i}"
+    else:
+        return f"input {i - aot_config.num_params_buffers}"
+
+
 # Like aot_dispatch_autograd, but with the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
 def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+
     _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
         flat_fn
     )(*flat_args)
@@ -1221,6 +1246,11 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             fx_g = make_fx(
                 joint_forward_backward, aot_config.decompositions
             )(*joint_inputs)
+
+        # Redudant with the check above, but worth having in case tracing introduced
+        # a fake tensor. Unlikely.
+        # See Note: [Fake Modules and AOTAutograd]
+        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
@@ -1230,11 +1260,11 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         raise AssertionError("Graph partitioning without functionalization is not sound, we may introduce errors")
 
     if config.debug_joint:
-        print("====== Joint graph ======")
+        print(f"====== Joint graph {aot_config.aot_id} ======")
         fx_g.print_readable()
 
     with torch.no_grad():
-        with track_graph_compiling("joint"):
+        with track_graph_compiling(aot_config, "joint"):
             num_inner_fwd_outputs = _num_mutated_data_inputs + _num_non_aliased_outs + _num_aliasing_metadata_outs
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs)
@@ -1246,12 +1276,12 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         if config.debug_graphs:
-            print("====== Forward graph ======")
+            print("====== Forward graph {aot_config.aot_id} ======")
             fw_module.print_readable()
-            print("====== Backward graph ======")
+            print("====== Backward graph {aot_config.aot_id} ======")
             bw_module.print_readable()
 
-        with track_graph_compiling("forward"):
+        with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args_with_views_handled)
 
     class CompiledFunction(torch.autograd.Function):
@@ -1284,7 +1314,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         fw_metadata = _fw_metadata
 
         @staticmethod
-        @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
 
             # There is a pretty complicated calling convention around what the compiled fw returns.
@@ -1330,7 +1359,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
-        @disable_torchdynamo
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
@@ -1358,7 +1386,7 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             if CompiledFunction.compiled_bw is None:
                 # TODO - pass in fake tensors ?
                 context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling("backward", True):
+                with context(), track_graph_compiling(aot_config, "backward"):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
                         bw_module, all_args
                     )
@@ -1520,10 +1548,9 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             if can_require_grad is None:
                 assert not isinstance(a, Tensor)
             elif not can_require_grad:
-                assert not a.requires_grad, (
-                    "At compilation time, this graph was compiled under the "
-                    f"assumption that input {i} did not require grad, but at "
-                    f"runtime input {i} requires grad.  " + GUARD_BUG_BOILERPLATE
+                assert not a.requires_grad, format_guard_bug_msg(
+                    aot_config,
+                    f"{describe_input(i, aot_config)} would not require grad"
                 )
 
         return compiled_function(*args)
@@ -1577,17 +1604,29 @@ def create_aot_dispatcher_function(
     if config.use_dynamic_shapes:
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    # Check flat_args to see if they're already fake.  If so, use that fake
+    # mode instead.
+
+    for x in flat_args:
+        if isinstance(x, FakeTensor):
+            fake_mode = x.fake_mode
+            break
+    else:
+        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor:
+            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
                 def convert(idx, x):
                     if not isinstance(x, torch.Tensor):
+                        return x
+                    if isinstance(x, FakeTensor):
+                        assert x.fake_mode is fake_mode
                         return x
                     if idx < aot_config.num_params_buffers and config.static_weight_shapes:
                         return fake_mode.from_tensor(x, static_shapes=True)
@@ -1717,6 +1756,7 @@ def aot_function(
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
+        aot_id=next(AOT_COUNTER),
     )
     cached_res = None
 
@@ -1796,6 +1836,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         :attr:`mod`, but with forward and backward graph compiled.
 
     """
+    # See Note: [Fake Modules and AOTAutograd]
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
@@ -1824,6 +1866,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
     mod: nn.Module,
+    args,
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
@@ -1842,6 +1885,25 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
     #########################################################
+
+    # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
+
+    # Note [Fake Modules and AOTAutograd]
+    #
+    # A simple heuristic for when to use fake versus real tensors is that fake tensors are for compile time
+    # (when we don't want to actually run the compute, but we do want to know about metadata),
+    # and real tensors are for runtime (when we actually want to do the compute.) However, in AOTAutograd,
+    # modules are the exception: we always pass AOTAutograd modules with real tensors.
+    # This is because AOTAutograd will produce a compiled function which needs to directly access any
+    # parameters the compiled function may need, but these parameters will NOT be passed in by the caller (aka Dynamo).
+    # So at compile time, the compiled function we produce must close over any parameters, and those parameters must be
+    # real parameters, and we cannot do this unless at compile time we get a module with real tensors.
+
+    # Even if Dynamo did pass all parameters explicitly at runtime, which would eliminate the need to close over
+    # the parameters, it would still be profitable to pass real tensor parameters to the compiler at compile time,
+    # because some compilation strategies like CUDA graphs want to burn in the pointer addresses where the parameter data live,
+    # and of course we can't do that unless we give the backend a real tensor.
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
@@ -1882,29 +1944,33 @@ def aot_module_simplified(
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=params_len,
+        aot_id=next(AOT_COUNTER),
     )
 
-    compiled_fn = None
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
 
-    @wraps(functional_call)
-    def compiled_f(*args):
-        nonlocal compiled_fn
-        if compiled_fn is None:
-            compiled_fn = create_aot_dispatcher_function(
-                functional_call,
-                args,
-                aot_config,
-            )
-        return compiled_fn(args)
+    compiled_fn = create_aot_dispatcher_function(
+        functional_call,
+        full_args,
+        aot_config,
+    )
 
-    def forward(*args):
-        return compiled_f(
-            *params_flat,
-            *args,
-        )
+    # TODO: There is something deeply wrong here; compiled_fn running with
+    # the boxed calling convention, but aot_module_simplified somehow
+    # historically returned a function that was not the boxed calling
+    # convention.  This should get fixed...
+    def forward(*runtime_args):
+        full_args = []
+        full_args.extend(params_flat)
+        full_args.extend(runtime_args)
+        return compiled_fn(full_args)
 
+    # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+
     return forward
 
 
