@@ -113,7 +113,7 @@ class HandleConfig:
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: bool = False
+    keep_low_precision_grads: bool
 
 
 class FlatParameter(nn.Parameter):
