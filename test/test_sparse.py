@@ -4052,8 +4052,7 @@ class TestSparseMeta(TestCase):
 class TestSparseAny(TestCase):
 
     def test_generate_simple_inputs(self):
-        # Temporarily disable BSC and BSC layouts as these don't support select yet, see the next PR in the stack.
-        layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc][:-2]
+        layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
 
         tested_combinations = set()
         for tensors in zip(*map(self.generate_simple_inputs, layouts)):
