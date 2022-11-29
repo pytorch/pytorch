@@ -21,14 +21,12 @@ class GradcheckError(RuntimeError):
 
 
 
-def _is_sparse_compressed_tensor(obj):
-    return is_tensor_like(obj) and obj.layout in {torch.sparse_csr, torch.sparse_csc,
-                                                  torch.sparse_bsr, torch.sparse_bsc}
+def _is_sparse_compressed_tensor(obj: torch.Tensor):
+    return obj.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
 
 
-def _is_sparse_any_tensor(obj):
-    return is_tensor_like(obj) and obj.layout in {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc,
-                                                  torch.sparse_bsr, torch.sparse_bsc}
+def _is_sparse_any_tensor(obj: torch.Tensor):
+    return _is_sparse_compressed_tensor(obj) or obj.layout is torch.sparse_coo
 
 
 def _is_float_or_complex_tensor(obj):
@@ -112,7 +110,7 @@ def _iter_tensor(x_tensor):
             x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True).t()
             x_values = x_tensor.values()
         else:
-            raise NotImplementedError('_iter_tensor for {x_tensor.layout} input')
+            raise NotImplementedError(f'_iter_tensor for {x_tensor.layout} input')
         x_stride = get_stride(x_size)
         # Use .data here to get around the version check
         x_values = x_values.data
