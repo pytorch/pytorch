@@ -14,6 +14,7 @@ from torch.distributed.pipeline.sync.stream import CPUStream, current_stream, ge
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
+
 def _test_copy_wait(prev_stream, next_stream, cuda_sleep=None):
     device = get_device(prev_stream)
 
