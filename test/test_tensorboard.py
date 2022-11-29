@@ -7,7 +7,6 @@ import shutil
 import sys
 import tempfile
 import unittest
-import uuid
 
 TEST_TENSORBOARD = True
 try:
@@ -287,7 +286,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import pathlib
-        p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
+        p = pathlib.Path(tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib"))
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)
         import shutil
