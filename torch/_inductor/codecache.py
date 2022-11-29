@@ -609,6 +609,7 @@ class AsyncCompile:
                     scope.items(),
                     desc="Inductor Compilation",
                     disable=config.disable_progress,
+                    delay=15,
                 )
             ):
                 if config.verbose_progress:
