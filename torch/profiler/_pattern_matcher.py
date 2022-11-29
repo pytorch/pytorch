@@ -161,7 +161,7 @@ class ExtraCUDACopyPattern(Pattern):
     def __init__(self, prof: profile, should_benchmark: bool = False):
         super().__init__(prof, should_benchmark)
         self.name = "Extra CUDA Copy Pattern"
-        self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
+        self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initialize it on GPU."
         self.url = "https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html#create-tensors-directly-on-the-target-device"
         self.init_ops = {
             "aten::fill_", "aten::zero_", "aten::normal_", "aten::uniform_"
