@@ -89,7 +89,7 @@ if not config.disable_progress:
         import triton
 
         num_steps = 3
-    except:
+    except ImportError:
         num_steps = 2
     pbar = tqdm(total=num_steps, desc="torch.compile()")
 
