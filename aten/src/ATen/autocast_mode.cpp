@@ -505,6 +505,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(_convolution, deprecated, lower_precision_fp)
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
+  KERNEL_CPU(lstm_cell, lower_precision_fp)
 
   // fp32 cast policy
   KERNEL_CPU(conv_transpose1d, fp32)

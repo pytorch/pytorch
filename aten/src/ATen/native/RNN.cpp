@@ -52,7 +52,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
 #endif
-#include <iostream>
+// #include <iostream>
 int register_linear_params();
 
 namespace at { namespace native {
@@ -739,7 +739,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
     }
 
-    auto igates = pre_compute_input ? input : params.linear_ih(input);;
+    auto igates = pre_compute_input ? input : params.linear_ih(input);
     auto hgates = params.linear_hh(hx);
     auto result = at::_thnn_fused_lstm_cell(
         igates, hgates, cx);
@@ -748,30 +748,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     // Slice off the workspace argument (it's needed only for AD).
     return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
 
-    // const auto h_gates = params.linear_hh(hx);
-    // const auto in_gates = pre_compute_input ? input : params.linear_ih(input);
-    // std::cout << "pre_compute_input ?  " << pre_compute_input << "\n";
-    // std::cout << "in_gates sizes " << in_gates.sizes() << " in_gates strides " << in_gates.strides() << "\n";
-    // std::cout << " h_gates sizes " << h_gates.sizes() << " h_gates strides " << h_gates.strides() << "\n";
-    // const auto gates = in_gates.add_(h_gates);
-    // auto chunked_gates = gates.unsafe_chunk(4, 1);
-    // // auto cy = at::empty_like(chunked_gates[0]);
-    // // auto hy = at::empty_like(chunked_gates[0]);
-    // std::cout << "gates sizes " << gates.sizes() << " gates strides " << gates.strides() << "\n";
-    // std::cout << "chunked_gates0 sizes " << chunked_gates[0].sizes() << " gates0 strides " << chunked_gates[0].strides() << "\n";
-    // std::cout << "hx sizes " << hx.sizes() << " hx strides " << hx.strides() << "\n";
-    // std::cout << "cx sizes " << cx.sizes() << " cx strides " << cx.strides() << "\n";
-
-    // const auto gates = params.linear_hh(hx).add_(input);
-    // auto chunked_gates = gates.unsafe_chunk(4, 1);
-    // auto ingate = chunked_gates[0].sigmoid_();
-    // auto forgetgate = chunked_gates[1].sigmoid_();
-    // auto cellgate = chunked_gates[2].tanh_();
-    // auto outgate = chunked_gates[3].sigmoid_();
-    // auto cy = (forgetgate * cx).add_(ingate * cellgate);
-    // auto hy = outgate * cy.tanh();
-    // hy = params.matmul_hr(hy);
-    // return std::make_tuple(std::move(hy), std::move(cy));
   }
 
 };
