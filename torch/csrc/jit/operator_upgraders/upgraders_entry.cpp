@@ -120,6 +120,14 @@ def gelu_out_0_9(self: Tensor, *, out: Tensor) -> Tensor:
      {"random__from_0_10", R"SCRIPT(
 def random__from_0_10(self: Tensor, from: int, to: Optional[int], *, generator: None = None) -> Tensor:
   return torch.random_(self, from, to, generator=generator)
+)SCRIPT"},
+     {"random_from_0_10", R"SCRIPT(
+def random_from_0_10(self: Tensor, from: int, to: Optional[int], *, generator: None = None) -> Tensor:
+  return torch.random(self, from, to, generator=generator)
+)SCRIPT"},
+     {"random_from_out_0_10", R"SCRIPT(
+def random_from_out_0_10(self: Tensor, from: int, to: Optional[int], *, generator: None = None, out: Tensor) -> Tensor:
+  return torch.random(self, from, to, generator=generator, out=out)
 )SCRIPT"}});
 
 std::shared_ptr<Graph> create_upgrader_graph(
