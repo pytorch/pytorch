@@ -47,8 +47,6 @@ import weakref
 
 import pickle
 
-torch._C._set_autograd_function_extension_enabled(True)
-
 @contextlib.contextmanager
 def enable_autograd_function_extension():
     try:
