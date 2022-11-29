@@ -15,26 +15,27 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   const int padding_size = (int) padding.size();
   const int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
 
+  TORCH_CHECK(input_.numel() != 0, "MPS currently doesn't support zero-element input.")
   TORCH_CHECK(padding_size == 2 || padding_size == 4 || padding_size == 6,
               "invalid padding argument of size ", padding_size);
 
   const Tensor& grad_output_ = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output_.defined();
-
-  int64_t nbatch = 1;
   int64_t ndims = input_.ndimension();
-  // number of input dims with ConstantPad could be less than 2
-  int dim_w = ndims > 1 ? padding_dim : 0;
-  int dim_h = padding_dim - 1;
-  int dim_d = padding_dim - 2;
-  int dim_slices = 0;
 
-  if (!is_backward_pass && ndims > 1) {
+  if (!is_backward_pass && mode != MPSGraphPaddingModeConstant && ndims > 1) {
     bool valid_dims = input_.size(1) != 0 && input_.size(padding_dim) != 0;
     TORCH_CHECK((ndims == 1 + padding_dim && valid_dims) ||
                 (ndims == 2 + padding_dim && valid_dims && input_.size(1 + padding_dim) != 0),
                 "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
   }
+
+  int64_t nbatch = 1;
+  // number of input dims with ConstantPad could be less than 2
+  int dim_w = ndims > 1 && mode != MPSGraphPaddingModeConstant ? padding_dim : 0;
+  int dim_h = padding_dim - 1;
+  int dim_d = padding_dim - 2;
+  int dim_slices = 0;
 
   if (ndims == 2 + padding_dim) {
     nbatch = input_.size(0);
@@ -62,39 +63,58 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   Tensor grad_output, input = input_;
 
   if (!is_backward_pass) {
-    TORCH_CHECK(pad_l < input_w && pad_r < input_w,
-      "Argument #4: Padding size should be less than the corresponding "
-      "input dimension, but got: padding (", pad_l, ", ", pad_r,
-      ") at dimension ", dim_w, " of input ", ndims);
+    if (mode == MPSGraphPaddingModeConstant) {
+      std::vector<int64_t> output_shape;
+      auto input_sizes = input_.sizes();
+      auto l_diff = ndims - padding_dim;
 
-    if (padding_dim > 1) {
-      TORCH_CHECK(pad_t < input_h && pad_b < input_h,
-        "Argument #6: Padding size should be less than the corresponding "
-        "input dimension, but got: padding (", pad_t, ", ", pad_b,
-        ") at dimension ", dim_h, " of input ", ndims);
-    }
-    TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
-      "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
-      "output H: ", output_h, " W: ", output_w);
-
-    if (ndims == 1 + padding_dim) {
-      if (padding_dim == 3)
-        output.resize_({nplane, output_d, output_h, output_w});
-      else if (padding_dim == 2)
-        output.resize_({nplane, output_h, output_w});
-      else
-        output.resize_({nplane, output_w});
+      for (size_t i = 0; i < (size_t)l_diff; i ++) {
+        output_shape.emplace_back(input_sizes[i]);
+      }
+      for (const auto i : c10::irange((size_t)padding_dim)) {
+        auto pad_idx = padding.size() - ((i + 1) * 2);
+        auto new_dim = input_sizes[l_diff + i] + padding[pad_idx] + padding[pad_idx + 1];
+        TORCH_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",
+                 padding[pad_idx], " and ", padding[pad_idx + 1], " resulted in a negative output size, "
+                 "which is invalid. Check dimension ", l_diff + i, " of your input.");
+        output_shape.emplace_back(new_dim);
+      }
+      output.resize_({output_shape});
     } else {
-      if (padding_dim == 3)
-        output.resize_({nbatch, nplane, output_d, output_h, output_w});
-      else if (padding_dim == 2)
-        output.resize_({nbatch, nplane, output_h, output_w});
-      else if (ndims > 1)
-        output.resize_({nbatch, nplane, output_w});
-      else
-        output.resize_({output_w});
+      TORCH_CHECK(pad_l < input_w && pad_r < input_w,
+        "Argument #4: Padding size should be less than the corresponding "
+        "input dimension, but got: padding (", pad_l, ", ", pad_r,
+        ") at dimension ", dim_w, " of input ", ndims);
+
+      if (padding_dim > 1) {
+        TORCH_CHECK(pad_t < input_h && pad_b < input_h,
+          "Argument #6: Padding size should be less than the corresponding "
+          "input dimension, but got: padding (", pad_t, ", ", pad_b,
+          ") at dimension ", dim_h, " of input ", ndims);
+      }
+      TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
+        "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
+        "output H: ", output_h, " W: ", output_w);
+
+      if (ndims == 1 + padding_dim) {
+        if (padding_dim == 3)
+          output.resize_({nplane, output_d, output_h, output_w});
+        else if (padding_dim == 2)
+          output.resize_({nplane, output_h, output_w});
+        else
+          output.resize_({nplane, output_w});
+      } else {
+        if (padding_dim == 3)
+          output.resize_({nbatch, nplane, output_d, output_h, output_w});
+        else if (padding_dim == 2)
+          output.resize_({nbatch, nplane, output_h, output_w});
+        else if (ndims > 1)
+          output.resize_({nbatch, nplane, output_w});
+        else
+          output.resize_({output_w});
+      }
     }
-    if (output.numel() == 0 || input_.numel() == 0)
+    if (output.numel() == 0)
       return output;
     input = input_.contiguous();
   } else {
