@@ -14,7 +14,7 @@
 
 namespace at {
 namespace native {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 constexpr int64_t kChunkSize = 16;
 
@@ -150,6 +150,6 @@ std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   }
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace native
 } // namespace at
