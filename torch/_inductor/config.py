@@ -1,4 +1,5 @@
 import os
+import sys
 
 # add some debug printouts
 debug = False
@@ -7,7 +8,9 @@ debug = False
 dce = False
 
 # assume input tensors are dynamic
-dynamic_shapes = True
+dynamic_shapes = (
+    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+)  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -25,8 +28,13 @@ inplace_buffers = True
 benchmark_harness = True
 
 # control store vs recompute heuristic
+# For fanouts, rematearialization can lead to exponential blowup. So, have
+# smaller threashold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
+
+# Threshold to prevent excessive accumulation of ops in one buffer during lowering
+realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -51,7 +59,20 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count())
+compile_threads = (
+    min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+    if sys.platform != "win32"
+    else 1
+)
+
+# If kernel is fused, the name is generated from the origin node op names
+# for larger kernels limit this
+kernel_name_max_ops = 10
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
@@ -59,6 +80,15 @@ inductor_import = __name__.replace(".config", "")
 # How to import torchdynamo, either torchdynamo or torch.dynamo
 dynamo_import = inductor_import.replace("inductor", "dynamo")
 
+# Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+alignment_size = 4
+
+# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
+permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
+
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -80,7 +110,10 @@ class cpp:
         "g++-10",
         "clang++",
         "g++",
+        "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
 
 
 # config specific to codegen/triton.py
@@ -115,8 +148,8 @@ class triton:
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
-    # should we use natural codegen for where, needs newer triton version
-    simple_where = True
+    # should we put op names in kernel names
+    descriptive_kernel_names = True
 
 
 # create a directory containing lots of debug information

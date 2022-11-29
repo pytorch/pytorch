@@ -1,4 +1,3 @@
-import collections
 import dataclasses
 import functools
 import itertools
@@ -6,11 +5,13 @@ import logging
 from typing import Callable, Dict, List, Tuple
 
 import sympy
-from sympy import Expr, Integer, Symbol
+from sympy import Expr
+
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
 from .codegen.common import IndentedBuffer
-from .utils import sympy_subs, VarRanges
+from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -37,17 +38,16 @@ class PositiveGuard:
 
 
 class SizeVarAllocator(object):
-    def __init__(self, prefix="s", zero_one_const=True):
+    def __init__(self, shape_env=None):
         super().__init__()
-        self.prefix = prefix
-        self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
-        self.var_to_val: Dict[Expr, int] = collections.OrderedDict()
+        if shape_env is None:
+            shape_env = ShapeEnv()
+        self.shape_env = shape_env
+        self.var_to_val = self.shape_env.var_to_val
         self.guards = []
-        self.replacements: Dict[sympy.Symbol, Expr] = {}
+        self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
-        if not zero_one_const:
-            self.val_to_var.clear()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
 
@@ -59,7 +59,7 @@ class SizeVarAllocator(object):
         1-element tensor for the CUDA backend.
         """
         self.need_seed = True
-        return sympy.Symbol("seed")
+        return sympy_symbol("seed")
 
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
@@ -200,7 +200,7 @@ class SizeVarAllocator(object):
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy.Symbol("_merge_tester")
+                    v = sympy_symbol("_merge_tester")
                     expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
                     expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
                     if self.simplify(expr1) == self.simplify(expr2):
@@ -353,18 +353,11 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        if val < 0:
-            # all variables are positive
-            return -self[-val]
-        if val in self.val_to_var:
-            return self.val_to_var[val]
-        var = Symbol(f"{self.prefix}{len(self.var_to_val)}")
-        self.val_to_var[val] = var
-        self.var_to_val[var] = val
-        return var
+        return self.shape_env.create_symbol(val)
 
     def size_hint(self, expr: Expr) -> int:
-        return int(sympy_subs(sympy.expand(expr), self.var_to_val))
+        out = sympy_subs(sympy.expand(expr), self.var_to_val)
+        return int(out)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -461,28 +454,30 @@ class SizeVarAllocator(object):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
-        # TODO: This should be the below, but causes test/test_torchinductor.py::GpuTests::test_triton_conv_cuda to fail
-        # needed_vars = set(self.var_to_val.keys()) - set(self.replacements.keys())
-
-        needed_vars = set(self.var_to_val.keys())
-        needed = set(map(str, needed_vars))
+        # Assign all symbolic shapes needed to local variables
+        needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
+        added = set()
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = str(shape)
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
+                    added.add(shape)
                     code.writeline(f"{shape} = {sizeof(name)}[{dim}]")
+                elif isinstance(shape, sympy.Symbol):
+                    assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = str(shape)
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
-
+                elif isinstance(shape, sympy.Symbol):
+                    assert shape in added, f"{shape} is needed but not added"
         assert not needed
 
     def codegen_sizevar(self, x: Expr) -> str:

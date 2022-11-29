@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
@@ -266,15 +266,13 @@ static inline scalar_t area_pixel_compute_scale(
     bool align_corners,
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
-  if(align_corners){
+  if(align_corners) {
     if(output_size > 1) {
       return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
-    }
-    else {
+    } else {
       return static_cast<scalar_t>(0);
     }
-  }
-  else{
+  } else {
     return compute_scales_value<scalar_t>(scale, input_size, output_size);
   }
 }
@@ -447,14 +445,20 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    const accscalar_t real_input_index =
-        area_pixel_compute_source_index<accscalar_t>(
+    using opmath_t = at::opmath_type<scalar_t>;
+    const auto real_input_index =
+        area_pixel_compute_source_index<opmath_t>(
             ratio, output_index, align_corners, /*cubic=*/false);
-    input_index0 = static_cast<int64_t>(real_input_index);
+    // when `real_input_index` becomes larger than the range the floating point
+    // type can accurately represent, the type casting to `int64_t` might exceed
+    // `input_size - 1`, causing overflow. So we guard it with `std::min` below.
+    input_index0 = std::min(static_cast<int64_t>(real_input_index), input_size - 1);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = real_input_index - input_index0;
+    lambda1 = std::min(
+      std::max(real_input_index - input_index0, static_cast<opmath_t>(0)),
+      static_cast<opmath_t>(1)
+    );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
   }
 }
