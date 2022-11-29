@@ -606,12 +606,12 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]):
         if config.compile_threads > 1:
-            for key, result in (pbar := tqdm(list(scope.items()), desc="Inductor Compilation", disable=config.disable_progress)):
-                if isinstance(result, (Future, TritonFuture)):
-                    scope[key] = result.result()
-                pbar.update(1)
+            for key, result in (pbar := tqdm(scope.items(), desc="Inductor Compilation", disable=config.disable_progress)):
+                sleep(1)
                 if config.verbose_progress:
                     pbar.set_postfix_str(key)
+                if isinstance(result, (Future, TritonFuture)):
+                    scope[key] = result.result()
 
         _compile_end()
 
