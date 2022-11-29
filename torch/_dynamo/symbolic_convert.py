@@ -48,12 +48,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import (
-    counters,
-    fake_tensors_available,
-    graph_break_dup_warning_checker,
-    istype,
-)
+from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -121,10 +116,103 @@ def stack_op(fn: typing.Callable):
     return impl
 
 
+def _detect_and_normalize_assert_statement(
+    self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool
+):
+    # Detect if this jump instruction is assert and normalize the assert
+    # by pushing dummy error message when nothing is given.
+    #
+    # Python 3.9 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_ASSERTION_ERROR
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS
+    #
+    # Python 3.8 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_GLOBAL              0 (Assertion type)
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS            1
+
+    if (truth_fn is not operator.truth) or push:
+        return False
+
+    current_instruction_pointer = self.instruction_pointer
+    inst = self.instructions[current_instruction_pointer]
+    # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
+    if sys.version_info < (3, 9):
+        if inst.opname != "LOAD_GLOBAL" or inst.argval != "AssertionError":
+            return False
+    else:
+        if inst.opname != "LOAD_ASSERTION_ERROR":
+            return False
+
+    current_instruction_pointer += 1
+
+    if current_instruction_pointer >= len(self.instructions):
+        return False
+
+    inst = self.instructions[current_instruction_pointer]
+    has_error_msg = False
+    # DETECT RAISE_VARARGS or LOAD CONST
+    if inst.opname == "LOAD_CONST":
+        if not isinstance(inst.argval, str):
+            return False
+        self.LOAD_CONST(inst)
+        has_error_msg = True
+
+        # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+        if inst.opname != "CALL_FUNCTION":
+            return False
+
+        # CALL_FUNCTION should be followed by RAISE_VARARGS
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+
+    if inst.opname != "RAISE_VARARGS":
+        return False
+
+    if not has_error_msg:
+        # Push dummy value instead of error message
+        self.push(ConstantVariable("assertion error"))
+
+    return True
+
+
 def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
+        if (
+            config.rewrite_assert_with_torch_assert
+            and _detect_and_normalize_assert_statement(self, truth_fn, push)
+        ):
+            error_msg: VariableTracker = self.pop()
+            self.output.guards.update(error_msg.guards)
+            # Skip over things like `assert True`
+            if value.is_python_constant() and bool(value.as_python_constant()):
+                self.jump(inst)
+                return
+
+            # Manually insert torch._assert instead of python assert and jump over
+            # assert related instructions as we don't need them anymore.
+            self.output.create_proxy(
+                "call_function",
+                torch._assert,
+                *proxy_args_kwargs((value, error_msg), {}),
+                current_tx=self,
+            )
+            self.jump(inst)
+            return
+
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
@@ -158,6 +246,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
+        elif isinstance(value, NNModuleVariable):
+            # Equivant of "self.nn_module is not None"
+            if truth_fn(value):
+                push and self.push(value)
+                self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -301,11 +394,18 @@ class InstructionTranslatorBase(object):
                 return newvar
             return v
 
+        def skip(v: VariableTracker):
+            return oldvar.mutable_local not in v.recursively_contains
+
         cache = dict()
-        self.output.side_effects.apply(repl, cache)
-        self.stack = [VariableTracker.apply(repl, x, cache) for x in self.stack]
+        self.output.side_effects.apply(repl, cache, skip_fn=skip)
+        self.stack = [
+            VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
+        ]
         for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
+            self.symbolic_locals[k] = VariableTracker.apply(
+                repl, x, cache, skip_fn=skip
+            )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
@@ -1407,13 +1507,10 @@ class InstructionTranslatorBase(object):
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True,
-                shape_env=output.shape_env,
-            ) as fake_mode:
-                pass
-            self._fake_mode = fake_mode
+        self._fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=output.shape_env,
+        )
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []
