@@ -4493,7 +4493,7 @@ void checkSiblingConsistency(TensorView* replay, TensorView* target) {
       [](auto a, auto b) { return std::make_pair(a, b); });
   BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
   auto r = replay_.getReplay();
-  for (int64_t i = 0; i < replay_dom.size(); i++) {
+  for (int64_t i = 0; i < (int64_t)replay_dom.size(); i++) {
     auto target_id = target_dom[i];
     auto replay_it = r.find(target_id);
     TORCH_CHECK(replay_it != r.end());
@@ -6348,7 +6348,7 @@ TEST_F(NVFuserTest, FusionVectorizeStrideContiguity2D_CUDA) {
     at::Tensor t0 = at::randn({1000000, size}, options).narrow(1, 0, 16);
     auto cg_outputs = fec.runFusionWithInputs({t0});
 
-    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+    TORCH_CHECK(getVecSizeForPointwise(fec) == (size_t)vec);
 
     testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
   }
@@ -6377,7 +6377,7 @@ TEST_F(NVFuserTest, FusionVectorizeStrideContiguity3D_CUDA) {
     at::Tensor t0 = at::randn({1000000, size, 3}, options).narrow(1, 0, 8);
     auto cg_outputs = fec.runFusionWithInputs({t0});
 
-    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+    TORCH_CHECK(getVecSizeForPointwise(fec) == (size_t)vec);
 
     testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
   }
@@ -6413,7 +6413,7 @@ TEST_F(NVFuserTest, FusionVectorizeStrideContiguity5D_CUDA) {
                         .narrow(3, 0, 4);
     auto cg_outputs = fec.runFusionWithInputs({t0});
 
-    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+    TORCH_CHECK(getVecSizeForPointwise(fec) == (size_t)vec);
 
     testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
   }
@@ -6460,7 +6460,7 @@ TEST_F(NVFuserTest, FusionVectorizeStrideContiguitySelfOverlapping_CUDA) {
     at::Tensor t0 = at::empty_strided(shape, stride, options);
     t0.random_();
     auto cg_outputs = fec.runFusionWithInputs({t0});
-    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+    TORCH_CHECK(getVecSizeForPointwise(fec) == (size_t)vec);
     testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
   }
 }
