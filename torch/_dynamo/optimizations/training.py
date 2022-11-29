@@ -23,7 +23,7 @@ from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 from .. import config, eval_frame
-from ..utils import clone_inputs, count_calls, counters
+from ..utils import clone_inputs, counters
 from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
