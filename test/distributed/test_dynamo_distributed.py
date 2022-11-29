@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import logging
 import os
 import random
 import unittest
@@ -21,7 +20,6 @@ from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
@@ -181,7 +179,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
     self.assertTrue(same(correct_results, opt_results))
 
-class TestFakeDistributedSingleProc(TestCase):
+class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -379,7 +377,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
