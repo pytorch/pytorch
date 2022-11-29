@@ -67,7 +67,7 @@ updated, and all models on different processes should be exactly the same.
 
 DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wrapper
 before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
-(graph-break optimizations) based on DDP bucket sizes.  (See :ref:`TorchDynamo DDPOptimizer` for more information.)
+(graph-break optimizations) based on DDP bucket sizes.  (See :ref:`torchdynamo-ddpoptimizer-doc` for more information.)
 
 TorchDynamo support for DDP currently requires setting `static_graph=True` and `find_unused_parameters=True`, due to
 interactions between the graph tracing process and DDP's mechanism for observing operations happening on its module,
@@ -204,6 +204,8 @@ DistributedDataParallel
 .. image:: https://user-images.githubusercontent.com/16999635/72313120-4e7c1c80-3658-11ea-9c6d-44336b2daeac.png
     :alt: ddp_code.png
     :width: 400 px
+
+.. _torchdynamo-ddpoptimizer:
 
 TorchDynamo DDPOptimizer
 ------------------------
