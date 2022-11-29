@@ -59,6 +59,8 @@ class BaseTestCase(TestCase):
         self.temp_dirs = []
 
     def createSummaryWriter(self):
+        # Just to get the name of the directory in a writable place. tearDown()
+        # is responsible for clean-ups.
         temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard").name
         self.temp_dirs.append(temp_dir)
         return SummaryWriter(temp_dir)
@@ -286,11 +288,10 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import pathlib
-        p = pathlib.Path(tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib").name)
-        with SummaryWriter(p) as writer:
-            writer.add_scalar('test', 1)
-        import shutil
-        shutil.rmtree(str(p))
+        with tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib") as d:
+            p = pathlib.Path(d.name)
+            with SummaryWriter(p) as writer:
+                writer.add_scalar('test', 1)
 
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
