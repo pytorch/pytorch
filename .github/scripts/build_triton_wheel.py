@@ -42,7 +42,8 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
                 print("source:\n  path: .\n", file=meta)
                 print("build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
                       "python setup.py install --single-version-externally-managed --record=record.txt\n", file=meta)
-                print("requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n", file=meta)
+                print("requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n"
+                      "    - filelock\n    - pytorch\n", file=meta)
                 print("about:\n  home: https://github.com/openai/triton\n  license: MIT\n  summary:"
                       " 'A language and compiler for custom Deep Learning operation'", file=meta)
 
