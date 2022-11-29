@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import os.path
 from ._convert_np import make_np
 from ._utils import make_grid
 from tensorboard.compat import tf
@@ -16,8 +17,7 @@ def make_tsv(metadata, save_path, metadata_header=None):
         metadata = ["\t".join(str(e) for e in l) for l in [metadata_header] + metadata]
 
     metadata_bytes = tf.compat.as_bytes("\n".join(metadata) + "\n")
-    fs = tf.io.gfile
-    with fs.GFile(fs.join(save_path, "metadata.tsv"), "wb") as f:
+    with tf.io.gfile.GFile(os.path.join(save_path, "metadata.tsv"), "wb") as f:
       f.write(metadata_bytes)
 
 
@@ -43,8 +43,7 @@ def make_sprite(label_img, save_path):
         im.save(buf, format="PNG")
         im_bytes = buf.getvalue()
 
-    fs = tf.io.gfile
-    with fs.GFile(fs.join(save_path, "sprite.png"), "wb") as f:
+    with tf.io.gfile.GFile(os.path.join(save_path, "sprite.png"), "wb") as f:
       f.write(im_bytes)
 
 
@@ -61,15 +60,13 @@ def get_embedding_info(metadata, label_img, filesys, subdir, global_step, tag):
 
 
 def write_pbtxt(save_path, contents):
-    fs = tf.io.gfile
-    config_path = fs.join(save_path, "projector_config.pbtxt")
-    with fs.GFile(config_path, "wb") as f:
+    config_path = os.path.join(save_path, "projector_config.pbtxt")
+    with tf.io.gfile.GFile(config_path, "wb") as f:
       f.write(tf.compat.as_bytes(contents))
 
 
 def make_mat(matlist, save_path):
-    fs = tf.io.gfile
-    with fs.GFile(fs.join(save_path, "tensors.tsv"), "wb") as f:
+    with tf.io.gfile.GFile(os.path.join(save_path, "tensors.tsv"), "wb") as f:
         for x in matlist:
             x = [str(i.item()) for i in x]
             f.write(tf.compat.as_bytes("\t".join(x) + "\n"))
