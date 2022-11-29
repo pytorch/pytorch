@@ -307,9 +307,11 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
-            elif issubclass(
+            elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
+                # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+                # in fully_sharded_data_parallel.py for more information
                 return UnspecializedNNModuleVariable(
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
