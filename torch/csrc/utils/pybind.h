@@ -227,6 +227,35 @@ struct type_caster<c10::SymFloat> {
       handle /* parent */);
 };
 
+template <typename T>
+struct type_caster<c10::complex<T>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::complex<T>, _("torch._complex.complex"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+
+    // Refered from `THPUtils_unpackComplexDouble`
+    Py_complex py_complex = PyComplex_AsCComplex(obj);
+    if (py_complex.real == -1.0 && PyErr_Occurred()) {
+      return false;
+    }
+
+    // Python's Complex is always double precision.
+    value = c10::complex<double>(py_complex.real, py_complex.imag);
+    return true;
+  }
+
+  static handle cast(
+      const c10::complex<T>& complex,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    // Python only knows double precision complex.
+    return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
+  }
+};
+
 // Pybind11 bindings for our optional and variant types.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>

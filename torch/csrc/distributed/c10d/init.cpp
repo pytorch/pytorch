@@ -1539,7 +1539,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                return ::c10d::ops::monitored_barrier(self, opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
