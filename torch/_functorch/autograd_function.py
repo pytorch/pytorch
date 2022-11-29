@@ -72,7 +72,6 @@ custom_function_call = CustomFunctionPyOperator()
 # and apply it.
 @custom_function_call.py_impl(TransformType.Grad)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
-    # print(f'grad {interpreter.level()}')
     maybe_interpreter = interpreter
     level = maybe_interpreter.level()
 
@@ -82,7 +81,6 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
     class Generated(_SingleLevelFunction):
         @staticmethod
         def forward(*operands):
-            # print("generated forward")
             unwrapped_operands = pytree.tree_map_only(
                 torch.Tensor,
                 lambda x: _unwrap_for_grad(x, level),
@@ -105,7 +103,6 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
 
         @staticmethod
         def backward(ctx, *grads):
-            # print("generated backward")
             result = autograd_function.backward(ctx, *grads)
             return result
 
