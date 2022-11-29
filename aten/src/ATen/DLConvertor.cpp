@@ -255,7 +255,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
       src->deleter(const_cast<DLManagedTensor*>(src));
     }
   };
-  return fromDLPack(src, deleter);
+  return fromDLPack(src, std::move(deleter));
 }
 
 Tensor fromDLPack(
