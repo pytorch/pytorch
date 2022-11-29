@@ -303,7 +303,7 @@ def catch_errors_wrapper(callback):
         if (
             frame.f_lasti >= 0
             or skipfiles.check(frame.f_code.co_filename)
-            or os.environ.get("TORCH_COMPILE_DISABLE", "0")
+            or config.disable
         ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
