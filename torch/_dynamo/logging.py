@@ -89,7 +89,7 @@ try:
     num_steps = 3
 except:
     num_steps = 2
-pbar = tqdm(total=3, desc="torch.compile()")
+pbar = tqdm(total=num_steps, desc="torch.compile()")
 
 
 def get_step_logger(logger):
