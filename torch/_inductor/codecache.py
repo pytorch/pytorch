@@ -24,6 +24,8 @@ import torch
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
+from torch.hub import tqdm
+
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation

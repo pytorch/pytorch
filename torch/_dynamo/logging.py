@@ -1,6 +1,8 @@
 import itertools
 import logging
 import os
+from . import config
+from torch.hub import tqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
@@ -78,8 +80,24 @@ def init_logging(log_level, log_file_name=None):
 
 _step_counter = itertools.count(1)
 
+# Update num_steps if more phases are added: Dynamo, AOT, Backend
+# This is very inductor centric
+# _inductor.utils.has_triton() gives a circular import error here
+
+if not config.disable_progress:
+    try:
+        import triton
+
+        num_steps = 3
+    except:
+        num_steps = 2
+    pbar = tqdm(total=num_steps, desc="torch.compile()")
+
 
 def get_step_logger(logger):
+    if not config.disable_progress:
+        pbar.set_postfix_str(f"{logger.name}")
+        pbar.update(1)
     step = next(_step_counter)
 
     def log(level, msg):
