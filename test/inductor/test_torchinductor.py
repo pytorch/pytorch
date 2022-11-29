@@ -4677,6 +4677,22 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
+
 
 if HAS_CPU:
 
