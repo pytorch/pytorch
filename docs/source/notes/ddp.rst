@@ -67,7 +67,11 @@ updated, and all models on different processes should be exactly the same.
 
 DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wrapper
 before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
-(graph-break optimizations) based on DDP bucket sizes.  (See section below for more detail TODO link)
+(graph-break optimizations) based on DDP bucket sizes.  (See [TorchDynamo DDPOptimizer](#torchdynamo-ddpoptimizer) for more information.)
+
+TorchDynamo support for DDP currently requires setting `static_graph=True` and `find_unused_parameters=True`, due to
+interactions between the graph tracing process and DDP's mechanism for observing operations happening on its module,
+but this should be fixed ultimately.
 
 .. code::
 
@@ -219,4 +223,4 @@ a more in-depth explanation and experimental results, or read the docs and code 
 
 To Debug DDPOptimizer, set `torch._dynamo.config.log_level` to DEBUG (for full graph dumps) or INFO
 (for basic info about bucket boundaries).  To disable DDPOptimizer, set `torch._dynamo.config.optimize_ddp=False`.
-DDP and torchdynamo should still work correctly without DDPOptimizer, just without overlapping communication ops.
+DDP and TorchDynamo should still work correctly without DDPOptimizer, but with performance degradation.
