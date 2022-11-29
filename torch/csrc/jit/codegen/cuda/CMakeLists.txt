@@ -146,6 +146,9 @@ set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
 target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB})
+if(NOT MSVC)
+  target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
+endif()
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
                            PRIVATE ${TORCH_ROOT} # replace this one with nvfuser_srcs_dir?!
@@ -170,6 +173,9 @@ if(BUILD_PYTHON)
   message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
   message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
   target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
+  if(NOT MSVC)
+    target_compile_options(${NVFUSER_PYTHON} PRIVATE -Wno-unused-variable)
+  endif()
   target_include_directories(${NVFUSER_PYTHON}
   	                   PRIVATE ${TORCH_ROOT})
   			   #PRIVATE ${pybind11_INCLUDE_DIRS}
@@ -275,5 +281,8 @@ target_compile_definitions(tests PRIVATE USE_GTEST)
 target_compile_definitions(tests PRIVATE USE_CUDA)
 target_include_directories(tests PRIVATE "${NVFUSER_ROOT}" "${TORCH_ROOT}/torch/csrc/api/include/")
 target_link_libraries(tests PRIVATE ${NVFUSER_CODEGEN} torch torch_cuda gtest_main gmock_main)
+if(NOT MSVC)
+  target_compile_options(tests PRIVATE -Wno-unused-variable)
+endif()
 
 install(TARGETS tests DESTINATION bin)
