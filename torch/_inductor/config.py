@@ -7,6 +7,9 @@ debug = False
 # Whether to disable a progress bar for autotuning
 disable_progress = False
 
+# Whether to enable printing the source code for each future
+verbose_progress = True
+
 # dead code elimination
 dce = False
 
