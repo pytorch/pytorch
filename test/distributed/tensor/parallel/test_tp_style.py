@@ -5,7 +5,7 @@ import torch
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
 from torch.distributed._tensor import distribute_tensor, DeviceMesh, Shard, Replicate
-from torch.distributed._tensor.parallel.style import (
+from torch.distributed.tensor.parallel.style import (
     RowwiseParallel,
     ColwiseParallel,
     make_input_shard_1d,

@@ -8,7 +8,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.distributed._tensor import DeviceMesh, DTensor, Shard
-from torch.distributed._tensor.parallel._view_with_dim_change import (
+from torch.distributed.tensor.parallel._view_with_dim_change import (
     _view_with_sharding_dim_change,
 )
 
