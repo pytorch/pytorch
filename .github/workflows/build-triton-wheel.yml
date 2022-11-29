@@ -147,3 +147,59 @@ jobs:
             for pkg in "${PKG_DIR}/"*.whl; do
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
+  build-conda:
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.7", "3.8", "3.9", "3.10" ]
+    timeout-minutes: 40
+    env:
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      PY_VERS: ${{ matrix.py_vers }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+      - name: Build Triton conda package
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${DOCKER_IMAGE}"      \
+          )
+
+          docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
+          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: "pytorch-triton-${{ matrix.py_vers }}"
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
