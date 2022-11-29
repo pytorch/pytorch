@@ -330,8 +330,40 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-
         _init_ignored_module_states(self, module, ignored_modules)
+
+        # Add module annotations for Dynamo support
+        for submodule in module.modules():
+            if submodule not in self._ignored_modules:
+                """[note: Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+
+                Dynamo doesn't get to see this instance (FullyShardedDataParallel) during tracing, since
+                it skips tracing all the torch.distributed.fsdp code.
+                 - Why? Running the FSDP code eagerly avoids lots of issues trying to trace complex hooks, and also
+                   gets us graph-breaks on FSDP module boundaries which we want anyway for comm ops.
+                 - However, we _also_ want dynamo to treat the wrapped module inside FSDP 'unspecially' (*),
+                   and we need a way to indicate to dynamo which modules are wrapped by FSDP.
+
+                (*) UnspecializedNNModules in dynamo are traced-through without any assumptions, and with thorough
+                guards.  NNModules otherwise are 'specialized', meaning there is less overhead due to assuming
+                their code is well-behaved.
+
+                One particular issue with specialized NNModules for FSDP is that the
+                views created for orig_params are captured into the compiled graph on the first iteration, and while
+                they are always going to point to the correct flatparameter and give correct results, their order
+                of creation influences the order of backward execution, preventing overlap of comm and computation
+                during backward.  We need to _use_ the new parameter views created on each forward iteration, in
+                order for backward to interleave hooks with compute per layer.  UnspecializedNNModule lets us achieve
+                this by capturing the module code more 'functionally' and passing parameters in as inputs each time.
+                """
+                submodule._is_fsdp_managed_module = True
+
+                # Dynamo only supports FSDP with use_orig_params=True.
+                # This is hacky, but I could not think of another way to add an assertion to dynamo
+                # for this, since Dynamo skips all the FSDP code frames and thus can't inspect the
+                # FSDP module directly
+                submodule._fsdp_use_orig_params = use_orig_params
+
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -682,7 +714,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, *args, **kwargs)
+            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
