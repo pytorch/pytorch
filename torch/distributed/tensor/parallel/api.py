@@ -9,7 +9,7 @@ from torch.distributed._tensor import (
     Replicate,
     DeviceMesh,
 )
-from torch.distributed._tensor.parallel import TensorParallelMultiheadAttention
+from torch.distributed.tensor.parallel import TensorParallelMultiheadAttention
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
