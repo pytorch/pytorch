@@ -1170,7 +1170,7 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
-
+          .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1393,11 +1393,13 @@ Arguments:
           .def(
               "reduce_scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& output_tensors,
-                 const std::vector<std::vector<at::Tensor>>& input_tensors,
+                 std::vector<at::Tensor>& output_tensors,
+                 std::vector<std::vector<at::Tensor>>& input_tensors,
                  const ::c10d::ReduceScatterOptions& opts) {
+                auto input_tensor_lists = ::c10d::toTensorLists(input_tensors);
+
                 return ::c10d::ops::reduce_scatter(
-                    self, output_tensors, input_tensors, opts);
+                    self, output_tensors, input_tensor_lists, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
@@ -1411,13 +1413,13 @@ Arguments:
                  std::vector<at::Tensor>& input,
                  ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
-                std::vector<std::vector<at::Tensor>> inputs = {input};
+                c10::List<at::TensorList> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
                 return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
               },
-              py::arg("output_tensors"),
-              py::arg("input_tensor"),
+              py::arg("output"),
+              py::arg("input"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 

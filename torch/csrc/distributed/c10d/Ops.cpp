@@ -106,21 +106,6 @@ c10::intrusive_ptr<Work> allgather_coalesced_(
       input_list_vec);
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
-    const std::vector<at::Tensor>& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    int64_t timeout) {
-  auto work = process_group->reduce_scatter(
-      const_cast<std::vector<at::Tensor>&>(output_tensors),
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ReduceScatterOptions{
-          *reduce_op.get(), std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors, work);
-}
 
 c10::intrusive_ptr<Work> _reduce_scatter_base_(
     at::Tensor& output_tensor,
@@ -273,8 +258,7 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, allgather_coalesced_));
   m.def(
-      "reduce_scatter_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
+      "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors,  __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "_reduce_scatter_base_",
       dispatch(
@@ -315,7 +299,7 @@ c10::intrusive_ptr<Work> broadcast(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const BroadcastOptions& opts) {
-  // TODO: if clause handles the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup
   if (!process_group->hasBackends()) {
     auto tensor_vec = tensors.vec();
     return process_group->broadcast(tensor_vec, opts);
@@ -345,7 +329,7 @@ c10::intrusive_ptr<Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts) {
-  // TODO: if clause handles the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup
   if (!process_group->hasBackends()) {
     auto tensor_vec = tensors.vec();
     return process_group->allreduce(tensor_vec, opts);
@@ -391,7 +375,7 @@ c10::intrusive_ptr<Work> allgather(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     at::TensorList input_tensors,
     const AllgatherOptions& opts) {
-  // TODO: if clause handles the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup
   if (!process_group->hasBackends()) {
     auto input_tensors_vec = input_tensors.vec();
     return process_group->allgather(
@@ -446,15 +430,15 @@ c10::intrusive_ptr<Work> allgather_coalesced(
 
 c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<at::Tensor>& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const at::TensorList& output_tensors,
+    const c10::List<at::TensorList>& input_tensors,
     const ReduceScatterOptions& opts) {
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("c10d::reduce_scatter_", "")
           .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-              const std::vector<at::Tensor>&,
-              const std::vector<std::vector<at::Tensor>>&,
+              const at::TensorList&,
+              const c10::List<at::TensorList>&,
               const c10::intrusive_ptr<::c10d::ProcessGroup>&,
               const c10::intrusive_ptr<::c10d::ReduceOp>&,
               int64_t)>();

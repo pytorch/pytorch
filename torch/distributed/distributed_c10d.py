@@ -974,7 +974,7 @@ def _new_process_group_helper(
             return GroupMember.NON_GROUP_MEMBER
 
     prefix_store = PrefixStore(f"{group_name}/", store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
+    base_pg_options = ProcessGroup.Options(backend="BaseProcessGroup")
     base_pg_options._timeout = timeout
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
 

@@ -1046,8 +1046,9 @@ class DistributedDataParallelTest(
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
-    def _get_process_group(self):
-        store = self._get_store()
+    def _get_process_group(self, store=None):
+        if store is None:
+            store = self._get_store()
         c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
         return c10d.distributed_c10d._get_default_group()
 
@@ -1720,11 +1721,10 @@ class DistributedDataParallelTest(
             loss.backward()
 
         del ddp
-        del process_group
-        del store  # this will delete self.file_name
+        c10d.destroy_process_group(process_group)
 
         store = c10d.FileStore(recovery_filename, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group(store=store)
         ddp = DistributedDataParallel(
             model,
             device_ids=[device_id],
@@ -2710,8 +2710,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
+        # TODO: [dispatchable comms] should we retrieve the options from the nccl backend always?
+        backend_pg = pg._get_backend(torch.device("cuda"))
         # test if the process group constructed with high priority stream
-        self.assertTrue(pg.options.is_high_priority_stream)
+        self.assertTrue(backend_pg.options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
         pg.allreduce(t).wait()
