@@ -3,9 +3,17 @@
 import torch
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
-from torch.distributed._tensor import distribute_tensor, DeviceMesh, Shard, Replicate
-from torch.distributed._tensor.parallel import PairwiseParallel, ParallelStyle
-from torch.distributed._tensor.parallel.api import _parallelize_mlp
+from torch.distributed._tensor import DeviceMesh, Replicate, DTensor
+from torch.distributed._tensor.parallel.style import (
+    ColwiseParallel,
+    PairwiseParallel,
+    ParallelStyle,
+    RowwiseParallel,
+)
+from torch.distributed._tensor.parallel.api import (
+    _parallelize_linear,
+    _parallelize_mlp,
+)
 from torch.distributed._tensor.parallel.utils import _create_1d_device_mesh
 from torch.distributed._tensor.parallel.style import (
     make_input_replicate_1d,
@@ -71,8 +79,64 @@ class TensorParallelAPITests(DTensorTestBase):
         ):
             _create_1d_device_mesh(mesh, 3)
 
+    def _compare_params(
+        self,
+        local_module,
+        dist_module,
+        skip_rowwise_bias=False,
+        compare_grad=False,
+    ):
+        replicate = [Replicate()]
+        for name, param in local_module.named_parameters():
+            dist_param = dist_module.get_parameter(name)
+            param = param.grad if compare_grad else param
+            dist_param = dist_param.grad if compare_grad else dist_param
+            if self.rank == 0 or (
+                name not in ["net2.bias"]
+                and not skip_rowwise_bias
+                or name not in ["bias", "net2.bias"]
+            ):
+                self.assertEqual(
+                    param,
+                    dist_param.redistribute(
+                        device_mesh=dist_param.device_mesh, placements=replicate
+                    ).to_local(),
+                )
+
+    def _compare_module(
+        self, local_module, dist_module, inp_size, rowwise=False
+    ):
+        LR = 0.25  # the learning rate we use for testing
+        local_optim = torch.optim.SGD(local_module.parameters(), lr=LR)
+        dist_optim = torch.optim.SGD(dist_module.parameters(), lr=LR)
+        torch.manual_seed(0)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        self._compare_params(local_module, dist_module)
+
+        # check forward correctness
+        local_output = local_module(inp)
+        inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
+        dist_output = dist_module(inp)
+        dist_output = (
+            dist_output.to_local()
+            if isinstance(dist_output, DTensor)
+            else dist_output
+        )
+        self.assertEqual(local_output, dist_output)
+
+        local_output.sum().backward()
+        dist_output.sum().backward()
+
+        # check backward and ensure gradients are same
+        self._compare_params(local_module, dist_module, rowwise, True)
+
+        local_optim.step()
+        dist_optim.step()
+        self._compare_params(local_module, dist_module, rowwise)
+
     @with_comms
     def test_parallelize_mlp(self):
+        inp_size = [12, 10]
         model = MLPModule(self.device_type)
         model_tp = MLPModule(self.device_type)
 
@@ -86,25 +150,8 @@ class TensorParallelAPITests(DTensorTestBase):
         device_mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size)
         )
-        _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
-
-        # Ensure the parameter is properly distributed.
-        self.assertEqual(
-            distribute_tensor(model.net1.weight, device_mesh, [Shard(0)]),
-            model_tp.net1.weight,
-        )
-        self.assertEqual(
-            distribute_tensor(model.net1.bias, device_mesh, [Shard(0)]),
-            model_tp.net1.bias,
-        )
-        self.assertEqual(
-            distribute_tensor(model.net2.weight, device_mesh, [Shard(1)]),
-            model_tp.net2.weight,
-        )
-        self.assertEqual(
-            distribute_tensor(model.net2.bias, device_mesh, [Replicate()]),
-            model_tp.net2.bias,
-        )
+        model_tp = _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
+        self._compare_module(model, model_tp, inp_size)
 
     @with_comms
     def test_parallelize_mlp_error(self):
@@ -125,11 +172,47 @@ class TensorParallelAPITests(DTensorTestBase):
             _parallelize_mlp(model_tp, device_mesh, DummyParallel())
 
         with self.assertRaisesRegex(
-            RuntimeError, "We only support even number of Linear for MLP."
+            RuntimeError, "More than one nn.Linear needed for a MLP."
         ):
             _parallelize_mlp(
                 torch.nn.Linear(10, 5), device_mesh, PairwiseParallel()
             )
+
+    @with_comms
+    def test_linear_row_wise_parallel(self):
+        # test RowwiseParallel
+        inp_size = [9, 16]
+        rowwise = RowwiseParallel()
+
+        torch.manual_seed(5)
+        model = torch.nn.Linear(16, 10, device=self.device_type)
+        torch.manual_seed(5)
+        model_tp = torch.nn.Linear(16, 10, device=self.device_type)
+
+        # parallelize model_tp
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        model_tp = _parallelize_linear(model_tp, device_mesh, rowwise)
+
+        # let each rank generate unique local input
+        torch.manual_seed(self.rank)
+        self._compare_module(model, model_tp, inp_size, True)
+
+    @with_comms
+    def test_linear_col_wise_parallel(self):
+        # test ColwiseParallel
+        inp_size = [8, 10]
+        colwise = ColwiseParallel()
+
+        torch.manual_seed(5)
+        model = torch.nn.Linear(10, 16, device=self.device_type)
+        torch.manual_seed(5)
+        model_tp = torch.nn.Linear(10, 16, device=self.device_type)
+
+        # parallelize model_tp
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        model_tp = _parallelize_linear(model_tp, device_mesh, colwise)
+
+        self._compare_module(model, model_tp, inp_size)
 
 
 if __name__ == "__main__":

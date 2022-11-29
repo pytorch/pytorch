@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, xfail_inherited_tests
 import torch
 import unittest
 import warnings
@@ -13,6 +13,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
@@ -20,7 +21,6 @@ from torch.utils._pytree import tree_map
 from torch import nn
 import re
 
-import types
 import functools
 import itertools
 
@@ -68,16 +68,6 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
-
-
-def copy_func(f):
-    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
-    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
-                           argdefs=f.__defaults__,
-                           closure=f.__closure__)
-    g = functools.update_wrapper(g, f)
-    g.__kwdefaults__ = f.__kwdefaults__
-    return g
 
 
 # Copied from functorch
@@ -714,25 +704,8 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
     tracing_mode = "fake"
 
 
-def xfail_inherited_tests(tests):
-    """
-    Given a list of test names which are defined by a superclass of the
-    class this decorates, mark them as expected failure.  This is useful
-    if you are doing poor man's parameterized tests by subclassing a generic
-    test class.
-    """
-    def deco(cls):
-        for t in tests:
-            # NB: expectedFailure operates by mutating the method in question,
-            # which is why you have to copy the function first
-            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
-        return cls
-    return deco
-
-
 @skipIfNoSympy
 @xfail_inherited_tests([
-    "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
     "test_trace_subclasses",
 ])
@@ -972,8 +945,27 @@ def forward(self, a_1):
         # happened afterwards
         self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
 
+    def test_elementwise_meta_with_sym_numbers(self):
+        def f(x, offset, as_sym_float=False):
+            x0 = x.size()[0]
+            if as_sym_float:
+                x0 = sym_float(x0)
+            return torch.add(x0, offset)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.int64)
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, True)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
     def test_return_symint(self):
         def f(x):
@@ -1182,8 +1174,6 @@ symbolic_tensor_failures = {
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cholesky', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cholesky_ex', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
@@ -1247,7 +1237,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
-    xfail('nn.functional.embedding', ''),  # argument 'size' must be tuple of ints, but found element of type tor...
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
