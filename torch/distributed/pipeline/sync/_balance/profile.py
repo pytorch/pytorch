@@ -43,7 +43,6 @@ def detach(batch: Batch) -> None:
         batch[i] = x.detach().requires_grad_(x.requires_grad)
 
 
-
 def profile_times(module: nn.Sequential, sample: Union[List[Any], Tensor], timeout: float, device: torch.device,) -> List[int]:
     """Profiles elapsed times per layer."""
     if any(p.grad is not None for p in module.parameters()):
