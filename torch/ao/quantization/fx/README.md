@@ -211,7 +211,7 @@ Note: this map is generated before we insert qdqstub to graph1, and will not cha
    We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a
    QDQStub at this edge, which could serve as an input argument for `qat_linear_relu` Node (and also output for `input` Node)
    The way we decide if we want to insert QDQStub here is to figure out
-   
+
    (1). The target dtype for output of `input` Node, which is torch.float32
 
    (2). The target dtype for input of `qat_linear_relu` Node, which is torch.quint8
@@ -280,7 +280,7 @@ Pattern in this case is the same as before, it defines the pattern for the subgr
 
 `set_dtype_configs`: sets a list of supported (activation, weight, bias, etc.) dtype combinations for qconfigs for the pattern. Note that we represent different modes of quantization (static/dynamic/`weight_only`) purely through this combination, for example, fbgemm static quantization can be represented as:
 ```
-{ 
+{
   "input_activation": torch.quint8,
   "weight": torch.qint8,
   "output_activation": torch.quint8
