@@ -57,8 +57,8 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 Usually, PyTorch is used either as:
 
-- A replacement for NumPy to use the power of GPUs.
-- A deep learning research platform that provides maximum flexibility and speed.
+- A replacement for NumPy to use the power of GPUs
+- A deep learning research platform that provides maximum flexibility and speed
 
 Elaborating Further:
 
