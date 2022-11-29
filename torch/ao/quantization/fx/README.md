@@ -172,8 +172,10 @@ input - qat_linear_relu - output
 ```
 
 step 1: assign qconfig to each op (please see [TODO: link] for details)
+
 step 2: determine which qconfigs are valid according to the backend configuration (please see [TODO: link] for details)
 (we should add a warning here)
+
 step 3: for subgraphs with validated qconfigs, insert qstub/dqstub/qdqstub needed
 
 To talk about what happens in this step, let’s first define some terms. Let’s view the computation graph we showed above as a Graph consists of nodes and edges, each node here will be an FX Node that represents some computation, for example linear, and each edge will be a connection between two nodes, and each edge can both be viewed as the output of the previous Node or the input of the next Node.
@@ -211,10 +213,10 @@ Note: this map is generated before we insert qdqstub to graph1, and will not cha
    The way we decide if we want to insert QDQStub here is to figure out
    
    (1). The target dtype for output of `input` Node, which is torch.float32
-   
+
    (2). The target dtype for input of `qat_linear_relu` Node, which is torch.quint8
    There is a mismatch here and (2) is a quantized dtype, so we need to insert QDQStub at the edge.
-   
+
    We also need to attach observer/fakequant module to the QDQStub we inserted here.
 2. Insert QDQStub2 (for output of qat_linear_relu)
    The logic for inserting QDQStub for output is much easier, since we assume all modules/functions in the graph produce fp32 output
@@ -269,12 +271,14 @@ BackendConfig(nniqat.LinearReLU)
 ```
 
 Pattern in this case is the same as before, it defines the pattern for the subgraph we are dealing with
+
 `set_observation_type`: sets the observation type for the patter, currently only two types:
 
 `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` means the output observer instance will be different from the input, which is the most common type of observer placement.
+
 `OUTPUT_SHARE_OBSERVER_WITH_INPUT` means the output observer is shared with input, they will be the same instance. This is useful for operators like cat.
 
-`set_dtype_configs`: sets a list of supported (activation, weight, bias, etc.) dtype combinations for qconfigs for the pattern. Note that we represent different modes of quantization (static/dynamic/`weight_only`) purely through this combination, for example, fbgemm static quantization can be represented as: 
+`set_dtype_configs`: sets a list of supported (activation, weight, bias, etc.) dtype combinations for qconfigs for the pattern. Note that we represent different modes of quantization (static/dynamic/`weight_only`) purely through this combination, for example, fbgemm static quantization can be represented as:
 ```
 { 
   "input_activation": torch.quint8,
@@ -287,7 +291,7 @@ Note: the dtype config will be used to configure the support for dynamic quantiz
 
 Note: we may extend this to support more fine grained configurations of args, kwargs, attributes and outputs in the future
 
-Note: we are referring to observer here, which is an implementation detail, we can change this to talk about quantization parameters instead, e.g. `QParamsType.OUTPUT_USE_DIFFERENT_QPARAMS_AS_INPUT and QParamsType.OUTPUT_USE_SAME_QPARAMS_AS_INPUT`
+Note: we are referring to observer here, which is an implementation detail, we can change this to talk about quantization parameters instead, e.g. `QParamsType.OUTPUT_USE_DIFFERENT_QPARAMS_AS_INPUT` and `QParamsType.OUTPUT_USE_SAME_QPARAMS_AS_INPUT`
 
 ### 2. Calibration/Training
 After we insert observers, we run the model to calibrate observers or to fine tune. This step is identical to eager mode quantization. After that the observer/fakequantize modules contain sufficient information to determine quantization parameters according to the observed data.
@@ -367,8 +371,9 @@ Pattern in this case is the same as before, it defines the pattern for the subgr
 
 `set_reference_quantized_module_for_root`: Sets the corresponding reference quantized module class for root module class, e.g. when root_module is nn.Linear, this will be nn.quantized.reference.Linear, used to swap the root module to be a reference quantized module.
 
-Note: we are only swapping `root_module` here, for example, in the current example, the original module is nniqat.LinearReLU, when we are converting weight modules(step (2)), we first convert nniqat.LinearReLU to a float module, in this case, the fused LinearReLU module: nni.LinearReLU, and then swap the root_module (nn.Linear) with reference quantized module (nnqr.Linear), so we end up with a nni.LinearReLU module, which is a sequential module of a nnqr.Linear and nn.ReLU.
-Basically, the corresponding reference quantized module for both nniqat.LinearReLU and nni.LinearReLU would be a nni.LinearReLU sequential module (originally nn.Linear + nn.ReLU) with nn.Linear being replaced by nnqr.Linear: nni.LinearReLU(nnqr.Linear, nn.ReLU).
+Note: we are only swapping `root_module` here, for example, in the current example, the original module is `nniqat.LinearReLU`, when we are converting weight modules(step (2)), we first convert `nniqat.LinearReLU` to a float module, in this case, the fused LinearReLU module: `nni.LinearReLU`, and then swap the root_module (`nn.Linear`) with reference quantized module (`nnqr.Linear`), so we end up with a `nni.LinearReLU` module, which is a sequential module of a `nnqr.Linear` and `nn.ReLU`.
+
+Basically, the corresponding reference quantized module for both `nniqat.LinearReLU` and `nni.LinearReLU` would be a `nni.LinearReLU` Sequential module (originally `nn.Linear` + `nn.ReLU`) with `nn.Linear` being replaced by `nnqr.Linear`: `nni.LinearReLU(nnqr.Linear, nn.ReLU)`.
 
 `set_fused_module`: This is the corresponding fused module class for the pattern, used to identify fused modules that needs to be converted to reference quantized module
 
@@ -388,30 +393,32 @@ def forward(self, x):
 ```
 
 Currently, PyTorch has native quantized backends: fbgemm and qnnpack, so we need a lowering pass to lower the reference quantized model to a model that is using native quantized operators in PyTorch. What this pass did is
-* Recognize the reference patterns like: "dequantize - `float_op` - quantize" in the graph and replace them with the quantized modules (under torch.nn.quantized namespace) or operators (under torch.ops.quantized namespace, or torch namespace)
+
+1. Recognize the reference patterns like: "dequantize - `float_op` - quantize" in the graph and replace them with the quantized modules (under torch.nn.quantized namespace) or operators (under torch.ops.quantized namespace, or torch namespace)
 In general there are three types of patterns:
-** Static quantization:
+
+* Static quantization:
 ```
 dequantize -> float_op -> quantize_per_tensor
 ```
 
-** Dynamic quantization: 
+* Dynamic quantization:
 ```
 quantize_per_tensor_dynamic -> dequantize -> float_op
 ```
 
-** Weight only quantization:
+* Weight only quantization:
 ```
                                        input - float_op - output
       weight - quantize_per_tensor - dequantize /
 ```
 
-* Prepack and fold the weights for quantized linear and quantized conv operator
-* The lowering pass is also going to keep some patterns for quantized operators unfused, since user may explicitly request some operators to stay in float by configuring the qconfig to be None
+2. Prepack and fold the weights for quantized linear and quantized conv operator
+3. The lowering pass is also going to keep some patterns for quantized operators unfused, since user may explicitly request some operators to stay in float by configuring the qconfig to be None
 
 There are no configurations related to lowering in `backend_config` since it is backend developer’s responsibility to implement lowering pass and each of the backend developers may have their own configurations. So from end to end, `backend_config` and together with qconfig_mapping controls what Reference Quantized Model is produced by FX Graph Mode Quantization, not lowered model.
 
-However, for some operator based backends, like the current pytorch native backends including fbgemm and qnnpack. We could interpret `backend_config` in terms of configurations for operators as well. e.g. configuring `input_dtype`=quint8, `weight_dtype`=qint8, `output_dtype`=torch.quint8 for nn.Linear is saying that the quantized linear will take a quint8 activation and qint8 weight as input and outputs a quint8 activation. But there is no guarantee that this interpretation will always work in the future, especially when we add new flavors of quantized operators.
+However, for some operator based backends, like the current pytorch native backends including fbgemm and qnnpack. We could interpret `backend_config` in terms of configurations for operators as well. e.g. configuring `input_dtype=quint8`, `weight_dtype=qint8`, `output_dtype=torch.quint8` for nn.Linear is saying that the quantized linear will take a `quint8` activation and `qint8` weight as input and outputs a `quint8` activation. But there is no guarantee that this interpretation will always work in the future, especially when we add new flavors of quantized operators.
 
 ## Extensibility
 
