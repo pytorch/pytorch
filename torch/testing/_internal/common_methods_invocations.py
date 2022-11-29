@@ -10776,11 +10776,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_gradgrad'),
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensor',
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo',
                             'test_make_fx_symbolic_exhaustive_inplace'),
                # Fail but are also flaky
                DecorateInfo(unittest.skip("Test changes in memory layout"), 'TestMathBits'),
-               DecorateInfo(unittest.skip("Modifies input strides and storage_offset"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Modifies input strides and storage_offset"), 'TestCommon',
+                            'test_non_standard_bool_values'),
            )),
     OpInfo('as_strided_scatter',
            op=lambda x, src, size, stride, storage_offset=0:
