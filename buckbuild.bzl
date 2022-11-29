@@ -147,6 +147,7 @@ THIRD_PARTY_LIBS = {
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
     "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "sleef": ["//third-party/sleef:sleef", "//third_party:sleef"],
 }
 
 def third_party(name):
@@ -1930,7 +1931,12 @@ def define_buck_targets(
                 third_party("glog"),
                 third_party("XNNPACK"),
                 third_party("pocketfft"),
-            ],
+            ] + select({
+                "DEFAULT": [],
+                "ovr_config//runtime:fbcode-arm64": [
+                  third_party("sleef"),
+                ],
+            }),
             compiler_flags = get_aten_compiler_flags(),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [
