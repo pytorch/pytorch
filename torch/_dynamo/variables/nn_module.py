@@ -567,7 +567,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
-
+            elif isinstance(method, staticmethod):
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(method.__func__, **options),
+                    args,
+                    kwargs,
+                )
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
