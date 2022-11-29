@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: "pytorch-triton-${{ matrix.py_vers }}"
+          name: "pytorch-triton-wheel-${{ matrix.py_vers }}"
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
@@ -110,27 +110,27 @@ jobs:
       - name: Download Build Artifacts (3.7)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.7"
+          name: "pytorch-triton-wheel-3.7"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.8)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.8"
+          name: "pytorch-triton-wheel-3.8"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.9)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.9"
+          name: "pytorch-triton-wheel-3.9"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.10)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.10"
+          name: "pytorch-triton-wheel-3.10"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.11)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.11"
+          name: "pytorch-triton-wheel-3.11"
           path: "${{ runner.temp }}/artifacts/"
       - name: Upload binaries
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/master' || github.event.ref == 'refs/heads/main') }}
@@ -195,7 +195,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: "pytorch-triton-${{ matrix.py_vers }}"
+          name: "pytorch-triton-conda-${{ matrix.py_vers }}"
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
