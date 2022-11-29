@@ -10,9 +10,7 @@ from typing import Callable, Dict
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
 
-__all__ = ['Optimizer', 'register_optimizer_step_post_hook', 'register_optimizer_step_pre_hook']
-_global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+__all__ = ['Optimizer']
 
 
 class _RequiredParameter(object):
@@ -33,19 +31,6 @@ def _use_grad_for_differentiable(func):
         return ret
     return _use_grad
 
-
-def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Register a pre hook common to all optimizers.
-    Currently, just a placeholder for the implementation.
-    """
-    raise NotImplementedError
-
-
-def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Register a post hook common to all optimizers.
-    Currently, just a placeholder for the implementation.
-    """
-    raise NotImplementedError
 
 class Optimizer(object):
     r"""Base class for all optimizers.
@@ -71,7 +56,7 @@ class Optimizer(object):
         self._optimizer_step_pre_hooks = OrderedDict()
         self._optimizer_step_post_hooks = OrderedDict()
 
-        self._step_with_hook()
+        self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -109,7 +94,7 @@ class Optimizer(object):
             self._optimizer_step_pre_hooks = OrderedDict()
         if '_optimizer_step_post_hooks' not in self.__dict__:
             self._optimizer_step_post_hooks = OrderedDict()
-        self._step_with_hook()  # To support multiprocessing pickle/unpickle
+        self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
@@ -156,7 +141,7 @@ class Optimizer(object):
         """
         pass
 
-    def _step_with_hook(self):
+    def _patch_step_function(self):
 
         def profile_hook_step(func):
 
@@ -347,7 +332,7 @@ class Optimizer(object):
         foreach = self.defaults.get('foreach', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
-            self._step_with_hook()
+            self._patch_step_function()
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):

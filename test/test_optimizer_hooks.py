@@ -6,8 +6,6 @@ from torch.optim import Optimizer, SGD
 from unittest import TestCase
 
 class TestOptimizerHook(TestCase):
-    optimizer: SGD
-
     @classmethod
     def setUpClass(cls):
         params = [torch.Tensor([1, 1])]
@@ -26,7 +24,7 @@ class TestOptimizerHook(TestCase):
         self.optimizer.step()
         self.optimizer.step()
         # check if pre hooks were registered
-        assert data == 6
+        self.assertEqual(data, 6)
 
         # remove handles, take step and verify that hook is no longer registered
         while len(handles) > 0:
@@ -34,7 +32,7 @@ class TestOptimizerHook(TestCase):
             elt.remove()
 
         self.optimizer.step()
-        assert data == 6
+        self.assertEqual(data, 6)
 
     def test_pre_hook(self):
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
@@ -49,7 +47,7 @@ class TestOptimizerHook(TestCase):
         self.optimizer.step()
         self.optimizer.step()
         # check if pre hooks were registered
-        assert data == 9
+        self.assertEqual(data, 9)
 
         # remove handles, take step and verify that hook is no longer registered
         while len(handles) > 0:
@@ -57,7 +55,7 @@ class TestOptimizerHook(TestCase):
             elt.remove()
 
         self.optimizer.step()
-        assert data == 9
+        self.assertEqual(data, 9)
 
     def test_pre_and_post_hook(self):
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
@@ -76,9 +74,9 @@ class TestOptimizerHook(TestCase):
         post_handles.append(post_handle)
 
         self.optimizer.step()
-        assert data == [2, 1]
+        self.assertListEqual(data, [2, 1])
         self.optimizer.step()
-        assert data == [2, 1, 2, 1]
+        self.assertListEqual(data, [2, 1, 2, 1])
 
         while len(pre_handles) > 0:
             elt = pre_handles.pop()
@@ -89,4 +87,4 @@ class TestOptimizerHook(TestCase):
             elt.remove()
 
         self.optimizer.step()
-        assert data == [2, 1, 2, 1]
+        self.assertListEqual(data, [2, 1, 2, 1])
