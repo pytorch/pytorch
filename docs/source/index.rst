@@ -43,6 +43,13 @@ Features described in this documentation are classified by release status:
    notes/*
 
 .. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: torch.compile
+
+   dynamo/*
+
+.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
