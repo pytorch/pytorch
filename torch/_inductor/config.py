@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = False
+
 # dead code elimination
 dce = False
 
