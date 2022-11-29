@@ -1465,10 +1465,7 @@ class TestMemoryProfilerE2E(TestCase):
             textwrap.indent("\n".join(lines), " " * 12),
             """\
             preexisting                PARAMETER                   3  v0
-            preexisting                PARAMETER                   3  v0
             preexisting                PARAMETER                   4  v0
-            preexisting                PARAMETER                   4  v0
-            preexisting                PARAMETER                   7  v0
             preexisting                PARAMETER                   7  v0
             create                     INPUT                       1  v0
             create                     INPUT                       2  v0
@@ -1518,115 +1515,111 @@ class TestMemoryProfilerE2E(TestCase):
             create                     GRADIENT                   30  v0
             destroy                    AUTOGRAD_DETAIL            28  v0
             destroy                    ACTIVATION                 16  v0
-            create                     ???                        31  v0
-            destroy                    ???                        31  v0
+            create                     OPTIMIZER_STATE            31  v0
+            increment_version          OPTIMIZER_STATE            31  v0
+            create                     OPTIMIZER_STATE            32  v0
             create                     OPTIMIZER_STATE            33  v0
-            increment_version          OPTIMIZER_STATE            33  v0
             create                     OPTIMIZER_STATE            34  v0
+            increment_version          OPTIMIZER_STATE            34  v0
             create                     OPTIMIZER_STATE            35  v0
             create                     OPTIMIZER_STATE            36  v0
-            increment_version          OPTIMIZER_STATE            36  v0
             create                     OPTIMIZER_STATE            37  v0
+            increment_version          OPTIMIZER_STATE            37  v0
             create                     OPTIMIZER_STATE            38  v0
             create                     OPTIMIZER_STATE            39  v0
-            increment_version          OPTIMIZER_STATE            39  v0
-            create                     OPTIMIZER_STATE            40  v0
-            create                     OPTIMIZER_STATE            41  v0
-            create                     ???                        42  v0
-            increment_version          OPTIMIZER_STATE            33  v1
+            create                     ???                        40  v0
+            increment_version          OPTIMIZER_STATE            31  v1
+            create                     TEMPORARY                  41  v0
+            destroy                    TEMPORARY                  41  v0
+            destroy                    ???                        40  v0
+            create                     INPUT                      42  v0
+            increment_version          OPTIMIZER_STATE            32  v0
             create                     TEMPORARY                  43  v0
             destroy                    TEMPORARY                  43  v0
-            destroy                    ???                        42  v0
+            destroy                    INPUT                      42  v0
+            increment_version          OPTIMIZER_STATE            32  v1
             create                     INPUT                      44  v0
-            increment_version          OPTIMIZER_STATE            34  v0
+            increment_version          OPTIMIZER_STATE            33  v0
             create                     TEMPORARY                  45  v0
             destroy                    TEMPORARY                  45  v0
             destroy                    INPUT                      44  v0
+            increment_version          OPTIMIZER_STATE            33  v1
+            create                     ???                        46  v0
+            create                     INPUT                      47  v0
+            create                     TEMPORARY                  48  v0
+            create                     ???                        49  v0
+            destroy                    TEMPORARY                  48  v0
+            destroy                    INPUT                      47  v0
+            destroy                    ???                        46  v0
+            create                     INPUT                      50  v0
+            increment_version          ???                        49  v0
+            create                     TEMPORARY                  51  v0
+            destroy                    TEMPORARY                  51  v0
+            destroy                    INPUT                      50  v0
+            increment_version          PARAMETER                   3  v0
+            create                     ???                        52  v0
             increment_version          OPTIMIZER_STATE            34  v1
-            create                     INPUT                      46  v0
-            increment_version          OPTIMIZER_STATE            35  v0
-            create                     TEMPORARY                  47  v0
-            destroy                    TEMPORARY                  47  v0
-            destroy                    INPUT                      46  v0
-            increment_version          OPTIMIZER_STATE            35  v1
-            create                     ???                        48  v0
-            create                     INPUT                      49  v0
-            create                     TEMPORARY                  50  v0
-            create                     ???                        51  v0
-            destroy                    TEMPORARY                  50  v0
-            destroy                    INPUT                      49  v0
-            destroy                    ???                        48  v0
-            create                     INPUT                      52  v0
-            increment_version          ???                        51  v0
             create                     TEMPORARY                  53  v0
             destroy                    TEMPORARY                  53  v0
-            destroy                    INPUT                      52  v0
-            increment_version          PARAMETER                   3  v0
-            create                     ???                        54  v0
-            increment_version          OPTIMIZER_STATE            36  v1
+            destroy                    ???                        52  v0
+            create                     INPUT                      54  v0
+            increment_version          OPTIMIZER_STATE            35  v0
             create                     TEMPORARY                  55  v0
             destroy                    TEMPORARY                  55  v0
-            destroy                    ???                        54  v0
+            destroy                    INPUT                      54  v0
+            increment_version          OPTIMIZER_STATE            35  v1
             create                     INPUT                      56  v0
-            increment_version          OPTIMIZER_STATE            37  v0
+            increment_version          OPTIMIZER_STATE            36  v0
             create                     TEMPORARY                  57  v0
             destroy                    TEMPORARY                  57  v0
             destroy                    INPUT                      56  v0
+            increment_version          OPTIMIZER_STATE            36  v1
+            create                     ???                        58  v0
+            create                     INPUT                      59  v0
+            create                     TEMPORARY                  60  v0
+            create                     ???                        61  v0
+            destroy                    TEMPORARY                  60  v0
+            destroy                    INPUT                      59  v0
+            destroy                    ???                        58  v0
+            create                     INPUT                      62  v0
+            increment_version          ???                        61  v0
+            create                     TEMPORARY                  63  v0
+            destroy                    TEMPORARY                  63  v0
+            destroy                    INPUT                      62  v0
+            destroy                    ???                        49  v1
+            increment_version          PARAMETER                   4  v0
+            create                     ???                        64  v0
             increment_version          OPTIMIZER_STATE            37  v1
-            create                     INPUT                      58  v0
-            increment_version          OPTIMIZER_STATE            38  v0
-            create                     TEMPORARY                  59  v0
-            destroy                    TEMPORARY                  59  v0
-            destroy                    INPUT                      58  v0
-            increment_version          OPTIMIZER_STATE            38  v1
-            create                     ???                        60  v0
-            create                     INPUT                      61  v0
-            create                     TEMPORARY                  62  v0
-            create                     ???                        63  v0
-            destroy                    TEMPORARY                  62  v0
-            destroy                    INPUT                      61  v0
-            destroy                    ???                        60  v0
-            create                     INPUT                      64  v0
-            increment_version          ???                        63  v0
             create                     TEMPORARY                  65  v0
             destroy                    TEMPORARY                  65  v0
-            destroy                    INPUT                      64  v0
-            destroy                    ???                        51  v1
-            increment_version          PARAMETER                   4  v0
-            create                     ???                        66  v0
-            increment_version          OPTIMIZER_STATE            39  v1
+            destroy                    ???                        64  v0
+            create                     INPUT                      66  v0
+            increment_version          OPTIMIZER_STATE            38  v0
             create                     TEMPORARY                  67  v0
             destroy                    TEMPORARY                  67  v0
-            destroy                    ???                        66  v0
+            destroy                    INPUT                      66  v0
+            increment_version          OPTIMIZER_STATE            38  v1
             create                     INPUT                      68  v0
-            increment_version          OPTIMIZER_STATE            40  v0
+            increment_version          OPTIMIZER_STATE            39  v0
             create                     TEMPORARY                  69  v0
             destroy                    TEMPORARY                  69  v0
             destroy                    INPUT                      68  v0
-            increment_version          OPTIMIZER_STATE            40  v1
-            create                     INPUT                      70  v0
-            increment_version          OPTIMIZER_STATE            41  v0
-            create                     TEMPORARY                  71  v0
-            destroy                    TEMPORARY                  71  v0
-            destroy                    INPUT                      70  v0
-            increment_version          OPTIMIZER_STATE            41  v1
-            create                     ???                        72  v0
-            create                     INPUT                      73  v0
-            create                     TEMPORARY                  74  v0
-            create                     ???                        75  v0
-            destroy                    TEMPORARY                  74  v0
-            destroy                    INPUT                      73  v0
-            destroy                    ???                        72  v0
-            create                     INPUT                      76  v0
-            increment_version          ???                        75  v0
-            create                     TEMPORARY                  77  v0
-            destroy                    TEMPORARY                  77  v0
-            destroy                    INPUT                      76  v0
-            destroy                    ???                        63  v1
+            increment_version          OPTIMIZER_STATE            39  v1
+            create                     ???                        70  v0
+            create                     INPUT                      71  v0
+            create                     TEMPORARY                  72  v0
+            create                     ???                        73  v0
+            destroy                    TEMPORARY                  72  v0
+            destroy                    INPUT                      71  v0
+            destroy                    ???                        70  v0
+            create                     INPUT                      74  v0
+            increment_version          ???                        73  v0
+            create                     TEMPORARY                  75  v0
+            destroy                    TEMPORARY                  75  v0
+            destroy                    INPUT                      74  v0
+            destroy                    ???                        61  v1
             increment_version          PARAMETER                   7  v0
-            destroy                    ???                        75  v1
-            create                     ???                        78  v0
-            destroy                    ???                        78  v0
+            destroy                    ???                        73  v1
             increment_version          GRADIENT                   29  v0
             increment_version          GRADIENT                   30  v0
             increment_version          GRADIENT                   26  v0""")
