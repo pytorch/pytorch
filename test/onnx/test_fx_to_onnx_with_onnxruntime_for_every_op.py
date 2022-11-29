@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 import copy
+
 import functorch
 
 import onnx_test_common
@@ -8,7 +9,7 @@ from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_methods_invocations import op_db
 
-failed_cases = {
+SKIPPED_OPS = {
     "linalg.householder_product",
     "cholesky_inverse",
     "linalg.matrix_rank",
@@ -67,332 +68,138 @@ failed_cases = {
     "linalg.det",
     "linalg.ldl_factor",
     "ormqr",
-    "signal.windows.gaussian",
-    "roll",
-    "special.bessel_j1",
-    "diag_embed",
-    "nn.functional.dropout",
-    "native_batch_norm",
-    "nn.functional.conv_transpose1d",
-    "matmul",
-    "nn.functional.conv_transpose3d",
-    "cummin",
-    "vdot",
-    "full_like",
-    "nn.functional.multilabel_margin_loss",
-    "zero_",
-    "special.hermite_polynomial_h",
-    "float_power",
-    "column_stack",
-    "narrow",
-    "lgamma",
-    "var_mean",
-    "special.chebyshev_polynomial_w",
-    "argsort",
-    "char",
-    "nn.functional.pdist",
-    "nn.functional.bilinear",
-    "nn.functional.avg_pool1d",
-    "nn.functional.glu",
-    "transpose",
-    "quantile",
-    "nn.functional.instance_norm",
-    "view",
-    "fft.irfft",
-    "nn.functional.dropout3d",
-    "bfloat16",
-    "linalg.cross",
-    "new_ones",
-    "linalg.vander",
-    "exp2",
-    "__getitem__",
-    "native_layer_norm",
-    "fmin",
-    "isclose",
-    "diag",
-    "nn.functional.softmin",
-    "randint_like",
-    "polar",
-    "special.i0e",
-    "special.xlog1py",
-    "sinc",
-    "t",
-    "slice_scatter",
-    "cdouble",
-    "nansum",
-    "nn.functional.avg_pool3d",
-    "select",
-    "bernoulli",
-    "count_nonzero",
-    "median",
-    "unfold_copy",
-    "special.chebyshev_polynomial_v",
-    "nn.functional.adaptive_max_pool1d",
-    "acosh",
-    "special.hermite_polynomial_he",
-    "special.modified_bessel_i1",
-    "short",
-    "fft.ifft",
-    "special.bessel_y1",
-    "log10",
-    "nn.functional.conv2d",
-    "normal",
-    "unbind",
-    "int",
-    "special.scaled_modified_bessel_k1",
-    "renorm",
-    "chalf",
-    "nn.functional.multilabel_soft_margin_loss",
-    "logit",
-    "logical_not",
-    "hypot",
-    "reshape",
-    "atleast_3d",
-    "masked_select",
-    "deg2rad",
-    "resize_as_",
-    "hsplit",
-    "chunk",
-    "std_mean",
-    "fft.hfftn",
-    "xlogy",
-    "randn_like",
-    "split",
-    "broadcast_to",
-    "any",
-    "aminmax",
-    "tile",
-    "special.zeta",
-    "isneginf",
-    "nn.functional.interpolate",
-    "matrix_exp",
-    "cross",
-    "scatter_add",
-    "view_copy",
-    "linalg.vecdot",
-    "empty_like",
-    "permute",
-    "take_along_dim",
-    "inner",
-    "all",
-    "half",
-    "argwhere",
-    "special.modified_bessel_k0",
-    "polygamma",
-    "masked.normalize",
-    "nn.functional.layer_norm",
-    "kthvalue",
-    "topk",
-    "logspace",
-    "sinh",
-    "expand",
-    "nn.functional.hinge_embedding_loss",
-    "nn.functional.prelu",
-    "vstack",
-    "native_dropout_backward",
-    "angle",
-    "unfold",
-    "nn.functional.binary_cross_entropy_with_logits",
-    "logaddexp2",
-    "isreal",
-    "cumsum",
-    "clamp",
-    "sort",
-    "nn.functional.adaptive_avg_pool2d",
-    "std",
-    "cat",
-    "nanquantile",
-    "nn.functional.avg_pool2d",
-    "broadcast_shapes",
-    "digamma",
-    "special.modified_bessel_i0",
-    "diagonal_copy",
-    "special.log_ndtr",
-    "nn.functional.adaptive_avg_pool3d",
-    "nanmean",
-    "new_zeros",
-    "expm1",
-    "scatter",
-    "mvlgamma",
-    "triu",
-    "masked_fill",
-    "nn.functional.smooth_l1_loss",
-    "softmax",
-    "split_with_sizes",
-    "uniform",
-    "fft.fftn",
-    "select_scatter",
-    "nn.functional.multi_margin_loss",
-    "take",
-    "equal",
-    "movedim",
-    "fft.ihfft",
-    "long",
-    "linalg.multi_dot",
-    "resize_",
-    "sum_to_size",
-    "__rmatmul__",
-    "i0",
-    "atanh",
-    "igamma",
-    "new_empty_strided",
-    "rot90",
-    "floor_divide",
-    "diff",
-    "trunc",
-    "vsplit",
-    "special.modified_bessel_k1",
-    "new_empty",
-    "special.shifted_chebyshev_polynomial_w",
-    "stack",
-    "tensor_split",
-    "dist",
-    "cartesian_prod",
-    "nextafter",
-    "dstack",
-    "new_full",
-    "multinomial",
-    "_softmax_backward_data",
-    "byte",
-    "corrcoef",
-    "gather",
-    "diagonal_scatter",
-    "frexp",
-    "nanmedian",
-    "logaddexp",
-    "einsum",
-    "nn.functional.pad",
-    "nn.functional.adaptive_max_pool3d",
-    "asinh",
-    "addcdiv",
-    "var",
-    "rand_like",
-    "block_diag",
-    "cumulative_trapezoid",
-    "nn.functional.normalize",
-    "fft.ifftn",
-    "atleast_2d",
-    "unsqueeze",
-    "atan2",
-    "randint",
-    "__rpow__",
-    "special.legendre_polynomial_p",
-    "log_softmax",
-    "rad2deg",
-    "erfc",
-    "squeeze",
-    "erfinv",
-    "special.airy_ai",
-    "nn.functional.binary_cross_entropy",
-    "nn.functional.selu",
-    "fft.rfft",
-    "fmax",
-    "nn.functional.conv1d",
-    "arange",
-    "frac",
-    "addcmul",
-    "index_select",
-    "prod",
-    "nn.functional.batch_norm",
-    "isin",
-    "linspace",
-    "grid_sampler_2d",
-    "logcumsumexp",
-    "copysign",
-    "constant_pad_nd",
-    "cumprod",
-    "complex",
-    "mode",
-    "logsumexp",
-    "special.polygamma",
-    "max",
-    "special.shifted_chebyshev_polynomial_v",
-    "atleast_1d",
-    "igammac",
-    "cdist",
-    "nn.functional.group_norm",
-    "special.laguerre_polynomial_l",
-    "fft.rfftn",
-    "heaviside",
-    "nn.functional.logsigmoid",
-    "addr",
-    "special.erfcx",
-    "trapz",
-    "tril",
-    "special.bessel_j0",
-    "view_as_complex",
-    "nn.functional.conv_transpose2d",
-    "cov",
-    "cummax",
-    "double",
-    "isposinf",
-    "special.shifted_chebyshev_polynomial_t",
-    "diagflat",
-    "special.spherical_bessel_j0",
-    "special.scaled_modified_bessel_k0",
-    "amax",
-    "amin",
-    "index_fill",
-    "special.ndtri",
-    "dsplit",
-    "nn.functional.cosine_similarity",
-    "fft.fft",
-    "trapezoid",
-    "slice",
-    "nan_to_num",
-    "masked_scatter",
-    "special.i1",
-    "to_sparse",
-    "min",
-    "hstack",
-    "special.entr",
-    "special.shifted_chebyshev_polynomial_u",
-    "isfinite",
-    "special.chebyshev_polynomial_t",
-    "fft.ihfftn",
-    "signbit",
-    "nn.functional.cross_entropy",
-    "sgn",
-    "fft.irfftn",
-    "nn.functional.adaptive_max_pool2d",
-    "special.bessel_y0",
-    "nn.functional.local_response_norm",
-    "trace",
-    "special.chebyshev_polynomial_u",
-    "lerp",
-    "nn.functional.dropout2d",
-    "put",
-    "special.i1e",
-    "nn.functional.adaptive_avg_pool1d",
-    "unflatten",
-    "cfloat",
-    "bool",
-    "fft.hfft",
-    "nn.functional.linear",
-    "repeat",
-    "nn.functional.unfold",
-    "index_copy",
-    "nn.functional.threshold",
-    "cosh",
-    "narrow_copy",
 }
 
 
 class TestFxToOnnxWithOnnxRuntimeOnOperators(onnx_test_common._TestONNXRuntime):
+    def setUp(self):
+        super().setUp()
+        self._onnx_shape_inference = GLOBALS.onnx_shape_inference
+        GLOBALS.onnx_shape_inference = False
+        self.op_db = [op for op in op_db if op.name not in SKIPPED_OPS]
+
+    def tearDown(self):
+        GLOBALS.onnx_shape_inference = self._onnx_shape_inference
+
     def test_cpu_float_op_without_kwargs(self):
-        failed_op_names = set()
-        all_op_names = set()
-        tested_op_names = set()
+        selected_op_names = {
+            "nn.functional.alpha_dropout",
+            "neg",
+            "flatten",
+            "dot",
+            "diagonal",
+            "nn.functional.elu",
+            "view_as",
+            "lt",
+            "sigmoid",
+            "sum",
+            "ceil",
+            "where",
+            "nn.functional.hardshrink",
+            "ne",
+            "broadcast_tensors",
+            "erf",
+            "le",
+            "logical_and",
+            "exp",
+            "acos",
+            "minimum",
+            "ldexp",
+            "mean",
+            "T",
+            "nn.functional.relu6",
+            "nn.functional.hardswish",
+            "nn.functional.hardtanh",
+            "resolve_neg",
+            "clone",
+            "mH",
+            "nn.functional.hardsigmoid",
+            "fmod",
+            "nn.functional.tanhshrink",
+            "rsqrt",
+            "mm",
+            "conj_physical",
+            "clamp_max",
+            "argmax",
+            "__rmul__",
+            "special.ndtr",
+            "fft.ifftshift",
+            "nn.functional.mse_loss",
+            "mv",
+            "real",
+            "H",
+            "__rdiv__",
+            "fft.fftshift",
+            "nn.functional.silu",
+            "div",
+            "isnan",
+            "asin",
+            "mul",
+            "log1p",
+            "remainder",
+            "square",
+            "tan",
+            "logical_xor",
+            "nn.functional.soft_margin_loss",
+            "__rmod__",
+            "__radd__",
+            "mT",
+            "__rsub__",
+            "floor",
+            "sub",
+            "tanh",
+            "clamp_min",
+            "logical_or",
+            "positive",
+            "gt",
+            "expand_as",
+            "abs",
+            "round",
+            "msort",
+            "reciprocal",
+            "atan",
+            "log2",
+            "nn.functional.pairwise_distance",
+            "sqrt",
+            "reshape_as",
+            "nn.functional.celu",
+            "nn.functional.l1_loss",
+            "nn.functional.relu",
+            "eq",
+            "fliplr",
+            "true_divide",
+            "sign",
+            "rsub",
+            "log",
+            "nn.functional.feature_alpha_dropout",
+            "cos",
+            "contiguous",
+            "nn.functional.leaky_relu",
+            "nn.functional.softshrink",
+            "isinf",
+            "bmm",
+            "flipud",
+            "argmin",
+            "sin",
+            "add",
+            "float",
+            "kron",
+            "ge",
+            "pow",
+            "resolve_conj",
+            "maximum",
+            "nn.functional.embedding",
+            "conj",
+            "nn.functional.softsign",
+            "nn.functional.mish",
+            "outer",
+        }
         target_dtype = torch.float
         target_device = "cpu"
 
-        for op in op_db:
-            if op.name in failed_cases:
-                # One example without kwargs fails exporting test, so
-                # we skip the entire op's test.
-                continue
-
-            if not op.supports_dtype(target_dtype, target_device):
+        failed_op_names = set()
+        for op in self.op_db:
+            if op.name not in selected_op_names:
                 continue
 
             samples = op.sample_inputs(target_device, target_dtype)
@@ -402,30 +209,66 @@ class TestFxToOnnxWithOnnxRuntimeOnOperators(onnx_test_common._TestONNXRuntime):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
 
-                all_op_names.add(op.name)
                 if len(kwargs) > 0:
                     continue
-                tested_op_names.add(op.name)
 
                 try:
-                    # Move this to exporter.
-                    onnx_shape_inference = GLOBALS.onnx_shape_inference
-                    GLOBALS.onnx_shape_inference = False
                     gm = functorch.make_fx(op)(*copy.deepcopy(args))
                     self.run_test_with_fx_to_onnx_exporter(
                         gm, args, rtol=1e-3, atol=1e-7
                     )
-                    GLOBALS.onnx_shape_inference = onnx_shape_inference
                 except Exception as e:
                     failed_op_names.add(op.name)
 
-        assert len(failed_op_names) == 0, f"Failed op names: {failed_op_names}"
-        assert len(tested_op_names) >= 113, f"Tested op names: {tested_op_names}"
-        print(
-            f"number of seleted ops: {len(all_op_names)}, "
-            f"number of failed ops: {len(failed_op_names)}, "
-            f"number of tested ops: {len(tested_op_names)}"
-        )
+        self.assertEqual(len(failed_op_names), 0, f"Failed op names: {failed_op_names}")
+
+    def test_cpu_float_op_with_kwargs(self):
+        selected_op_names = {
+            "diagonal",
+            "nn.functional.l1_loss",
+            "addmm",
+            "nn.functional.hardshrink",
+            "nn.functional.softshrink",
+            "fft.ifftshift",
+            "add",
+            "nn.functional.mse_loss",
+            "nn.functional.soft_margin_loss",
+            "fft.fftshift",
+            "sub",
+            "nn.functional.hardtanh",
+            "flatten",
+            "rsub",
+        }
+        target_dtype = torch.float
+        target_device = "cpu"
+
+        failed_op_names = set()
+        for op in self.op_db:
+            if op.name not in selected_op_names:
+                continue
+
+            samples = op.sample_inputs(target_device, target_dtype)
+            for sample_input in samples:
+                # Use the correct schema from get_signature_for_torch_op
+                # Then schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs).
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+
+                if len(kwargs) == 0:
+                    continue
+
+                def wrapped(*args_):
+                    return op(*args_, **kwargs)
+
+                try:
+                    gm = functorch.make_fx(wrapped)(*copy.deepcopy(args))
+                    self.run_test_with_fx_to_onnx_exporter(
+                        gm, args, rtol=1e-3, atol=1e-7
+                    )
+                except Exception as e:
+                    failed_op_names.add(op.name)
+
+        self.assertEqual(len(failed_op_names), 0, f"Failed op names: {failed_op_names}")
 
 
 if __name__ == "__main__":
