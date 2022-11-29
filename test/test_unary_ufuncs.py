@@ -1097,6 +1097,11 @@ class TestUnaryUfuncs(TestCase):
     @dtypes(torch.complex64, torch.complex128)
     @onlyCPU
     def test_log1p_complex(self, device, dtype):
+        # The output values here were obtained using arbitrary precision math (mpmath)
+        # and double checked with WolframAlpha.
+        # Not using numpy's log1p here because by the time of writing this, 
+        # np.log1p has precision problems for small complex input values, see here:
+        # https://github.com/numpy/numpy/issues/22609
         inouts = [
             (0.2 + 0.3j, 0.21263386770217202 + 0.24497866312686414j),
             (1e-19 + 1e-18j, 1e-19 + 1e-18j),
