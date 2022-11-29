@@ -42,7 +42,7 @@ class NumpyCube(torch.autograd.Function):
 
 def sample_inputs_numpy_cube(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    yield SampleInput(make_arg([], low=0.8, high=2), args=())
+    yield SampleInput(make_arg(1, low=0.8, high=2), args=())
 
 
 class NumpyCubeNotComposable(torch.autograd.Function):

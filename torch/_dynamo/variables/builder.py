@@ -443,12 +443,11 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif (
-            type(getattr(value, "__self__", None))
+            isinstance(value, types.MethodType)
+            and type(getattr(value, "__self__", None))
             is torch.autograd.function.FunctionMeta
             and getattr(value, "__name__", "") == "apply"
             and value == getattr(value.__self__, "apply", None)
-            and hasattr(value, "__func__")
-            and value.__func__ is torch.autograd.Function.apply.__func__
         ):
             # handle aliased autograd function `apply` calls
             return GetAttrVariable(
