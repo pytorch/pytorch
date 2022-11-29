@@ -4297,13 +4297,15 @@ class TestOptimizerHook(TestCase):
         cls.optimizer = SGD(params, lr=0.001)
 
     def test_post_hook(self):
+        """Mutate state of a variable in a post hook
+        """
         def post_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
             data += 2
 
         data = 2
         handles = []
-        hook_handle = self.optimizer.register_step_pre_hook(post_hook)
+        hook_handle = self.optimizer.register_step_post_hook(post_hook)
         handles.append(hook_handle)
 
         self.optimizer.step()
@@ -4320,6 +4322,8 @@ class TestOptimizerHook(TestCase):
         assert data == 6
 
     def test_pre_hook(self):
+        """Mutate state of a variable in the pre hook
+        """
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
             data += 2
@@ -4343,6 +4347,8 @@ class TestOptimizerHook(TestCase):
         assert data == 9
 
     def test_pre_and_post_hook(self):
+        """Mutate state of a list in the pre hook and post hook.
+        """
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
             data.append(2)
