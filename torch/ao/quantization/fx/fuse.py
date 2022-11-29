@@ -27,7 +27,7 @@ from ..backend_config.utils import (
 
 from .custom_config import FuseCustomConfig
 
-from .fusion_patterns import (
+from .fuse_handler import (
     _get_fusion_pattern_to_fuse_handler_cls,
     FuseHandler,
 )
