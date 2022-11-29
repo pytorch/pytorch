@@ -121,8 +121,13 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
-        self.assertTrue(same(r1, r2))
-        self.assertTrue(same(r1, r3))
+        self.assertEqual(r1.size(), r2.size())
+        self.assertEqual(r1.stride(), r2.stride())
+        self.assertEqual(r1.dtype, r2.dtype)
+
+        self.assertEqual(r1.size(), r3.size())
+        self.assertEqual(r1.stride(), r3.stride())
+        self.assertEqual(r1.dtype, r3.dtype)
 
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_log_conv_args(self):

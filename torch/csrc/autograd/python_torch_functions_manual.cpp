@@ -19,7 +19,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 
-include <ATen/ATen.h>
+#include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
 #include <Python.h>
@@ -426,17 +426,9 @@ static PyObject* THPVariable__to_functional_tensor(
     if (inner_autograd_meta) {
       wrapped.set_requires_grad(self_.requires_grad());
       if (wrapped.requires_grad()) {
-        // std::stringstream ss;
-        // ss << self;
-        // ss << " | ";
-        // ss << wrapped;
-        // ss << " | ";
-        // ss << num;
-        // ss <<" | ";
-        // ss << args;
-        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(n
-            ew torch::autograd::Error("Some message"), 
-            orch::autograd::deleteNode);
+        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+            new torch::autograd::Error("Some message"),
+            torch::autograd::deleteNode);
         torch::autograd::set_history(wrapped, new_grad_fn);
       }
       num = num + 1;

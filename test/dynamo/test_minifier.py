@@ -193,11 +193,15 @@ class MinifierTests(MinifierTestBase):
         """
         )
 
+        repro_after = "dynamo"
+        repro_level = 2
         test_code = self._gen_test_code(
-            run_code, "dynamo", 2, RELU_CUSTOM_ERROR_BACKEND, False
+            run_code, repro_after, repro_level, RELU_CUSTOM_ERROR_BACKEND, False
         )
         _, repro_dir = self._run_test_code(test_code)
-        launch_proc, _ = self._run_minifier_launcher("", repro_dir)
+        launch_proc, _ = self._run_minifier_launcher(
+            "", repro_dir, repro_after, repro_level
+        )
         self.assertIn("RuntimeError", launch_proc.stderr.decode("utf-8"))
 
     # Test that a module with mixed cpu/cuda parts with an error after dynamo can be repro'd
