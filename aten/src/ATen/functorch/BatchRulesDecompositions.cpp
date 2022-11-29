@@ -216,7 +216,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_round);
   OP_DECOMPOSE(special_sinc);
 
-  
+
   m.impl("split.sizes", native::split_symint);
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);
