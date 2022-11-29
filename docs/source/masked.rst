@@ -56,10 +56,10 @@ There are already a number of existing tutorials that we've written to help user
 -  `Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
    differences with NumPy's MaskedArray, and reduction semantics`_
 
-.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview.html
-.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html
-.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad.html
-.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html
+.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview
+.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity
+.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad
+.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics
 
 Supported Operators
 +++++++++++++++++++
@@ -157,7 +157,7 @@ Binary Operators
 As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat
 that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you
 need support for a particular operator or have proposed semantics for how they should behave instead, please open
-an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users
+an issue on GitHub. For now, we have decided to go with the most conservative implementation to ensure that users
 know exactly what is going on and are being intentional about their decisions with masked semantics.
 
 The available binary operators are:
