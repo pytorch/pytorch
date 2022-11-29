@@ -1462,8 +1462,9 @@ class CommonTemplate:
 
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
-    def test_conv_customer_bn_fuse(self):
-        class CustomerBatchNorm(torch.nn.BatchNorm2d):
+    def test_conv_functional_bn_fuse(self):
+        # Define a BatchNorm using functional BN.
+        class BatchNorm(torch.nn.BatchNorm2d):
             def __init__(
                 self,
                 num_features,
@@ -1475,7 +1476,7 @@ class CommonTemplate:
                 dtype=None,
             ):
                 factory_kwargs = {"device": device, "dtype": dtype}
-                super(CustomerBatchNorm, self).__init__(
+                super(BatchNorm, self).__init__(
                     num_features,
                     eps=eps,
                     momentum=momentum,
@@ -1533,7 +1534,7 @@ class CommonTemplate:
                 groups=1,
                 bias=True,
             ),
-            CustomerBatchNorm(64),
+            BatchNorm(64),
         ).eval()
         with torch.no_grad():
             self.common(
@@ -4756,6 +4757,22 @@ class CommonTemplate:
         self.common(
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
+        )
+
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
         )
 
 

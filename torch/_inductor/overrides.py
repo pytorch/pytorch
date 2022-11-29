@@ -650,14 +650,16 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
             if matches_module_function_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
                     continue
+                # TODO: support kwargs.
                 if len(node.args) != 8:
                     continue
                 conv = modules[node.args[0].target]
-                if conv.training or node.args[5]:
-                    continue
-                if type(node.args[7]) is not float:
-                    continue
+                bn_training = node.args[5]
                 bn_eps = node.args[7]
+                if conv.training or bn_training:
+                    continue
+                if type(bn_eps) is not float:
+                    continue
                 bn_args_is_constant = all(
                     n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
                 )
