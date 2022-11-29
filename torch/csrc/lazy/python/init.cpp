@@ -126,8 +126,10 @@ void initLazyBindings(PyObject* module) {
         torch::lazy::LazyGraphExecutor::Get()->WaitDeviceOps({});
       },
       py::arg("devices"));
-  lazy.def(
-      "_reset_metrics", []() { torch::lazy::MetricsArena::Get()->Reset(); });
+  lazy.def("_reset_metrics", []() {
+    torch::lazy::MetricsArena::Get()->ResetCounters();
+    torch::lazy::MetricsArena::Get()->ResetMetrics();
+  });
   lazy.def("_counter_names", []() { return torch::lazy::GetCounterNames(); });
   lazy.def(
       "_metrics_report", []() { return torch::lazy::CreateMetricReport(); });
