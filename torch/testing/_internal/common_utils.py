@@ -107,7 +107,6 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
 DISABLE_RUNNING_SCRIPT_CHK = os.getenv('PYTORCH_DISABLE_RUNNING_SCRIPT_CHK') == '1'
-MAX_NUM_RETRIES = 3
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -506,6 +505,7 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+parser.add_argument('--rerun-disabled-tests', action='store_true')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -527,6 +527,9 @@ else:
     # infer flags based on the default settings
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
+RERUN_DISABLED_TESTS = args.rerun_disabled_tests
+# Rerun disabled tests many more times to make sure that they are not flaky anymore
+MAX_NUM_RETRIES = 3 if not RERUN_DISABLED_TESTS else 50
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
@@ -738,9 +741,15 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
         print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
-        # exitcode of 5 means no tests were found, which happens since some test configs don't
-        # run tests from certain files
-        exit(0 if exit_code == 5 else exit_code)
+
+        if not RERUN_DISABLED_TESTS:
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            # Only record the test report and always return a success code when running under rerun
+            # disabled tests mode
+            exit(0)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -767,6 +776,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
+            def printErrors(self) -> None:
+                super().printErrors()
+                self.printErrorList("XPASS", self.unexpectedSuccesses)
         test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
@@ -925,8 +937,6 @@ TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WIT
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
-    import logging
-    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
     # TODO: Remove this; this is grandfathered in because we suppressed errors
@@ -1653,6 +1663,9 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE:
+        should_skip = False
+        skip_msg = ""
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1687,11 +1700,22 @@ def check_if_enable(test: unittest.TestCase):
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
                     if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                        should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
                             "please make sure CI is not set and you are not using the flag --import-disabled-tests."
-                        raise unittest.SkipTest(skip_msg)
+                        break
+
+        if should_skip and not RERUN_DISABLED_TESTS:
+            # Skip the disabled test when not running under --rerun-disabled-tests verification mode
+            raise unittest.SkipTest(skip_msg)
+
+        if not should_skip and RERUN_DISABLED_TESTS:
+            skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                " disabled tests are run"
+            raise unittest.SkipTest(skip_msg)
+
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -2039,9 +2063,48 @@ class TestCase(expecttest.TestCase):
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
         if num_runs_left == 0:
+            # The logic when RERUN_DISABLED_TESTS is set to true is as follows:
+            # |-if the disabled test passes:
+            # |-- if it's flaky:
+            # |---  Do nothing because it's still flaky
+            # |-- elif it isn't flaky anymore:
+            # |---  Close the disabled ticket (later)
+            # |
+            # |- elif the disabled test fails after n retries:
+            # |--  This is expected, report this but don't fail the job
+            skipped_msg = {
+                "num_red": num_red,
+                "num_green": num_green,
+                "max_num_retries": MAX_NUM_RETRIES,
+                "rerun_disabled_test": RERUN_DISABLED_TESTS,
+            }
+
+            traceback_str = ""
+            if RERUN_DISABLED_TESTS and using_unittest:
+                # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
+                # a verification check, we don't want more red signals coming from it
+                if result.failures:
+                    _, traceback_str = result.failures.pop(-1)
+                if result.errors:
+                    _, traceback_str = result.errors.pop(-1)
+
+                if traceback_str:
+                    skipped_msg["traceback_str"] = traceback_str
+
+                if num_green == 0:
+                    # The disabled test fails, report as skipped but don't fail the job
+                    result.addSkip(self, json.dumps(skipped_msg))
+
+                if num_red == 0:
+                    # The test passes after re-running multiple times. This acts as a signal
+                    # to confirm that it's not flaky anymore
+                    result.addSuccess(self)
+
             if num_green > 0 and num_red > 0 and using_unittest:
-                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
-                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+                skipped_msg["flaky"] = True
+                # Still flaky, do nothing
+                result.addSkip(self, json.dumps(skipped_msg))
+
             return
 
         if using_unittest:
@@ -2100,7 +2163,20 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+            # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
+            # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
+            # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
+            #
+            # Also if the result is skipped, this is due to check_if_enable skipping non-disabled tests, thus we
+            # want to ignore them, not retrying and skipping multiple times
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            # The original logic here is that num_retries_left must be smaller than MAX_NUM_RETRIES indicating
+            # that at least one retry has been spent
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
@@ -3505,6 +3581,32 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     return torch.tensor(res, device=device, dtype=dtype)
 
 
+def copy_func(f):
+    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
+    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                           argdefs=f.__defaults__,
+                           closure=f.__closure__)
+    g = functools.update_wrapper(g, f)
+    g.__kwdefaults__ = f.__kwdefaults__
+    return g
+
+
+def xfail_inherited_tests(tests):
+    """
+    Given a list of test names which are defined by a superclass of the
+    class this decorates, mark them as expected failure.  This is useful
+    if you are doing poor man's parameterized tests by subclassing a generic
+    test class.
+    """
+    def deco(cls):
+        for t in tests:
+            # NB: expectedFailure operates by mutating the method in question,
+            # which is why you have to copy the function first
+            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
+        return cls
+    return deco
+
+
 def sandcastle_skip_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
@@ -3679,6 +3781,15 @@ class TestGradients(TestCase):
             else:
                 all_args = tuple(chain((sample.input,), sample.args, sample.kwargs.values()))
             gradcheck_args = tuple(x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad))
+
+            # Verifies sample input tensors should have no grad
+            # This may happen if the same tensor is used in two different SampleInputs
+            for t in gradcheck_args:
+                self.assertIsNone(t.grad,
+                                  "A sampled input has a gradient before running autograd. "
+                                  "This usually means that (at least) one input tensor is reused "
+                                  "across different SampleInputs. "
+                                  "Please create a new tensor for each SampleInput.")
 
             def _input_recomposition_helper(inputs, inp, input_idx):
                 if is_iterable_of_tensors(inp):

@@ -3219,6 +3219,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.dropout2d', ''),  # randomness
         xfail('nn.functional.dropout3d', ''),  # randomness
+        xfail('nn.functional.alpha_dropout', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
         skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
@@ -3238,6 +3239,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
+        skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
@@ -3292,7 +3294,12 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
+        # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
+        xfail('_native_batch_norm_legit'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
     }))
@@ -3313,7 +3320,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
+        # Batch norm got a batched tensor as input while the running_mean or running_var,
+        # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
+        xfail('_native_batch_norm_legit'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
@@ -3340,6 +3350,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('vdot'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('all'),
         xfail('any'),
@@ -3379,6 +3391,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bernoulli', ''),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
         xfail('column_stack', ''),
@@ -3452,6 +3465,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('equal', ''),
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
+        skip('_softmax_backward_data'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -3870,6 +3884,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
+        # throws in vmap on CUDA
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
+        # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
+        # but it passes locally
+        skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
