@@ -55,7 +55,7 @@ class DomainMap : public pointwise_utils::DomainMap {
  private:
   bool hasMinimumSize(TensorView* tv, int num_axes) const {
     TORCH_INTERNAL_ASSERT(tv != nullptr);
-    return (num_axes == 0 || tv->getMaybeRFactorDomain().size() > num_axes);
+    return (num_axes == 0 || (int64_t)tv->getMaybeRFactorDomain().size() > num_axes);
   }
 };
 

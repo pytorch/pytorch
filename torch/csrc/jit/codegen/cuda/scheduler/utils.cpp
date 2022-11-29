@@ -152,7 +152,7 @@ void splitDims(
   for (auto entry : to_split) {
     size_t dim = entry.first;
     size_t size = entry.second;
-    if (dim != prev_dim) {
+    if ((int64_t)dim != prev_dim) {
       dim_offset += pending_dim_offset;
       pending_dim_offset = 0;
     }
@@ -258,7 +258,7 @@ void parallelizeAllLike(
     pos += reference_tv->nDims() + 1;
   }
   TORCH_CHECK(
-      pos >= 0 && pos <= reference_tv->nDims(),
+      pos >= 0 && pos <= (int64_t)reference_tv->nDims(),
       "parallelizeAllLike called on an position outside valid range.");
 
   std::unordered_map<IterDomain*, IterDomain*> concrete_to_reference_map;
@@ -1942,7 +1942,7 @@ void orderTiledConcreteIdAsRoot(TensorView* tv) {
 
   // Validate that we have processed all inner ids or broadcast/reduction
   //  ids we have registered.
-  TORCH_INTERNAL_ASSERT(current_pos == ndims, "Inconsistent ordering logic");
+  TORCH_INTERNAL_ASSERT(current_pos == (int)ndims, "Inconsistent ordering logic");
 
   // Apply the new order:
   tv->reorder(reorder_map_old_to_new);
@@ -2302,19 +2302,19 @@ bool breakIsDisjoint(std::vector<int> group_ids, int pos) {
     pos += group_ids.size();
   }
   TORCH_INTERNAL_ASSERT(
-      pos >= 0 && pos <= group_ids.size(),
+      pos >= 0 && pos <= (int)group_ids.size(),
       "Invalid position, size of vec is ",
       group_ids.size(),
       " but position is ",
       pos);
 
-  if (pos == 0 || pos == group_ids.size()) {
+  if (pos == 0 || pos == (int)group_ids.size()) {
     return true;
   }
 
   std::unordered_set<int> left_ints(group_ids.begin(), group_ids.begin() + pos);
 
-  for (auto i = pos; i < group_ids.size(); i++) {
+  for (auto i = pos; i < (int)group_ids.size(); i++) {
     if (left_ints.count(group_ids[i]) > 0) {
       return false;
     }

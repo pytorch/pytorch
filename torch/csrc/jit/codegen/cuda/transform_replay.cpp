@@ -818,7 +818,7 @@ bool TransformReplay::fullSelfMatching(
       [](auto a, auto b) { return std::make_pair(a, b); });
   BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
   auto r = replay_.getReplay();
-  for (int64_t i = 0; i < replay_dom.size(); i++) {
+  for (int64_t i = 0; i < (int64_t)replay_dom.size(); i++) {
     auto target_id = target_dom[i];
     auto replay_it = r.find(target_id);
     if (replay_it == r.end() || replay_it->second != replay_dom[i]) {
@@ -943,7 +943,7 @@ TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {
     pos += int64_t(from->nDims()) + 1;
   }
   TORCH_CHECK(
-      pos >= 0 && pos <= from->nDims(),
+      pos >= 0 && pos <= (int64_t)from->nDims(),
       "TransformPropagator called on an pos outside valid range.");
   replayed_pos_[from] = pos;
 }

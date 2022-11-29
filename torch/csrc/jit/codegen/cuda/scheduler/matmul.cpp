@@ -13,7 +13,7 @@ namespace {
 //      [... I0, B, I1] -> [... B, I0, I1]
 //  should probably be only used to order innermost mnk axes.
 void moveInnerBroadcastLeft(TensorView* tv, int number_of_inner_pos = 3) {
-  TORCH_INTERNAL_ASSERT(tv->nDims() >= number_of_inner_pos);
+  TORCH_INTERNAL_ASSERT(int(tv->nDims()) >= number_of_inner_pos);
   std::vector<int> broadcast_pos;
   std::vector<int> nonbroadcast_pos;
 

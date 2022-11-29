@@ -170,7 +170,7 @@ class MergeTransform final : public ViewTransform {
       std::vector<IterDomain*>& root_domain,
       std::vector<IterDomain*>& current_transformed_domain) override {
     TORCH_INTERNAL_ASSERT(
-        (index_ + 1) < current_transformed_domain.size(),
+        (index_ + 1) < (int64_t)current_transformed_domain.size(),
         "Tried to apply: ",
         toString(),
         "\t To domain: \t",
@@ -232,7 +232,7 @@ class SplitTransform final : public ViewTransform {
       std::vector<IterDomain*>& root_domain,
       std::vector<IterDomain*>& current_transformed_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ < current_transformed_domain.size(),
+        index_ < (int64_t)current_transformed_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
@@ -458,7 +458,7 @@ class AnalyzeViewTransformation {
     if (root_domain_not_provided_) {
       return original_view_[original_view_index] == 1;
     } else {
-      TORCH_INTERNAL_ASSERT(original_view_index < root_domain_.size());
+      TORCH_INTERNAL_ASSERT(original_view_index < (int64_t)root_domain_.size());
       return root_domain_[original_view_index]->isImplicitBroadcast() &&
           !root_domain_[original_view_index]->hasExpandedExtent();
     }
@@ -493,8 +493,8 @@ class AnalyzeViewTransformation {
 
     // Iterate until original view is completely consumed and new view is
     // completely generated.
-    while (original_view_index < original_view_.size() ||
-           new_view_index < new_view_.size()) {
+    while (original_view_index < (int64_t)original_view_.size() ||
+           new_view_index < (int64_t)new_view_.size()) {
       TORCH_INTERNAL_ASSERT(
           !(prev_new_view_index == new_view_index &&
             prev_original_view_index == original_view_index),
@@ -503,15 +503,15 @@ class AnalyzeViewTransformation {
       prev_new_view_index = new_view_index;
       prev_original_view_index = original_view_index;
 
-      if (new_view_index >= new_view_.size()) {
+      if (new_view_index >= (int64_t)new_view_.size()) {
         TORCH_INTERNAL_ASSERT(
             current_size == 1,
             "View is complete, but there's still some elements to distribute.");
       }
 
-      if ((new_view_index == new_view_.size() ||
+      if ((new_view_index == (int64_t)new_view_.size() ||
            (new_view_[new_view_index + 1] != 1)) &&
-          original_view_index + 1 < original_view_.size() &&
+          original_view_index + 1 < (int64_t)original_view_.size() &&
           original_view_[original_view_index + 1] == 1 &&
           !isImplicitBroadcast(original_view_index + 1)) {
         // Next index in original_view is runtime size 1 and next new view is
@@ -524,7 +524,7 @@ class AnalyzeViewTransformation {
         continue;
       }
 
-      if (new_view_index < new_view_.size() &&
+      if (new_view_index < (int64_t)new_view_.size() &&
           // Still new dimensions to resolve and current size does resolve it.
           current_size == new_view_[new_view_index]) {
         // Keep this dimension, it's good to go, we hit a boundary where there's
@@ -536,7 +536,7 @@ class AnalyzeViewTransformation {
         ++original_view_index;
 
         // Update current_size with the next size in original view
-        if (original_view_index < original_view_.size()) {
+        if (original_view_index < (int64_t)original_view_.size()) {
           current_size = original_view_[original_view_index];
         } else {
           current_size = 0;
@@ -548,7 +548,7 @@ class AnalyzeViewTransformation {
       // view. Insert broadcast and increment new_view. Size 1 dimensions in
       // new_view that don't match up with runtime size 1's in original view are
       // assumed to be broadcast (not a split from a runtime domain).
-      if (new_view_index < new_view_.size() && new_view_[new_view_index] == 1) {
+      if (new_view_index < (int64_t)new_view_.size() && new_view_[new_view_index] == 1) {
         broadcast_transforms_.push_back(
             std::make_shared<BroadcastTransform>(new_view_index));
         ++new_view_index;
@@ -571,7 +571,7 @@ class AnalyzeViewTransformation {
         ++original_view_index;
 
         // Update original position and current size.
-        if (original_view_index < original_view_.size()) {
+        if (original_view_index < (int64_t)original_view_.size()) {
           current_size = original_view_[original_view_index];
         } else {
           current_size = 0;
@@ -580,7 +580,7 @@ class AnalyzeViewTransformation {
         continue;
       }
 
-      if (original_view_index + 1 < original_view_.size() &&
+      if (original_view_index + 1 < (int64_t)original_view_.size() &&
           isImplicitBroadcast(original_view_index + 1)) {
         // Original view has a compile time size 1 dimension, and it's
         // interfering with necessary transformations. Do a trivial reduction.
@@ -594,10 +594,10 @@ class AnalyzeViewTransformation {
       // We're only left with performing transformations to match a new_view
       // dimension, there must be an activew new_view.
       TORCH_INTERNAL_ASSERT(
-          new_view_index < new_view_.size(),
+          new_view_index < (int64_t)new_view_.size(),
           "Expecting to still have new dimensions to work on in view, but none left.");
 
-      if (new_view_index < new_view_.size() &&
+      if (new_view_index < (int64_t)new_view_.size() &&
           current_size % new_view_[new_view_index] == 0) {
         // Insert split to generate the next new_view domain.
         view_transforms_.push_back(std::make_shared<SplitTransform>(
@@ -614,7 +614,7 @@ class AnalyzeViewTransformation {
       // Need more of the original_view dimension to resolve the new_view
       // dimension, merge the next dimension in.
       TORCH_INTERNAL_ASSERT(
-          original_view_index + 1 < original_view_.size(),
+          original_view_index + 1 < (int64_t)original_view_.size(),
           "Expecting to still have original dimensions to work on in view, but none left.");
 
       view_transforms_.push_back(
@@ -702,7 +702,7 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> inferViewShapes(
   // TODO: refactor
   int64_t dynamic_index = -1;
   int64_t new_size_num_elements = 1;
-  for (int64_t idx = 0; idx < new_sizes.size(); ++idx) {
+  for (int64_t idx = 0; idx < (int64_t)new_sizes.size(); ++idx) {
     if (new_sizes[idx] == -1) {
       TORCH_INTERNAL_ASSERT(
           dynamic_index == -1, "Only one dimension can by inferred.")

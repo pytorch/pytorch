@@ -239,7 +239,7 @@ size_t expandVectorizationToContigMergedDomains(
 
     int tv_num_merged_domains = 0;
     for (const auto i : c10::irange(max_num_merged_domains)) {
-      if (i == tv_root.size()) {
+      if (i == (int)tv_root.size()) {
         break;
       }
       auto ref_id = ref_root.at(ref_root.size() - 1 - i);

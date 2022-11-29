@@ -251,13 +251,13 @@ void maybeBuildVirtualInnerDims(
   // merge inner_most1 and inner_most2 left until we are done or we can no
   // longer do so
   int64_t dim = inner_most1 - 1;
-  while (dim >= 0 && dim != inner_most2 && merged_size1 < params.tile_size1) {
+  while (dim >= 0 && dim != inner_most2 && merged_size1 < (int64_t)params.tile_size1) {
     params.dims_merged_with_1.push_back(dim);
     merged_size1 *= shape_in_ref1[dim];
     dim--;
   }
   dim = inner_most2 - 1;
-  while (dim >= 0 && dim != inner_most1 && merged_size2 < params.tile_size2) {
+  while (dim >= 0 && dim != inner_most1 && merged_size2 < (int64_t)params.tile_size2) {
     params.dims_merged_with_2.push_back(dim);
     merged_size2 *= shape_in_ref1[dim];
     dim--;
@@ -275,7 +275,7 @@ void maybeBuildVirtualInnerDims(
     unavailable_dims.insert(i);
   }
   dim = shape_in_ref1.size() - 1;
-  while (dim >= 0 && merged_size1 < params.tile_size1) {
+  while (dim >= 0 && merged_size1 < (int64_t)params.tile_size1) {
     if (unavailable_dims.count(dim) == 0) {
       params.dims_merged_with_1.push_back(dim);
       merged_size1 *= shape_in_ref1[dim];
@@ -284,7 +284,7 @@ void maybeBuildVirtualInnerDims(
     dim--;
   }
   dim = shape_in_ref1.size() - 1;
-  while (dim >= 0 && merged_size2 < params.tile_size2) {
+  while (dim >= 0 && merged_size2 < (int64_t)params.tile_size2) {
     if (unavailable_dims.count(dim) == 0) {
       params.dims_merged_with_2.push_back(dim);
       merged_size2 *= shape_in_ref1[dim];
@@ -294,8 +294,8 @@ void maybeBuildVirtualInnerDims(
   }
   // If both are satisfied, then we are done. If neither are satisfied, then it
   // is impossible to satisfy both of them, also done.
-  if ((merged_size1 < params.tile_size1) ==
-      (merged_size2 < params.tile_size2)) {
+  if ((merged_size1 < (int64_t)params.tile_size1) ==
+      (merged_size2 < (int64_t)params.tile_size2)) {
     return; // no need to split
   }
   // If one of them are not satisfied, there might be two cases:
@@ -309,7 +309,7 @@ void maybeBuildVirtualInnerDims(
   int64_t large_dim;
   int64_t split_factor;
   bool split_inner_most;
-  if (merged_size1 < params.tile_size1) {
+  if (merged_size1 < (int64_t)params.tile_size1) {
     if (params.dims_merged_with_2.empty()) {
 #if SUPPORT_SPLITTING_INNERMOST_DIM
       // https://github.com/csarofeen/pytorch/issues/1964
@@ -351,17 +351,17 @@ void maybeBuildVirtualInnerDims(
   params.split_before_tiling.push_back({large_dim, split_factor});
   // adjust all dims to after-split
   for (auto& i : params.dims_merged_with_1) {
-    if (i > large_dim) {
+    if ((int64_t)i > large_dim) {
       i++;
     }
   }
   for (auto& i : params.dims_merged_with_2) {
-    if (i > large_dim) {
+    if ((int64_t)i > large_dim) {
       i++;
     }
   }
   // Give the split-out dim to the unsatisfied one, so that both are satisfied.
-  if (merged_size1 < params.tile_size1) {
+  if (merged_size1 < (int64_t)params.tile_size1) {
     if (!split_inner_most) {
       params.dims_merged_with_2.pop_back();
       params.dims_merged_with_2.push_back(large_dim + 1);
@@ -508,7 +508,7 @@ std::string getTransposeRuntimeRejectReason(
   const int64_t device_multiprocessor_count =
       (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   auto elements_per_wave = device_multiprocessor_count * default_tile_elements;
-  if (elements_per_wave > n_elems) {
+  if ((int64_t)elements_per_wave > n_elems) {
     return "Transpose scheduler does not perform well on small problem sizes.";
   }
 
@@ -522,7 +522,7 @@ std::string getTransposeRuntimeRejectReason(
   //   transpose(T0[1000000000, 2, 2], 1, 2)
   // the pointwise scheduler should provide better performance, because it
   // provides coalesced memory access
-  if (inner_size1 * inner_size2 < default_tile_elements) {
+  if (inner_size1 * inner_size2 < (int64_t)default_tile_elements) {
     auto inner_elements = inner_size1 * inner_size2;
     for (int64_t i = inner_most_pos2_in_ref1 + 1; i < inner_most_pos1_in_ref1;
          i++) {
@@ -539,15 +539,15 @@ std::string getTransposeRuntimeRejectReason(
     //   T3[2, 10000000, 3] input/output
     //   T4[3, 10000000, 2] input/output
     //   T5[3, 10000000, 2] input/output
-    if (inner_elements < default_tile_elements) {
+    if (inner_elements < (int64_t)default_tile_elements) {
       return "Inner transpose of small dimensions should be scheduled by the "
              "pointwise scheduler because it provides better memory coalescing";
     }
   }
 
 #if !SUPPORT_SPLITTING_INNERMOST_DIM
-  if (n_elems / inner_size1 < TransposeParams::getDefaultTileSize() ||
-      n_elems / inner_size2 < TransposeParams::getDefaultTileSize()) {
+  if (n_elems / inner_size1 < (int64_t)TransposeParams::getDefaultTileSize() ||
+      n_elems / inner_size2 < (int64_t)TransposeParams::getDefaultTileSize()) {
     return "Splitting of inner most dim for the creation of virtual inner most dim "
            "is disabled due to indexing bug, skipping this case at runtime for now"
            "See: https://github.com/csarofeen/pytorch/issues/1964";

@@ -310,7 +310,7 @@ void TensorView::inlineAt(
   }
 
   TORCH_INTERNAL_ASSERT(
-      pos >= 0 && pos <= nDims(),
+      pos >= 0 && pos <= (int64_t)nDims(),
       "Invalid inline position for T",
       name(),
       ": ",
@@ -328,7 +328,7 @@ void TensorView::inlineAt(
   }
 
   TORCH_INTERNAL_ASSERT(
-      pos <= max_inline_pos,
+      pos <= (int64_t)max_inline_pos,
       "Invalid inline position for T",
       name(),
       ": ",
