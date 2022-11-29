@@ -91,7 +91,7 @@ rewrite_assert_with_torch_assert = True
 print_graph_breaks = False
 
 # Disable dynamo
-disable = os.environ.get("TORCH_COMPILE_DISABLE", "0")
+disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
