@@ -40,7 +40,6 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        self.name = "GraphLowering"     
         if self.reuse_shape_env:
             size = ex.size()
             stride = ex.stride()
