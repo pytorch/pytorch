@@ -923,7 +923,7 @@ class SummaryWriter(object):
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
 
-        fs = tf.io.gfile.get_filesystem(save_path)
+        fs = tf.io.gfile
         if fs.exists(save_path):
             if fs.isdir(save_path):
                 print(
