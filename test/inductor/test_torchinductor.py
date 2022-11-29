@@ -42,6 +42,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics
+    from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -4945,6 +4946,39 @@ if HAS_CPU:
                 compiled_out = opt_fn(value, mask)
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
+
+        def test_cpu_vec_cosim(self):
+            cpp_vec_op_list = []
+            cpp_op_list = []
+
+            for k, v in CppVecOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_vec_op_list.append(k)
+            for k, v in CppOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_op_list.append(k)
+
+            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_erf_cpu_only(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
