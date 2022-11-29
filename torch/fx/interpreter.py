@@ -120,7 +120,8 @@ class Interpreter:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
-        for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True, disable=disable_progress):
+        for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}",
+                         initial=1, position=0, leave=True, disable=disable_progress):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
