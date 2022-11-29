@@ -509,7 +509,7 @@ class AnalyzeViewTransformation {
             "View is complete, but there's still some elements to distribute.");
       }
 
-      if ((new_view_index == new_view_.size() ||
+      if ((new_view_index + 1 >= new_view_.size() ||
            (new_view_[new_view_index + 1] != 1)) &&
           original_view_index + 1 < original_view_.size() &&
           original_view_[original_view_index + 1] == 1 &&
@@ -732,7 +732,7 @@ AnalyzeViewResult analyzeView(
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
       original_sizes.size() > 0,
-      "Empty original size not supported for view operatioon.");
+      "Empty original size not supported for view operation.");
 
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain())

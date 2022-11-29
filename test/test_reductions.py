@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -463,9 +464,9 @@ class TestReductions(TestCase):
                torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, 64)
+                op(x, dim=64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, -1)
+                op(x, dim=-1)
 
     @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
@@ -1792,11 +1793,9 @@ class TestReductions(TestCase):
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
-        norm_error_msg = r'Expected dims to be different, got'
         for op in ops:
             for dim in [(0, 0), (0, -4)]:
-                e_msg = norm_error_msg if op == torch.norm else error_msg
-                with self.assertRaisesRegex(RuntimeError, e_msg):
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
     # TODO: update this test to comapre against NumPy
@@ -2842,6 +2841,9 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+        linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
+        test_against_np(linear, bins=20, min=0, max=0.99)
+
     @onlyCPU
     def test_histc_bfloat16(self, device):
         actual = torch.histc(
@@ -3382,6 +3384,21 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    def test_reductions_large_half_tensors(self, device, dtype):
+        t = torch.ones(2**31, device=device, dtype=dtype)
+        t[2**30:] = -1
+        expected = torch.tensor(0, device=device, dtype=dtype)
+        self.assertEqual(torch.sum(t), expected)
+
+        # mean_cuda is not implemented for ComplexHalf
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 

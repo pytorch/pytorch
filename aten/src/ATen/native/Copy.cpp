@@ -1,21 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_copy_from.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/expand_copy.h>
+#endif
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -116,12 +124,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // 1. Memory Format for source and destination tensors is contiguous.
   // 2. Device for both the source and destination tensor is CPU.
   // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+  // This checks that self.sizes() == src.sizes() because this code path doesn't
+  // support broadcasting. This also guards against out of bounds memory access
+  // when copying, see fbgemm::Float16ToFloat_ref.
+  // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
         ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+         (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
+        (self.sizes() == src.sizes())) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -212,6 +225,18 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::metal::metal_copy_(self, src);
   }
 
+  // Exit early if self and src are views of the same data
+  const bool is_same_data = (
+      self.is_alias_of(src) &&
+      self.storage_offset() == src.storage_offset() &&
+      self.strides().equals(src.strides()) &&
+      self.sizes().equals(src.sizes()) &&
+      self.scalar_type() == src.scalar_type()
+    );
+  if (is_same_data) {
+    return self;
+  }
+
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
@@ -253,27 +278,39 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
+// NB: cribbed from https://github.com/pytorch/pytorch/pull/88198
+at::Tensor clone_preserve_strides(const at::Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.has_storage());
+  // In cases where the input tensor has internal memory overlap, we cannot actually
+  // preserve the strides/storage_offset of the input tensor, because
+  // *_scatter ops will try to copy_() into the cloned tensor.
+  // However, this should **never** show up in functionalized user code;
+  // most aten ops that try to mutate a tensor with internal memory overlap would error anyway.
+  //
+  // The one place that this does come up is in autograd - if there's a select_scatter
+  // in the forward, then autograd will generate one for the backward.
+  // If the input to the select_scatter is grad_output, then this could be an expanded tensor
+  // with internal overlap.
+  //if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
+  //  return self.clone();
+  //}
+  auto dtype_size = self.dtype().itemsize();
+  auto nbytes = self.storage().sym_nbytes();
+  TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+  auto numel = nbytes / dtype_size;
+  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto clone = self_full_size.clone();
+  auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
+  return out;
+}
+
 Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
   // (1) It isn't exposed to the frontend (no python bindings)
   // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
-  // Note: This implementation doesn't currently preserve the strides of `self`.
-  // That might be fine for functorch (which already doesn't preserve strides in vmap),
-  // but it's worth looking into whether or not this implementation will be problematic for LazyTensor/XLA.
-  auto intermediate = src.to(self, non_blocking);
-  // We can't use expand() here. Why?
-  // The contract for copy_() is that the output tensor has the same amount of storage as the original tensor.
-  // e.g. This should work:
-  //   a = torch.ones(4, 4)
-  //   b = torch.ones(1, 4)
-  //   c = torch.ones(4, 4)
-  //   torch.ops.aten.copy(a, b).add_(c)
-  // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
-  if (self.sizes() != intermediate.sizes()) {
-    return at::expand_copy(intermediate, self.sizes());
-  } else {
-    return intermediate;
-  }
+  auto r = clone_preserve_strides(self);
+  r.copy_(src, non_blocking);
+  return r;
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {

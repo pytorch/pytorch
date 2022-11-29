@@ -1,6 +1,4 @@
-if(BUILD_SPLIT_CUDA)
-  set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
-elseif(USE_CUDA)
+if(USE_CUDA)
   set(TORCHLIB_FLAVOR torch_cuda)
 elseif(USE_ROCM)
   set(TORCHLIB_FLAVOR torch_hip)

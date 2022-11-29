@@ -114,7 +114,7 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
-#ifdef FBCODE_CAFFE2
+#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     return false;
 #else
     return nvfuserCanBeEnabled();
@@ -650,6 +650,62 @@ RegisterOperators reg_add_optional({
             } else {
               push(stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
             }
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_permute_copy({
+    Operator(
+        "prim::permute_copy(Tensor(a) self, int[] dims) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "permute_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dims;
+            pop(stack, self, dims);
+            push(stack, at::native::view(self.toTensor(), dims.toIntVector()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_transpose_copy({
+    Operator(
+        "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "transpose_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dim0, dim1;
+            pop(stack, self, dim0, dim1);
+            push(
+                stack,
+                at::transpose(self.toTensor(), dim0.toInt(), dim1.toInt()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_t_copy({
+    Operator(
+        "prim::t_copy(Tensor(a) self) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "t_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self;
+            pop(stack, self);
+            push(stack, at::t(self.toTensor()));
           };
         },
         aliasAnalysisFromSchema()),
