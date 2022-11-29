@@ -1788,7 +1788,6 @@ class TestImports(TestCase):
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
-                           "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
