@@ -5,11 +5,10 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 #include <c10/util/Optional.h>
-
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at {
 namespace native {
-
 
 Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
 
@@ -76,7 +75,6 @@ Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descen
 
   return result;
 }
-
 
 }
 }
