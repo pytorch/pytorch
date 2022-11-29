@@ -58,6 +58,7 @@ def make_buffer_allocation(buffer):
 
 def make_cpp_buffer_allocation(buffer):
     from .cpp import DTYPE_TO_ATEN
+
     # TODO: map layout and device here
     dtype = buffer.get_dtype()
     shape = tuple(buffer.get_size())
@@ -630,6 +631,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def get_kernel_path(self, code):
         from ..codecache import pick_vec_isa
+
         picked_vec_isa = pick_vec_isa()
         ext = "so"
         extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
