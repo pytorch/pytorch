@@ -135,6 +135,7 @@ inductor_skips["cuda"] = {
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     # flaky
     "native_batch_norm": {f16, f32, f64},
+    "_native_batch_norm_legit": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -232,7 +233,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -246,7 +246,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
-    "view_as_complex": {f16, f32, f64},
+    "view_as_complex": {f16},
 }
 
 
@@ -331,7 +331,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -341,7 +340,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
-    "view_as_complex": {f16, f32, f64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
 }
