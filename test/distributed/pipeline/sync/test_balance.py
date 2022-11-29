@@ -227,4 +227,3 @@ def test_already_has_grad():
 
     with pytest.raises(ValueError, match="some parameter already has gradient"):
         balance_by_time(1, model, sample, device="cpu")
- 
