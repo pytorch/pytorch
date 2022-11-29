@@ -8,6 +8,7 @@
 from typing import Any, Dict, Optional, Tuple
 
 import torch
+import torch._prims_common as utils
 
 from torch._prims_common import (
     DimsSequenceType,
@@ -351,11 +352,13 @@ def _full_nvfuser(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ):
     assert device != torch.device("cpu")
     assert layout is None
     assert pin_memory is False
-    dtype = torch.float32 if dtype is None else dtype
+    assert requires_grad is False
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
     nvfuser_dtype = getnvFuserDtype(dtype)
     return fd.full(shape, fill_value, nvfuser_dtype)
 
@@ -442,7 +445,6 @@ def register_full():
         layout=None,
         device=None,
         pin_memory=False,
-        requires_grad=False,
     ):
         return prim(
             size,
@@ -451,7 +453,6 @@ def register_full():
             layout=layout,
             device=device,
             pin_memory=pin_memory,
-            requires_grad=requires_grad,
         )
 
     nvprim_implicit_impl.impl("full.names", _names_overload_impl)
@@ -462,6 +463,7 @@ def register_full():
     for p in (prim_packet, prim):
         p.__doc__ = "Create a tensor with given size and filled with value"
         p.impl_nvfuser = _nvfuser_impls["full"]
+        p.is_recomputable = _nvfuser_is_recomputable["full"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -506,6 +508,7 @@ _nvfuser_is_recomputable: Dict[str, bool] = {
     "expm1": True,
     "floor": True,
     "fmod": True,
+    "full": True,
     "ge": True,
     "gt": True,
     "imag": True,
