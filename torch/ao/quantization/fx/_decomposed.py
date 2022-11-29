@@ -17,6 +17,9 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
     elif dtype == torch.int8:
         quant_min_lower_bound = -128
         quant_max_upper_bound = 127
+    elif dtype == torch.int32:
+        quant_min_lower_bound = -2**31
+        quant_max_upper_bound = 2**31-1
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 
@@ -126,7 +129,7 @@ def dequantize_per_tensor(
        dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
-    if dtype in [torch.uint8, torch.int8]:
+    if dtype in [torch.uint8, torch.int8, torch.int32]:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
         # failed the test
