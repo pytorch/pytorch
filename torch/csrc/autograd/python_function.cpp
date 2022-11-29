@@ -833,6 +833,47 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
   END_HANDLE_TH_ERRORS
 }
 
+namespace {
+
+THPObjectPtr make_ctx_input_tuple(
+    THPFunction* ctx,
+    const UnpackedInput& unpacked_input,
+    int64_t num_args) {
+  THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
+  if (!ctx_input_tuple)
+    return {};
+  Py_INCREF(ctx);
+  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
+  for (const auto i : c10::irange(num_args)) {
+    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
+    Py_INCREF(arg);
+    PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
+  }
+  return ctx_input_tuple;
+}
+
+THPObjectPtr make_ctx_output_input_tuple(
+    THPFunction* ctx,
+    PyObject* outputs,
+    const UnpackedInput& unpacked_input,
+    int64_t num_args) {
+  THPObjectPtr result(PyTuple_New(num_args + 2));
+  if (!result)
+    return {};
+  Py_INCREF(ctx);
+  Py_INCREF(outputs);
+  PyTuple_SET_ITEM(result.get(), 0, (PyObject*)ctx);
+  PyTuple_SET_ITEM(result.get(), 1, (PyObject*)outputs);
+  for (const auto i : c10::irange(num_args)) {
+    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
+    Py_INCREF(arg);
+    PyTuple_SET_ITEM(result.get(), i + 2, arg);
+  }
+  return result;
+}
+
+} // namespace
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -877,29 +918,50 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  // Prepend ctx to input_tuple, in preparation for static method call
+  // autograd.Function may optionally contain a setup_context staticmethod.
+  // In this case, autograd.Function.forward does NOT accept a ctx object.
+  bool has_separate_setup_context_fn =
+      (isAutogradFunctionExtensionEnabled() &&
+       PyObject_HasAttrString(cls, "setup_context"));
+
   auto num_args = PyTuple_GET_SIZE(inputs);
-  THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
-  if (!ctx_input_tuple)
-    return nullptr;
-  Py_INCREF(ctx);
-  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
-  for (const auto i : c10::irange(num_args)) {
-    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
-  }
 
   // Call forward
-  THPObjectPtr tensor_outputs;
+  THPObjectPtr outputs;
   {
     AutoGradMode grad_mode(false);
     at::AutoFwGradMode fw_grad_mode(false);
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn)
       return nullptr;
-    tensor_outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
-    if (!tensor_outputs)
+    if (has_separate_setup_context_fn) {
+      // call forward followed by setup_context
+      outputs = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
+      if (!outputs) {
+        return nullptr;
+      }
+      auto ctx_output_input_tuple =
+          make_ctx_output_input_tuple(ctx, outputs, unpacked_input, num_args);
+      if (!ctx_output_input_tuple) {
+        return nullptr;
+      }
+      THPObjectPtr setup_context_fn(
+          PyObject_GetAttrString(cls, "setup_context"));
+      auto result =
+          PyObject_CallObject(setup_context_fn, ctx_output_input_tuple);
+      if (!result) {
+        return nullptr;
+      }
+    } else {
+      // call forward
+      auto ctx_input_tuple =
+          make_ctx_input_tuple(ctx, unpacked_input, num_args);
+      if (!ctx_input_tuple) {
+        return nullptr;
+      }
+      outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
+    }
+    if (!outputs)
       return nullptr;
   }
 
@@ -909,7 +971,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       ctx,
       unpacked_input,
       inputs,
-      std::move(tensor_outputs),
+      std::move(outputs),
       is_executable,
       node);
   END_HANDLE_TH_ERRORS
