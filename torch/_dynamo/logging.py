@@ -2,7 +2,7 @@ import itertools
 import logging
 import os
 
-from tqdm import tqdm
+from torch.hub import tqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
