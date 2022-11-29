@@ -2706,9 +2706,9 @@ def native_layer_norm(
     numerator = sub(g, input, mean)
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    denominator = sqrt(g, add(g, variance, eps_cst))
+    denominator = sqrt(g, g.op("Add", variance, eps_cst).setType(eps_cst.type()))
 
-    normalized = g.op("Div", numerator, denominator)
+    normalized = g.op("Div", numerator, denominator).setType(eps_cst.type())
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
