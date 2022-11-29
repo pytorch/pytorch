@@ -5945,6 +5945,9 @@ TEST_F(NVFuserTest, AsyncCompilation_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction1_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);

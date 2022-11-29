@@ -1561,6 +1561,9 @@ TEST_F(NVFuserTest, FusionGroupedReductionReEntrant1_CUDA) {
 // Channels-last batch norm with vectorization. Relies on re-entrant
 // GroupedGridReduction
 TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
