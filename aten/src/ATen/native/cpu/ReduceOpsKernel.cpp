@@ -333,20 +333,9 @@ static void and_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a & b;
         },
-#else
-        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          Vectorized<uint8_t> c = Vectorized<uint8_t>();
-
-          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
-            c[i] = (a[i] && b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-#endif
         /*ident=*/true);
   } else {
     binary_kernel_reduce_vec(
@@ -380,20 +369,9 @@ static void or_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a | b;
         },
-#else
-        [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          Vectorized<uint8_t> c = Vectorized<uint8_t>();
-
-          for (decltype(c.size()) i = 0; i != Vectorized<uint8_t>::size(); i++) {
-            c[i] = (a[i] || b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-#endif
         /*ident=*/false);
   } else {
     binary_kernel_reduce_vec(
