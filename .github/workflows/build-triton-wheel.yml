@@ -157,6 +157,7 @@ jobs:
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
       PY_VERS: ${{ matrix.py_vers }}
+      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -186,11 +187,13 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
-            "${DOCKER_IMAGE}"      \
+            -e ANACONDA_API_TOKEN \
+            "${DOCKER_IMAGE}" \
           )
 
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
+          docker exec -t "${container_name}" anaconda upload /artifacts/torch*.tar.b2 -u pytorch-nighly --label main --no-progress --force
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
