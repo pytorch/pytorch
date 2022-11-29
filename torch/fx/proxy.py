@@ -58,24 +58,24 @@ class ScopeContextManager(object):
 
     def __init__(
         self,
-        prev_scope: Scope,
+        scope: Scope,
         current_scope: Scope,
     ):
         super().__init__()
-        # Make a copy of scope to restore on context block exit
-        self._prev_scope = copy.copy(prev_scope)
-        # Modify the prev_scope that was passed in by reference
-        prev_scope.module_path = current_scope.module_path
-        prev_scope.module_type = current_scope.module_type
-        # Save a pointer to the modified prev_scope
-        self._current_scope = prev_scope
+        # Keep a copy of prev scope to restore on exit
+        self._prev_scope = copy.copy(scope)
+        # Update scope to current scope
+        scope.module_path = current_scope.module_path
+        scope.module_type = current_scope.module_type
+        # Save a reference so we can restore it
+        self._scope = scope
 
     def __enter__(self):
-        return self._current_scope
+        return self._scope
 
     def __exit__(self, *args):
-        self._current_scope.module_path = self._prev_scope.module_path
-        self._current_scope.module_type = self._prev_scope.module_type
+        self._scope.module_path = self._prev_scope.module_path
+        self._scope.module_type = self._prev_scope.module_type
         return
 
 
