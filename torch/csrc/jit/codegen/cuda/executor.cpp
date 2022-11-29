@@ -16,6 +16,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -877,7 +878,7 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
     executor_entry = &executor_entry_lookup_[*opt_code];
   }
 
-  executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
   TORCH_INTERNAL_ASSERT(lowered_);
 
   TORCH_INTERNAL_ASSERT(
@@ -975,7 +976,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
-  executor_utils::initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
   TORCH_INTERNAL_ASSERT(lowered_);
   launch_params_ = LaunchParams();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

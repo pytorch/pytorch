@@ -1,6 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/native/cuda/jit_utils.h>
 
 #include <c10/util/irange.h>
 
@@ -928,18 +929,6 @@ ExpressionEvaluator bindFusionInputs(
   return expr_eval;
 }
 
-void initializeCudaContext() {
-  // lazily construct context if non-existing yet;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CUcontext pctx = nullptr;
-  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::getFreeMutex()));
-    C10_CUDA_CHECK(cudaFree(nullptr));
-  }
-}
-
 namespace {
 
 // Dump PTX or CUBIN to a file
@@ -981,7 +970,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
         "NVFuser Compile: arch check disabled, should not compile any kernel");
   }
 
-  initializeCudaContext();
+  at::cuda::jit::initializeCudaContext();
 
   std::stringstream ptxas_log;
 
