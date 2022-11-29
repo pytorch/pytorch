@@ -93,11 +93,13 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   }
 
   PredicateElimination& predicateElimination() {
-    return pred_elimination_;
+    TORCH_INTERNAL_ASSERT(pred_elimination_.get() != nullptr);
+    return *pred_elimination_;
   }
 
   const PredicateElimination& predicateElimination() const {
-    return pred_elimination_;
+    TORCH_INTERNAL_ASSERT(pred_elimination_.get() != nullptr);
+    return *pred_elimination_;
   }
 
   LocalAllocationInfoMap& localAllocationInfoMap() {
@@ -199,7 +201,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   std::shared_ptr<const ConcretizedBroadcastDomains>
       concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
-  PredicateElimination pred_elimination_;
+  std::unique_ptr<PredicateElimination> pred_elimination_;
   std::shared_ptr<ComputeAtMap> compute_at_map_;
   std::shared_ptr<HaloInfo> halo_info_;
   LocalAllocationInfoMap local_allocation_info_map_;

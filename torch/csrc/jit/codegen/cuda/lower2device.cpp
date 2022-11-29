@@ -342,7 +342,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Detects all exprssions that don't need predicates. Depends on
   // nonDivisibleSplitInfo.
   dumpExprsIfEnabled(fusion_->exprs(), "Before build predicateElimination");
-  predicateElimination().build(fusion_);
+  pred_elimination_ = std::make_unique<PredicateElimination>(fusion_);
 
   dumpExprsIfEnabled(fusion_->exprs(), "Before build doubleBufferInfo");
   doubleBufferInfo().build(fusion_);
@@ -460,7 +460,7 @@ bool GpuLower::hasCurrent() {
 }
 
 void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
-  pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
+  predicateElimination().propagateRemovalInfo(old_expr, new_expr);
   if (old_expr->isA<kir::Allocate>()) {
     auto alloc_info_it =
         localAllocationInfoMap().find(old_expr->as<kir::Allocate>());

@@ -140,6 +140,10 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //!  for kernel launch for a new input dimension but same heuristics
   void updateHeuristicsLaunchParams(FusionHeuristics* update_heuristics);
 
+  const std::vector<FusionExecutor>& executors() const {
+    return executors_;
+  }
+
  private:
   //! Interface to run a single kernel, either one kernel for single-kernel
   //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns

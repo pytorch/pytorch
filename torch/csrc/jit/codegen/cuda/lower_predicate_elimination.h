@@ -13,7 +13,7 @@ namespace cuda {
 
 class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
  public:
-  void build(Fusion* fusion);
+  PredicateElimination(Fusion* fusion);
 
   //! True if expr does not need a predicate
   //!
@@ -37,6 +37,10 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   //  if all expressions were mutated, but that'd take much more
   //  global info to reliably track.
   void propagateRemovalInfo(const Expr* from, const Expr* to);
+
+  const std::unordered_set<const Expr*>& getNonPredicatedExprs() const {
+    return non_predicated_exprs_;
+  }
 
  private:
   using IterVisitor::handle;
