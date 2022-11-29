@@ -222,6 +222,12 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    sync_line = ""
+    for arg in args:
+        if arg.is_cuda:
+            sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
+            break
+
     if "inductor" in compiler_name:
         fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
@@ -243,7 +249,8 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(args)
+                ref = compiled(args)
+                {sync_line}
                 """
             )
         )
@@ -296,16 +303,26 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         stderr.seek(0)
         print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
         print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
+        # print(f"Isolated test failed - {file_name}")
         return True
     return False
 
 
 def inductor_fails(fx_g, args, check_str=None):
+    has_cuda = False
+    for arg in args:
+        if arg.is_cuda:
+            has_cuda = True
+            break
+
+    def sync():
+        if has_cuda:
+            # Ensures that segfaults are surfaced
+            torch.cuda.synchronize()
+
     compile_fx_inner = import_module(
         f"{config.inductor_import}.compile_fx"
     ).compile_fx_inner
-
-    import_module(f"{config.inductor_import}.config").triton.autotune = False
 
     try:
         result = fx_g(*args)
@@ -313,10 +330,14 @@ def inductor_fails(fx_g, args, check_str=None):
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
+    result = None
+
+    sync()
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
+        sync()
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
