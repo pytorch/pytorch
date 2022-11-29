@@ -21,10 +21,10 @@ from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
-from torch.utils import cpp_extension
-from . import config, cuda_properties, exc
 
 from torch.hub import tqdm
+from torch.utils import cpp_extension
+from . import config, cuda_properties, exc
 
 LOCK_TIMEOUT = 600
 
@@ -604,7 +604,13 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]):
         if config.compile_threads > 1:
-            for key, result in (pbar := tqdm(scope.items(), desc="Inductor Compilation", disable=config.disable_progress)):
+            for key, result in (
+                pbar := tqdm(
+                    scope.items(),
+                    desc="Inductor Compilation",
+                    disable=config.disable_progress,
+                )
+            ):
                 if config.verbose_progress:
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
