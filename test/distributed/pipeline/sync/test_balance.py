@@ -57,7 +57,7 @@ def test_balance_by_time(device):
             return x
 
     model = nn.Sequential(*[Delay(i / 10) for i in [1, 2, 3, 4, 5, 6]])
-    sample = torch.rand(1)
+    sample = 1
     balance = balance_by_time(2, model, sample, device=device)
     assert balance == [4, 2]
 
@@ -187,33 +187,23 @@ def test_not_training():
     assert not model.training
 
 
-def test_balance_by_time_tuple():
-    class Twin(nn.Module):
-        def forward(self, x):
-            return x, x.detach()
-
-    class Add(nn.Module):
-        def forward(self, a, b):
-            return a + b
-
-    model = nn.Sequential(Twin(), Add())
-    sample = torch.rand(1, requires_grad=True)
-    balance_by_time(1, model, sample, device="cpu")
-
-
 @skip_if_no_cuda
 def test_balance_by_size_tuple():
-    class Twin(nn.Module):
-        def forward(self, x):
-            return x, x.detach()
+    class Skip(nn.Module):
+        def forward(self, a, b):
+            return a, b
 
     class Add(nn.Module):
         def forward(self, a, b):
             return a + b
 
-    model = nn.Sequential(Twin(), Add())
-    sample = torch.rand(1, requires_grad=True)
+    model = nn.Sequential(Skip(), Add())
+    sample = (torch.rand(1, requires_grad=True), 0)
     balance_by_size(1, model, sample)
+
+    with pytest.raises(TypeError, match="No tensor found!"):
+        all_non_tensor_sample = (1, 0)
+        balance_by_time(1, model, all_non_tensor_sample)    
 
 
 def test_already_has_grad():
@@ -223,33 +213,4 @@ def test_already_has_grad():
 
     with pytest.raises(ValueError, match="some parameter already has gradient"):
         balance_by_time(1, model, sample, device="cpu")
-
-
-def test_balance_by_time_non_tensor_tuple():
-    class Skip(nn.Module):
-        def forward(self, a, b):
-            return a, b
-
-    class Add(nn.Module):
-        def forward(self, a, b):
-            return a + b
-
-    model = nn.Sequential(Skip(), Add())
-    sample = (torch.rand(1, requires_grad=True), 0)
-    balance_by_time(1, model, sample, device="cpu")
-
-
-@skip_if_no_cuda
-def test_balance_by_size_non_tensor_tuple():
-    class Skip(nn.Module):
-        def forward(self, a, b):
-            return a, b
-
-    class Add(nn.Module):
-        def forward(self, a, b):
-            return a + b
-
-    model = nn.Sequential(Skip(), Add())
-    sample = (torch.rand(1, requires_grad=True), 0)
-    balance_by_size(1, model, sample)
-    
+ 
