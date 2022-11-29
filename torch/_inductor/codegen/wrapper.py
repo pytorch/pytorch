@@ -637,7 +637,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
             V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
-            self.wrapper_call.writeline(f"static LoadKernel_call{self._call_func_id} load_kernel_;")
+            self.wrapper_call.writeline(
+                f"static LoadKernel_call{self._call_func_id} load_kernel_;"
+            )
 
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
