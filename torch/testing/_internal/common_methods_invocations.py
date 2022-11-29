@@ -13440,9 +13440,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
-                       # alias, nn.functional.tanh, will produce (because of warning string saved):
-                       # "RuntimeError: Expected to not find "tanh" but found it"
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
@@ -15568,10 +15565,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
-                       # alias, nn.functional.sigmoid, will produce (because of warning string saved):
-                       # "RuntimeError: Expected to not find "sigmoid" but found it"
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
+                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,

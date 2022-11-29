@@ -38,8 +38,9 @@ from common_utils import (
     skip,
     skipOps,
 )
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 USE_TORCHVISION = False
 try:
@@ -960,7 +961,8 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
-    def test_compilation_context(self):
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    def test_compilation_context(self, counter):
         def f(x):
             return x.sin().sin()
         count = []
@@ -975,7 +977,7 @@ def forward(self, primals_1, primals_2):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -983,6 +985,56 @@ def forward(self, primals_1, primals_2):
 
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_dupe(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        fxy = aot_module_simplified(F(), (x, y), nop)
+        fxy(x, y)
+        fxy(x, x)  # is ok!
+
+        fxx = aot_module_simplified(F(), (x, x), nop)
+        fxx(x, x)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_requires_grad(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        fxy = aot_module_simplified(F(), (x, y), nop)
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        fxz = aot_module_simplified(F(), (x, z), nop)
+        compare(F(), fxz, (x, z))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
     def test_resize_input(self):
         def f(x, y):
@@ -1494,14 +1546,51 @@ class TestAOTModuleSimplified(AOTTestCase):
         ref = mod(*inputs)
         ref[0].sum().backward()
 
-        aot_mod = aot_module_simplified(mod, nop)
-        aot_mod.zero_grad()
-        res = aot_mod(*cloned_inputs)
+        compiled_f = aot_module_simplified(mod, cloned_inputs, nop)
+        mod.zero_grad()
+        res = compiled_f(*cloned_inputs)
         res[0].sum().backward()
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    def test_aot_module_simplified_dynamic(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        mod = MockModule()
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+
+        inputs = [x, y]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        ref = mod(*inputs)
+        ref[0].sum().backward()
+
+        cloned_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+        res = compiled_f(*cloned_inputs)
+        res[0].sum().backward()
+
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(s1, 20)
+ - Eq(s2, 30)""")
+
+        assert torch.allclose(ref[0], res[0])
+        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
+        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
@@ -1534,13 +1623,77 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
-
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
-        res = aot_mod(*inputs)
+
+        compiled_f = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
+        res = compiled_f(*inputs)
         res[0].sum().backward()
+
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.y = y
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z + self.y
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_y = fake_mode.from_tensor(real_y)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        # This test uses tracing to lift the fake_y into a constant buffer,
+        # so we have a contrived trace example.
+        # For a traceless example closer to how dynamo would call us, see
+        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
+        graph = tracer.trace(MockModule(fake_y))
+        mod_fake = torch.fx.GraphModule(tracer.root, graph)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
+            """Unexpected fake buffer y"""
+        )
+        # Counterfactual to ensure that the raise is only due to real vs fake
+        # Run the same exact thing except with a real buffer.
+        graph = tracer.trace(MockModule(real_y))
+        mod_real = torch.fx.GraphModule(tracer.root, graph)
+        aot_module_simplified(MockModule(real_y), (real_x,), nop)
+
+    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear.bias = torch.nn.Parameter(torch.ones(4))
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
+            """Unexpected fake param linear.weight"""
+        )
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

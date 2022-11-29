@@ -59,6 +59,7 @@ class GuardSource(enum.Enum):
     LOCAL_NN_MODULE = 2
     GLOBAL_NN_MODULE = 3
     CONSTANT = 4
+    RANDOM_VALUE = 5
 
     def select(self, locals_, globals_):
         if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
@@ -804,7 +805,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
 
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
-):
+) -> None:
     """
     called whenever a guard fails.
     """
