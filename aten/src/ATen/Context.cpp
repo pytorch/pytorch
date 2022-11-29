@@ -296,23 +296,21 @@ bool Context::hasLAPACK() {
 
 at::QEngine Context::qEngine() const {
   static auto _quantized_engine = []() {
-    c10::optional<at::QEngine> qengine = c10::nullopt;
-#ifdef C10_MOBILE
-    _quantized_engine = at::kNoQEngine;
-#endif // C10_MOBILE
+    at::QEngine> qengine = at::kNoQEngine;
 #ifdef USE_PYTORCH_QNNPACK
-    _quantized_engine = at::kQNNPACK;
+    qengine = at::kQNNPACK;
 #endif // USE_PYTORCH_QNNPACK
 
 #if AT_MKLDNN_ENABLED()
-    _quantized_engine = at::kONEDNN;
+    qengine = at::kONEDNN;
 #endif
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      _quantized_engine = at::kFBGEMM;
+      qengine = at::kFBGEMM;
     }
 #endif
+    return qengine;
   }();
   return quantized_engine.value_or(_quantized_engine);
 }
