@@ -23,13 +23,13 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
+from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -120,6 +120,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
+    "dm_nfnet_f0",  # accuracy
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
@@ -877,7 +878,14 @@ class BenchmarkRunner:
             # Since we are not running a long iteration, default value of
             # init_scale 65536 is going to turn all gradients to inf. Therefore,
             # we just use a init_scale of 2.0 for benchmarking purpose.
-            self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+
+            # Disabling Gradscaler because
+            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+            #  2) Current setup shares grad_scaler for eager and dynamo model,
+            #  which is bad as Gradscaler has state and can adjust the scaling
+            #  factor between eager and dynamo run, making accuracy check
+            #  harder.
+            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
