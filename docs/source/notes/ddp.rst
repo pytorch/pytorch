@@ -205,7 +205,6 @@ DistributedDataParallel
     :alt: ddp_code.png
     :width: 400 px
 
-.. _torchdynamo-ddpoptimizer:
 
 TorchDynamo DDPOptimizer
 ------------------------
