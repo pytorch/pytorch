@@ -1308,8 +1308,8 @@ Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
       self.sparse_dim() == 2,
-      "Only 2D tensors can be converted to the SparseCsr layout but got shape: ",
-      self.sizes());
+      "Only tensors with two sparse dimensions can be converted to the SparseCsr layout, got self with ",
+      self.sparse_dim(), " sparse dimensions.");
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
@@ -1328,8 +1328,8 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
 Tensor coo_to_sparse_csc(const Tensor& self) {
   TORCH_CHECK(
       self.sparse_dim() == 2,
-      "Only 2D tensors can be converted to the SparseCsc layout but got shape: ",
-      self.sizes());
+      "Only tensors with two sparse dimensions can be converted to the SparseCsc layout, got self with ",
+      self.sparse_dim(), " sparse dimensions.");
   auto coalesced_self = self.transpose(0, 1).coalesce().to_sparse_csr();
   return at::native::_sparse_csc_tensor_unsafe(
       coalesced_self.crow_indices(),
@@ -1759,7 +1759,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
-  if (self.layout() == layout_) {
+  if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
     return self;
   }
   switch (layout_) {

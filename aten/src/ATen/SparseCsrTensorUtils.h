@@ -295,17 +295,7 @@ inline Layout flip_compressed_layout(Layout layout) {
 }
 
 inline DimVector getBlockSize(Tensor const& self) {
-  int64_t n_batch;
-  switch (self.layout()) {
-    case kSparseBsr:
-      n_batch = self.crow_indices().dim() - 1;
-      break;
-    case kSparseBsc:
-      n_batch = self.ccol_indices().dim() - 1;
-      break;
-    default:
-      return {};
-  }
+  int64_t n_batch = numBatchDimensions(self);
   Tensor values = self.values();
   return {
       std::max<int64_t>(1, values.size(n_batch + 1)),
