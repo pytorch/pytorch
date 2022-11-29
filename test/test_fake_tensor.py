@@ -142,12 +142,12 @@ class FakeTensorTest(TestCase):
         out = fn()
         with torch._subclasses.FakeTensorMode():
             out_fake = fn()
-        
+
         for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
             if not isinstance(a, FakeTensor):
                 self.assertTrue(not isinstance(b, FakeTensor))
                 continue
-            
+
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
