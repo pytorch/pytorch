@@ -306,13 +306,13 @@ def _isint(x):
     else:
         return isinstance(x, int)
 
-def _warn_typed_storage_removal():
+def _warn_typed_storage_removal(stacklevel=1):
     message = (
         "TypedStorage is deprecated. It will be removed in the future and "
         "UntypedStorage will be the only storage class. This should only matter "
         "to you if you are using storages directly."
     )
-    warnings.warn(message, UserWarning)
+    warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
 
 class TypedStorage:
     is_sparse = False
