@@ -55,7 +55,7 @@ void LayerNormKernelImplInternal(
       T* Y_ptr = Y_data + i * N;
       T mean_val;
       T rstd_val;
-      std::tie(mean_val, rstd_val) = utils::RowwiseMoments(X_ptr, N);
+      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, N);
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T_ACC scale = rstd_val;
       const T_ACC bias = -rstd_val * mean_val;
