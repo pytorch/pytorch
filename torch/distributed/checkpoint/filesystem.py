@@ -57,7 +57,7 @@ class _StoragePrefix:
     prefix: str
 
 
-DEFAULT_SUFIX = ".distcp"
+DEFAULT_SUFFIX = ".distcp"
 
 
 def _trim(tensor: torch.Tensor) -> torch.Tensor:
