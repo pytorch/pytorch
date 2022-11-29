@@ -26,8 +26,6 @@ from . import config, cuda_properties, exc
 
 from torch.hub import tqdm
 
-from time import sleep
-
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
@@ -607,7 +605,6 @@ class AsyncCompile:
     def wait(self, scope: Dict[str, Any]):
         if config.compile_threads > 1:
             for key, result in (pbar := tqdm(scope.items(), desc="Inductor Compilation", disable=config.disable_progress)):
-                sleep(1)
                 if config.verbose_progress:
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):

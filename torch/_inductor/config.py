@@ -5,10 +5,10 @@ import sys
 debug = False
 
 # Whether to disable a progress bar for autotuning
-disable_progress = False
+disable_progress = True
 
 # Whether to enable printing the source code for each future
-verbose_progress = True
+verbose_progress = False
 
 # dead code elimination
 dce = False
