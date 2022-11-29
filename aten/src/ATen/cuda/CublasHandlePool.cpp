@@ -42,8 +42,7 @@ void clearCublasWorkspaces() {
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
   /* :4096:2:16:8 default, 32MiB for Hopper */
-  int device;
-  cudaDeviceProp* properties = at::cuda::getDeviceProperties(cudaGetDevice(&device));
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = properties->major == 9 && properties->minor == 0;
   const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 
