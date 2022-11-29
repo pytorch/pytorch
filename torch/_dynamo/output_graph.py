@@ -529,7 +529,10 @@ class OutputGraph(fx.Tracer):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
-            compiled_fn = compiler_fn(gm, self.fake_example_inputs())
+            if config.repro_level == 4:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            else:
+                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:

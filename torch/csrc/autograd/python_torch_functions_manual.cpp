@@ -1,6 +1,9 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -15,12 +18,8 @@
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/functions/basic_ops.h>
-#include <torch/csrc/autograd/functions/utils.h>
- 
 
-#include <ATen/ATen.h>
+include <ATen/ATen.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
 #include <Python.h>
@@ -403,6 +402,8 @@ static PyObject* THPVariable_numel(
     PyObject* args,
     PyObject* kwargs);
 
+int num = 0;
+
 static PyObject* THPVariable__to_functional_tensor(
     PyObject* self,
     PyObject* args,
@@ -425,9 +426,20 @@ static PyObject* THPVariable__to_functional_tensor(
     if (inner_autograd_meta) {
       wrapped.set_requires_grad(self_.requires_grad());
       if (wrapped.requires_grad()) {
-        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(new torch::autograd::Error("Some message"), torch::autograd::deleteNode);
+        // std::stringstream ss;
+        // ss << self;
+        // ss << " | ";
+        // ss << wrapped;
+        // ss << " | ";
+        // ss << num;
+        // ss <<" | ";
+        // ss << args;
+        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(n
+            ew torch::autograd::Error("Some message"), 
+            orch::autograd::deleteNode);
         torch::autograd::set_history(wrapped, new_grad_fn);
       }
+      num = num + 1;
     }
   }
   return wrap(wrapped);
@@ -835,3 +847,4 @@ void initTorchFunctions(PyObject* module) {
 
 } // namespace autograd
 } // namespace torch
+ 
