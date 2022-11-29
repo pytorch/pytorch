@@ -332,6 +332,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // We have no intention to change the behavior of Undefined,
   // so this nested-tensor branch requires `dispatch_key != DispatchKey::Undefined`
   // to let the original CompositeImplicitAutograd handle Undefined
+  // See Note: [Disjoint AliasKeyset] The order for this alias key doesn't matter
   if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
     if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
       return {*nested_registration, "nested kernel"};
@@ -357,6 +358,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 2.5. For batched backend keys, use kernel from DispatchKey::CompositeImplicitBatched if available
+  // See Note: [Disjoint AliasKeyset] The order for this alias key doesn't matter
   if (isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitBatched)) {
     if (auto batched_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitBatched)) {
       return {*batched_registration, "batched kernel"};

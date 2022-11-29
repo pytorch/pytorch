@@ -444,8 +444,12 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+
+  // Note: [Disjoint Alias Keyset] Is joint from all the other alias keys
+  // and so precedence order doesn't matter
   CompositeImplicitBatched, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitBatched.cpp
+  // Note: [Disjoint Alias Keyset]
   CompositeImplicitAutogradNestedTensor, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at
