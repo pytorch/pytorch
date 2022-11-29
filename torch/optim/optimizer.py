@@ -10,7 +10,7 @@ from typing import Callable, Dict
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
 
-__all__ = ['Optimizer']
+__all__ = ['Optimizer', 'register_optimizer_step_post_hook', 'register_optimizer_step_pre_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
 
@@ -193,13 +193,17 @@ class Optimizer(object):
             self.__class__.step.hooked = True
 
     def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
-        r"""Register an optimizer step pre hook which will be called before optimizer step.
-        It should have the following signature::
-            hook(optimizer, args, kwargs) -> Optional[Tuple[2]]
+        r"""Register an optimizer step pre hook which will be called before
+        optimizer step. It should have the following signature::
 
-        The ``optimizer`` argument is the optimizer instance being used. If args and kwargs
-        are modified by the pre-hook, then the transformed values are returned as a tuple
-        containing the new_args and new_kwargs.
+            hook(optimizer, args, kwargs) -> None or modified args and kwargs
+
+        The ``optimizer`` argument is the optimizer instance being used. If
+        args and kwargs are modified by the pre-hook, then the transformed
+        values are returned as a tuple containing the new_args and new_kwargs.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:
@@ -213,9 +217,13 @@ class Optimizer(object):
     def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
         It should have the following signature::
+
             hook(optimizer, args, kwargs) -> None
 
         The ``optimizer`` argument is the optimizer instance being used.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
 
         Returns:
             :class:`torch.utils.hooks.RemoveableHandle`:

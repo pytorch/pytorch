@@ -1,3 +1,5 @@
+# Owner(s): ["module: optimizer"]
+
 from typing import Any, Dict, Tuple
 import torch
 from torch.optim import Optimizer, SGD
