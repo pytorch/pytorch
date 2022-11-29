@@ -720,19 +720,16 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
-        try:
+        x = torch.randn(1).as_subclass(TensorProxy)
+        cnt = torch._dynamo.testing.CompileCounter()
+        out1 = foo(x)
+        opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+        out2 = opt_foo(x)
 
-            x = torch.randn(1).as_subclass(TensorProxy)
-            cnt = torch._dynamo.testing.CompileCounter()
-            out1 = foo(x)
-            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
-            out2 = opt_foo(x)
+        self.assertEqual(cnt.op_count, 4)
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-            self.assertEqual(cnt.op_count, 4)
-            self.assertTrue(torch._dynamo.testing.same(out1, out2))
-
-        finally:
-            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
     def test_torch_function_with_closure(self):
         def run():
@@ -759,18 +756,17 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
             torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
-            try:
-                x = torch.randn(1).as_subclass(TensorProxy)
-                x = torch.randn(1)
-                cnt = torch._dynamo.testing.CompileCounter()
-                out1 = foo(x)
-                opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
-                out2 = opt_foo(x)
+            x = torch.randn(1).as_subclass(TensorProxy)
+            x = torch.randn(1)
+            cnt = torch._dynamo.testing.CompileCounter()
+            out1 = foo(x)
+            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            out2 = opt_foo(x)
 
-                self.assertEqual(cnt.op_count, 4)
-                self.assertTrue(torch._dynamo.testing.same(out1, out2))
-            finally:
-                torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+            self.assertEqual(cnt.op_count, 4)
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
+
+            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
 

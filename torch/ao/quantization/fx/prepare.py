@@ -407,8 +407,9 @@ def get_target_activation_dtype_for_node(
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
-                act_dtype, weight_dtype, input_act_is_dynamic = \
+                act_dtype, weight_dtype, act_compute_dtype = \
                     get_qconfig_dtypes(qconfig)
+                input_act_is_dynamic = act_compute_dtype is not None
 
                 # Currently `QConfig` only has one `activation` field.
                 # For static quantization, it is reused for both input
@@ -418,13 +419,13 @@ def get_target_activation_dtype_for_node(
                 # In the future this may change as we add more fields
                 # to the `QConfig` object.
                 output_act_dtype = act_dtype \
-                    if (not input_act_is_dynamic) else torch.float
+                    if input_act_is_dynamic is not True else torch.float
 
                 bias_dtype = torch.float16 \
                     if (
                         act_dtype == torch.float16
                         and weight_dtype == torch.float16
-                        and (not input_act_is_dynamic)
+                        and act_compute_dtype is None
                     ) else torch.float
                 return {
                     "input_activation_dtype": (act_dtype, input_act_is_dynamic),

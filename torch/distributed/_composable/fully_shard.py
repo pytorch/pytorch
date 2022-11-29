@@ -17,7 +17,6 @@ from torch.distributed.fsdp._init_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
-    _register_root_pre_forward_hook,
 )
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -31,11 +30,10 @@ from torch.distributed.fsdp.wrap import _FSDPPolicy
 @contract
 def fully_shard(
     module: nn.Module,
-    *,
     process_group: Optional[dist.ProcessGroup] = None,
-    policy: Optional[_FSDPPolicy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
+    policy: Optional[_FSDPPolicy] = None,
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     device_id: Optional[Union[int, torch.device]] = None,
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
@@ -79,5 +77,4 @@ def fully_shard(
     modules = list(module.modules())
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
-    _register_root_pre_forward_hook(state, module)  # prepend last
     return module

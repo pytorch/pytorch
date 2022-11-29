@@ -4,9 +4,6 @@ import logging
 import operator
 import random
 import weakref
-from typing import Optional
-
-import numpy
 
 import torch
 import torch.nn as nn
@@ -84,8 +81,7 @@ class ConvUnary2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        unary: Optional[nn.Module],
-        input_size: list,
+        unary: nn.Module,
     ):
         super(ConvUnary2d, self).__init__(
             conv.in_channels,
@@ -100,27 +96,12 @@ class ConvUnary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, unary, input_size)
+        self._update_module_params(conv, unary)
 
-    def _update_module_params(self, conv, unary, input_size):
+    def _update_module_params(self, conv, unary):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = "none"
-        self.scalars = []
-        self.algorithm = ""
-        if unary is not None:
-            self.attr, self.scalars, self.algorithm = unary_modules_map[
-                unary.__class__
-            ](unary)
-        self.weight = torch.nn.Parameter(
-            torch._C._nn.mkldnn_reorder_conv2d_weight(
-                self.weight.to_mkldnn(),
-                self.padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                input_size,
-            ),
-            requires_grad=self.weight.requires_grad,
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
         )
 
     def _conv_forward(self, input, weight, bias):
@@ -161,7 +142,6 @@ class ConvBinary2d(nn.Conv2d):
         self,
         conv: nn.Module,
         binary_op_name: str,
-        input_size: list,
     ):
         super(ConvBinary2d, self).__init__(
             conv.in_channels,
@@ -176,26 +156,15 @@ class ConvBinary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, binary_op_name, input_size)
+        self._update_module_params(conv, binary_op_name)
 
-    def _update_module_params(self, conv, binary_op_name, input_size):
+    def _update_module_params(self, conv, binary_op_name):
         self.__dict__ = copy.deepcopy(conv.__dict__)
         self.binary_attr = binary_op_name
         self.binary_alpha = None
         self.unary_attr = None
         self.unary_scalars = []
         self.unary_algorithm = None
-        self.weight = torch.nn.Parameter(
-            torch._C._nn.mkldnn_reorder_conv2d_weight(
-                self.weight.to_mkldnn(),
-                self.padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                input_size,
-            ),
-            requires_grad=self.weight.requires_grad,
-        )
 
     def _update_unary_params(self, unary):
         self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
@@ -246,7 +215,6 @@ class ConvBinaryInplace2d(nn.Conv2d):
         self,
         conv: nn.Module,
         binary_op_name: str,
-        input_size: list,
     ):
         super(ConvBinaryInplace2d, self).__init__(
             conv.in_channels,
@@ -261,26 +229,15 @@ class ConvBinaryInplace2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, binary_op_name, input_size)
+        self._update_module_params(conv, binary_op_name)
 
-    def _update_module_params(self, conv, binary_op_name, input_size):
+    def _update_module_params(self, conv, binary_op_name):
         self.__dict__ = copy.deepcopy(conv.__dict__)
         self.binary_attr = binary_op_name
         self.binary_alpha = None
         self.unary_attr = None
         self.unary_scalars = []
         self.unary_algorithm = None
-        self.weight = torch.nn.Parameter(
-            torch._C._nn.mkldnn_reorder_conv2d_weight(
-                self.weight.to_mkldnn(),
-                self.padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                input_size,
-            ),
-            requires_grad=self.weight.requires_grad,
-        )
 
     def _update_unary_params(self, unary):
         self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
@@ -324,34 +281,6 @@ class ConvBinaryInplace2d(nn.Conv2d):
 
     def forward(self, input, other):
         return self._conv_forward(input, other, self.weight, self.bias)
-
-
-class PackedLinear(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
-        super(PackedLinear, self).__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, input_size)
-
-    def _update_module_params(self, linear, input_size):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(numpy.prod(input_size) / input_size[-1])
-        self.packed_weight = torch.nn.Parameter(
-            torch.ops.mkl._mkl_reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
-            ),
-            requires_grad=self.weight.requires_grad,
-        )
-
-    def forward(self, input):
-        y = torch.ops.mkl._mkl_linear(
-            input, self.packed_weight, self.weight, self.bias, self.batch_size
-        )
-        return y
 
 
 class LinearUnary(nn.Linear):
@@ -405,47 +334,31 @@ class LinearBinary(nn.Linear):
         return y
 
 
-def packed_conv_eval(conv: nn.Module, input_size: list):
-    assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
-        conv,
-        None,
-        input_size,
-    )
-
-
-def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: list):
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
         unary,
-        input_size,
     )
 
 
-def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: list):
+def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
         binary_op_name,
-        input_size,
     )
 
 
-def fused_conv_binary_inplace_eval(
-    conv: nn.Module, binary_op_name: str, input_size: list
-):
+def fused_conv_binary_inplace_eval(conv: nn.Module, binary_op_name: str):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinaryInplace2d(
         conv,
         binary_op_name,
-        input_size,
     )
 
 
-def fused_conv_binary_unary_eval(
-    conv_binary: nn.Module, unary: nn.Module, input_size: list
-):
+def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module):
     assert not (conv_binary.training), "Fusion only for eval!"
     # reuse origin conv module, and just update its' unary attr.
     conv_binary._update_unary_params(unary)
@@ -458,12 +371,7 @@ def is_bfloat16_module(m):
     return weight_is_bf16 and bias_is_bf16
 
 
-def packed_linear_eval(linear: nn.Module, input_size: list):
-    assert not (linear.training), "Fusion only for eval!"
-    return PackedLinear(linear, input_size)
-
-
-def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
+def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module):
     assert not (linear.training), "Fusion only for eval!"
     return LinearUnary(
         linear,
@@ -471,7 +379,7 @@ def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: lis
     )
 
 
-def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
+def fused_linear_binary_eval(linear: nn.Module, attr: str):
     assert not (linear.training), "Fusion only for eval!"
     linear_binary = LinearBinary(
         linear,
@@ -555,7 +463,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
-    gm = pack_module(gm)
+
     return gm
 
 
@@ -619,12 +527,7 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     computation_node
                 ):
                     continue
-                computation_node_input_size = (
-                    node.args[0].args[0].meta.get("tensor_meta").shape
-                )
-                fused_module = fuse_func(
-                    computation_node, unary_node, computation_node_input_size
-                )
+                fused_module = fuse_func(computation_node, unary_node)
                 replace_node_module(node.args[0], modules, fused_module)
 
                 node.replace_all_uses_with(node.args[0])
@@ -835,10 +738,7 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
 def replace_and_fuse_for_binary(
     computation_node, node, fuse_func, attr, modules, index_node, index_pointwise
 ):
-    computation_node_input_size = (
-        node.args[index_node].args[0].meta.get("tensor_meta").shape
-    )
-    fused_module = fuse_func(computation_node, attr, computation_node_input_size)
+    fused_module = fuse_func(computation_node, attr)
     replace_node_module(node.args[index_node], modules, fused_module)
     node.args[index_node].args = node.args[index_node].args + (
         node.args[index_pointwise],
@@ -951,33 +851,6 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     gm.graph.lint()
                     break
 
-    gm.recompile()
-    return gm
-
-
-def pack_module(gm: torch.fx.GraphModule):
-    modules = dict(gm.named_modules())
-    for node in gm.graph.nodes:
-        if node.op == "call_module":
-            assert isinstance(node.target, str)
-            cur_module = modules[node.target]
-            if type(cur_module) in computation_op_packed_map:
-                computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                if computation_node_input_meta.dtype != torch.float32:
-                    continue
-                if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
-                    continue
-                computation_node_input_size = computation_node_input_meta.shape
-                if type(cur_module) in [nn.Conv2d] and isinstance(
-                    cur_module.padding, str
-                ):
-                    continue
-                new_module = computation_op_packed_map[type(cur_module)](
-                    cur_module, computation_node_input_size
-                )
-                assert isinstance(new_module, nn.Module)
-                replace_node_module(node, modules, new_module)
-                gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -1106,8 +979,8 @@ replacements_using_triton_random = {lowmem_dropout, rand_like}
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
-    ConvBinary2d: fused_conv_binary_unary_eval,
-    ConvBinaryInplace2d: fused_conv_binary_unary_eval,
+    ConvBinary2d: fused_binary_unary_eval,
+    ConvBinaryInplace2d: fused_binary_unary_eval,
 }
 
 
@@ -1147,13 +1020,6 @@ computation_op_binary_op_fusion_map = {
 computation_op_binary_op_fusion_inplace_map = {
     nn.Conv2d: fused_conv_binary_inplace_eval,
 }
-
-
-computation_op_packed_map = {
-    nn.Linear: packed_linear_eval,
-    nn.Conv2d: packed_conv_eval,
-}
-
 
 # For add: we support conv/linear + other and other + conv
 # For sub/add_/sub_, we only support conv/linear - other

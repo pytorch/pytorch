@@ -148,8 +148,7 @@ struct C10_API Device final {
 
   /// Return true if the device supports arbirtary strides.
   bool supports_as_strided() const noexcept {
-    return type_ != DeviceType::IPU && type_ != DeviceType::XLA &&
-        type_ != DeviceType::Lazy;
+    return type_ != DeviceType::XLA && type_ != DeviceType::Lazy;
   }
 
   /// Same string as returned from operator<<.

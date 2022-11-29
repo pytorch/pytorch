@@ -175,9 +175,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-Tensor layer_norm_symint(
+Tensor layer_norm(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -186,7 +186,8 @@ Tensor layer_norm_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+
+  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);

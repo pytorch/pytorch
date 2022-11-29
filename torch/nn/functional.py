@@ -1955,6 +1955,7 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
+    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1965,6 +1966,7 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
+    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
@@ -2762,7 +2764,7 @@ def poisson_nll_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
-        raise ValueError(reduction + " is not a valid value for reduction")
+        raise ValueError(reduction + " is not valid")
 
     ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
