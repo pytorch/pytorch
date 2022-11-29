@@ -625,7 +625,13 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
+    def norm(
+        self,
+        p: Optional[Union[float, str]] = "fro",
+        dim=None,
+        keepdim=False,
+        dtype=None,
+    ):
         r"""See :func:`torch.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
