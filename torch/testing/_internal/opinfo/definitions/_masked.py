@@ -465,9 +465,7 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
-            # integer overflow
             DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestReductions",
                 "test_ref_small_input",
                 dtypes=(torch.int8, torch.int16, torch.int32),
