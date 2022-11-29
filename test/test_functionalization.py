@@ -1283,7 +1283,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return view_copy_5
     """)  # noqa: B950
 
-            reinplaced_logs = self.get_logs(f, [torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size)], reapply_views=True, run_reinplace=True)
+            reinplaced_logs = self.get_logs(
+                f, [torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size)],
+                reapply_views=True, run_reinplace=True
+            )
             self.assertExpectedInline(reinplaced_logs, """\
 
 
