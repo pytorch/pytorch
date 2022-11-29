@@ -469,7 +469,7 @@ void IndexCompute::handle(Merge* merge) {
     // Don't propagate to inner id if it's comprised of only broadcast root
     // domains, unless outer is also all broadcast domains. Index shouldn't be
     // anything but zero if both inner and outer are all broadcast domains, but
-    // didn't add a hard check for this. See FusionAdvancedIndexing5_CUDA
+    // didn't add a hard check for this. See Indexing5 test.
     if (!inner_id->isBroadcast() && !outer_id->isBroadcast()) {
       // If neither dimension is a broadcast (should be true for reference
       // indexing) pick the preferred path or the inner path.

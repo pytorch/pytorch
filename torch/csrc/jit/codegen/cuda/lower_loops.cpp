@@ -152,7 +152,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   TORCH_INTERNAL_ASSERT(lowered_exprs_.empty());
 
   // Figure out loop structure of each expression. This can be a bit convoluted,
-  // for an example why see FusionAdvancedLowering6
+  // for an example why see Indexing17 test
 
   // Grab iteration domain dependencies, similar to the logic in
   // lower_expr_sort, EXCEPT dependencies are in opposite order,

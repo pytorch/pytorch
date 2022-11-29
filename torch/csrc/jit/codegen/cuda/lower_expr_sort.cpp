@@ -326,7 +326,7 @@ class ExprSegmentationSorter {
   // can segmenet all combinations we haven't previously looked at.
   bool fallback_mode_enabled_ = false;
 
-  // We need to track ID resolution, see AdvancedLowering6. For loops need
+  // We need to track ID resolution, see Indexing17 test. For loops need
   // to be resolved from inner most to outer most. We therefore track
   // loop dependencies where inner most loops need to be fully resolved before
   // we can resolve the next outer loop. We track this by looking at all tensor
