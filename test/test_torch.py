@@ -8478,6 +8478,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
+    def test_no_cuda_monkeypatch(self):
+        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
+        # is not available.
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+            torch.cuda.Stream()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+            torch.cuda.Event()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+            torch.cuda.graphs.CUDAGraph()
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
