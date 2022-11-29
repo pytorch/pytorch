@@ -1,12 +1,14 @@
 import itertools
 import logging
 import os
-from . import config
 from torch.hub import tqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
 logging.addLevelName(logging.CODE, "CODE")
+
+# Disable progress bar by default, not in dynamo config because otherwise get a circular import
+disable_progress = True
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
@@ -84,7 +86,7 @@ _step_counter = itertools.count(1)
 # This is very inductor centric
 # _inductor.utils.has_triton() gives a circular import error here
 
-if not config.disable_progress:
+if not disable_progress:
     try:
         import triton
 
@@ -95,7 +97,7 @@ if not config.disable_progress:
 
 
 def get_step_logger(logger):
-    if not config.disable_progress:
+    if not disable_progress:
         pbar.set_postfix_str(f"{logger.name}")
         pbar.update(1)
     step = next(_step_counter)

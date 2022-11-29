@@ -33,9 +33,6 @@ log_file_name = None
 # Verbose will print full stack traces on warnings and errors
 verbose = False
 
-# Whether to enable a macro level progress bar tracking state for dynamo, AOT and a backend
-disable_progress = True
-
 # verify the correctness of optimized backend
 verify_correctness = False
 
