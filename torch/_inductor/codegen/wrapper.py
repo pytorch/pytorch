@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import hashlib
@@ -452,7 +453,16 @@ class WrapperCodeGen(CodeGen):
         result.splice(self.header)
 
         out_names = V.graph.get_output_names()
-        with self.wrapper_call.indent():
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self.wrapper_call.indent())
+            if config.profiler_mark_wrapper_call:
+                self.wrapper_call.writeline(
+                    "from torch.profiler import record_function"
+                )
+                self.wrapper_call.writeline(
+                    "with record_function('inductor_wrapper_call'):"
+                )
+                stack.enter_context(self.wrapper_call.indent())
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
