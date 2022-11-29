@@ -562,7 +562,7 @@ class AsyncCompile:
         if hasattr(pool, "_start_queue_management_thread"):
             pool._start_queue_management_thread()
         else:
-            for i in tqdm(config.compile_threads, disable=config.disable_progress):
+            for _ in range(config.compile_threads):
                 pool._adjust_process_count()
             pool._start_executor_manager_thread()
         _compile_end()
@@ -604,7 +604,7 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]):
         if config.compile_threads > 1:
-            for key, result in list(scope.items()):
+            for key, result in tqdm(list(scope.items()), desc="Inductor Compilation Progress", disable=config.disable_progress):
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
 
