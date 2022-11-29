@@ -32,10 +32,10 @@ from functorch import (
     jvp, make_functional, make_functional_with_buffers,
     combine_state_for_ensemble, make_fx
 )
-from torch._functorch.make_functional import (
+from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
+from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
