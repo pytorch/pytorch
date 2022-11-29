@@ -39,7 +39,7 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
-        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None)
+        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None, False)
 
     def _get_transformer(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
