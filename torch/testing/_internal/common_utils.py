@@ -937,8 +937,6 @@ TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WIT
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
-    import logging
-    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
     # TODO: Remove this; this is grandfathered in because we suppressed errors
@@ -2626,18 +2624,30 @@ class TestCase(expecttest.TestCase):
             return r
 
         if patterns is None:
-            # A pattern is a 3-tuple with items:
-            # - a deep list of integers that define the sparsity
-            #   patterns of the generated inputs: zero values
-            #   correspond to unspecified elements/blocks and non-zero
-            #   values the specified elements while elements with the
-            #   same value belong to the same block in some cases.
-            #   The batch inputs are generated if the depth of list is
-            #   larger than two.
-            # - a list of block sizes, only used in the case of
-            #   BSR/BSC layouts
-            # - a list of dense dimensions, used to generate hybrid
-            #   tensors
+            # A pattern is a 3-tuple with the following items:
+            #
+            # - a list of integers with the depth of two or more. The
+            #   integers define the sparsity patterns of the generated
+            #   inputs: zero values correspond to unspecified
+            #   elements/blocks, and non-zero values to the specified
+            #   elements.
+            #
+            #   For debugging convenience, the first option in the
+            #   list of block sizes (see below), the elements with the
+            #   same value belong to the same block. However, it is
+            #   not a hard requirement: as long as the shape of a
+            #   pattern divides with block sizes, the pattern will be
+            #   a valid one.
+            #
+            #   If the depth of the list is larger than two, inputs
+            #   with batch dimensions will be generated.
+            #
+            # - a list of 2-tuples of block sizes, used to generate
+            #   BSR/BSC tensors with various block size parameters
+            #
+            # - a list of tuples of dense dimensions, used to generate
+            #   hybrid tensors with various dense dimensions
+            #
             patterns = [
                 # a simple 3 x 2 tensor: non-hybrid, hybrid with 1 and 2 dense dimensions
                 ([[1, 2, 0],
