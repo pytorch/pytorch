@@ -499,8 +499,8 @@ class WrapperCodeGen(CodeGen):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
-                f"{V.graph.sizevars.codegen_python_shape_tuple(shape)}, "
-                f"{V.graph.sizevars.codegen_python_shape_tuple(stride)}, "
+                f"{V.graph.sizevars.codegen_benchmark_shape_tuple(shape)}, "
+                f"{V.graph.sizevars.codegen_benchmark_shape_tuple(stride)}, "
                 f"device='{device.type}', dtype={dtype})"
             )
 
