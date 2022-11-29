@@ -347,8 +347,9 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        V.kernel.mutations.add(input_node.get_name())
-                        V.kernel.mutations.add(self.get_name())
+                        if hasattr(V.kernel, "mutations"):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
