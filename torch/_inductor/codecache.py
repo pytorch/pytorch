@@ -604,7 +604,7 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]):
         if config.compile_threads > 1:
-            for key, result in tqdm(list(scope.items()), desc="Inductor Compilation Progress", disable=config.disable_progress):
+            for key, result in tqdm(list(scope.items()), desc="Inductor Compilation", disable=config.disable_progress):
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
 
