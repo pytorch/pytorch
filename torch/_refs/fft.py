@@ -115,7 +115,7 @@ def _fft_c2r(
 ) -> TensorLikeType:
     """Common code for performing any complex to real FFT (irfft or hfft)"""
     input = _maybe_promote_tensor_fft(input, require_complex=True)
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
     check(last_dim_size >= 1, lambda: f"Invalid number of data points ({n}) specified")
 
@@ -144,7 +144,7 @@ def _fft_r2c(
         lambda: f"{func_name} expects a floating point input tensor, but got {input.dtype}",
     )
     input = _maybe_promote_tensor_fft(input)
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
@@ -167,7 +167,7 @@ def _fft_c2c(
         input.dtype.is_complex,
         lambda: f"{func_name} expects a complex input tensor, but got {input.dtype}",
     )
-    dims = (utils.canonicalize_dim(input.ndim, dim),)
+    dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
@@ -263,7 +263,7 @@ def _canonicalize_fft_shape_and_dim_args(
     if dim is not None:
         if not isinstance(dim, Sequence):
             dim = (dim,)
-        ret_dims = utils.canonicalize_dims(input_dim, dim)
+        ret_dims = utils.canonicalize_dims(input_dim, dim, wrap_scalar=False)
 
         # Check dims are unique
         check(len(set(dim)) == len(dim), lambda: "FFT dims must be unique")
