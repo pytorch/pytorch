@@ -2418,6 +2418,10 @@ class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         self._test_allreduce_coalesced(backend="gloo")
 
     @requires_gloo()
+    def test_all_to_all_single(self):
+        self._test_all_to_all_single(backend="gloo")
+
+    @requires_gloo()
     def test_allgather_coalesced(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
