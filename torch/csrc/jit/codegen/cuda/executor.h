@@ -176,10 +176,12 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       bool structured = false,
       CompileOptions options = CompileOptions());
 
-  //! Internal tests only. Runs the compiled CUDA kernel from compileRtc.
-  void runRtc(
+  //! Internal tests only. Runs the compiled CUDA kernel from
+  //! compileRtc. Return the elapsed milliseconds.
+  float runRtc(
       const LaunchParams& launch_params,
-      const std::vector<at::Tensor>& args);
+      const std::vector<at::Tensor>& args,
+      KernelIndexMode index_mode = KernelIndexMode::INT64);
 
   //! Internal knob used for debugging/profiling only
   void disableLaunchParamCache() {

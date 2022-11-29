@@ -1380,16 +1380,26 @@ void FusionExecutor::compileRtc(
       executor_utils::nvrtcCompile(scode, name, fusion_id_);
 }
 
-void FusionExecutor::runRtc(
+float FusionExecutor::runRtc(
     const LaunchParams& launch_params,
-    const std::vector<at::Tensor>& args) {
+    const std::vector<at::Tensor>& args,
+    KernelIndexMode index_mode) {
   FUSER_PERF_SCOPE("runFusion");
 
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  KernelArgumentHolder kernel_arguments(options_.index_mode);
+  cudaEvent_t start_event = {};
+  cudaEvent_t finish_event = {};
+
+  cudaEventCreate(&start_event);
+  cudaEventCreate(&finish_event);
+
+  KernelArgumentHolder kernel_arguments(index_mode);
   kernel_arguments.push(args);
+
+  cudaEventRecord(start_event);
+
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
       compiled_kernel_.function,
       launch_params.gdimx(),
@@ -1402,6 +1412,17 @@ void FusionExecutor::runRtc(
       stream,
       kernel_arguments.getBuffer(),
       nullptr));
+
+  cudaEventRecord(finish_event);
+  cudaEventSynchronize(start_event);
+  cudaEventSynchronize(finish_event);
+
+  float kernel_time_ms = 0;
+  cudaEventElapsedTime(&kernel_time_ms, start_event, finish_event);
+  cudaEventDestroy(start_event);
+  cudaEventDestroy(finish_event);
+
+  return kernel_time_ms;
 }
 
 } // namespace cuda
