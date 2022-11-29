@@ -15,7 +15,7 @@ from torch._C._functorch import (
 # we need to give the illusion that autograd.Function runs before those things.
 #
 # We do this by using creating a custom PyOperator that only functorch
-# dispatching specially.
+# dispatches specially.
 class CustomFunctionPyOperator(PyOperator):
     def __init__(self):
         super().__init__('custom_function_call')
