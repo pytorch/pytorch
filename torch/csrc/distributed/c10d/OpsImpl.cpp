@@ -399,6 +399,17 @@ c10::intrusive_ptr<Work> barrier_cuda(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
+void monitored_barrier_cpu_(
+    at::Tensor /* unused */,
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout,
+    bool wait_all_ranks) {
+  process_group->monitoredBarrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
+      wait_all_ranks);
+}
+
 // register functions to dispatcher
 namespace {
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -529,6 +540,10 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("barrier", barrier_cuda);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("monitored_barrier_", monitored_barrier_cpu_);
 }
 
 } // namespace

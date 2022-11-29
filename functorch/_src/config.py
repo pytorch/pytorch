@@ -14,6 +14,11 @@ use_functionalize = True
 # TODO Benchmark
 use_fake_tensor = False
 
+# Enables optional asserts in hotpath code to check for errors.  If
+# you are seeing weird accuracy problems, try turning this on.
+# For now, to more easily identify bugs, this is turned on by default.
+debug_assert = True
+
 debug_fake_cross_ref = os.environ.get('AOT_FAKE_CROSSREF', False)
 
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
