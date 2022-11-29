@@ -310,7 +310,8 @@ def _warn_typed_storage_removal(stacklevel=1):
     message = (
         "TypedStorage is deprecated. It will be removed in the future and "
         "UntypedStorage will be the only storage class. This should only matter "
-        "to you if you are using storages directly."
+        "to you if you are using storages directly.  To access UntypedStorage "
+        "directly, use tensor._storage() instead of tensor.storage()"
     )
     warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
 
