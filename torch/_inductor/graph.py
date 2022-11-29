@@ -276,7 +276,15 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
-                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+                x,
+                (
+                    TensorBox,
+                    ir.Constant,
+                    type(None),
+                    ir.ConstantBuffer,
+                    sympy.Expr,
+                    int,
+                ),
             )
             for x in result
         ), result
@@ -330,9 +338,14 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        result = ir.ExternKernel.require_stride_order(
-                            result, ir.get_stride_order(n.meta["val"].stride())
-                        )
+                        if user.target in (
+                            torch.ops.aten.convolution.default,
+                            torch.ops.aten.convolution_backward.default,
+                            torch.ops.aten.mm.default,
+                        ):
+                            result = ir.ExternKernel.require_stride_order(
+                                result, ir.get_stride_order(n.meta["val"].stride())
+                            )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()

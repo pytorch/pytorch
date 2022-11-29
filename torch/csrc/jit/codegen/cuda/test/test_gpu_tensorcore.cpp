@@ -2815,6 +2815,9 @@ TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoad_CUDA) {
 
 // Matmul test for Turing MMA: across supported layouts
 TEST_F(NVFuserTest, FusionTuringMatmulLargeLoad_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
 
