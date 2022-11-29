@@ -4,14 +4,13 @@ import math
 import unittest
 import functools
 import itertools
-from typing import Any, Dict, Tuple
 from copy import deepcopy
 
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import Optimizer, SGD
+from torch.optim import SGD
 from torch import sparse
 from torch.optim.lr_scheduler import (
     LambdaLR,
@@ -4288,5 +4287,5 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
