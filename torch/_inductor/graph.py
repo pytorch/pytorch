@@ -40,37 +40,7 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        size = [self.sizevars[i] for i in ex.size()]
-        self.name = "GraphLowering"
-        stride = [None] * len(size)
-        for i, val in enumerate(ex.stride()):
-            if val in (0, 1):
-                stride[i] = Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
-            }
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = sorted(
-                    [
-                        (ex.stride()[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ]
-                )[0]
-                stride[i] = self.sizevars[val]
-                
+        self.name = "GraphLowering"     
         if self.reuse_shape_env:
             size = ex.size()
             stride = ex.stride()
