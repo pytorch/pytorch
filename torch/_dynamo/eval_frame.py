@@ -120,7 +120,7 @@ def enable_dynamic(enable: bool = True):
         yield
         return
     with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
+        "functorch._src.config.use_dynamic_shapes", True
     ):
         yield
 
