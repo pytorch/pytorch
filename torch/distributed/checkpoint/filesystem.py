@@ -190,7 +190,7 @@ class FileSystemWriter(StorageWriter):
 
         def gen_file():
             nonlocal file_count
-            file_name = f"{storage_plan.prefix}{file_count}{DEFAULT_SUFIX}"
+            file_name = f"{storage_plan.prefix}{file_count}{DEFAULT_SUFFIX}"
             file_count += 1
             return file_name
 
