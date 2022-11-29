@@ -286,7 +286,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import pathlib
-        p = pathlib.Path(tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib"))
+        p = pathlib.Path(tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib").name)
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)
         import shutil
