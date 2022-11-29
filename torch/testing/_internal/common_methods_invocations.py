@@ -453,9 +453,8 @@ def sample_inputs_prelu(op_info, device, dtype, requires_grad, **kwargs):
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
             yield SampleInput(make_arg(shape), args=(weight_tensor,))
 
-        if len(shape) >= 2:
-            channel_size = shape[1]
-            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+        channel_size = shape[1] if len(shape) >= 2 else 1
+        yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
     weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
 
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
