@@ -49,7 +49,7 @@ import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
-from functorch._src.make_functional import functional_init_with_buffers
+from torch._functorch.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
 
