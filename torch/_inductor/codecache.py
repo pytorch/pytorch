@@ -53,7 +53,7 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/{getpass.getuser()}/inductor"
     )
 
 
@@ -320,29 +320,25 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    if sys.platform == "linux" and (
-        include_pytorch
-        or vec_isa != invalid_vec_isa
-        or config.cpp.enable_kernel_profile
-    ):
-        # Note - We include pytorch only on linux right now. There is more work
-        # to do to enable OMP build on darwin where PyTorch is built with IOMP
-        # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+    if vec_isa != invalid_vec_isa:
+        macros = f"-D{vec_isa.build_macro()}"
+        # This is needed in OSS, but breaks things in fbcode
+        include_pytorch = include_pytorch or hasattr(torch.version, "git_version")
+    else:
+        macros = ""
+
+    if include_pytorch or config.cpp.enable_kernel_profile:
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = vec_isa.build_macro()
-        if macros:
-            macros = f"-D{macros}"
+        libs = ["torch", "gomp"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
         libs = ["gomp"]
-        macros = ""
+
+    ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -357,6 +353,7 @@ def cpp_compile_command(
             {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -D C10_USING_CUSTOM_GENERATED_MACROS
+            -Wl,-undefined -Wl,dynamic_lookup
             -o{output}
         """,
     ).strip()

@@ -25,6 +25,7 @@ from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -72,6 +73,9 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 
 torch._inductor.config.triton.autotune = False  # too slow
 
+# The default IS_FBCODE env var triggers a bunch of extra logic in the
+# TestCase base class that we don't want
+IS_FBCODE_ALT = IS_FBCODE or os.environ.get("IS_FBCODE_ALT") == "1"
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
@@ -1229,6 +1233,9 @@ class CommonTemplate:
                 ),
             )
 
+    @unittest.skipIf(
+        IS_FBCODE_ALT, "torch.* op returned non-Tensor complex call_function aten.add"
+    )
     def test_both_scalars(self):
         def fn(a, b):
             return (
@@ -1439,6 +1446,9 @@ class CommonTemplate:
             [1, 2],
             [1, 4],
         )
+        if IS_FBCODE_ALT:
+            options = list(options)
+            del options[1:-1]  # avoid timeouts
 
         for (
             dim,
@@ -1503,6 +1513,9 @@ class CommonTemplate:
             ["same", 0],
             test_memory_format,
         )
+        if IS_FBCODE_ALT:
+            options = list(options)
+            del options[1:-1]  # avoid timeouts
 
         for (
             unary_fn,
@@ -1599,6 +1612,9 @@ class CommonTemplate:
             ["same", 0],
             test_memory_format,
         )
+        if IS_FBCODE_ALT:
+            options = list(options)
+            del options[1:-1]  # avoid timeouts
 
         for (
             binary_fn,
@@ -2569,6 +2585,7 @@ class CommonTemplate:
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
 
+        torch.manual_seed(1234)
         self.common(
             fn,
             (torch.randn([16, 16]),),
@@ -4949,6 +4966,7 @@ if HAS_CPU:
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
+        @unittest.skipIf(IS_FBCODE_ALT, "missing sleef.h")
         @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
@@ -4973,6 +4991,7 @@ if HAS_CPU:
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
+        @unittest.skipIf(IS_FBCODE_ALT, "missing sleef.h")
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
             def fn(x1, x2):
