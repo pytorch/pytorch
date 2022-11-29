@@ -583,9 +583,9 @@ class DynamoGuardPrinter(StrPrinter):
         if expr == 1:
             return "1"
         assert (
-            expr in (self.expr_to_tensor_ref)
-            or (expr in self.intermediary_symbols)
-            or (expr in self.base_symbols)
+            expr in self.expr_to_tensor_ref
+            or expr in self.intermediary_symbols
+            or expr in self.base_symbols
         )
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
