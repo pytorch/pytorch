@@ -279,6 +279,9 @@ class TestFSDPCheckpoint(FSDPTest):
         dist.barrier()
 
 
+instantiate_parametrized_tests(TestFSDPCheckpoint)
+
+
 class CheckpointModule(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
         super().__init__()
@@ -300,64 +303,56 @@ class ModelWithCheckpointSubmodule(nn.Module):
         self.l1 = nn.Linear(100, 100)
         self.s1 = CheckpointModule(checkpoint, use_reentrant)
         self.s2 = CheckpointModule(checkpoint, use_reentrant)
+        self.relu = nn.ReLU()
         self.l2 = nn.Linear(100, 100)
 
     def forward(self, x):
-        return self.l2(self.s2(self.s1(self.l1(x))))
+        return self.l2(self.relu(self.s2(self.s1(self.l1(x)))))
 
 
 class TestModel(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
         super().__init__()
         self.l1 = nn.Linear(100, 100)
-        self.m1 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
-        self.m2 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
+        self.relu = nn.ReLU()
+        self.checkpoint1 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
+        self.checkpoint2 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
         self.l2 = nn.Linear(100, 100)
 
     def forward(self, x):
-        return self.l2(self.m2(self.m1(self.l1(x))))
+        return self.l2(self.relu(self.checkpoint2(self.checkpoint1(self.l1(x)))))
 
 
 class TestFSDPCheckpointSubmodule(FSDPTest):
 
+    # TODO: grad value checks occasionally fails when use_reentrant = True
     @skip_if_lt_x_gpu(2)
-    def test_checkpoint_submodule_nonreentrant(self):
-        model = TestModel().cuda()
+    @parametrize("use_reentrant", [False])
+    def test_checkpoint_submodule(self, use_reentrant: bool):
+        model = TestModel(use_reentrant=use_reentrant).cuda()
         model_ac = deepcopy(model)
 
         for _, m in model_ac.named_modules():
             if isinstance(m, CheckpointModule):
                 m.checkpoint = True
-                m.use_reentrant = False
 
-        self.assertTrue(model_ac.m1.s1.checkpoint)
-        self.assertTrue(model_ac.m2.s2.checkpoint)
+        self.assertTrue(model_ac.checkpoint1.s1.checkpoint)
+        self.assertTrue(model_ac.checkpoint2.s2.checkpoint)
+
+        fsdp_kwargs = {
+            "device_id": torch.cuda.current_device(),
+            "sharding_strategy": ShardingStrategy.NO_SHARD,
+        }
 
         # Wrap no checkpointing model submodules with FSDP
-        model.m1 = FSDP(
-            module=model.m1,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
-        model.m2 = FSDP(
-            module=model.m2,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
+        model.m1 = FSDP(module=model.checkpoint1, **fsdp_kwargs)
+        model.m2 = FSDP(module=model.checkpoint2, **fsdp_kwargs)
 
         # Wrap checkpointing model submodules with FSDP
-        model_ac.m1 = FSDP(
-            module=model_ac.m1,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
-        model_ac.m2 = FSDP(
-            module=model_ac.m2,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
+        model_ac.m1 = FSDP(module=model_ac.checkpoint1, **fsdp_kwargs)
+        model_ac.m2 = FSDP(module=model_ac.checkpoint2, **fsdp_kwargs)
 
-        x = torch.randn(2, 100).cuda()
+        x = torch.randn(2, 100, device="cuda")
 
         model(x).sum().backward()
         model_ac(x).sum().backward()
@@ -366,30 +361,8 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 
-    @skip_if_lt_x_gpu(2)
-    def test_checkpoint_submodule_reentrant(self):
-        model = TestModel(checkpoint=True, use_reentrant=True).cuda()
+instantiate_parametrized_tests(TestFSDPCheckpointSubmodule)
 
-        model.m1 = FSDP(
-            module=model.m1,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
-        model.m2 = FSDP(
-            module=model.m2,
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=ShardingStrategy.NO_SHARD,
-        )
-
-        x = torch.randn(2, 100).cuda()
-
-        with self.assertRaisesRegex(
-            AssertionError, "but got HandleTrainingState.BACKWARD_POST"
-        ):
-            model(x).sum().backward()
-
-
-instantiate_parametrized_tests(TestFSDPCheckpoint)
 
 if __name__ == "__main__":
     run_tests()
