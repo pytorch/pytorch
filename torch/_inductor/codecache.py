@@ -608,6 +608,8 @@ class AsyncCompile:
                 pbar.set_postfix_str(f"{result}")
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    if config.verbose_progress:
+                        pbar.set_postfix_str(scope[key].fn)
 
         _compile_end()
 
