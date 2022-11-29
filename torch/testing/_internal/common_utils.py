@@ -2633,10 +2633,9 @@ class TestCase(expecttest.TestCase):
             #   elements/blocks, and non-zero values to the specified
             #   elements.
             #
-            #   For debugging convenience, the first option in the
-            #   list of block sizes (see below), the elements with the
-            #   same value belong to the same block. However, it is
-            #   not a hard requirement: as long as the shape of a
+            #   For debugging convenience, the elements with the same
+            #   value typically belong to the same block. However, it
+            #   is not a hard requirement: as long as the shape of a
             #   pattern divides with block sizes, the pattern will be
             #   a valid one.
             #
