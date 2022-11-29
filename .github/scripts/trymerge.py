@@ -179,6 +179,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       comments(last: 5) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -336,6 +337,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
       comments(last: 100, before: $cursor) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -405,6 +407,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
     re.MULTILINE
 )
+RE_PR_CC_LINE = re.compile(r'^cc:? @\w+.*\r?\n?$', re.MULTILINE)
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
@@ -583,6 +586,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
 @dataclass
 class GitHubComment:
     body_text: str
+    created_at: str
     author_login: str
     author_association: str
     editor_login: Optional[str]
@@ -807,6 +811,7 @@ class GitHubPR:
     def _comment_from_node(node: Any) -> GitHubComment:
         editor = node["editor"]
         return GitHubComment(body_text=node["bodyText"],
+                             created_at=node["createdAt"] if "createdAt" in node else "",
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
@@ -903,8 +908,12 @@ class GitHubPR:
             filters out ghstack info """
         # Adding the url here makes it clickable within the Github UI
         approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
+        # Remove "cc: " line from the message body
+        msg_body = re.sub(RE_PR_CC_LINE, "", self.get_body())
+        if filter_ghstack:
+            msg_body = re.sub(RE_GHSTACK_DESC, "", msg_body)
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
-        msg += self.get_body() if not filter_ghstack else re.sub(RE_GHSTACK_DESC, "", self.get_body())
+        msg += msg_body
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
@@ -1376,7 +1385,9 @@ def merge(pr_num: int, repo: GitRepo,
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+        raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
+                           "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
+                           "`@pytorchbot rebase`")
 
     start_time = time.time()
     last_exception = ''

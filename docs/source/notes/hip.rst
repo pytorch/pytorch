@@ -130,17 +130,35 @@ NOTE: The CUDA_VERSION macro, cudaRuntimeGetVersion and cudaDriverGetVersion API
 semantically map to the same values as HIP_VERSION macro, hipRuntimeGetVersion and
 hipDriverGetVersion APIs. Please do not use them interchangeably when doing version checks.
 
-Eg: Instead of
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-If it is desired to not take the code path for ROCm/HIP:
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(USE_ROCM)
-If it is desired to take the code path for ROCm/HIP:
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || defined(USE_ROCM)
-If it is desired to take the code path for ROCm/HIP only for specific HIP versions:
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 40300)
+For example: Instead of using
+
+``#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000`` to implicitly exclude ROCm/HIP,
+
+use the following to not take the code path for ROCm/HIP:
+
+``#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(USE_ROCM)``
+
+Alternatively, if it is desired to take the code path for ROCm/HIP:
+
+``#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || defined(USE_ROCM)``
+
+Or if it is desired to take the code path for ROCm/HIP only for specific HIP versions:
+
+``#if (defined(CUDA_VERSION) && CUDA_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 40300)``
 
 
 Refer to CUDA Semantics doc
 ---------------------------
 
 For any sections not listed here, please refer to the CUDA semantics doc: :ref:`cuda-semantics`
+
+
+Enabling kernel asserts
+-----------------------
+
+Kernel asserts are supported on ROCm, but they are disabled due to performance overhead. It can be enabled
+by recompiling the PyTorch from source.
+
+Please add below line as an argument to cmake command parameters::
+
+    -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON

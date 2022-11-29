@@ -16,6 +16,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Functions.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -47,7 +48,9 @@ Py_ssize_t THPVariable_length(PyObject* self) {
   if (self_.dim() == 0) {
     return 0;
   }
-  return (Py_ssize_t)self_.size(0);
+  // TODO: Maybe this should return a SymInt directly?
+  // Add the guard to get a nice error message if/when we will hit this.
+  return (Py_ssize_t)self_.sym_size(0).guard_int(__FILE__, __LINE__);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -528,11 +531,12 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    IntArrayRef valueSizes = value.sizes();
-    IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
+    SymIntArrayRef valueSizes = value.sym_sizes();
+    SymIntArrayRef slicedValueSizes =
+        at::indexing::slicePrefix1sSize(valueSizes);
     torch::autograd::Variable valuesSliced;
     if (!valueSizes.equals(slicedValueSizes)) {
-      valuesSliced = value.view(slicedValueSizes);
+      valuesSliced = value.view_symint(slicedValueSizes);
     } else {
       valuesSliced = value;
     }

@@ -712,6 +712,20 @@ class TestHistogramObserver(QuantizationTestCase):
 
         self.assertEqual(ref_qparams, my_qparams)
 
+    def test_histogram_observer_extreme_inputs(self):
+        """
+        Ensures that the HistogramObserver is able to work correctly in
+        a rare case: extreme samll max values
+        """
+        obs = HistogramObserver()
+        test_input = torch.tensor(
+            [0.0, 0.0, 4.58e-41, 4.58e-41]
+        )
+        # Make sure it runs, two passes are required based on the behavior of forward func
+        # The first pass initializes min_val&max_val, and second pass calls _adjust_min_max
+        obs(test_input)
+        obs(test_input)
+
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -997,11 +1011,11 @@ class TestFusedObsFakeQuantModule(TestCase):
         )
 
         # Compare params with reference
-        torch.testing.assert_allclose(out, out_ref)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(out, out_ref)
+        torch.testing.assert_close(
             running_min_op, mod.activation_post_process.min_val
         )
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             running_max_op, mod.activation_post_process.max_val
         )
 
@@ -1052,11 +1066,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             )
 
             # Compare params with reference
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 running_min_op, mod.activation_post_process.min_val
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 running_max_op, mod.activation_post_process.max_val
             )
 
@@ -1081,12 +1095,12 @@ class TestFusedObsFakeQuantModule(TestCase):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.min_val,
                 mod.activation_post_process.min_val,
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.max_val,
                 mod.activation_post_process.max_val,
             )
@@ -1137,20 +1151,20 @@ class TestFusedObsFakeQuantModule(TestCase):
                     False,
                 )
                 # Compare params with reference
-                torch.testing.assert_allclose(out, out_ref)
+                torch.testing.assert_close(out, out_ref)
                 if mod.observer_enabled[0]:
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_min_op, mod.activation_post_process.min_val
                     )
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_max_op, mod.activation_post_process.max_val
                     )
                 if mod.fake_quant_enabled:
-                    torch.testing.assert_allclose(scale, mod.scale)
-                    torch.testing.assert_allclose(zero_point, mod.zero_point)
+                    torch.testing.assert_close(scale, mod.scale)
+                    torch.testing.assert_close(zero_point, mod.zero_point)
 
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
     def test_fused_mod_reduce_range(self):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)

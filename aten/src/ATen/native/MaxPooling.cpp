@@ -1,10 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool1d_native.h>
+#include <ATen/ops/max_pool1d_with_indices.h>
+#include <ATen/ops/quantized_max_pool1d.h>
+#endif
 
 namespace at {
 namespace native {

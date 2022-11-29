@@ -1,10 +1,23 @@
 from collections import OrderedDict
 from typing import Dict, Any
-from torch.ao.quantization.quantization_types import Pattern
+from torch.ao.quantization.utils import Pattern
 from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
 import copy
+
+__all__ = [
+    "DEFAULT_FUSION_PATTERNS",
+    "register_fusion_pattern",
+    "get_default_fusion_patterns",
+    "DEFAULT_QUANTIZATION_PATTERNS",
+    "DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP",
+    "DEFAULT_OUTPUT_OBSERVER_MAP",
+    "register_quant_pattern",
+    "get_default_quant_patterns",
+    "get_default_output_activation_post_process_map",
+    "sorted_patterns_dict",
+]
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any

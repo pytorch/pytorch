@@ -1,17 +1,26 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
-#include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_layer_norm.h>
+#include <ATen/ops/native_layer_norm_backward_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#endif
 
 #include <array>
-#include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 
@@ -166,9 +175,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-Tensor layer_norm(
+Tensor layer_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    c10::SymIntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -177,8 +186,7 @@ Tensor layer_norm(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-
-  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
