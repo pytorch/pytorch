@@ -308,7 +308,7 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        source=NNModuleSource(AttrSource(self.source, name)),
+                        source=NNModuleSource(GetItemSource(self.source, name)),
                         **options,
                     ),
                 ]

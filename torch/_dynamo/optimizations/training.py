@@ -78,10 +78,8 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
             raise e
         pass
 
-    # TODO: delete the logic for this later.
-    # Now that aot autograd supports aliasing and mutation, we don't need it.
-    # if mutated:
-    # return raise_or_warn("mutation")
+    if mutated:
+        return raise_or_warn("mutation")
 
     return True
 
@@ -148,7 +146,7 @@ class AotNop(AotAutogradStrategy):
         DEBUG = False
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=debug_nop if DEBUG else nop
-        )  # type: ignore[call-arg]
+        )
 
 
 aot_eager = AotNop.compile_fn
@@ -164,7 +162,7 @@ class AotTorchscript(AotAutogradStrategy):
 
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=ts_compile
-        )  # type: ignore[call-arg]
+        )
 
 
 aot_ts = AotTorchscript.compile_fn
@@ -214,7 +212,7 @@ class AotMemEfficientFusion(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
@@ -222,7 +220,7 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
 
 class AotInductorDebug(AotAutogradStrategy):
@@ -247,7 +245,7 @@ class AotInductorDebug(AotAutogradStrategy):
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         }
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
 
 aot_inductor_debug = AotInductorDebug.compile_fn
@@ -291,7 +289,7 @@ def prims_executor(gm, inputs, *, executor):
     return make_boxed_func(partial(execute, gm, executor=executor))
 
 
-def nvprims_fw_bw_partition_fn(joint_module, joint_inputs, *, num_fwd_outputs):
+def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
     # This function is called once per forward+backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph that is later
     # passed to the executor.
@@ -319,10 +317,7 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs, *, num_fwd_outputs):
     }
 
     fw_gm, bw_gm = min_cut_rematerialization_partition(
-        prim_gm,
-        joint_inputs,
-        recomputable_ops=recomputable_ops,
-        num_fwd_outputs=num_fwd_outputs,
+        prim_gm, joint_inputs, recomputable_ops=recomputable_ops
     )
     # AOT Autograd might not use the partitioner, so we need to make sure that
     # the graph is marked as already transformed to use nvFuser-compatible nodes
@@ -346,7 +341,7 @@ def create_nvprims_backend(*, executor):
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
                 partition_fn=disable(nvprims_fw_bw_partition_fn),
-            )  # type: ignore[call-arg]
+            )
 
     return NvPrims
 

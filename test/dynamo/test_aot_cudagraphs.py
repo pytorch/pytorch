@@ -105,6 +105,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         fn(x, y)
 
     @patch("functorch._src.config.use_functionalize", True)
+    @patch_all(ok=False)  # input mutation not supported yet
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)

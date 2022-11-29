@@ -193,30 +193,15 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            if t.layout is torch.sparse_coo:
+            if t.is_sparse:
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(), t._values(), t.size()
                 )
-            elif t.layout in {
-                torch.sparse_csr,
-                torch.sparse_csc,
-                torch.sparse_bsr,
-                torch.sparse_bsc,
-            }:
+            elif t.is_sparse_csr:
                 # TODO: Validation currently involves an expensive traversal
                 # on CPU, which may include a device transfer.
-                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    compressed_indices, plain_indices = (
-                        t.crow_indices(),
-                        t.col_indices(),
-                    )
-                else:
-                    compressed_indices, plain_indices = (
-                        t.ccol_indices(),
-                        t.row_indices(),
-                    )
-                torch._validate_sparse_compressed_tensor_args(
-                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
+                torch._validate_sparse_csr_tensor_args(
+                    t.crow_indices(), t.col_indices(), t.values(), t.size()
                 )
             else:
                 raise NotImplementedError(
@@ -241,15 +226,14 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    elif layout in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }:
-        compressed_indices, plain_indices, values, size = data
-        result = torch._sparse_compressed_tensor_unsafe(
-            compressed_indices, plain_indices, values, size, layout=layout
+    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
+
+
+def _rebuild_sparse_csr_tensor(layout, data):
+    if layout == torch.sparse_csr:
+        crow_indices, col_indices, values, size = data
+        result = torch._sparse_csr_tensor_unsafe(
+            crow_indices, col_indices, values, size
         )
         _sparse_tensors_to_validate.append(result)
         return result
