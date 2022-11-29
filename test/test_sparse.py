@@ -4063,14 +4063,8 @@ class TestSparseAny(TestCase):
     def test_generate_simple_inputs(self):
         layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
 
-        generators = list(map(self.generate_simple_inputs, layouts))
-
         tested_combinations = set()
-        while True:
-            try:
-                tensors = [next(g) for g in generators]
-            except StopIteration:
-                break
+        for tensors in zip(*map(self.generate_simple_inputs, layouts)):
             for i, t in enumerate(tensors):
                 self.assertEqual(t.layout, layouts[i])
 
