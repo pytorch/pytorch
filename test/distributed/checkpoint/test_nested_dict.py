@@ -22,13 +22,13 @@ class TestFlattening(TestCase):
         """
         flatten_dict:
             {
-                'key0': 1, 
-                'key1': [1, 2], 
-                'key2': {1: 2, 2: 3}, 
-                'key3': tensor([1]), 
-                'key4.0.0': tensor(2), 
-                'key4.0.1': 'x', 
-                'key4.1': [1, 2, 3], 
+                'key0': 1,
+                'key1': [1, 2],
+                'key2': {1: 2, 2: 3},
+                'key3': tensor([1]),
+                'key4.0.0': tensor(2),
+                'key4.0.1': 'x',
+                'key4.1': [1, 2, 3],
                 'key4.2': {'key6': [44]}
             }
         """
