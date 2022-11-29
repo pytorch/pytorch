@@ -867,6 +867,7 @@ def register_onednn_fusion_ops():
             attr,
             scalars,
             algorithm,
+            param,
         ):
             return TensorBox.create(
                 ir.ConvolutionUnary.create(
@@ -880,6 +881,7 @@ def register_onednn_fusion_ops():
                     attr,
                     scalars,
                     algorithm,
+                    param,
                 )
             )
 
@@ -898,6 +900,7 @@ def register_onednn_fusion_ops():
             unary_attr,
             unary_scalars,
             unary_algorithm,
+            param,
         ):
             return TensorBox.create(
                 ir.ConvolutionBinary.create(
@@ -914,6 +917,7 @@ def register_onednn_fusion_ops():
                     unary_attr,
                     unary_scalars,
                     unary_algorithm,
+                    param,
                 )
             )
 

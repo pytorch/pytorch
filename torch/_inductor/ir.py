@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import random
 import re
 import textwrap
 from collections import OrderedDict
@@ -3484,8 +3485,15 @@ class ConvolutionUnary(ExternKernelAlloc):
         self.kernel = kernel
 
     def codegen(self, wrapper):
+        if not wrapper.onednn_param_utils_gen:
+            wrapper.onednn_param_utils_gen = True
+            wrapper.write_onednn_param_gen_utils()
+        wrapper.writeline(f"{self.get_name()}_id = {random.getrandbits(32)}")
         wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+            f"{self.get_name()}_param = get_onednn_conv_param({self.get_name()}_id, {', '.join(self.codegen_args())})"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3503,6 +3511,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         attr,
         scalars,
         algorithm,
+        param,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise"
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
@@ -3531,8 +3540,15 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.kernel = kernel
 
     def codegen(self, wrapper):
+        if not wrapper.onednn_param_utils_gen:
+            wrapper.onednn_param_utils_gen = True
+            wrapper.write_onednn_param_gen_utils()
+        wrapper.writeline(f"{self.get_name()}_id = {random.getrandbits(32)}")
         wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+            f"{self.get_name()}_param = get_onednn_conv_param_binary({self.get_name()}_id, {', '.join(self.codegen_args())})"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args()) + ', ' + self.get_name() + '_param'})"
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3553,6 +3569,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         unary_attr: Optional[str],
         unary_scalars: Optional[List],
         unary_algorithm: Optional[str],
+        param,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
         (
