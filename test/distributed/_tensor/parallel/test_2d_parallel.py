@@ -13,7 +13,6 @@ from torch.distributed._tensor import (
     DeviceMesh,
     DTensor as DT,
     Replicate,
-    Shard,
 )
 from torch.distributed._tensor.parallel import (
     PairwiseParallel,
@@ -51,28 +50,26 @@ class SimpleModel(torch.nn.Module):
         return x
 
 
-def _shard_wrap_module(
-    module, module_shard, fsdp_wrap, mesh_2d, fsdp_pg, use_orig_params
-):  
-    device_mesh_1d = None
+def _distribute_and_fsdp_wrap_module(
+    module, module_shard, mesh_2d, fsdp_pg, use_orig_params, fsdp_nested
+):
     if module_shard:
         module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
-        device_mesh_1d = module.net1.weight.device_mesh
+    pg = fsdp_pg if module_shard else distributed_c10d._get_default_group()
 
-    if fsdp_wrap and module_shard:
-        return FSDP(
-            module, process_group=fsdp_pg, use_orig_params=use_orig_params
-        ), device_mesh_1d
-    if fsdp_wrap:
-        return FSDP(
-            module,
-            process_group=distributed_c10d._get_default_group(),
-            use_orig_params=use_orig_params,
-        ), device_mesh_1d
-    return module, device_mesh_1d
+    if fsdp_nested:
+        module.net1 = FSDP(
+            module.net1, process_group=pg, use_orig_params=use_orig_params
+        )
+        module.net2 = FSDP(
+            module.net2, process_group=pg, use_orig_params=use_orig_params
+        )
+    return FSDP(
+        module, process_group=pg, use_orig_params=use_orig_params
+    )
 
 
-def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False):
+def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False):
     rank = dist.get_rank()
     torch.cuda.set_device(rank)
     world_size = dist.get_world_size()
@@ -88,10 +85,10 @@ def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False):
     fsdp_pg = twod_mesh.get_dim_groups()[0]
 
     # Create Input
-    model, device_mesh_1d = _shard_wrap_module(
-        model, True, True, twod_mesh, fsdp_pg, use_orig_params
+    model = _distribute_and_fsdp_wrap_module(
+        model, True, twod_mesh, fsdp_pg, use_orig_params, fsdp_nested
     )
-    return model, fsdp_pg, device_mesh_1d
+    return model, fsdp_pg
 
 
 def is_nested_tensor(val: Any) -> bool:
@@ -144,7 +141,7 @@ class Test2dParallelIntegration(DTensorTestBase):
             is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"])
         )
 
-    def _compare_params(self, m1, m2, device_mesh_1d, use_orig_params):
+    def _compare_params(self, m1, m2):
         with FSDP.summon_full_params(m1):
             with FSDP.summon_full_params(m2):
                 for n_p1, n_p2 in zip(m1.named_parameters(), m2.named_parameters()):
@@ -154,43 +151,40 @@ class Test2dParallelIntegration(DTensorTestBase):
                     name = n_p1[0]
                     if name == "net2.bias" and self.rank != 0:
                         continue
-                    if use_orig_params:
-                        p1 = p1.data
-                        p2 = p2.data
-                    if "net1" in name:
-                        spec = [Shard(0)]
-                    elif name == "net2.weight":
-                        spec = [Shard(1)]
-                    else:
-                        spec = [Replicate()]
                     if type(p2) is DT:
                         p2 = p2.redistribute(
-                            device_mesh_1d, [Replicate()]
+                            p2.device_mesh, [Replicate()]
                         ).to_local()
-                    # elif name != "net2.bias":
-                    #     p2 = DT.from_local(p2, device_mesh_1d, spec).redistribute(
-                    #        device_mesh_1d, [Replicate()] 
-                    #     ).to_local()
-                    # print(name, p1.size(), p2.size(), spec)
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
-    def _test_2d_e2e_flow(self, use_orig_params=False) -> None:
+    def _test_2d_e2e_flow(self, use_orig_params=False, fsdp_nested=False, multi_param_group=False) -> None:
         if not is_available():
             self.skipTest("FSDP 2d parallel integration not available")
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model, use_orig_params=use_orig_params)
         torch.manual_seed(0)
-        model_2d, dp_pg, device_mesh_1d = init_model(use_orig_params=use_orig_params)
+        model_2d, dp_pg = init_model(use_orig_params=use_orig_params, fsdp_nested=fsdp_nested)
         # Check named parameters are returning the same name at least.
         param_names_2d = [name for name, _ in model_2d.named_parameters()]
-        for name, p in model.named_parameters():
+        for name, _ in model.named_parameters():
             self.assertTrue(name in param_names_2d)
-        self._compare_params(model, model_2d, device_mesh_1d, use_orig_params)
+        self._compare_params(model, model_2d)
 
-        optim = torch.optim.Adam(model.parameters(), lr=0.0001)
-        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.0001)
-        return
+        if multi_param_group and use_orig_params:
+            param_group = [
+                {"params": model.net1.parameters(), "lr": 0.02},
+                {"params": model.net2.parameters(), "lr": 0.15},
+            ]
+            optim = torch.optim.Adam(param_group, lr=0.01)
+            param_group = [
+                {"params": model_2d.net1.parameters(), "lr": 0.02},
+                {"params": model_2d.net2.parameters(), "lr": 0.15},
+            ]
+            optim_2d = torch.optim.Adam(param_group, lr=0.01)
+        else:
+            optim = torch.optim.Adam(model.parameters(), lr=0.01)
+            optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
         for i in range(5):
             # Ensure all input across TP ranks are same.
@@ -204,9 +198,9 @@ class Test2dParallelIntegration(DTensorTestBase):
             optim.step()
             optim_2d.step()
             self.assertEqual(model(input), model_2d(input))
-        
+
         # Ensure all params are still the same after optimizer update.
-        self._compare_params(model, model_2d, device_mesh_1d, use_orig_params)
+        self._compare_params(model, model_2d)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -217,6 +211,16 @@ class Test2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_use_orig_params(self) -> None:
         self._test_2d_e2e_flow(use_orig_params=True)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_integration_fsdp_nested(self) -> None:
+        self._test_2d_e2e_flow(fsdp_nested=True)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_integration_fsdp_nested_param_groups(self) -> None:
+        self._test_2d_e2e_flow(fsdp_nested=True, use_orig_params=True, multi_param_group=True)
 
 
 if __name__ == "__main__":
