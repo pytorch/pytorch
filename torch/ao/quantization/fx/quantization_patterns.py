@@ -18,7 +18,7 @@ from torch.ao.quantization.utils import (
 )
 
 from abc import ABC
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Type
 
 __all__ = [
     "QuantizeHandler",
@@ -114,7 +114,7 @@ def _get_quantize_handler_cls(
         observation_type: ObservationType,
         dtype_configs: List[DTypeConfig],
         num_tensor_args_to_observation_type: Dict[int, ObservationType],
-        input_output_observed: bool) -> QuantizeHandler:
+        input_output_observed: bool) -> Type[QuantizeHandler]:
     """
     Return a configurable QuantizeHandler that matches the given specifications from the backend.
     """
