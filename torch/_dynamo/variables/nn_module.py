@@ -282,7 +282,7 @@ class NNModuleVariable(VariableTracker):
             bound_args = bound_args.arguments
             return {k: bound_args[k] for k in names}
 
-        def wrap_values(items, is_parameter=False):
+        def wrap_values(items):
             result = []
             for name, submod in items:
                 result.append(
@@ -290,15 +290,13 @@ class NNModuleVariable(VariableTracker):
                         submod,
                         key,
                         name,
-                        source=NNModuleSource(
-                            gen_source(self.source, name, is_parameter)
-                        ),
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     )
                 )
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
 
-        def named_embed(name, obj, is_parameter=False):
+        def named_embed(name, obj):
             return TupleVariable(
                 [
                     ConstantVariable(name, **options),
@@ -306,28 +304,20 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        source=NNModuleSource(
-                            gen_source(self.source, name, is_parameter)
-                        ),
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     ),
                 ]
             )
 
-        def gen_source(source, name, is_parameter=False):
+        def gen_source(source, name):
             name_split = name.split(".")
             if name_split[0] == "":
                 return source
-            while len(name_split) > 1:
+            while len(name_split) > 0:
                 x = name_split.pop(0)
                 source = AttrSource(source, x)
-
-            if is_parameter:
-                return GetItemSource(
-                    AttrSource(source, "_parameters"), name_split.pop(0)
-                )
-            else:
-                return AttrSource(source, name_split.pop(0))
+            return source
 
         if name == "children":
             assert not (args or kwargs)
@@ -337,7 +327,7 @@ class NNModuleVariable(VariableTracker):
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
             ):
-                result.append(named_embed(name, param, True))
+                result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_buffers":
             result = []
@@ -356,7 +346,7 @@ class NNModuleVariable(VariableTracker):
         elif name == "modules":
             return wrap_values(module.named_modules())
         elif name == "parameters":
-            return wrap_values(module.named_parameters(**get_kwargs("recurse")), True)
+            return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
