@@ -66,6 +66,7 @@ decompositions = get_decompositions(
         aten.mv,
         aten.narrow,
         aten.native_batch_norm,
+        aten._native_batch_norm_legit_functional,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -487,11 +488,6 @@ def fill_scalar(self, value):
 def fill_tensor(self, value: Tensor):
     assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
     return torch.full_like(self, value.item())
-
-
-@register_decomposition([aten._efficientzerotensor])
-def _efficientzerotensor(size, *, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.zeros(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
 
 @register_decomposition([aten.bernoulli.default])
