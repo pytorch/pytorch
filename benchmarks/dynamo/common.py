@@ -892,7 +892,7 @@ class BenchmarkRunner:
     def init_optimizer(self, device, params):
         if device == "cuda":
             # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(params, capturable=True)
+            self.optimizer = torch.optim.SGD(params, lr=0.01)
         else:
             self.optimizer = None
 
