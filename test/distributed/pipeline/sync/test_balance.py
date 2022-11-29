@@ -252,3 +252,4 @@ def test_balance_by_size_non_tensor_tuple():
     model = nn.Sequential(Skip(), Add())
     sample = (torch.rand(1, requires_grad=True), 0)
     balance_by_size(1, model, sample)
+    
