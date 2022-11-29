@@ -2334,7 +2334,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f_onnx(input_two_dims), 8)
 
     def test_cond(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(x):
             return x.sin()
@@ -2352,7 +2352,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
     def test_cond_nested(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn_nested(x):
             return x * 10
@@ -2397,7 +2397,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(cc.frame_count, 2)
 
     def test_cond_export(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn_nested(x):
             return x * 10
@@ -2442,7 +2442,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )  # * -1 then add x
 
     def test_cond_export_single_arg(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(x):
             return x
