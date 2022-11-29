@@ -184,8 +184,8 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: List[Callable]
-    constraints: List[Callable]
+    passes: List[Callable] = []
+    constraints: List[Callable] = []
     _validated: bool = False
 
     def __init__(

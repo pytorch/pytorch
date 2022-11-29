@@ -165,8 +165,8 @@ class PassManager:
             checks
     """
 
-    passes: List[Callable[[nn.Module], PassResult]]
-    constraints: List[Callable[[Callable, Callable], bool]]
+    passes: List[Callable[[nn.Module], PassResult]] = []
+    constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
 
