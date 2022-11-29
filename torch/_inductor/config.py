@@ -87,6 +87,8 @@ alignment_size = 4
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -110,6 +112,8 @@ class cpp:
         "g++",
         "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
 
 
 # config specific to codegen/triton.py
@@ -144,6 +148,8 @@ class triton:
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
+    # should we put op names in kernel names
+    descriptive_kernel_names = True
 
 
 # create a directory containing lots of debug information
