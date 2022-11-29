@@ -350,7 +350,12 @@ def _export(
     return model_proto
 
 
-def export(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True, **kwargs):
+def export(
+    fn: Union[torch.nn.Module, Callable],
+    *args,
+    use_binary_format: bool = True,
+    **kwargs,
+):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.

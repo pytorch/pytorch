@@ -1,51 +1,14 @@
 # Owner(s): ["module: onnx"]
+import copy
+import functorch
+
 import onnx_test_common
 import torch
-from torch.onnx._internal._fx import _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
 
-not_recorded_ops = {torch.ops.aten.detach.default}
-
-
-class RecordExampleMode(TorchDispatchMode):
-    def __init__(self, skipped_ops):
-        self.skipped_ops = skipped_ops
-        self.inputs = []
-        self.kw_inputs = []
-        self.outputs = []
-        self.ops = []
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if (
-            any(arg.kwarg_only for arg in func._schema.arguments)
-            or func in self.skipped_ops
-        ):
-            # Only record examples for functions that don't have kwarg-only arguments.
-            # Dynamo FX exporter doesn't support kwarg so does FX-to-ONNX exporter.
-            return func(*args, **kwargs)
-        detached_args = tree_map(
-            lambda x: x.detach().to("cpu") if isinstance(x, torch.Tensor) else x, args
-        )
-        detached_kwargs = tree_map(
-            lambda x: x.detach().to("cpu") if isinstance(x, torch.Tensor) else x, kwargs
-        )
-        self.inputs.append(detached_args)
-        self.kw_inputs.append(detached_kwargs)
-        self.ops.append(func)
-        if kwargs is None:
-            kwargs = {}
-        out = func(*args, **kwargs)
-        detached_outputs = tree_map(
-            lambda x: x.detach().to("cpu") if isinstance(x, torch.Tensor) else x, out
-        )
-        self.outputs.append(detached_outputs)
-        return out
-
-
-missing_implementation_cases = {
+failed_cases = {
     "linalg.householder_product",
     "cholesky_inverse",
     "linalg.matrix_rank",
@@ -105,72 +68,364 @@ missing_implementation_cases = {
     "linalg.ldl_factor",
     "ormqr",
     "signal.windows.gaussian",
+    "roll",
+    "special.bessel_j1",
+    "diag_embed",
+    "nn.functional.dropout",
+    "native_batch_norm",
+    "nn.functional.conv_transpose1d",
+    "matmul",
+    "nn.functional.conv_transpose3d",
+    "cummin",
+    "vdot",
+    "full_like",
+    "nn.functional.multilabel_margin_loss",
+    "zero_",
+    "special.hermite_polynomial_h",
+    "float_power",
+    "column_stack",
+    "narrow",
+    "lgamma",
+    "var_mean",
+    "special.chebyshev_polynomial_w",
+    "argsort",
+    "char",
+    "nn.functional.pdist",
+    "nn.functional.bilinear",
+    "nn.functional.avg_pool1d",
+    "nn.functional.glu",
+    "transpose",
+    "quantile",
+    "nn.functional.instance_norm",
+    "view",
+    "fft.irfft",
+    "nn.functional.dropout3d",
+    "bfloat16",
+    "linalg.cross",
+    "new_ones",
+    "linalg.vander",
+    "exp2",
+    "__getitem__",
+    "native_layer_norm",
+    "fmin",
+    "isclose",
+    "diag",
+    "nn.functional.softmin",
+    "randint_like",
+    "polar",
+    "special.i0e",
+    "special.xlog1py",
+    "sinc",
+    "t",
+    "slice_scatter",
+    "cdouble",
+    "nansum",
+    "nn.functional.avg_pool3d",
+    "select",
+    "bernoulli",
+    "count_nonzero",
+    "median",
+    "unfold_copy",
+    "special.chebyshev_polynomial_v",
+    "nn.functional.adaptive_max_pool1d",
+    "acosh",
+    "special.hermite_polynomial_he",
+    "special.modified_bessel_i1",
+    "short",
+    "fft.ifft",
+    "special.bessel_y1",
+    "log10",
+    "nn.functional.conv2d",
+    "normal",
+    "unbind",
+    "int",
+    "special.scaled_modified_bessel_k1",
+    "renorm",
+    "chalf",
+    "nn.functional.multilabel_soft_margin_loss",
+    "logit",
+    "logical_not",
+    "hypot",
+    "reshape",
+    "atleast_3d",
+    "masked_select",
+    "deg2rad",
+    "resize_as_",
+    "hsplit",
+    "chunk",
+    "std_mean",
+    "fft.hfftn",
+    "xlogy",
+    "randn_like",
+    "split",
+    "broadcast_to",
+    "any",
+    "aminmax",
+    "tile",
+    "special.zeta",
+    "isneginf",
+    "nn.functional.interpolate",
+    "matrix_exp",
+    "cross",
+    "scatter_add",
+    "view_copy",
+    "linalg.vecdot",
+    "empty_like",
+    "permute",
+    "take_along_dim",
+    "inner",
+    "all",
+    "half",
+    "argwhere",
+    "special.modified_bessel_k0",
+    "polygamma",
+    "masked.normalize",
+    "nn.functional.layer_norm",
+    "kthvalue",
+    "topk",
+    "logspace",
+    "sinh",
+    "expand",
+    "nn.functional.hinge_embedding_loss",
+    "nn.functional.prelu",
+    "vstack",
+    "native_dropout_backward",
+    "angle",
+    "unfold",
+    "nn.functional.binary_cross_entropy_with_logits",
+    "logaddexp2",
+    "isreal",
+    "cumsum",
+    "clamp",
+    "sort",
+    "nn.functional.adaptive_avg_pool2d",
+    "std",
+    "cat",
+    "nanquantile",
+    "nn.functional.avg_pool2d",
+    "broadcast_shapes",
+    "digamma",
+    "special.modified_bessel_i0",
+    "diagonal_copy",
+    "special.log_ndtr",
+    "nn.functional.adaptive_avg_pool3d",
+    "nanmean",
+    "new_zeros",
+    "expm1",
+    "scatter",
+    "mvlgamma",
+    "triu",
+    "masked_fill",
+    "nn.functional.smooth_l1_loss",
+    "softmax",
+    "split_with_sizes",
+    "uniform",
+    "fft.fftn",
+    "select_scatter",
+    "nn.functional.multi_margin_loss",
+    "take",
+    "equal",
+    "movedim",
+    "fft.ihfft",
+    "long",
+    "linalg.multi_dot",
+    "resize_",
+    "sum_to_size",
+    "__rmatmul__",
+    "i0",
+    "atanh",
+    "igamma",
+    "new_empty_strided",
+    "rot90",
+    "floor_divide",
+    "diff",
+    "trunc",
+    "vsplit",
+    "special.modified_bessel_k1",
+    "new_empty",
+    "special.shifted_chebyshev_polynomial_w",
+    "stack",
+    "tensor_split",
+    "dist",
+    "cartesian_prod",
+    "nextafter",
+    "dstack",
+    "new_full",
+    "multinomial",
+    "_softmax_backward_data",
+    "byte",
+    "corrcoef",
+    "gather",
+    "diagonal_scatter",
+    "frexp",
+    "nanmedian",
+    "logaddexp",
+    "einsum",
+    "nn.functional.pad",
+    "nn.functional.adaptive_max_pool3d",
+    "asinh",
+    "addcdiv",
+    "var",
+    "rand_like",
+    "block_diag",
+    "cumulative_trapezoid",
+    "nn.functional.normalize",
+    "fft.ifftn",
+    "atleast_2d",
+    "unsqueeze",
+    "atan2",
+    "randint",
+    "__rpow__",
+    "special.legendre_polynomial_p",
+    "log_softmax",
+    "rad2deg",
+    "erfc",
+    "squeeze",
+    "erfinv",
+    "special.airy_ai",
+    "nn.functional.binary_cross_entropy",
+    "nn.functional.selu",
+    "fft.rfft",
+    "fmax",
+    "nn.functional.conv1d",
+    "arange",
+    "frac",
+    "addcmul",
+    "index_select",
+    "prod",
+    "nn.functional.batch_norm",
+    "isin",
+    "linspace",
+    "grid_sampler_2d",
+    "logcumsumexp",
+    "copysign",
+    "constant_pad_nd",
+    "cumprod",
+    "complex",
+    "mode",
+    "logsumexp",
+    "special.polygamma",
+    "max",
+    "special.shifted_chebyshev_polynomial_v",
+    "atleast_1d",
+    "igammac",
+    "cdist",
+    "nn.functional.group_norm",
+    "special.laguerre_polynomial_l",
+    "fft.rfftn",
+    "heaviside",
+    "nn.functional.logsigmoid",
+    "addr",
+    "special.erfcx",
+    "trapz",
+    "tril",
+    "special.bessel_j0",
+    "view_as_complex",
+    "nn.functional.conv_transpose2d",
+    "cov",
+    "cummax",
+    "double",
+    "isposinf",
+    "special.shifted_chebyshev_polynomial_t",
+    "diagflat",
+    "special.spherical_bessel_j0",
+    "special.scaled_modified_bessel_k0",
+    "amax",
+    "amin",
+    "index_fill",
+    "special.ndtri",
+    "dsplit",
+    "nn.functional.cosine_similarity",
+    "fft.fft",
+    "trapezoid",
+    "slice",
+    "nan_to_num",
+    "masked_scatter",
+    "special.i1",
+    "to_sparse",
+    "min",
+    "hstack",
+    "special.entr",
+    "special.shifted_chebyshev_polynomial_u",
+    "isfinite",
+    "special.chebyshev_polynomial_t",
+    "fft.ihfftn",
+    "signbit",
+    "nn.functional.cross_entropy",
+    "sgn",
+    "fft.irfftn",
+    "nn.functional.adaptive_max_pool2d",
+    "special.bessel_y0",
+    "nn.functional.local_response_norm",
+    "trace",
+    "special.chebyshev_polynomial_u",
+    "lerp",
+    "nn.functional.dropout2d",
+    "put",
+    "special.i1e",
+    "nn.functional.adaptive_avg_pool1d",
+    "unflatten",
+    "cfloat",
+    "bool",
+    "fft.hfft",
+    "nn.functional.linear",
+    "repeat",
+    "nn.functional.unfold",
+    "index_copy",
+    "nn.functional.threshold",
+    "cosh",
+    "narrow_copy",
 }
 
 
-allowed_test_dtypes = {torch.float}
-
-
 class TestFxToOnnxWithOnnxRuntimeOnOperators(onnx_test_common._TestONNXRuntime):
-    def test_op(self):
-        for op in op_db:
-            # Two kinds of ops are skipped.
-            #  1. Their implementation is not always built with PyTorch.
-            #  2. Non-aten ops.
-            #
-            # Reason of skipping case 1:
-            #  For example, when linear algebra is disabled, torch.linalg.* are not runnable
-            #  and the following
-            #   op(*args, **kwargs)
-            #  will throw an error.
-            #  Therefore, we skip those missing operators. Please do NOT extend this list
-            #  for other reasons; if a op is added, it only means PyTorch can't run it.
-            # Reason of skipping case 2:
-            #  We don't have FX-to-ONNX exporter for those ops.
-            if op.aten_name is None or op.name in missing_implementation_cases:
-                continue
-            mode = RecordExampleMode(not_recorded_ops)
-            with mode:
-                selected_dtypes = [
-                    dtype
-                    for dtype in allowed_test_dtypes
-                    if op.supports_dtype(dtype, "cpu")
-                ]
-                for dtype in selected_dtypes:
-                    samples = op.sample_inputs("cpu", dtype)
-                    for sample_input in samples:
-                        args = [sample_input.input] + list(sample_input.args)
-                        kwargs = sample_input.kwargs
-                        op(*args, **kwargs)
+    def test_cpu_float_op_without_kwargs(self):
+        failed_op_names = set()
+        all_op_names = set()
+        tested_op_names = set()
+        target_dtype = torch.float
+        target_device = "cpu"
 
-            for inputs, kw_inputs, outputs, op in zip(
-                mode.inputs, mode.kw_inputs, mode.outputs, mode.ops
-            ):
-                if op not in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE:
-                    print(
-                        f"[SkipTest] Missing exporter. {op}, {','.join([str(type(x)) for x in inputs])}, {str(kw_inputs)}"
-                    )
+        for op in op_db:
+            if op.name in failed_cases:
+                # One example without kwargs fails exporting test, so
+                # we skip the entire op's test.
+                continue
+
+            if not op.supports_dtype(target_dtype, target_device):
+                continue
+
+            samples = op.sample_inputs(target_device, target_dtype)
+            for sample_input in samples:
+                # Use the correct schema from get_signature_for_torch_op
+                # Then schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs).
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+
+                all_op_names.add(op.name)
+                if len(kwargs) > 0:
                     continue
-                if any(not isinstance(value, torch.Tensor) for value in inputs):
-                    print(
-                        f"[SkipTest] Non-tensor inputs. {op}, {','.join([str(type(x)) for x in inputs])}, {str(kw_inputs)}"
-                    )
-                    continue
-                if any(arg.kwarg_only for arg in op._schema.arguments):
-                    print(
-                        "[SkipTest] Key-word argument generally not supported yet."
-                        f" {op}, {','.join([str(type(x)) for x in inputs])}, {str(kw_inputs)}"
-                    )
-                    continue
+                tested_op_names.add(op.name)
+
                 try:
-                    self.run_test_with_positional_args(op, args, **kwargs)
-                    print(
-                        f"[PassTest] {op}, {','.join([str(type(x)) for x in inputs])}, {str(kw_inputs)}"
+                    # Move this to exporter.
+                    onnx_shape_inference = GLOBALS.onnx_shape_inference
+                    GLOBALS.onnx_shape_inference = False
+                    gm = functorch.make_fx(op)(*copy.deepcopy(args))
+                    self.run_test_with_fx_to_onnx_exporter(
+                        gm, args, rtol=1e-3, atol=1e-7
                     )
+                    GLOBALS.onnx_shape_inference = onnx_shape_inference
                 except Exception as e:
-                    print(
-                        f"[FailTest] {op}, {','.join([str(type(x)) for x in inputs])}, {str(kw_inputs)}"
-                    )
+                    failed_op_names.add(op.name)
+
+        assert len(failed_op_names) == 0, f"Failed op names: {failed_op_names}"
+        assert len(tested_op_names) >= 113, f"Tested op names: {tested_op_names}"
+        print(
+            f"number of seleted ops: {len(all_op_names)}, "
+            f"number of failed ops: {len(failed_op_names)}, "
+            f"number of tested ops: {len(tested_op_names)}"
+        )
 
 
 if __name__ == "__main__":
