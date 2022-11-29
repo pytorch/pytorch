@@ -186,16 +186,28 @@ def test_not_training():
 
     assert not model.training
 
+def test_balance_by_time_tuple():
+    class Twin(nn.Module):
+        def forward(self, x):
+            return x, x.detach()
 
-@skip_if_no_cuda
-def test_balance_by_size_tuple():
     class Add(nn.Module):
         def forward(self, a, b):
             return a + b
 
+    model = nn.Sequential(Twin(), Add())
+    sample = torch.rand(1, requires_grad=True)
+    balance_by_time(1, model, sample, device="cpu")
+
+@skip_if_no_cuda
+def test_balance_by_size_tuple():
     class Skip(nn.Module):
         def forward(self, a, b):
             return a, b
+
+    class Add(nn.Module):
+        def forward(self, a, b):
+            return a + b
 
     model = nn.Sequential(Skip(), Add())
     sample = (torch.rand(1, requires_grad=True), 0)
