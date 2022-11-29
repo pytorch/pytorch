@@ -8,10 +8,12 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import torch.distributed as dist
 
 
-# wrapper to initialize temp directory for distributed checkpoint
 def with_temp_dir(
     func: Optional[Callable] = None,
 ) -> Optional[Callable]:
+    """
+    Wrapper to initialize temp directory for distributed checkpoint.
+    """
     assert func is not None
 
     @wraps(func)
