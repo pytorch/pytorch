@@ -46,7 +46,7 @@ class VariableTracker(object, metaclass=HasPostInit):
         guards = set()
 
         def visit(var):
-            if hasattr(var, "inner_guards"):
+            if hasattr(var, "inner_guards") and var.inner_guards is not None:
                 guards.update(var.inner_guards)
                 return
 
@@ -282,7 +282,6 @@ class VariableTracker(object, metaclass=HasPostInit):
 
     def __post_init__(self, *args, **kwargs):
         if self.inner_guards is None:
-            self.inner_guards = set()
             self.inner_guards = VariableTracker.propagate([self])["guards"]
 
         if self.recursively_contains is None:
