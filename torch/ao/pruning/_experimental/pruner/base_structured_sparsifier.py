@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from typing import Type, Set, Dict, Callable, Tuple, Any
+from typing import Type, Set, Dict, Callable, Tuple, Any, Optional, Union
 
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook
@@ -23,12 +23,14 @@ from .prune_functions import (
 
 __all__ = ["BaseStructuredSparsifier"]
 
+
 def _get_supported_structured_pruning_modules():
     SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
         nn.Linear,
         nn.Conv2d,
     }
     return SUPPORTED_STRUCTURED_PRUNING_MODULES
+
 
 def _get_supported_activation_functions():
     SUPPORTED_ACTIVATION_FUNCTIONS = {
@@ -55,6 +57,7 @@ def _get_supported_activation_functions():
     }
     return SUPPORTED_ACTIVATION_FUNCTIONS
 
+
 def _get_supported_activation_modules():
     SUPPORTED_ACTIVATION_MODULES = {
         nn.ReLU,
@@ -80,11 +83,18 @@ def _get_supported_activation_modules():
     }
     return SUPPORTED_ACTIVATION_MODULES
 
-def _get_default_structured_pruning_patterns():
+
+def _get_default_structured_pruning_patterns() -> Dict[
+    Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str], ...],
+    Callable[..., None],
+]:
     """
     Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
     """
-    patterns: Dict[Tuple[Any, ...], Callable] = {
+    patterns: Dict[
+        Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str], ...],
+        Callable[..., None],
+    ] = {
         # linear -> linear
         (nn.Linear, "output"): prune_linear,
         (nn.Linear, nn.Linear): prune_linear_linear,
@@ -93,28 +103,92 @@ def _get_default_structured_pruning_patterns():
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
     }
 
-    for activation in chain(_get_supported_activation_functions(), _get_supported_activation_modules()):
-        patterns.update({
-            # linear -> activation -> linear
-            (nn.Linear, activation, nn.Linear): prune_linear_activation_linear,
-            # conv2d -> activation -> conv2d
-            (nn.Conv2d, activation, nn.Conv2d): prune_conv2d_activation_conv2d,
-            # conv2d -> activation -> pool -> conv2d
-            (nn.Conv2d, activation, nn.AvgPool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, F.avg_pool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, nn.MaxPool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, F.max_pool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
-            # conv2d -> pool -> activation -> conv2d
-            (nn.Conv2d, nn.AvgPool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, F.avg_pool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, nn.MaxPool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, F.max_pool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
-            # conv2d -> adaptive pool -> flatten -> linear
-            (nn.Conv2d, nn.AdaptiveAvgPool2d, nn.Flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveAvgPool2d, torch.flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveMaxPool2d, nn.Flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveMaxPool2d, torch.flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
-        })
+    for activation in chain(
+        _get_supported_activation_functions(), _get_supported_activation_modules()
+    ):
+        patterns.update(
+            {
+                # linear -> activation -> linear
+                (nn.Linear, activation, nn.Linear): prune_linear_activation_linear,
+                # conv2d -> activation -> conv2d
+                (nn.Conv2d, activation, nn.Conv2d): prune_conv2d_activation_conv2d,
+                # conv2d -> activation -> pool -> conv2d
+                (
+                    nn.Conv2d,
+                    activation,
+                    nn.AvgPool2d,
+                    nn.Conv2d,
+                ): prune_conv2d_activation_pool_conv2d,
+                (
+                    nn.Conv2d,
+                    activation,
+                    F.avg_pool2d,
+                    nn.Conv2d,
+                ): prune_conv2d_activation_pool_conv2d,
+                (
+                    nn.Conv2d,
+                    activation,
+                    nn.MaxPool2d,
+                    nn.Conv2d,
+                ): prune_conv2d_activation_pool_conv2d,
+                (
+                    nn.Conv2d,
+                    activation,
+                    F.max_pool2d,
+                    nn.Conv2d,
+                ): prune_conv2d_activation_pool_conv2d,
+                # conv2d -> pool -> activation -> conv2d
+                (
+                    nn.Conv2d,
+                    nn.AvgPool2d,
+                    activation,
+                    nn.Conv2d,
+                ): prune_conv2d_pool_activation_conv2d,
+                (
+                    nn.Conv2d,
+                    F.avg_pool2d,
+                    activation,
+                    nn.Conv2d,
+                ): prune_conv2d_pool_activation_conv2d,
+                (
+                    nn.Conv2d,
+                    nn.MaxPool2d,
+                    activation,
+                    nn.Conv2d,
+                ): prune_conv2d_pool_activation_conv2d,
+                (
+                    nn.Conv2d,
+                    F.max_pool2d,
+                    activation,
+                    nn.Conv2d,
+                ): prune_conv2d_pool_activation_conv2d,
+                # conv2d -> adaptive pool -> flatten -> linear
+                (
+                    nn.Conv2d,
+                    nn.AdaptiveAvgPool2d,
+                    nn.Flatten,
+                    nn.Linear,
+                ): prune_conv2d_pool_flatten_linear,
+                (
+                    nn.Conv2d,
+                    nn.AdaptiveAvgPool2d,
+                    torch.flatten,
+                    nn.Linear,
+                ): prune_conv2d_pool_flatten_linear,
+                (
+                    nn.Conv2d,
+                    nn.AdaptiveMaxPool2d,
+                    nn.Flatten,
+                    nn.Linear,
+                ): prune_conv2d_pool_flatten_linear,
+                (
+                    nn.Conv2d,
+                    nn.AdaptiveMaxPool2d,
+                    torch.flatten,
+                    nn.Linear,
+                ): prune_conv2d_pool_flatten_linear,
+            }
+        )
     return patterns
 
 
@@ -140,13 +214,11 @@ class BaseStructuredSparsifier(BaseSparsifier):
     def make_config_from_model(
         self,
         model: nn.Module,
-        SUPPORTED_MODULES: Set[Type] = None,
+        SUPPORTED_MODULES: Optional[Set[Type]] = None,
     ) -> None:
         if SUPPORTED_MODULES is None:
             SUPPORTED_MODULES = _get_supported_structured_pruning_modules()
-        super().make_config_from_model(
-            model, SUPPORTED_MODULES=SUPPORTED_MODULES
-        )
+        super().make_config_from_model(model, SUPPORTED_MODULES=SUPPORTED_MODULES)
 
     def _prepare(self, *args, **kwargs) -> None:
         r"""This function will attach the FakeStructuredSparsity parameterizations
@@ -179,7 +251,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 )
             )
 
-    def prune(self):
+    def prune(self) -> None:
         r"""
         This function will FX symbolically trace the model and then find instances of the patterns
         defined in self.patterns (by default SUPPORTED_STRUCTURED_PRUNING_PATTERNS ).
@@ -205,7 +277,10 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 if (
                     first_module is not None
                     and parametrize.is_parametrized(first_module)
-                    and isinstance(first_module.parametrizations["weight"][0], FakeStructuredSparsity)
+                    and isinstance(
+                        first_module.parametrizations["weight"][0],
+                        FakeStructuredSparsity,
+                    )
                 ):
                     convert_block = []
                     for node in matched:
@@ -214,10 +289,6 @@ class BaseStructuredSparsifier(BaseSparsifier):
                         elif node.op == "call_function":
                             convert_block.append(node.target)
                     convert_fn(*convert_block)
-
-        # remove bias hooks, since biases are propogated during module conversion.
-        for handle in self.bias_handles:
-            handle.remove()
 
         self.traced.graph.lint()
         self.traced.recompile()
