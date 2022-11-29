@@ -78,11 +78,11 @@ class PredicateAnalyzer : public OptOutDispatch {
     }
 
     auto pairwise_map = PairwiseRootDomainMap(producer, consumer);
-    auto c2p =
+    DisjointSets<IterDomain*> disjoint_c2p_ids =
         BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
-            .getReplay();
+            .getIterDomainEquivalence();
 
-    PredicateAnalyzer analyzer(c2p);
+    PredicateAnalyzer analyzer(disjoint_c2p_ids);
 
     for (auto id : consumer->domain()->domain()) {
       if (analyzer.needsPredicate(id)) {
@@ -94,8 +94,8 @@ class PredicateAnalyzer : public OptOutDispatch {
   }
 
  private:
-  PredicateAnalyzer(const std::unordered_map<IterDomain*, IterDomain*>& c2p_map)
-      : c2p_map_(c2p_map) {}
+  PredicateAnalyzer(const DisjointSets<IterDomain*>& disjoint_c2p_ids)
+      : disjoint_c2p_ids_(disjoint_c2p_ids) {}
 
   // Returns true if no out-of-bound accesses could occur with a
   // producer
@@ -117,7 +117,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 
     // If the producer has a matching domain, it should not cause
     // out-of-bound accesses
-    if (c2p_map_.find(consumer_id) != c2p_map_.end()) {
+    if (disjoint_c2p_ids_.mappingExists(consumer_id)) {
       return;
     }
 
@@ -160,7 +160,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 
  private:
   //! BestEffort map from consumer IDs to producer IDs
-  const std::unordered_map<IterDomain*, IterDomain*>& c2p_map_;
+  const DisjointSets<IterDomain*>& disjoint_c2p_ids_;
   bool needs_predicate_ = false;
 };
 
