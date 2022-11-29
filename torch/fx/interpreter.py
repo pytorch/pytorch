@@ -4,6 +4,7 @@ from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
+from .._dynamo.config import disable_progress
 import torch.fx.traceback as fx_traceback
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
@@ -119,7 +120,7 @@ class Interpreter:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
-        for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True):
+        for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True, disable=disable_progress):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
