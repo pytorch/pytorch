@@ -5,6 +5,7 @@ import numpy as np
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 import uuid
 
@@ -59,7 +60,7 @@ class BaseTestCase(TestCase):
         self.temp_dirs = []
 
     def createSummaryWriter(self):
-        temp_dir = str(uuid.uuid4())
+        temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard").name
         self.temp_dirs.append(temp_dir)
         return SummaryWriter(temp_dir)
 
