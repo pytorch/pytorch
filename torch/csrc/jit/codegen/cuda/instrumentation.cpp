@@ -32,6 +32,8 @@ Trace::Trace() {
     logEvent('I', "TRACE_START");
   }
 
+  // Note isOptionDisabled could throw an exception, so this
+  // constructor should not be used from a destructor.
   if (isOptionDisabled(DisableOption::Nvtx)) {
     record_nvtx_range_ = false;
   }
