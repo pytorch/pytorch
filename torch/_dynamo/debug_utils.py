@@ -541,7 +541,13 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
-        log.warning(f"Unable to run graph because {e}")
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                f" Logging the exception and moving on. Exception: {e}"
+            )
+        )
         return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
@@ -721,7 +727,13 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
-        log.warning(f"Unable to compile the model because {e}")
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                f" Logging the exception and moving on. Exception: {e}"
+            )
+        )
         return False
 
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
