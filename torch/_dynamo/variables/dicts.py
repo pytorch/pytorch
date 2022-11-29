@@ -259,7 +259,8 @@ class DefaultDictVariable(ConstDictVariable):
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
                     )
-                    new_rec_contains.add(default_var.mutable_local)
+                    if default_var.mutable_local is not None:
+                        new_rec_contains.add(default_var.mutable_local)
                     tx.replace_all(
                         self, self.modifed(new_val, new_rec_contains, **options)
                     )

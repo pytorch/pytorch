@@ -1115,11 +1115,22 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
+        new_guards = VariableTracker.propagate([obj, v])
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
-                **VariableTracker.propagate([obj, v]),
+                recursively_contains=new_rec_contains,
+                inner_guards=new_guards["guards"],  # don't compute this twice
+                **new_guards,
             ),
         )
 

@@ -491,6 +491,7 @@ class ListIteratorVariable(VariableTracker):
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
             **VariableTracker.propagate([self]),
         )
 
