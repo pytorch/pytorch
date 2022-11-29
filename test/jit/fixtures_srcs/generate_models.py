@@ -97,6 +97,8 @@ ALL_MODULES = {
     TestVersionedGeluV9(): "aten::gelu",
     TestVersionedGeluOutV9(): "aten::gelu.out",
     TestVersionedRandomV10(): "aten::random_.from",
+    TestVersionedRandomFuncV10(): "aten::random.from",
+    TestVersionedRandomOutV10(): "aten::random.from_out",
 }
 
 """

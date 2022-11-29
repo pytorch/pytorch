@@ -65,3 +65,23 @@ class TestVersionedRandomV10(torch.nn.Module):
     def forward(self, x):
         out = torch.zeros_like(x)
         return out.random_(0, 10)
+
+
+class TestVersionedRandomFuncV10(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        out = torch.zeros_like(x)
+        return out.random(0, 10)
+
+
+class TestVersionedRandomOutV10(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        x = torch.zeros_like(x)
+        out = torch.zeros_like(x)
+        x.random(0, 10, out=out)
+        return out
