@@ -148,7 +148,7 @@ class AotNop(AotAutogradStrategy):
         DEBUG = False
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=debug_nop if DEBUG else nop
-        )
+        )  # type: ignore[call-arg]
 
 
 aot_eager = AotNop.compile_fn
@@ -164,7 +164,7 @@ class AotTorchscript(AotAutogradStrategy):
 
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=ts_compile
-        )
+        )  # type: ignore[call-arg]
 
 
 aot_ts = AotTorchscript.compile_fn
@@ -214,7 +214,7 @@ class AotMemEfficientFusion(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
@@ -222,7 +222,7 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 class AotInductorDebug(AotAutogradStrategy):
@@ -247,7 +247,7 @@ class AotInductorDebug(AotAutogradStrategy):
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         }
-        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)  # type: ignore[call-arg]
 
 
 aot_inductor_debug = AotInductorDebug.compile_fn
@@ -346,7 +346,7 @@ def create_nvprims_backend(*, executor):
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
                 partition_fn=disable(nvprims_fw_bw_partition_fn),
-            )
+            )  # type: ignore[call-arg]
 
     return NvPrims
 
