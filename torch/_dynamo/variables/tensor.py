@@ -11,7 +11,6 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 
 from ..utils import (
-    fake_tensors_available,
     get_fake_value,
     get_real_value,
     product,
@@ -225,6 +224,16 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 memory_format in self.is_contiguous, **options
             )
+        elif name == "type" and self.dtype is not None and len(args) == 0:
+            tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
+                0
+            ]
+            constant_result = ConstantVariable(
+                f"torch.{tensortype.__name__}", **options
+            )
+        elif name == "get_device" and isinstance(self.device, torch.device):
+            index = self.device.index if self.device.type != "cpu" else -1
+            constant_result = ConstantVariable(index, **options)
         else:
             constant_result = None
 
@@ -245,19 +254,13 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("tolist", "numpy", "backward"):
+        elif name in ("tolist", "numpy", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
-                use_fake_tensors = (
-                    fake_tensors_available and config.fake_tensor_propagation
-                )
-                if use_fake_tensors:
-                    example_value = get_fake_value(self.proxy.node, tx)
-                else:
-                    example_value = get_real_value(self.proxy.node, tx.output).item()
+                example_value = get_fake_value(self.proxy.node, tx)
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
