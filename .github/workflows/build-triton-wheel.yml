@@ -193,7 +193,15 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
-          docker exec -t "${container_name}" anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force
+
+      - name: Publish artifacts to PyTorchNightly
+        run: |
+          container_name=$(docker container ps --format '{{.ID}}')
+          docker exec -it "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
+
+      - name: Chown artifacts
+        run: |
+          container_name=$(docker container ps --format '{{.ID}}')
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
