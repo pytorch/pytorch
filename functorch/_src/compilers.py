@@ -380,6 +380,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
 
     return aot_module_simplified(
         gm,
+        example_inputs,
         fw_compiler=graph_saver_forward,
         bw_compiler=graph_saver_backward,
         partition_fn=graph_saver_joint,
@@ -387,6 +388,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
     )
 
 
+# WARNING: This isn't tested anywhere!!
 def graph_dumper_aot(current_name, folder_name, dump_example_input=False):
     """
     Dump the forward, backward, and joint computation graph.
