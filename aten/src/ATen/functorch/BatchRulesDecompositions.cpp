@@ -201,6 +201,22 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_multigammaln);
   OP_DECOMPOSE(special_polygamma);
   OP_DECOMPOSE(special_softmax);
+  OP_DECOMPOSE(special_digamma);
+  OP_DECOMPOSE(special_erf);
+  OP_DECOMPOSE(special_erfc);
+  OP_DECOMPOSE(special_erfinv);
+  OP_DECOMPOSE(special_exp2);
+  OP_DECOMPOSE(special_expm1);
+  OP_DECOMPOSE(special_expit);
+  OP_DECOMPOSE(special_gammaln);
+  OP_DECOMPOSE(special_i0);
+  OP_DECOMPOSE(special_log1p);
+  OP_DECOMPOSE(special_ndtr);
+  OP_DECOMPOSE(special_psi);
+  OP_DECOMPOSE(special_round);
+  OP_DECOMPOSE(special_sinc);
+
+  
   m.impl("split.sizes", native::split_symint);
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);
