@@ -1013,14 +1013,14 @@ class TritonKernel(Kernel):
 
         argdefs, _, signature = self.args.python_argdefs()
 
-        mutated_args = []
+        mutated_args = set()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
-                mutated_args.append(self.args.input_buffers[mutation])
+                mutated_args.add(self.args.input_buffers[mutation])
             if mutation in self.args.inplace_buffers:
-                mutated_args.append(self.args.inplace_buffers[mutation])
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
-                mutated_args.append(self.args.output_buffers[mutation])
+                mutated_args.add(self.args.output_buffers[mutation])
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),

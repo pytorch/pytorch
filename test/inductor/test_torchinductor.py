@@ -5092,6 +5092,23 @@ if HAS_CUDA:
             fn_compiled([x3, y])
             assert same(x2, x3)
 
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_buffer_autotune(self):
+            def foo(x, y, z):
+                a = x @ y
+                return a.unsqueeze(0).unsqueeze(0) + z
+
+            x = torch.zeros(5, 5, device="cuda")
+            y = torch.zeros(5, 5, device="cuda")
+            z = torch.zeros(1, 1, 5, 5, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            self.common(
+                foo,
+                (x, y, z),
+                check_lowp=False,
+            )
+
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
                 def __init__(self, k: int, n: int):
