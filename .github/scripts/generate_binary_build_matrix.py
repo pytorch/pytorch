@@ -226,7 +226,8 @@ def generate_wheels_matrix(os: str,
                         "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' | "
                         "nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' | "
                         "nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' | "
-                        "nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux'",
+                        "nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' | "
+                        "nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux'",
                         "build_name":
                         f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
                         .replace(
