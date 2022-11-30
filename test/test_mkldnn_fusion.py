@@ -250,10 +250,48 @@ class TestMkldnnFusion(JitTestCase):
                         algorithm = pointwise_info.algorithm
                         fused = torch.ops.mkldnn._convolution_pointwise(
                             x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
-                            mod.conv.groups, attr, scalars, algorithm
+                            mod.conv.groups, attr, scalars, algorithm, None
                         )
                     self.assertEqual(ref, fused)
 
+    def test_conv_unary_fusion_ops_with_param_cache(self):
+        class M(nn.Module):
+            def __init__(self, unary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
+                super(M, self).__init__()
+                self.conv = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
+                self.unary = unary_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.unary(x)
+                return x
+
+        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        for pointwise_name, pointwise_info in self._unary_list().items():
+            for dim in [2, 3]:
+                channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
+                options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for bias, dilation, groups, memory_format in options:
+                    oC = 32 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
+                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    mod = M(pointwise_info.pointwise_module, dim, iC, oC, dilation, groups, bias, kernel_size=3)
+                    mod = mod.to(memory_format=memory_format).eval()
+                    with torch.no_grad():
+                        ref = mod(x)
+                        attr = pointwise_info.attr
+                        scalars = pointwise_info.scalars
+                        algorithm = pointwise_info.algorithm
+                        conv_param = torch.ops.mkldnn._conv_param_generation(
+                            x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                            mod.conv.groups, attr, scalars, algorithm
+                        )
+                        fused = torch.ops.mkldnn._convolution_pointwise(
+                            x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                            mod.conv.groups, attr, scalars, algorithm, conv_param
+                        )
+                    self.assertEqual(ref, fused)
 
     def test_conv_binary_fusion_ops(self):
         class M(nn.Module):
@@ -289,7 +327,7 @@ class TestMkldnnFusion(JitTestCase):
                         attr = pointwise_name
                         fused = torch.ops.mkldnn._convolution_pointwise(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
-                            mod.conv.groups, attr, None, unary_attr, [], None
+                            mod.conv.groups, attr, None, unary_attr, [], None, None
                         )
                         # for binary add, we support inplace version.
                         if attr == "add":
@@ -302,6 +340,56 @@ class TestMkldnnFusion(JitTestCase):
 
                         self.assertEqual(ref, fused)
 
+    def test_conv_binary_fusion_ops_with_param_cache(self):
+        class M(nn.Module):
+            def __init__(self, binary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
+                super(M, self).__init__()
+                self.conv = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
+                self.binary = binary_fn
+
+            def forward(self, x, other):
+                x = self.conv(x)
+                x = self.binary(x, other)
+                return x
+
+        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        for pointwise_name, pointwise_fn in self._binary_list().items():
+            for dim in [2, 3]:
+                channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
+                options = itertools.product([False, True], [True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for fuse_relu, bias, dilation, groups, memory_format in options:
+                    oC = 32 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
+                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    mod = M(pointwise_fn, dim, iC, oC, dilation, groups, bias, kernel_size=3)
+                    mod = mod.to(memory_format=memory_format).eval()
+                    other = torch.randn_like(mod.conv(x))
+                    with torch.no_grad():
+                        ref = mod(x, other)
+                        unary_attr = None
+                        if fuse_relu:
+                            ref.relu_()
+                            unary_attr = "relu"
+                        attr = pointwise_name
+                        conv_param = torch.ops.mkldnn._conv_param_generation_binary(
+                            x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                            mod.conv.groups, attr, None, unary_attr, [], None
+                        )
+                        fused = torch.ops.mkldnn._convolution_pointwise(
+                            x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                            mod.conv.groups, attr, None, unary_attr, [], None, conv_param
+                        )
+                        # for binary add, we support inplace version.
+                        if attr == "add":
+                            fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
+                                x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                                mod.conv.groups, attr, None, unary_attr, [], None
+                            )
+                            self.assertEqual(ref, other)
+                            self.assertEqual(ref, fused_inplace)
+
+                        self.assertEqual(ref, fused)
 
     def test_linear_binary_fusion_ops(self):
         class M(nn.Module):

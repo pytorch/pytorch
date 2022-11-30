@@ -546,10 +546,11 @@ Tensor mkldnn_convolution_pointwise(
     c10::string_view attr,
     torch::List<c10::optional<at::Scalar>> scalars,
     c10::optional<c10::string_view> algorithm,
-    int64_t param) {
+    c10::optional<int64_t> mkldnn_param) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  int64_t param = mkldnn_param.has_value() ? mkldnn_param.value() : 0;
   return _mkldnn_convolution(
       input_t,
       weight_t,
@@ -587,7 +588,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     c10::optional<c10::string_view> unary_attr,
     torch::List<c10::optional<at::Scalar>> unary_scalars,
     c10::optional<c10::string_view> unary_algorithm,
-    int64_t param) {
+    c10::optional<int64_t> mkldnn_param) {
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
       "mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
@@ -663,6 +664,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
     op_attr.set_post_ops(po);
 
+    int64_t param = mkldnn_param.has_value() ? mkldnn_param.value() : 0;
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
       if (!param) {
