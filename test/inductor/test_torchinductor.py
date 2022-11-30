@@ -4712,6 +4712,7 @@ class CommonTemplate:
         )
 
     @patch.object(config, "cpp_wrapper", True)
+    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
     def test_cpp_wrapper(self):
         device = "cpu"
         for name in [
