@@ -56,7 +56,7 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 300
     steps:
       - name: Enable git symlinks on Windows
         shell: bash
