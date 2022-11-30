@@ -1102,14 +1102,10 @@ def swap_custom_module_to_observed(
 
 def insert_observers_for_model(
     model: GraphModule,
-    modules: Dict[str, torch.nn.Module],
     matches: Dict[str, _MatchResultWithQConfig],
     node_name_to_qconfig: Dict[str, QConfigAny],
-    graph: Graph,
     prepare_custom_config: PrepareCustomConfig,
     equalization_config_map: Dict[str, Any],
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
     backend_config: BackendConfig,
     observed_node_names: Set[str],
     is_qat: bool,
@@ -1181,6 +1177,8 @@ def insert_observers_for_model(
     for node in model.graph.nodes:
         root_node, _, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
+        input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
+        output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
         node_name_to_target_dtype_info[node.name] = get_target_activation_dtype_for_node(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
@@ -1281,7 +1279,7 @@ def insert_observers_for_model(
                     if is_input_node_of_the_pattern:
                         # this modifies node inplace
                         maybe_insert_input_observers_for_node(
-                            node, qconfig, model, modules, graph,
+                            node, qconfig, model, modules, model.graph,
                             node_name_to_target_dtype_info,
                             qhandler,
                             prepare_custom_config,
@@ -1289,7 +1287,7 @@ def insert_observers_for_model(
 
                         # Insert equalization input observers if needed
                         maybe_insert_input_equalization_observers_for_node(
-                            node, equalization_qconfig, model, modules, graph,
+                            node, equalization_qconfig, model, modules, model.graph,
                             node_name_to_target_dtype_info, is_quantized_branch, backend_config)
 
                     is_last_node_of_pattern = node is last_node
@@ -1310,12 +1308,12 @@ def insert_observers_for_model(
                             # these output observers are the same as DeQuantStubs. In the future, we
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
-                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
+                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, model.graph)
                             swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = maybe_insert_output_observer_for_node(
-                                node, model, modules, graph, matches,
+                                node, model, modules, model.graph, matches,
                                 node_name_to_target_dtype_info, pattern, qhandler, is_qat)
 
                             if maybe_output_obs_node is not None:
@@ -1358,7 +1356,7 @@ def insert_observers_for_model(
                     maybe_insert_observers_before_graph_output(
                         node, output_quantized_idxs,
                         node_name_to_target_dtype_info, node_name_to_qconfig,
-                        model, modules, graph)
+                        model, modules, model.graph)
 
         #
         # After this point, the current node has input and output observers
@@ -1563,9 +1561,6 @@ def prepare(
         match_with_qconfig = (*match_without_qconfig, node_name_to_qconfig[node_name])
         matches[node_name] = match_with_qconfig
 
-    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-
     run_prepare_fx_on_standalone_modules(
         model, is_qat, modules, matches, prepare_custom_config, backend_config)
 
@@ -1575,14 +1570,15 @@ def prepare(
     observed_node_names: Set[str] = set()
 
     result_node = insert_observers_for_model(
-        model, modules, matches, node_name_to_qconfig,
-        model.graph, prepare_custom_config,
+        model,
+        matches,
+        node_name_to_qconfig,
+        prepare_custom_config,
         equalization_node_name_to_qconfig,
-        input_quantized_idxs,
-        output_quantized_idxs,
         backend_config,
         observed_node_names,
-        is_qat)
+        is_qat
+    )
 
     save_state(model, node_name_to_qconfig, node_name_to_scope,
                prepare_custom_config, equalization_node_name_to_qconfig, qconfig_mapping, is_qat, observed_node_names)
@@ -1597,6 +1593,8 @@ def prepare(
         # these inputs are observed in parent
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
+        input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
+        output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
         model._standalone_module_input_quantized_idxs = \
             torch.tensor(input_quantized_idxs)
         model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
