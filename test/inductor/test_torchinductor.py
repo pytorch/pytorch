@@ -4719,9 +4719,10 @@ class CommonTemplate:
             "test_as_strided",  # buffer reuse
             "test_cat",  # alias
             "test_lowmem_dropout1",  # None as output
+            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
             "test_relu",  # multiple inputs
+            "test_silu",  # single input, single output
             "test_transpose",  # multiple outputs, buffer clear
-            "test_upsample_bilinear2d_b",  # single input, single output
         ]:
             test_name = f"{name}_{device}"
             assert hasattr(self, test_name), "undefined function"
