@@ -2041,6 +2041,9 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
         self.assertEqual(qconfig_mapping.to_dict(), qconfig_dict)
 
+    def test_qconfig_mapping_repr(self):
+        self.assertTrue(isinstance(get_default_qconfig_mapping().__repr__(), str))
+
     # Dummy classes for PrepareCustomConfig testing
 
     class _DummyStandaloneModule:

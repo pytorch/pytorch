@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple, Union
-
+import re
 import torch
 
 from .fake_quantize import (
@@ -157,6 +157,14 @@ def _get_symmetric_qnnpack_qconfig_mapping():
             qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qconfig)
     return qconfig_mapping
 
+_QCONFIG_STYLE_ORDER: List[str] = [
+    "global_qconfig",
+    "object_type_qconfigs",
+    "module_name_regex_qconfigs",
+    "module_name_qconfigs",
+    "module_name_object_type_order_qconfigs",
+]
+
 class QConfigMapping:
     """
     Mapping from model ops to :class:`torch.ao.quantization.QConfig` s.
@@ -256,6 +264,18 @@ class QConfigMapping:
         """
         self.module_name_object_type_order_qconfigs[(module_name, object_type, index)] = qconfig
         return self
+
+    def __repr__(self) -> str:
+        output = self.__class__.__name__ + " ("
+        for style_name in _QCONFIG_STYLE_ORDER:
+            output += f"\n {style_name}"
+            qconfigs = getattr(self, style_name)
+            if isinstance(qconfigs, OrderedDict) and len(qconfigs)>0:
+                for key, qconfig in qconfigs.items():
+                    output += f"\n  {key}: {qconfig}"
+            else:
+                output += f"\n  {qconfigs}"
+        return output + "\n)"
 
     # TODO: remove this
     def to_dict(self) -> Dict[str, Any]:
