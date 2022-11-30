@@ -47,8 +47,9 @@
 "NNC":
 - torch/csrc/jit/tensorexpr/**
 
-"oncall: quantization":
+"release notes: quantization":
 - torch/ao/quantization/**
 - torch/quantization/**
 - aten/src/ATen/quantized/**
 - aten/src/ATen/native/quantized/cpu/**
+- test/quantization/**
