@@ -5613,6 +5613,15 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(argsort_mps_result, argsort_cpu_result)
 
+        helper(True, 0, True)
+        helper(True, 0, False)
+        helper(False, 0, True)
+        helper(False, 0, False)
+        helper(True, 1, True)
+        helper(True, 1, False)
+        helper(False, 1, True)
+        helper(False, 1, False)
+
     # Test diag
     def test_diag(self):
         def helper(shape, diag=0):
