@@ -97,7 +97,8 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
+                or self.device.type
+                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == "privateuseone"
@@ -331,22 +332,32 @@ class Tensor(torch._C._TensorBase):
                     "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
-        elif self.is_sparse_csr:
-            if self.layout == torch.sparse_csr:
-                args_sparse_csr = (
-                    self.layout,
-                    (
-                        self.crow_indices(),
-                        self.col_indices(),
-                        self.values(),
-                        self.size(),
-                    ),
+        elif self.layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices, plain_indices = (
+                    self.crow_indices(),
+                    self.col_indices(),
                 )
             else:
-                raise NotImplementedError(
-                    "sparse csr tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                compressed_indices, plain_indices = (
+                    self.ccol_indices(),
+                    self.row_indices(),
                 )
-            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+            args_sparse_compressed = (
+                self.layout,
+                (
+                    compressed_indices,
+                    plain_indices,
+                    self.values(),
+                    self.size(),
+                ),
+            )
+            return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor

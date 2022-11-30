@@ -23,8 +23,12 @@ class BaseListVariable(VariableTracker):
             tuple: TupleVariable,
         }[obj]
 
-    def __init__(self, items: List[VariableTracker], **kwargs):
-        super(BaseListVariable, self).__init__(**kwargs)
+    def __init__(
+        self, items: List[VariableTracker], recursively_contains=None, **kwargs
+    ):
+        super(BaseListVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
         self.items: List[VariableTracker] = items
@@ -89,41 +93,50 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, value, items=None, guards=None, **kwargs):
-        if items is None:
-            items = [variables.ConstantVariable(x, guards=guards) for x in value]
-        super().__init__(items, guards=guards, **kwargs)
-        self.value = value
+    def __init__(self, items, **kwargs):
+        items_to_map = items
+        start = variables.ConstantVariable(0)
+        stop = None
+        step = variables.ConstantVariable(1)
+
+        if len(items_to_map) == 1:
+            (stop,) = items_to_map
+        elif len(items_to_map) == 2:
+            start, stop = items_to_map
+        elif len(items_to_map) == 3:
+            start, stop, step = items_to_map
+        else:
+            raise AssertionError()
+
+        assert stop is not None
+        super().__init__([start, stop, step], **kwargs)
 
     def python_type(self):
         return range
 
     def as_python_constant(self):
-        return self.value
+        return range(*[x.as_python_constant() for x in self.items])
+
+    def as_proxy(self):
+        return self.python_type()(*self._as_proxy())
+
+    def unpack_var_sequence(self, tx):
+        return [
+            variables.ConstantVariable(x).add_options(self)
+            for x in self.as_python_constant()
+        ]
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        range_fn = codegen.create_load_global("range", add=True)
-        if self.value.step == 1:
-            if self.value.start == 0:
-                return [
-                    range_fn,
-                    codegen.create_load_const(self.value.stop),
-                    create_instruction("CALL_FUNCTION", 1),
-                ]
-            return [
-                range_fn,
-                codegen.create_load_const(self.value.start),
-                codegen.create_load_const(self.value.stop),
-                create_instruction("CALL_FUNCTION", 2),
-            ]
-        return [
-            range_fn,
-            codegen.create_load_const(self.value.start),
-            codegen.create_load_const(self.value.stop),
-            codegen.create_load_const(self.value.step),
-            create_instruction("CALL_FUNCTION", 3),
-        ]
+        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.foreach(self.items)
+        return [create_instruction("CALL_FUNCTION", 3)]
+
+    def var_getattr(self, tx, name):
+        fields = ["start", "stop", "step"]
+        if name not in fields:
+            unimplemented(f"range.{name}")
+        return self.items[fields.index(name)].add_options(self)
 
 
 class ListVariable(BaseListVariable):
@@ -145,9 +158,13 @@ class ListVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
+            new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
+            new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(self.items + [arg], **options),
+                ListVariable(
+                    self.items + [arg], recursively_contains=new_rec_contains, **options
+                ),
             )
             return ConstantVariable(None)
         elif (
@@ -378,6 +395,9 @@ class NamedTupleVariable(TupleVariable):
     def python_type(self):
         return self.tuple_cls
 
+    def as_python_constant(self):
+        return self.python_type()(*[x.as_python_constant() for x in self.items])
+
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
@@ -451,8 +471,10 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
-    def __init__(self, items, index: int = 0, **kwargs):
-        super(ListIteratorVariable, self).__init__(**kwargs)
+    def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
+        super(ListIteratorVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492

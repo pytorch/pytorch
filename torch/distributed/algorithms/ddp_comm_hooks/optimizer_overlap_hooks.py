@@ -38,7 +38,7 @@ def _apply_optim_in_backward_hook(
     r"""
     If torch.distributed.optim._apply_optimizer_in_backward is used to overlap
     optimizer with backward pass, DDP will run the below hook to run optimizer
-    step for parametrs after gradient communication has taken place.
+    step for parameters after gradient communication has taken place.
     """
     def apply_optim_in_backward_hook(
         hook_state: Any, bucket: dist.GradBucket,
@@ -50,8 +50,6 @@ def _apply_optim_in_backward_hook(
             for p in model_params:
                 if hasattr(p, '_in_backward_optimizers'):
                     for optim in p._in_backward_optimizers:
-                        # TODO - DDP is set to zero_grad in reducer, simply
-                        # setting to None here won't work.
                         optim.step()
 
             return bucket.buffer()

@@ -1161,10 +1161,20 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["unshard"],
             self._streams["pre_unshard"],
         )
+        # If every FSDP instance uses `NO_SHARD`, then we can directly use
+        # the normal `nn.utils` one targeting local gradients
+        all_no_shard = all(
+            not handle.uses_sharded_strategy
+            for handle in FullyShardedDataParallel._fsdp_handles(self)
+        )
+        if all_no_shard:
+            return torch.nn.utils.clip_grad_norm_(
+                self.parameters(), max_norm, norm_type
+            )
+        # Otherwise, there exists some FSDP instance using a sharded strategy,
+        # where sharded and non-sharded parameters must be handled separately
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        # Perform local gradient norm computation, where sharded and
-        # non-sharded parameters must be handled separately
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
         for handle in FullyShardedDataParallel._fsdp_handles(self):

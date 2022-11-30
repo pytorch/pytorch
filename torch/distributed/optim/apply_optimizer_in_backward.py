@@ -9,6 +9,7 @@ def _apply_optimizer_in_backward(
     optimizer_class: Type[torch.optim.Optimizer],
     params: Iterable[torch.nn.Parameter],
     optimizer_kwargs: Dict[str, Any],
+    register_hook: bool = True,
 ) -> None:
     """
     Upon ``backward()``, parameters will fire the corresponding optimizer.
@@ -21,6 +22,10 @@ def _apply_optimizer_in_backward(
         optimizer_class: (Type[torch.optim.Optimizer]): Optimizer to apply to parameter
         params: (Iterator[nn.Parameter]): parameters to apply optimizer state to
         optimizer_kwargs: (Dict[str, Any]): kwargs to pass to optimizer constructor
+        register_hook: (bool): Whether to register a backward hook to run
+            optimizer step or not. This is by default ``True``, but user may
+            want to set this to ``False`` if another API will implement specific
+            logic to run the optimizer in backwards pass.
 
     Example::
         params_generator = model.parameters()
@@ -72,10 +77,11 @@ def _apply_optimizer_in_backward(
 
             param.grad = None
 
-        handle = param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
-        if not hasattr(param, '_optimizer_hook_handles'):
-            param._optimizer_hook_handles = []  # type: ignore[attr-defined]
-        param._optimizer_hook_handles.append(handle)  # type: ignore[attr-defined]
+        if register_hook:
+            handle = param._acc_grad.register_hook(optimizer_hook)  # type: ignore[attr-defined]
+            if not hasattr(param, '_optimizer_hook_handles'):
+                param._optimizer_hook_handles = []  # type: ignore[attr-defined]
+            param._optimizer_hook_handles.append(handle)  # type: ignore[attr-defined]
 
     for param in params:
         _apply_optimizer_in_backward_to_param(param)

@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator, Sequence
+from typing import Any, Callable, Iterator, List, Tuple, Generator
 
 import torch
 
@@ -1806,6 +1806,7 @@ class TestImports(TestCase):
             # And these both end up with transitive dependencies on distributed
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
+            ignored_modules.append("torch.testing._internal.common_distributed")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
@@ -1922,32 +1923,23 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
-    def _assert_is_generator_or_singleton(self, item, property_name):
-        if isinstance(item, Sequence):
-            msg = (
-                "{property_name} may only return lists for single items"
-                ", please use a coroutine which yields items instead")
-            self.assertTrue(len(item) <= 1, msg=msg)
-        else:
-            self.assertIsInstance(item, Generator)
-
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self._assert_is_generator_or_singleton(samples, "sample_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self._assert_is_generator_or_singleton(samples, "reference_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self._assert_is_generator_or_singleton(samples, "error_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

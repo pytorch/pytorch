@@ -1,4 +1,5 @@
 import collections
+import copy
 import functools
 import itertools
 import logging
@@ -6,7 +7,10 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
+
+import sympy
+from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
@@ -15,19 +19,23 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed
-from .guards import GuardBuilder
+from .exc import BackendCompilerFailed, unimplemented
+from .guards import Guard, GuardBuilder, TensorReference
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
+    assert_no_fake_params_or_buffers,
+    checkpoint_params,
     CleanupHook,
+    clone_inputs,
     count_calls,
     counters,
-    fake_tensors_available,
     format_graph_tabular,
+    same,
 )
-from .variables.builder import VariableBuilder, wrap_fx_proxy
+from .variables.base import VariableTracker
+from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -37,6 +45,15 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+
+
+# TODO: I think this accepts int arguments too
+class CompiledFn(Protocol):
+    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        ...
+
+
+CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
 @functools.lru_cache(None)
@@ -71,6 +88,59 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
+def wrap_compiler_fn(compiler_fn: CompilerFn) -> CompilerFn:
+    """WrapperBackend if config.verify_correctness is True"""
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
+
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+        return wrapper_backend_compiler_fn
+
+    return compiler_fn
+
+
+class WrapperBackend:
+    def __init__(self, backend: CompilerFn):
+        self.backend: CompilerFn = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            raise RuntimeError(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            raise
+        finally:
+            self.restore()
+
+
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -81,34 +151,42 @@ class OutputGraph(fx.Tracer):
         self,
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
-        compiler_fn: Callable,
+        compiler_fn: CompilerFn,
         root_tx,
     ):
         super(OutputGraph, self).__init__()
 
         # Mutable state checkpointed by copy_graphstate()
         self.graph = torch.fx.Graph()
-        self.graphargs = []
-        self.guards = set()
-        self.nn_modules = dict()
+        self.graphargs: List[GraphArg] = []
+        self.guards: Set[Guard] = set()
+        self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
-        self.output_instructions = []
+        self.output_instructions: List[Instruction] = []
         # Node => computed real value (see utils.get_real_value)
-        self.real_value_cache = {}
+        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
-        self.compiler_fn = compiler_fn
+        self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self.cleanups = []
+        self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map = {}
+        self.unspec_variable_map: Dict[
+            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
+        ] = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref = {}
-        self.intermediary_symbols = {}
+        self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
+        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
+
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input: OrderedDict[
+            str, Optional[fx.Proxy]
+        ] = collections.OrderedDict()
 
     @property
     def output(self):
@@ -120,6 +198,7 @@ class OutputGraph(fx.Tracer):
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
+        assert self.nn_modules is not None
         graph_nodes = set(self.graph.nodes)
         return (
             graph_nodes,
@@ -147,6 +226,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -162,22 +242,22 @@ class OutputGraph(fx.Tracer):
         return obj
 
     def create_graph_input(self, name, type_expr=None):
-        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
-
         # unique
-        used_names = {n.target for n in placeholders}
-        if name in used_names:
+        if name in self.name_to_input:
             for i in itertools.count():
-                if f"{name}_{i}" not in used_names:
+                if f"{name}_{i}" not in self.name_to_input:
                     name = f"{name}_{i}"
                     break
 
-        if placeholders:
-            ctx = self.graph.inserting_after(placeholders[-1])
+        if self.name_to_input:
+            prev_name = next(reversed(self.name_to_input))
+            ctx = self.graph.inserting_after(self.name_to_input[prev_name])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            self.name_to_input[name] = proxy.node
+            return proxy
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -251,6 +331,7 @@ class OutputGraph(fx.Tracer):
                     target
                 )
 
+        assert self.nn_modules is not None
         for k, v in self.nn_modules.items():
             if v is target:
                 # it already exists
@@ -294,11 +375,14 @@ class OutputGraph(fx.Tracer):
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+        assert self.nn_modules is not None
         root = FakeRootModule(self.nn_modules)
 
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
-        val_to_names = collections.OrderedDict()
+        val_to_names: OrderedDict[
+            VariableTracker, List[str]
+        ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
@@ -421,6 +505,7 @@ class OutputGraph(fx.Tracer):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
+        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -431,7 +516,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    logging.CODE,
+                    logging.CODE,  # type: ignore[attr-defined]
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -445,7 +530,7 @@ class OutputGraph(fx.Tracer):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
-    def call_user_compiler(self, gm):
+    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
                 self.compiler_fn.__name__
@@ -453,7 +538,10 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            compiler_fn = self.compiler_fn
+            if config.verify_correctness:
+                compiler_fn = wrap_compiler_fn(compiler_fn)
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -461,13 +549,13 @@ class OutputGraph(fx.Tracer):
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
-    def example_inputs(self):
+    def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result
 
-    def remove_unused_graphargs(self):
+    def remove_unused_graphargs(self) -> None:
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
@@ -490,10 +578,11 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
-    def add_output_instructions(self, prefix: List[Instruction]):
+    def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
@@ -501,16 +590,15 @@ class OutputGraph(fx.Tracer):
         self.output_instructions.extend(prefix)
         self.should_exit = True
 
-    def install_global(self, name, value):
+    def install_global(self, name, value) -> None:
         self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
         # Clear cache for conversion of real -> fake tensors
-        if fake_tensors_available:
-            self.root_tx.fake_mode.fake_tensor_converter = None
+        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
@@ -525,6 +613,7 @@ class OutputGraph(fx.Tracer):
             if "example_value" in node.meta:
                 del node.meta["example_value"]
         self.real_value_cache.clear()
+        self.name_to_input.clear()
 
     def create_proxy(
         self,
@@ -553,7 +642,8 @@ class OutputGraph(fx.Tracer):
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()
+        # official from_list stub doesn't have new-style type
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
 
         # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
         nn_module_stack_str = f"Module stack: {nn_module_stack}\n"

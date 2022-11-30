@@ -20,6 +20,12 @@ from torch.distributed.algorithms.join import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
+    allreduce_hook
+)
+from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+    _apply_optim_in_backward_hook
+)
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -553,11 +559,15 @@ class DistributedDataParallel(Module, Joinable):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-
         super(DistributedDataParallel, self).__init__()
         Joinable.__init__(self)
         self.logger = None
-        if not any((p.requires_grad for p in module.parameters())):
+        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
+            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
+        else:
+            self.parameters_to_ignore = set()
+        self._module_parameters = [p for n, p in module.named_parameters() if n not in self.parameters_to_ignore]
+        if not any((p.requires_grad for p in self._module_parameters)):
             self._log_and_throw(
                 RuntimeError,
                 "DistributedDataParallel is not needed when a module "
@@ -570,10 +580,8 @@ class DistributedDataParallel(Module, Joinable):
                 "device_ids can only be None or contain a single element.",
             )
 
-        self.is_multi_device_module = (
-            len({p.device for p in module.parameters()}) > 1
-        )
-        distinct_device_types = {p.device.type for p in module.parameters()}
+        self.is_multi_device_module = len({p.device for p in self._module_parameters}) > 1
+        distinct_device_types = {p.device.type for p in self._module_parameters if p.device is not None}
         if len(distinct_device_types) != 1:
             self._log_and_throw(
                 ValueError,
@@ -599,7 +607,7 @@ class DistributedDataParallel(Module, Joinable):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()},
+                        {p.device for p in self._module_parameters},
                     ),
                 )
 
@@ -621,16 +629,12 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self.module.parameters())[0].device
+        self.device = list(self._module_parameters)[0].device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
-        else:
-            self.parameters_to_ignore = []
 
         self._use_replicated_tensor_module = (
             _ddp_with_replicated_tensor_enabled()
@@ -647,7 +651,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         # Check that a module does not have Uninitialized parameters
-        for param in module.parameters():
+        for param in self._module_parameters:
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 self._log_and_throw(
                     RuntimeError,
@@ -699,8 +703,6 @@ class DistributedDataParallel(Module, Joinable):
         # None after they have been applied by the optimizer. There is no support
         # for setting only some parameter grads to None, this must be done manually
         # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
-        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
-        from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import _apply_optim_in_backward_hook
         if any(
             hasattr(p, '_in_backward_optimizers') for p in self.module.parameters()
         ):
@@ -708,13 +710,17 @@ class DistributedDataParallel(Module, Joinable):
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
             for p in self.module.parameters():
-                for handle in p._optimizer_hook_handles:
+                for handle in getattr(p, '_optimizer_hook_handles', []):
                     handle.remove()
 
             self.register_comm_hook(
-                None, # wrapped hook state
+                self.process_group, # wrapped hook state
                 _apply_optim_in_backward_hook(allreduce_hook),
             )
+            # TODO (rohan-varma): this is a workaround that allows to set all
+            # DDP managed parameters gradients to None at the end of backwards.
+            # This is an experimental environment variable and we will solidify
+            # this behavior dependent on use cases.
             if os.getenv("DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE", "1") != "0":
                 warnings.warn(
                     "DDP + apply_optim_in_backward will currently set all "
@@ -1036,6 +1042,10 @@ class DistributedDataParallel(Module, Joinable):
             >>>   for input in inputs:
             >>>     ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
+
+        .. warning::
+            The forward pass should be included inside the context manager, or
+            else gradients will still be synchronized.
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
