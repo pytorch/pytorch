@@ -25,8 +25,8 @@
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @jerryzh168 @dzdang
-/aten/src/ATen/native/quantized/cudnn @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized/cuda @jerryzh168
+/aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
 /test/ao/ @jerryzh168 @z-a-f @hdcharles
 /test/quantization/ @jerryzh168 @z-a-f
@@ -39,8 +39,8 @@ nn/quantizable/ @jerryzh168 @z-a-f
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
