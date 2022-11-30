@@ -603,19 +603,15 @@ class AsyncCompile:
         return self.submit(task)
 
     def wait(self, scope: Dict[str, Any]):
+        num_kernels = len([value for key, value in scope.items() if isinstance(value, (Future, TritonFuture))])
+        pbar = tqdm(total=num_kernels, desc="Inductor Compilation", disable=config.disable_progress, delay=15)
         if config.compile_threads > 1:
-            for key, result in (
-                pbar := tqdm(
-                    scope.items(),
-                    desc="Inductor Compilation",
-                    disable=config.disable_progress,
-                    delay=15,
-                )
-            ):
+            for key, result in scope.items():
                 if config.verbose_progress:
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
+                    pbar.update(1)
 
         _compile_end()
 
