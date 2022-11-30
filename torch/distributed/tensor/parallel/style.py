@@ -4,7 +4,7 @@ import torch
 from abc import ABC
 from typing import Union, Optional
 from torch.distributed._tensor import DTensor, Shard, Replicate, DeviceMesh
-from torch.distributed.tensor.parallel.utils import (
+from torch.distributed.tensor.parallel._utils import (
     _PrepareInputType,
     _PrepareOutputType,
     _prepare_input_validate,

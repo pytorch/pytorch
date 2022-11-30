@@ -14,7 +14,7 @@ from torch.distributed.tensor.parallel.api import (
     _parallelize_linear,
     _parallelize_mlp,
 )
-from torch.distributed.tensor.parallel.utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.style import (
     make_input_replicate_1d,
     make_output_replicate_1d,

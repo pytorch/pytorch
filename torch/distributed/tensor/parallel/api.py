@@ -16,7 +16,7 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.distributed.tensor.parallel.utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 
 
 __all__ = [
