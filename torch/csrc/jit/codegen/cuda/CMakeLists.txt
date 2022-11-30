@@ -151,7 +151,7 @@ target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
 # as the latter is not respected by nvcc
 target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
 
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB})
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB} torch::nvtoolsext)
 if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
 endif()
