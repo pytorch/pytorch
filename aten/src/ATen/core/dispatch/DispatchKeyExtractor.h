@@ -160,14 +160,7 @@ public:
         for (const auto& elt : ivalue.toListRef()) {
           if (elt.isTensor()) {
             ks = ks | elt.toTensor().key_set();
-          } else if (C10_UNLIKELY(elt.isTensorList())) {
-            printf("in if statement");
-            for (const at::Tensor& tensor : elt.toTensorList()) {
-              // std::cout << "tensor: " << tensor << std::endl;
-              printf("hello world");
-              ks = ks | tensor.key_set();
-            }
-           }
+          }
         }
       }
     });

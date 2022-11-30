@@ -1209,6 +1209,7 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
         _warn_not_in_group("isend")
         return
 
+    print(f"isend tensor {tensor} to {dst}")
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         return default_pg.send([tensor], dst, tag)
@@ -1244,6 +1245,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
     else:
         pg = group
 
+    print(f"in irecv, pg is {pg}, tensor is {tensor}, src is {src}, tag is {tag}")
     if src is None:
         return pg.recv_anysource([tensor], tag)
     else:
@@ -1424,6 +1426,7 @@ def batch_isend_irecv(p2p_op_list):
             curr_group = p2p_op.group
             tag = p2p_op.tag
 
+            print(f"in batch_isend_irecv, op is {op}, tensor is {tensor}, peer is {peer}, curr_group is {curr_group}, tag is {tag}")
             ret = op(tensor, peer, curr_group, tag)
 
             if ret is not None:

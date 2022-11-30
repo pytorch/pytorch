@@ -1210,6 +1210,7 @@ class DistributedTest:
                     # No model averaging, so the parameters are not updated.
                     self.assertEqual(param.data, tensor)
 
+        # TODO figure out why this test uses send/recv from itself, is it even supported?
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1277,20 +1278,25 @@ class DistributedTest:
             dist.barrier()
             rank = dist.get_rank()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            print(rank_to_GPU)
             device_id = rank_to_GPU[rank][0]
+            print(device_id)
             p2p_op_list = []
 
             if rank == 0:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
-                recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
-                p2p_op_list.append(recv_op)
-                send_op = dist.P2POp(dist.isend, send_tensor, 0)
-                p2p_op_list.append(send_op)
+                # TODO figure out why this test uses send/recv from itself, is it even supported?
+                # recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
+                # p2p_op_list.append(recv_op)
+                # send_op = dist.P2POp(dist.isend, send_tensor, 0)
+                # p2p_op_list.append(send_op)
 
+                print(p2p_op_list)
                 reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
+
 
             self._barrier()
 
@@ -1385,6 +1391,7 @@ class DistributedTest:
                     RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
+                    send_tensor = send_tensor.to_sparse()
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
                     dist.batch_isend_irecv([send_op])
 

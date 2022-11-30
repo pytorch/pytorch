@@ -10,6 +10,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
@@ -73,6 +74,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 6,
   };
 
+  const std::unordered_map<std::string, BackendType> backendTypeResolver = {
+    {"undefined", BackendType::UNDEFINED},
+    {"gloo", BackendType::GLOO},
+    {"nccl", BackendType::NCCL},
+    {"ucc", BackendType::UCC},
+    {"mpi", BackendType::MPI},
+    {"tcp", BackendType::TCP},
+    {"custom", BackendType::CUSTOM}
+  };
+
   // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
   explicit ProcessGroup(int rank, int size);
 
@@ -89,6 +100,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual const std::string getBackendName() const {
     return options_->backend;
+  };
+
+  BackendType getBackendType() const {
+    return backendType_;
   };
 
   virtual void startCoalescing() {
@@ -364,6 +379,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     backendTypeToBackend_[backendType] = backend;
   }
 
+  c10::intrusive_ptr<Backend> getDefaultBackend() const {
+    TORCH_CHECK(
+        backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
+        "Could not find the default backend type ",
+        backendType_,
+        " for Process Group with name ",
+        getBackendName(),
+        ".");
+    return backendTypeToBackend_.at(backendType_);
+  }
+
+
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType) const;
 
   c10::intrusive_ptr<Backend> getBackend(BackendType backendType) const {
@@ -386,6 +413,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   const int rank_;
   const int size_;
   const c10::intrusive_ptr<Options> options_;
+  const BackendType backendType_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
 
