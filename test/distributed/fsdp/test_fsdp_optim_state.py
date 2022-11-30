@@ -753,14 +753,13 @@ class TestFSDPOptimState(FSDPTest):
     def test_flatten_sharded_optim_state_dict_nested(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         nested model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.NESTED,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
+            use_optim_input=False,
             wrap_alt=True,
         )
 
@@ -768,14 +767,13 @@ class TestFSDPOptimState(FSDPTest):
     def test_flatten_sharded_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         transformer model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.TRANSFORMER,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
+            use_optim_input=False,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -783,11 +781,11 @@ class TestFSDPOptimState(FSDPTest):
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
-            use_optim_input=False,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.OPTIM_STATE_DICT,
             use_diff_optim_inputs=False,
+            use_optim_input=False,
             wrap_alt=True,
             fsdp_kwargs={"use_orig_params": True},
         )
