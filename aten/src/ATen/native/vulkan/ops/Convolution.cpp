@@ -320,6 +320,16 @@ static api::ShaderSource get_shader(
       break;
     case Conv2dDepthwise:
       shader = VK_SHADER(conv2d_dw);
+      if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
+          kernel_size[3] == 3) {
+        // 1x1 refers to the output tile size
+        shader = VK_SHADER(conv2d_dw_3x3);
+      }
+      if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
+          kernel_size[3] == 5) {
+        // 1x1 refers to the output tile size
+        shader = VK_SHADER(conv2d_dw_5x5);
+      }
       break;
     case Conv2dPointwise:
       shader = VK_SHADER(conv2d_pw_2x2);
