@@ -4712,6 +4712,24 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
+    @patch.object(config, "cpp_wrapper", True)
+    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
+    def test_cpp_wrapper(self):
+        device = "cpu"
+        for name in [
+            "test_as_strided",  # buffer reuse
+            "test_cat",  # alias
+            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_relu",  # multiple inputs
+            "test_silu",  # single input, single output
+            "test_transpose",  # multiple outputs, buffer clear
+        ]:
+            test_name = f"{name}_{device}"
+            assert hasattr(self, test_name), "undefined function"
+            func = getattr(self, test_name)
+            assert callable(func), "not a callable"
+            func()
+
 
 if HAS_CPU:
 
