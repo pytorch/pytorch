@@ -117,7 +117,6 @@ class SizeVarAllocator(object):
         """
         from .ir import IndexingDiv, ModularIndexing
 
-        # return expr
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
 
