@@ -113,7 +113,9 @@ class MinifierTests(MinifierTestBase):
         )
 
     def test_after_dynamo_cpu_accuracy_error(self):
-        self._test_after_dynamo("cpu", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
+        self._test_after_dynamo(
+            "cpu", 4, RELU_ACCURACY_ERROR_BACKEND, "Accuracy failed"
+        )
 
     @requires_cuda()
     def test_after_dynamo_cuda_compile_error(self):

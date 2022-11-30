@@ -66,10 +66,6 @@ unittest.expectedFailure(
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_issue1466_size_aot_autograd_dynamic_shapes
-    # Cannot call numel() on tensor with symbolic sizes/strides
-)
 
 # DynamicShapesExportTests
 unittest.expectedFailure(
