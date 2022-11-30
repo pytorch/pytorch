@@ -6667,7 +6667,7 @@
 - func: quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: quantize_per_tensor_tensor_qparams
+    CPU, CUDA, Meta: quantize_per_tensor_tensor_qparams
   autogen: quantize_per_tensor.tensor_qparams_out
 
 - func: quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> Tensor[]

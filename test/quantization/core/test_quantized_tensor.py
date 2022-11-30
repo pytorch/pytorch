@@ -1568,7 +1568,18 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_quantization.py TESTNAME\n\n"
-                       "instead.")
+    def test_quantize_per_tensor_tensor_qparams_meta(self):
+        X = torch.ones(5, 10)
+        qdtype = torch.quint8
+        scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+        scale_tensor = torch.tensor(scale)
+        zero_point_tensor = torch.tensor(zero_point)
+        quantized_X = torch.ops.aten.quantize_per_tensor.tensor_qparams(X, scale_tensor, zero_point_tensor, qdtype)
+
+        X_meta = torch.ones(5, 10, device="meta")
+        scale_meta_tensor = torch.tensor(scale, device="meta")
+        zero_point_meta_tensor = torch.tensor(zero_point, device="meta")
+        quantized_X_meta = torch.ops.aten.quantize_per_tensor.tensor_qparams(X_meta, scale_meta_tensor, zero_point_meta_tensor, qdtype)
+
+        self.assertEqual(quantized_X.shape, quantized_X_meta.shape)
+        self.assertEqual(quantized_X.dtype, quantized_X_meta.dtype)
