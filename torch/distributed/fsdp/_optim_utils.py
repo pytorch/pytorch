@@ -1092,7 +1092,7 @@ def _map_param_id_to_optim_keys(
     optim_state_dict: Dict[str, Any],
     group: Optional[dist.ProcessGroup],
     param_id_to_param: List[nn.Parameter],
-    param_to_fqns: Dict[nn.Parameter, str],
+    param_to_fqns: Dict[nn.Parameter, List[str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
 ) -> Tuple[Dict[int, _OptimStateKey], Dict[_OptimStateKey, int]]:
     """
@@ -1168,8 +1168,8 @@ def _process_param_groups(
     state_dict: Dict[str, Any],
     param_id_to_param: List[nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
-) -> Dict[str, Any]:
-    param_groups = []
+) -> List[Dict[str, Any]]:
+    param_groups: List[Dict[str, Any]] = []
     for flat_param_group in state_dict["param_groups"]:
         unflat_param_group = copy.deepcopy(flat_param_group)
         param_group_params = [
