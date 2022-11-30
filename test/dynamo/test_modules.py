@@ -776,10 +776,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
-        import logging
-
-        torch._dynamo.config.log_level = logging.DEBUG
-
         class M(torch.nn.Module):
             def __init__(self, module_dict):
                 super().__init__()
@@ -791,13 +787,27 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 x = torch.add(x, 1.0)
                 return x
 
+        module_dict = torch.nn.ModuleDict({"foo": torch.nn.Conv2d(1, 1, 1)})
+        m = M(module_dict)
+        data = torch.randn(1)
+        out1 = m(data)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        out2 = opt_m(data)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
+
         module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
         m = M(module_dict)
         data = torch.randn(1)
+        out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
         torch._dynamo.reset()
         opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
+
+        self.assertEqual(cnt.op_count, 1)
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         pre = m(data)
