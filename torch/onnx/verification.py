@@ -380,6 +380,7 @@ def _compare_onnx_pytorch_model(
 
     Args:
         pt_model: PyTorch model.
+        onnx_model_f: ONNX model file path or file-like object.
         input_args: positional arguments for PyTorch model forward method.
         input_kwargs: keyword arguments for PyTorch model forward method.
         additional_test_inputs: additional positional arguments for PyTorch model
@@ -703,7 +704,7 @@ def verify(
     options: Optional[VerificationOptions] = None,
     **_,
 ):
-    """Verify model export to ONNX with original PyTorch model.
+    """Verify model export to ONNX against original PyTorch model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
