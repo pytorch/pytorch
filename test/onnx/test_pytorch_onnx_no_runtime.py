@@ -1130,6 +1130,32 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
 
+    @pytorch_test_common.skipIfNoCuda
+    def test_composed_layer_norm_small_eps_fp16_keep_double(self):
+        class Net(torch.nn.Module):
+            def __init__(self, C):
+                super().__init__()
+                self.layer_norm = torch.nn.LayerNorm(C, eps=1e-8)
+
+            def forward(self, x):
+                return self.layer_norm(x)
+
+        N, C = 8, 4
+        model = Net(C).cuda().half()
+        x = torch.randn(N, C).cuda().half()
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f, opset_version=14)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        const_node = [n for n in onnx_model.graph.node if n.op_type == "Constant"]
+        self.assertNotEqual(len(const_node), 0)
+        double_type_count = 0
+        for node in const_node:
+            for a in node.attribute:
+                # EPS constant should be in double type
+                if a.name == "value" and a.t.data_type == 11:
+                    double_type_count += 1
+        self.assertNotEqual(double_type_count, 0)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
