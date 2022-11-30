@@ -12,6 +12,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
+#include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
@@ -438,6 +439,12 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_inplace_requires_grad_allowed",
       &at::functorch::getInplaceRequiresGradAllowed);
+  m.def(
+      "set_autograd_function_allowed",
+      &at::functorch::setAutogradFunctionAllowed);
+  m.def(
+      "get_autograd_function_allowed",
+      &at::functorch::getAutogradFunctionAllowed);
   m.def("dlevel", &dlevel, "dlevel");
   m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
@@ -461,6 +468,40 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
+    const auto& stack = getDynamicLayerStack();
+    if (stack.size() == 0) {
+      return c10::nullopt;
+    }
+    auto result = stack.back().interpreter();
+    return result;
+  });
+  m.def("pop_dynamic_layer_stack", &popDynamicLayer);
+  m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
+    return pushDynamicLayer(std::move(layer));
+  });
+  py::class_<DynamicLayer>(m, "DynamicLayer");
+
+  py::enum_<TransformType>(m, "TransformType")
+      .value("Torch", TransformType::Torch)
+      .value("Grad", TransformType::Grad)
+      .value("Jvp", TransformType::Jvp)
+      .value("Functionalize", TransformType::Functionalize)
+      .value("Vmap", TransformType::Vmap);
+  py::class_<Interpreter>(m, "CInterpreter")
+      .def("key", &Interpreter::key)
+      .def("level", &Interpreter::level);
+  py::class_<GradInterpreterPtr>(m, "CGradInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &GradInterpreterPtr::key)
+      .def("level", &GradInterpreterPtr::level)
+      .def("lift", &GradInterpreterPtr::lift)
+      .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+  py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &VmapInterpreterPtr::key)
+      .def("level", &VmapInterpreterPtr::level)
+      .def("batchSize", &VmapInterpreterPtr::batchSize);
 }
 
 } // namespace impl

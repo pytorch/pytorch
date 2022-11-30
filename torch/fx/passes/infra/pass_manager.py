@@ -165,8 +165,8 @@ class PassManager:
             checks
     """
 
-    passes: List[Callable[[nn.Module], PassResult]] = []
-    constraints: List[Callable[[Callable, Callable], bool]] = []
+    passes: List[Callable[[nn.Module], PassResult]]
+    constraints: List[Callable[[Callable, Callable], bool]]
     _validated: bool = False
     steps: int = 1
 
@@ -178,10 +178,8 @@ class PassManager:
         run_checks_after_each_pass: bool = False,
         suppress_check_failures: bool = False,
     ):
-        if passes:
-            self.passes = passes
-        if constraints:
-            self.constraints = constraints
+        self.passes = passes or []
+        self.constraints = constraints or []
         if steps:
             self.steps = steps
 
