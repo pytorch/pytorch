@@ -224,6 +224,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def erf(x):
+        return f"{x}.erf()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
