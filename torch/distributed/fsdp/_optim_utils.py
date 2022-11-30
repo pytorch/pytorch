@@ -1146,7 +1146,7 @@ def _map_param_id_to_optim_keys(
     return r0_param_id_to_optim_state_key, optim_state_key_to_param_id
 
 
-def _process_param_groups(
+def _unflatten_process_groups(
     state_dict: Dict[str, Any],
     param_id_to_param: List[nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
@@ -1264,7 +1264,7 @@ def _optim_state_dict(
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     if to_save:
-        fsdp_osd["param_groups"] = _process_param_groups(
+        fsdp_osd["param_groups"] = _unflatten_process_groups(
             optim_state_dict, param_id_to_param, param_to_fqns
         )
 
