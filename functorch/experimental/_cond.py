@@ -1,5 +1,3 @@
-# TODO(zhxchen17) Expose API through functorhc.experimental.control_flow
-#                 and rename this file to _cond.py.
 import torch
 
 import torch.utils._pytree as pytree
