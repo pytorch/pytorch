@@ -364,6 +364,16 @@ def forward(self, primals_1):
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
 
+    def test_input_mutation_simple_with_none(self):
+        def f(a, b):
+            return a * 3
+        inp = [torch.ones(3, 3, requires_grad=True), None]
+
+        f_compiled = aot_function(f, nop)
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+        self.assertEqual(out_ref, out_test)
+
     def test_input_mutation_is_output(self):
         def f(a):
             a.mul_(2)
