@@ -49,4 +49,4 @@
 - torch/quantization/**
 - aten/src/ATen/quantized/**
 - aten/src/ATen/native/quantized/cpu/**
-- test/quantization/
+- test/quantization/**
