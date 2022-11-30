@@ -479,10 +479,10 @@ bool numpy_with_dlpack_deleter_bug_installed = false;
 // The NumPy bug should be fixed in version 1.24.0, but all releases
 // between 1.22.0 and 1.23.5 result in internal assertion failures that
 // consequently lead to segfaults. To work around this, we need to selectively
-// disable the optimization whenever we detect a buggy NumPy installation. 
-// We would ideally restrict the "fix" just to Dlpack-backed tensors that stem 
-// from NumPy, but given that it is difficult to confidently detect the provenance 
-// of such tensors, we have to resort to a more general approach. 
+// disable the optimization whenever we detect a buggy NumPy installation.
+// We would ideally restrict the "fix" just to Dlpack-backed tensors that stem
+// from NumPy, but given that it is difficult to confidently detect the provenance
+// of such tensors, we have to resort to a more general approach.
 //
 // References:
 //  https://github.com/pytorch/pytorch/issues/88082
