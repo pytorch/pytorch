@@ -425,7 +425,6 @@ class TestFSDPOptimState(FSDPTest):
 
         if check_same_param_keys:
             # Check parameter keys are the same first for earlier erroring
-
             ref_osd_param_ids = set(ref_osd_state.keys())
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(ref_osd_param_ids == fsdp_osd_param_ids)
@@ -754,9 +753,10 @@ class TestFSDPOptimState(FSDPTest):
     def test_flatten_sharded_optim_state_dict_nested(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         nested model."""
-        self._test_load_optim_state(
+        self.run_subtests(
+            {"use_optim_input": [False, True]},
+            self._test_load_optim_state,
             _ModelClass.NESTED,
-            use_optim_input=False,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
@@ -768,9 +768,10 @@ class TestFSDPOptimState(FSDPTest):
     def test_flatten_sharded_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         transformer model."""
-        self._test_load_optim_state(
+        self.run_subtests(
+            {"use_optim_input": [False, True]},
+            self._test_load_optim_state,
             _ModelClass.TRANSFORMER,
-            use_optim_input=False,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,

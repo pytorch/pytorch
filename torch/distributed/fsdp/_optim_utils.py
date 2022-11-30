@@ -1393,10 +1393,12 @@ def _gather_orig_param_state(
     ):
         return optim_state
 
+    # Gathering state from all ranks. This step may be slow. However,
+    # `state_dict()` is not in the critical path. We can fuse the communication
+    # if the performance becomes a problem.
     state_objects = {
         state_name: value for state_name, value in sorted_items(optim_state)
     }
-
     object_list: List[Dict[str, Any]] = [
         {} for _ in range(cast(int, fsdp_state.world_size))
     ]
@@ -1416,6 +1418,7 @@ def _gather_orig_param_state(
                 assert curr_value == [] or curr_value == value
                 orig_state[state_name] = value
 
+    # Unflatten state values.
     for state_name in orig_state.keys():
         value = orig_state[state_name]
         if not isinstance(value, list) or not torch.is_tensor(value[0]):
@@ -1459,6 +1462,7 @@ def _shard_orig_param_state(
         return {}
     param_start, param_end = flat_param._shard_param_offsets[param_idx - start]  # type: ignore[attr-defined]
 
+    # Flatten and shard the state.
     new_optim_state: Dict[str, Any] = {}
     for state_name, value in optim_state.items():
         if torch.is_tensor(value) and value.dim() > 0:
