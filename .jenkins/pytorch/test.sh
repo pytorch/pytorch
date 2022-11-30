@@ -287,9 +287,9 @@ test_inductor_timm_shard() {
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
-  # AMP is very flaky, going back to fp32 for training
+  # Check training with --amp
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
 }
