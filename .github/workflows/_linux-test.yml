@@ -84,7 +84,7 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@weiwangmeta/setup-nvidia-for-gcp
+        uses: pytorch/test-infra/.github/actions/setup-nvidia
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Start monitoring script
