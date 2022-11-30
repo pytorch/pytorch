@@ -36,11 +36,10 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    :glob:
    :maxdepth: 1
 
-   dynamo/index
-   dynamo/installation
-   dynamo/get-started
-   dynamo/guards-overview
-   dynamo/custom-backends
-   dynamo/deep-dive
-   dynamo/troubleshooting
-   dynamo/faq
+   installation
+   get-started
+   guards-overview
+   custom-backends
+   deep-dive
+   troubleshooting
+   faq
