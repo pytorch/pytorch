@@ -108,6 +108,19 @@ factory_common_args = merge_dicts(
         returned Tensor. Default: ``torch.contiguous_format``.
 """
     ),
+    {
+        "sparse_factory_device_note": """\
+.. note::
+
+   If the ``device`` argument is specified, the device of the
+   constructed sparse tensor will be the specified device. All the
+   input tensors will be converted to the specified device if needed.
+
+   If the ``device`` argument is not specified, the device of the
+   constructed sparse tensor will be the device of :attr:`values`. A
+   RuntimeError exception is raised if the devices of indices tensors
+   and :attr:`values` turn out to be different."""
+    },
 )
 
 factory_like_common_args = parse_kwargs(
@@ -10156,6 +10169,8 @@ typically faster than that for sparse tensors in COO format. Make you
 have a look at :ref:`the note on the data type of the indices
 <sparse-compressed-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     compressed_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, compressed_dim_size + 1)``.  The last element of
@@ -10168,10 +10183,12 @@ Args:
     plain_indices (array_like): Plain dimension (column or row)
         co-ordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
+
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types.  that
-        represents a (1+K)-dimensional or (1+2+K)-dimensional tensor
-        where ``K`` is the number of dense dimensions.
+        represents a (1+K)-dimensional (for CSR and CSC layouts) or
+        (1+2+K)-dimensional tensor (for BSR and BSC layouts) where
+        ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
         blocksize[1], *densesize)`` where ``blocksize[0] ==
@@ -10220,6 +10237,8 @@ Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
 in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
@@ -10281,6 +10300,8 @@ multiplication operations in CSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-csc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncols + 1)``.  The last element of each batch
@@ -10340,6 +10361,8 @@ Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
 multiplication operations in BSR format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsr-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
@@ -10406,6 +10429,8 @@ multiplication operations in BSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncolblocks + 1)``. The last element of each
@@ -10470,6 +10495,8 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 .. note::
 
    This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
