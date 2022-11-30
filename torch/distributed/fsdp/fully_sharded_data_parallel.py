@@ -95,6 +95,7 @@ from ._unshard_param_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
+from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -316,7 +317,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[ProcessGroup] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
