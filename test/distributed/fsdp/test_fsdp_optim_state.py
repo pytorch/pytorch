@@ -52,6 +52,7 @@ class _OSDCommMethod(Enum):
     BROADCAST_OBJECT_LIST = auto()
     SCATTER_FULL_OSD = auto()
     FLATTEN_SHARDED_OSD = auto()
+    OPTIM_STATE_DICT = auto()
 
 
 class _ModelClass(Enum):
@@ -424,6 +425,7 @@ class TestFSDPOptimState(FSDPTest):
 
         if check_same_param_keys:
             # Check parameter keys are the same first for earlier erroring
+
             ref_osd_param_ids = set(ref_osd_state.keys())
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(ref_osd_param_ids == fsdp_osd_param_ids)
@@ -749,13 +751,12 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_flatten_sharded_optim_state_dict_nested(self):
+    def test_flatten_sharded_optim_state_dict_nested(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         nested model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.NESTED,
+            use_optim_input=False,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
@@ -767,14 +768,28 @@ class TestFSDPOptimState(FSDPTest):
     def test_flatten_sharded_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         transformer model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.TRANSFORMER,
+            use_optim_input=False,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_use_orig_params(self) -> None:
+        """Tests :meth:`optim_state_dict` for an FSDP-root
+        transformer model."""
+        self._test_load_optim_state(
+            _ModelClass.NESTED,
+            use_optim_input=False,
+            use_multiple_param_groups=False,
+            halve_world_size=False,
+            osd_comm_method=_OSDCommMethod.OPTIM_STATE_DICT,
+            use_diff_optim_inputs=False,
+            wrap_alt=True,
+            fsdp_kwargs={"use_orig_params": True},
         )
 
     def _test_load_optim_state(
@@ -801,11 +816,12 @@ class TestFSDPOptimState(FSDPTest):
         """
         NUM_ITERS = 3
         initializer = self._model_class[model_class]
-        osd_method = (
-            FSDP.sharded_optim_state_dict
-            if osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD
-            else FSDP.full_optim_state_dict
-        )
+        if osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
+            osd_method = FSDP._optim_state_dict
+        elif osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD:
+            osd_method = FSDP.sharded_optim_state_dict
+        else:
+            osd_method = FSDP.full_optim_state_dict
 
         # First, run a wrapped model with full world size for a few iterations
         model1, optim1, optim_input1 = initializer(
@@ -922,6 +938,9 @@ class TestFSDPOptimState(FSDPTest):
                     optim=optim2,
                 )
             )
+        elif osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
+            sharded_osd1 = FSDP._load_optim_state_dict(fsdp_osd1, model2, optim2)
+            sharded_osd2 = FSDP._load_optim_state_dict(fsdp_osd2, model2, optim2)
 
         # As a sanity check, check that sharding the second model's full/sharded
         # optimizer state dict according to itself is equivalent to its local
@@ -1286,7 +1305,11 @@ class TestFSDPOptimState(FSDPTest):
         def should_check_method(method_name: str):
             # Skip `rekey_optim_state_dict` since that does not depend on
             # `use_orig_params=True`
-            return method_name != "rekey_optim_state_dict"
+            return method_name not in (
+                "rekey_optim_state_dict",
+                "full_optim_state_dict",
+                "shard_full_optim_state_dict",
+            )
 
         def get_error_context():
             error_regex = "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
