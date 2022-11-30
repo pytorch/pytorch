@@ -727,7 +727,13 @@ class TestPrims(TestCase):
 
             # Check that the graph can be executed with nvFuser
             out = execute(gm, sample.input, *sample.args, executor="nvfuser")
-            self.assertEqual(out, gm(sample.input, *sample.args))
+            ref_out = gm(sample.input, *sample.args)
+            for idx, (left, right) in enumerate(zip(out, ref_out)):
+                # Nvfuser does not support torch.uint8 dtype so check reserve output against 0 scalar
+                if idx == 3:
+                    self.assertTrue(torch.all(torch.eq(left, 0)))
+                else:
+                    self.assertEqual(left, right)
 
     # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
     @onlyCUDA
