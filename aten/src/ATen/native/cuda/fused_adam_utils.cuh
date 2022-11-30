@@ -55,11 +55,13 @@ C10_DEVICE __forceinline__ void adam_math(
         }
         // Update param, grad, 1st and 2nd order momentum.
         if (weight_decay != 0) {
-          if (adam_mode == ADAM_MODE::ORIGINAL) {
-            grad += param * weight_decay;
-          }
-          if (adam_mode == ADAM_MODE::ADAMW) {
-            param -= lr * weight_decay * param;
+          switch (adam_mode) {
+            case ADAM_MODE::ORIGINAL:
+              grad += param * weight_decay;
+              break;
+            case ADAM_MODE::ADAMW:
+              param -= lr * weight_decay * param;
+              break;
           }
         }
         // todo(crcrpar): use lerp
@@ -70,11 +72,9 @@ C10_DEVICE __forceinline__ void adam_math(
         const opmath_t step_size = lr / bias_correction1;
         const opmath_t bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
         const opmath_t bias_correction2_sqrt = std::sqrt(bias_correction2);
-        if (amsgrad) {
-            max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
-        }
         opmath_t denom;
         if (amsgrad) {
+            max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
             denom = (std::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
         } else {
             denom = (std::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
