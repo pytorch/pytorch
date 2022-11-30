@@ -64,21 +64,17 @@ class TestFunctionalization(TestCase):
 
     crossref = False
 
-    def get_logs(self, func, inpts, *, reapply_views=False, run_reinplace=False):
-        if not isinstance(inpts, tuple) and not isinstance(inpts, list):
-            inpts = [inpts]
-        inpts_clone = [inpt.clone() for inpt in inpts]
+    def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
+        inpts_clone = tree_map_only(torch.Tensor, torch.clone, inpts)
         traced_f = make_fx(_functionalize(func, reapply_views=reapply_views, crossref=self.crossref))(*inpts)
         if run_reinplace:
             traced_f = reinplace(traced_f, *inpts_clone)
         return traced_f.code
 
-    def assert_functionalization(self, func, inpts, *, reapply_views=False, mutated_input_metadata=False):
-        if not isinstance(inpts, list) and not isinstance(inpts, tuple):
-            inpts = [inpts]
-        clones1 = [inpt.clone() for inpt in inpts]
-        clones2 = [inpt.clone() for inpt in inpts]
-        clones3 = [inpt.clone() for inpt in inpts]
+    def assert_functionalization(self, func, *inpts, reapply_views=False, mutated_input_metadata=False):
+        clones1 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones2 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones3 = tree_map_only(torch.Tensor, torch.clone, inpts)
 
         # Compare outputs (and mutated inputs), with and without functionalization.
         out_ref = func(*inpts)
@@ -96,7 +92,10 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            for inpt, input_clone, input_clone3 in zip(inpts, clones1, clones3):
+            flat_inpts, _ = tree_flatten(inpts)
+            flat_clones1, _ = tree_flatten(clones1)
+            flat_clones3, _ = tree_flatten(clones3)
+            for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
                 self.assertEqual(inpt, input_clone)  # input mutations should still occur
                 self.assertEqual(inpt, input_clone3)
 
@@ -1244,12 +1243,12 @@ def forward(self, arg0_1):
             with enable_python_dispatcher():
                 return torch.instance_norm(x, None, None, running_mean, running_var,
                                            use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
-        self.assert_functionalization(f, [torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size)])
+        self.assert_functionalization(f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size))
         # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
         # whereas on other platforms, the alias_copy's are before the view_copy's.
         # e.g., the alias_copy after the getitem_4 assignment would be moved to be right before the copy assignment.
         if not IS_WINDOWS:
-            logs = self.get_logs(f, [torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size)])
+            logs = self.get_logs(f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size))
             self.assertExpectedInline(logs, """\
 
 
@@ -1284,7 +1283,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """)  # noqa: B950
 
             reinplaced_logs = self.get_logs(
-                f, [torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size)],
+                f, torch.randn(20, size, 35, 45), torch.zeros(size), torch.ones(size),
                 reapply_views=True, run_reinplace=True
             )
             self.assertExpectedInline(reinplaced_logs, """\
