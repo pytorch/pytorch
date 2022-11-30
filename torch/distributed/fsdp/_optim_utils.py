@@ -1081,7 +1081,7 @@ def _map_param_id_to_optim_keys(
     optim_state_dict: Dict[str, Any],
     group: Optional[dist.ProcessGroup],
     param_id_to_param: List[nn.Parameter],
-    param_to_fqns: Dict[nn.Parameter, str],
+    param_to_fqns: Dict[nn.Parameter, List[str]],
 ) -> Tuple[Dict[int, _OptimStateKey], Dict[_OptimStateKey, int]]:
     """
     Construct the local mapping between the `_OptimStateKey` and parameter IDs
@@ -1092,7 +1092,7 @@ def _map_param_id_to_optim_keys(
     optim_state_key_to_param_id: Dict[_OptimStateKey, int] = {}  # local
     r0_param_id_to_optim_state_key: Dict[
         int, _OptimStateKey
-    ] = {} # rank 0
+    ] = {}  # rank 0
 
     for param_id, param in enumerate(param_id_to_param):
         # Do not include parameters without state to avoid empty mappings
@@ -1154,8 +1154,8 @@ def _process_param_groups(
     state_dict: Dict[str, Any],
     param_id_to_param: List[nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
-) -> Dict[str, Any]:
-    param_groups = []
+) -> List[Dict[str, Any]]:
+    param_groups: List[Dict[str, Any]] = []
     for flat_param_group in state_dict["param_groups"]:
         unflat_param_group = copy.deepcopy(flat_param_group)
         param_group_params = [
