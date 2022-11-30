@@ -3535,12 +3535,14 @@ class TestQuantizedLinear(TestCase):
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
-           use_channelwise=st.booleans())
+           use_channelwise=st.booleans(),
+           use_fused_qdq_skip_quant=st.booleans())
     @override_qengines
     def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
-                     use_relu, use_multi_dim_input, use_channelwise):
+                     use_relu, use_multi_dim_input, use_channelwise, use_fused_qdq_skip_quant):
         decimal_val = 4
         dtypes = [torch.quint8]
+        use_fused_qdq_skip_quant = use_fused_qdq_skip_quant and torch.backends.quantized.engine == "fbgemm"
         if torch.backends.quantized.engine == 'qnnpack':
             # QNNPACK supports uint8 in the kernels. In the op we shift the int8
             # weight values to uint8 to be on par with fbgemm. However, this causes
@@ -3561,11 +3563,17 @@ class TestQuantizedLinear(TestCase):
             nptype = np_dtype[dtype]
             qlinear_prepack = torch.ops.quantized.linear_prepack
             if use_relu:
-                qlinear = torch.ops.quantized.linear_relu
+                if use_fused_qdq_skip_quant:
+                    qlinear = torch.ops.quantized.linear_fused_qdq_skip_quant_relu
+                else:
+                    qlinear = torch.ops.quantized.linear_relu
             else:
-                qlinear = torch.ops.quantized.linear
+                if use_fused_qdq_skip_quant:
+                    qlinear = torch.ops.quantized.linear_fused_qdq_skip_quant
+                else:
+                    qlinear = torch.ops.quantized.linear
             if use_multi_dim_input:
-                batch_size *= 3  # Test the multi-dim input tensor
+                batch_size *= 3  # Test the multi-dim inpunt tensor
             X_scale = 1.5
             X_zp = 5
             X_value_min = -128 if dtype == torch.qint8 else 0
@@ -3642,9 +3650,13 @@ class TestQuantizedLinear(TestCase):
             float_bias = b if use_bias else None
             W_prepack = qlinear_prepack(W_q, float_bias)
             if use_multi_dim_input:
+                X = X.view(3, int(batch_size / 3), input_channels)
                 X_q = X_q.view(3, int(batch_size / 3), input_channels)
             # Quantized Linear operator with prepacked weight
-            Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
+            if use_fused_qdq_skip_quant:
+                Y_q_dq = qlinear(X, X_scale, X_zp, W_prepack, Y_scale, Y_zp)
+            else:
+                Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
             if not use_channelwise:
                 # Test the per-tensor quantization only
                 # Reference quantized Linear operator
@@ -3656,7 +3668,10 @@ class TestQuantizedLinear(TestCase):
                     Y_q_ref = np.reshape(
                         Y_q_ref, (3, int(batch_size / 3), output_channels))
                 # Assert equal
-                np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
+                # note: fused_qdq_skip_quant op will be tested against the result simulated
+                # with fp32 linear op
+                if not use_fused_qdq_skip_quant:
+                    np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
             # Test both per-tensor and per-channel quantization
             # Reference quantized result from PyTorch Linear operator
             W_fp32 = W_q.dequantize().to(dtype=torch.float)
@@ -3668,8 +3683,12 @@ class TestQuantizedLinear(TestCase):
             Y_q_ref2 = torch.quantize_per_tensor(
                 Y_fp32_ref, Y_scale, Y_zp, dtype)
             # Assert equal
-            np.testing.assert_array_almost_equal(
-                Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
+            if use_fused_qdq_skip_quant:
+                decimal_val = 1
+                np.testing.assert_array_almost_equal(Y_fp32_ref.numpy(), Y_q_dq.numpy(), decimal=decimal_val)
+            else:
+                np.testing.assert_array_almost_equal(
+                    Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
            # in cudnn v. 8.4.0, there is a limitation that input channels
