@@ -28,8 +28,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
 
   protected:
+#if !defined(USE_ROCM)
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
+#endif
 
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded

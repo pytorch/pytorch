@@ -42,6 +42,10 @@ c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
 
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
+#if defined(USE_ROCM)
+  // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
+  return prepare_column_major_matrix_for_cusparse(tensor);
+#else
   if (is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
     return at::native::expect_resolved_conj(tensor);
@@ -49,6 +53,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     return c10::MaybeOwned<Tensor>::owned(
         tensor.clone(at::MemoryFormat::Contiguous));
   }
+#endif
 }
 
 Tensor copy_strided(const Tensor& tensor, IntArrayRef strides) {
@@ -605,9 +610,24 @@ void spmm(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
+  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
+  // silently returning incorrect results
+#if defined(USE_ROCM)
+  auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
+      mat1.crow_indices().to(kInt),
+      mat1.col_indices().to(kInt),
+      mat1.values(),
+      mat1.sizes(),
+      mat1.scalar_type(),
+      mat1.layout(),
+      mat1.device());
+  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
+  auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
+#else
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
+#endif
 
   auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
@@ -669,7 +689,13 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION < 50200)
+#if !defined(USE_ROCM)
+  TORCH_CHECK(
+      false,
+      "Calling addmm with sparse GPU tensors requires compiling ",
+      "PyTorch with CUDA 11+. ",
+      "Please use PyTorch built with newer CUDA version.");
+#elif defined(USE_ROCM) && ROCM_VERSION < 50200
   TORCH_CHECK(
       false,
       "Calling addmm with sparse GPU tensors requires compiling ",

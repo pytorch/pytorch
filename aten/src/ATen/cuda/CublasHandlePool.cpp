@@ -105,14 +105,16 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
 #endif
-// On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
-// FP32 data type calculations based on the value of the allow_tf32 flag.
-// To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
-TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
-} else {
-TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-}
+#if !defined(USE_ROCM)
+  // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
+  // FP32 data type calculations based on the value of the allow_tf32 flag.
+  // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
+  if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  }
+#endif
 #if defined(USE_ROCM) && ROCM_VERSION >= 30800
   rocblas_atomics_mode rocblas_mode;
   if (at::globalContext().deterministicAlgorithms()) {

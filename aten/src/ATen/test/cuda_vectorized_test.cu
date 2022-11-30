@@ -85,7 +85,13 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   using vectorized = policies::vectorized<vec_size, array_t>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
+#if !defined(USE_ROCM)
+  // This fails only on CUDA 10.x, remove this after CUDA 10.x support is dropped
+  scalar_t *buf_ = &buf[0];
+  auto accessor = [&](int index) -> scalar_t & { return buf_[index]; };
+#else
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
+#endif
   policy.load_single_arg(accessor, src + block_work_size() * blockIdx.x);
   policy.store(buf, idx);
 }
