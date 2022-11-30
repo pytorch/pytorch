@@ -529,7 +529,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
