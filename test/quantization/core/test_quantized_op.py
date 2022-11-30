@@ -3629,7 +3629,7 @@ class TestQuantizedLinear(TestCase):
                     b, scale=X_scale * (W_scales[0].item()), zero_point=0, dtype=torch.qint32) if use_bias else None
             # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
             # Y_scale * 255 (max for uint8).
-            Y_scale = 1.234
+            Y_scale = 12.34
             Y_zp = 5
             # Weight prepacking operator for quantized Linear
             float_bias = b if use_bias else None
