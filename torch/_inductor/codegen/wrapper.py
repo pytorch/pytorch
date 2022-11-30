@@ -608,7 +608,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{output_types} call_{self._call_func_id}({inputs_args} args) {{"
                 )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
-                self.wrapper_call.writeline(f"auto& [{inputs_keys_str}] = args;")
+                self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
+                self.wrapper_call.writeline(f"std::tie({inputs_keys_str}) = args;")
             else:
                 self.wrapper_call.writeline(
                     f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
