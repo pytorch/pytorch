@@ -157,7 +157,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: malfet/make-pytorch-depend-on-torchtrition
           submodules: recursive
           repository: pytorch/builder
           path: builder
