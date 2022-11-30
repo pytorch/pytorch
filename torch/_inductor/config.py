@@ -60,6 +60,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+
 @lru_cache(1)
 def is_fbcode():
     try:
@@ -68,11 +69,11 @@ def is_fbcode():
         return False
     return True
 
+
 compile_threads = (
     1
     if sys.platform == "win32" or is_fbcode()
-    else
-    min(
+    else min(
         32,
         len(os.sched_getaffinity(0))
         if hasattr(os, "sched_getaffinity")
