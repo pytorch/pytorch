@@ -15,7 +15,6 @@ import torch
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
-    free_symbol_startswith,
     get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
@@ -676,10 +675,6 @@ class TritonKernel(Kernel):
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
-    def is_indirect_indexing(self, index: sympy.Expr):
-        # tmpX  means indirect indexing
-        return free_symbol_startswith(index, "tmp")
-
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
@@ -701,6 +696,8 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
+        *,
+        dense_indexing=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -720,7 +717,20 @@ class TritonKernel(Kernel):
                 assert var.name[0] in "xyr", var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
-        if isinstance(index, sympy.Integer):
+        need_dense = (
+            config.triton.dense_indexing
+            or dense_indexing
+            or self._load_mask is not None
+        ) and index != 0
+
+        have_dense = True
+        for tree in self.range_trees:
+            if tree.prefix == "r" and not self.inside_reduction:
+                continue
+            if index_vars.intersection(tree.var_list):
+                have_dense = False
+
+        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
 
         if self._load_mask:
@@ -758,7 +768,6 @@ class TritonKernel(Kernel):
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
-        indirect_indexing = self.is_indirect_indexing(index)
         index, mask_vars, mask = self.indexing(index)
 
         if "rmask" in mask:
@@ -804,7 +813,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask_vars, mask = self.indexing(index)
+        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
