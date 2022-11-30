@@ -131,7 +131,7 @@ or ``torchdynamo.list_backends()`` each of which with its optional dependencies.
 
 Some of the most commonly used backends include:
 
-* **Debugging backends**: 
+* **Debugging backends**:
   * ``dynamo.optimize("eager")`` - Uses PyTorch
   to run the extracted GraphModule. This is quite useful in debugging
   TorchDynamo issues.

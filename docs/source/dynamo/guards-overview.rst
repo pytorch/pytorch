@@ -363,7 +363,7 @@ signature), we see that it has a name, a source, and a create function.
 The name should be the name of the variable.
 
 The source here is an enum indicating what *kind* of source the guard
-belongs to 
+belongs to.
 
 .. note:: Not to be confused with ``Source`` and the other types
    in ``source.py``, as stored on ``VariableTracker``.
@@ -501,11 +501,11 @@ In this section, we have reviewed:
 
 - The role of ``.valid`` and invalidation
 around weak references (and potentially soon to be NN Module
-invalidations) 
+invalidations).
 - How the C++ side of guard functions
 (``___check_type_id``, ``___check_tensors``, etc) operate
-- What happens when guards fail
-- What happens if we produce invalid guard code
+- What happens when guards fail.
+- What happens if we produce invalid guard code.
 
 We covered how user provided code wrapped in a TorchDynamo context
 goes on to get traced and tracked internally, organized into ``VariableTracker``\ s
