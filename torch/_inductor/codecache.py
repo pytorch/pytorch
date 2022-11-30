@@ -480,7 +480,11 @@ class CppWrapperCodeCache:
 
             ipaths, lpaths, libs, macros = get_include_and_linking_paths()
 
-            extra_cflags = f"{cpp_flags()} -ftemplate-depth-5000 -fconstexpr-depth=1024 {optimization_flags()} {get_warning_all_flag()} {macros} {use_custom_generated_macros()}"
+            extra_cflags = f"""
+                {cpp_flags()} -ftemplate-depth-5000 -fconstexpr-depth=1024
+                {optimization_flags()} {get_warning_all_flag()}
+                {macros} {use_custom_generated_macros()}
+            """
             extra_ldflags = f"{get_shared()} {lpaths} {libs}"
             extra_include_paths = f"{ipaths}"
 
