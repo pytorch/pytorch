@@ -15,10 +15,6 @@ import numpy as np
 from functorch.experimental.ops import PyOperator
 
 import torch
-from torch.distributed.fsdp._dynamo_utils import (
-    FSDP_MANAGED_MODULE,
-    FSDP_USE_ORIG_PARAMS,
-)
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -311,14 +307,14 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
-            elif getattr(value, FSDP_MANAGED_MODULE, False) or issubclass(
+            elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
-                if getattr(value, FSDP_MANAGED_MODULE, False):
+                if getattr(value, "_is_fsdp_managed_module", False):
                     # Note: we can't do this assert inside FSDP constructor,
                     # since we don't know yet whether dynamo will be used
                     assert getattr(
-                        value, FSDP_USE_ORIG_PARAMS, False
+                        value, "_fsdp_use_orig_params", False
                     ), "Dynamo only supports FSDP with use_orig_params=True"
 
                 # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
