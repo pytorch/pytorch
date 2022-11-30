@@ -1,20 +1,25 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import warnings
+from typing import Callable, cast, Dict, Optional, Sequence
+
 import torch
-from torch.utils._pytree import tree_flatten
-from typing import Dict, Callable, Optional, Sequence, cast
-from torch.distributed._tensor.device_mesh import get_global_device_mesh, DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+
+from torch.distributed._tensor.dispatch import (
+    operator_dispatch,
+    OpSchema,
+    OutputSharding,
+)
 from torch.distributed._tensor.placement_types import (
-    Placement,
-    Shard,
-    Replicate,
     _Partial,
     DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
 )
 from torch.distributed._tensor.redistribute import Redistribute
-
-from torch.distributed._tensor.dispatch import operator_dispatch, OpSchema, OutputSharding
+from torch.utils._pytree import tree_flatten
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
@@ -172,18 +177,13 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 # recover tensor stride by modifying the stride that larger than
                 # the current stride on the shard_dim
                 for i in range(len(tensor_stride)):
-                    if (
-                        i != shard_dim
-                        and tensor_stride[i] >= tensor_stride[shard_dim]
-                    ):
+                    if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                         # rescale the stride by the shard size
                         tensor_stride[i] = (
                             tensor_stride[i] // local_size[shard_dim]
                         ) * size[shard_dim]
             elif not isinstance(placement, (Replicate, _Partial)):
-                raise RuntimeError(
-                    f"placement type {type(placement)} not supported!"
-                )
+                raise RuntimeError(f"placement type {type(placement)} not supported!")
 
         if requires_grad != local_tensor.requires_grad:
             warnings.warn(
@@ -203,9 +203,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
         # deepcopy and set spec
-        r._spec = DTensorSpec(
-            device_mesh, copy.deepcopy(placements), shape=r.size()
-        )
+        r._spec = DTensorSpec(device_mesh, copy.deepcopy(placements), shape=r.size())
         # detach local tensor from autograd graph as we initialize the
         # distributed tensor and autograd will be working on top of
         # the wrapper tensor directly instead of local torch.Tensor
@@ -296,9 +294,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = (
-            get_global_device_mesh() if device_mesh is None else device_mesh
-        )
+        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
         # convert the local tensor to desired device base on device mesh's device_type
         local_tensor = local_tensor.to(device_mesh.device_type)
 
@@ -357,9 +353,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # Note that redistribute currently only supports out
         # of place redistribution, i.e. it always create a new
         # DTensor object and leave the original one unchanged.
-        device_mesh = (
-            get_global_device_mesh() if device_mesh is None else device_mesh
-        )
+        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
         # raise error if new placements not specified
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
