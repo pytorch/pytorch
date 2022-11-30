@@ -46,6 +46,6 @@ jobs:
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
           { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.gcp.a100" },
           { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
-          { config: "inductor_torchbench", shard: 1, num_shards: 1, runner: "linux.gcp.a100.4x" },
+          { config: "inductor_torchbench", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.gcp.a100.4x" },
         ]}

@@ -16,12 +16,6 @@ runs:
         cat /etc/os-release || true
         whoami
 
-    - name: Runner health check nvidia-smi
-      if: always()
-      shell: bash
-      run: |
-        nvidia-smi
-
     # TODO: fix this dangerous chmod, why do I have to do this?
     - name: Open Up Work Directory Permission 
       if: always()
