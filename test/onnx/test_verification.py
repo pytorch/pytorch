@@ -1,5 +1,7 @@
 # Owner(s): ["module: onnx"]
 
+import unittest
+
 import numpy as np
 import pytorch_test_common
 
@@ -18,7 +20,11 @@ class TestVerification(pytorch_test_common.ExportTestCase):
     @common_utils.parametrize(
         "onnx_backend",
         [
-            verification.OnnxBackend.ONNX,
+            common_utils.subtest(
+                verification.OnnxBackend.ONNX,
+                # TODO: enable this when ONNX submodule catches up to >= 1.13.
+                decorators=[unittest.expectedFailure],
+            ),
             verification.OnnxBackend.ONNX_RUNTIME_CPU,
         ],
     )
@@ -42,7 +48,7 @@ class TestVerification(pytorch_test_common.ExportTestCase):
                 Model(),
                 (torch.randn(2, 3),),
                 opset_version=opset_version,
-                onnx_backend=onnx_backend,
+                options=verification.VerificationOptions(backend=onnx_backend),
             )
 
         torch.onnx.unregister_custom_op_symbolic(
@@ -121,7 +127,7 @@ class TestVerification(pytorch_test_common.ExportTestCase):
     ):
         ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
         pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
-        options = verification._VerificationOptions(
+        options = verification.VerificationOptions(
             rtol=1e-5,
             atol=1e-6,
             check_shape=True,
@@ -140,7 +146,7 @@ class TestVerification(pytorch_test_common.ExportTestCase):
     ):
         ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
         pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
-        options = verification._VerificationOptions(
+        options = verification.VerificationOptions(
             rtol=1e-5,
             atol=1e-6,
             check_shape=True,

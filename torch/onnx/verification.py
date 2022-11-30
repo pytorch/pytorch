@@ -44,7 +44,7 @@ class OnnxBackend(enum.Enum):
 
 
 @dataclasses.dataclass
-class _VerificationOptions:
+class VerificationOptions:
     """Options for ONNX export verification.
 
     Attributes:
@@ -62,6 +62,11 @@ class _VerificationOptions:
         backend: ONNX backend for verification. Default to OnnxBackend.ONNX_RUNTIME_CPU.
         rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
         atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
+        remained_onnx_input_idx: If provided, only the specified inputs will be passed
+            to the ONNX model. Supply a list when there are unused inputs in the model.
+            Since unused inputs will be removed in the exported ONNX model, supplying
+            all inputs will cause an error on unexpected inputs. This parameter tells
+            the verifier which inputs to pass into the ONNX model.
         acceptable_error_percentage: acceptable percentage of element mismatches in comparison.
             It should be a float of value between 0.0 and 1.0.
     """
@@ -73,6 +78,7 @@ class _VerificationOptions:
     backend: OnnxBackend = dataclasses.field(default=OnnxBackend.ONNX_RUNTIME_CPU)
     rtol: float = dataclasses.field(default=1e-3)
     atol: float = dataclasses.field(default=1e-7)
+    remained_onnx_input_idx: Optional[Sequence[int]] = dataclasses.field(default=None)
     acceptable_error_percentage: Optional[float] = dataclasses.field(default=None)
 
 
@@ -201,7 +207,7 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
 def _compare_onnx_pytorch_outputs(
     onnx_outs: Union[Sequence[_NumericType], Sequence],
     pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
-    options: _VerificationOptions,
+    options: VerificationOptions,
 ):
     """
     Compare ONNX and PyTorch outputs.
@@ -368,8 +374,7 @@ def _compare_onnx_pytorch_model(
     input_args: _InputArgsType,
     input_kwargs: Optional[_InputKwargsType],
     additional_test_inputs: Optional[Sequence[_InputArgsType]],
-    remained_onnx_input_idx: Optional[Sequence[int]],
-    options: _VerificationOptions,
+    options: VerificationOptions,
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -379,7 +384,6 @@ def _compare_onnx_pytorch_model(
         input_kwargs: keyword arguments for PyTorch model forward method.
         additional_test_inputs: additional positional arguments for PyTorch model
             forward method.
-        remained_onnx_input_idx: indices of inputs that are passed to ONNX model.
         options: options for verification.
 
     Raises:
@@ -405,7 +409,7 @@ def _compare_onnx_pytorch_model(
         pt_outs = pt_model_copy(*pt_args, **pt_kwargs)
 
         onnx_inputs = _prepare_input_for_onnx(
-            input_args, input_kwargs, remained_onnx_input_idx, options.flatten
+            input_args, input_kwargs, options.remained_onnx_input_idx, options.flatten
         )
 
         onnx_outs = _run_onnx(onnx_session, onnx_inputs)
@@ -696,15 +700,7 @@ def verify(
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
-    remained_onnx_input_idx: Optional[Sequence[int]] = None,
-    flatten: bool = True,
-    ignore_none: bool = True,
-    check_shape: bool = True,
-    check_dtype: bool = True,
-    onnx_backend: OnnxBackend = OnnxBackend.ONNX_RUNTIME_CPU,
-    rtol: float = 0.001,
-    atol: float = 1e-7,
-    acceptable_error_percentage: Optional[float] = None,
+    options: Optional[VerificationOptions] = None,
     **_,
 ):
     """Verify model export to ONNX with original PyTorch model.
@@ -726,40 +722,16 @@ def verify(
             model with external data.
         additional_test_inputs (list, optional): List of tuples. Each tuple is a group of
             input arguments to test. Currently only *args are supported.
-        remained_onnx_input_idx (list, optional): If provided, only the specified inputs
-            will be passed to the ONNX model. Supply a list when there are unused inputs
-            in the model. Since unused inputs will be removed in the exported ONNX
-            model, supplying all inputs will cause an error on unexpected inputs.
-            This parameter tells the verifier which inputs to pass into the ONNX model.
-        flatten (bool, optional): Default True. If True, unpack nested list/tuple/dict
-            inputs into a flattened list of Tensors for ONNX. Set this to False if nested
-            structures are to be preserved for ONNX, which is usually the case with
-            exporting ScriptModules.
-        ignore_none (bool, optional): Whether to ignore None type in
-            torch output, which is usually the case with tracing. Set this to False, if
-            torch output should keep None type, which is usually the case with exporting
-            ScriptModules. Default to True.
-        check_shape (bool, optional): Whether to check the shapes between
-            PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
-            output shape broadcasting. Default to True.
-        check_dtype (bool, optional): Whether to check the dtypes between
-            PyTorch and ONNX Runtime outputs are consistent. Default to True.
-        onnx_backend (OnnxBackend, optional): ONNX backend to use. Default to ONNX Runtime CPU.
-        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
-            It should be a float of value between 0.0 and 1.0.
+        options (_VerificationOptions, optional): A _VerificationOptions object that
+            controls the verification behavior.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
-    if "ort_providers" in _:
-        warnings.warn(
-            "The argument 'ort_providers' is deprecated. Please use 'onnx_backend' instead.",
-            DeprecationWarning,
-        )
+    if options is None:
+        options = VerificationOptions()
 
     if training == torch.onnx.TrainingMode.TRAINING:
         model.train()
@@ -790,23 +762,11 @@ def verify(
             verbose=verbose,
         )
 
-        options = _VerificationOptions(
-            flatten=flatten,
-            ignore_none=ignore_none,
-            rtol=rtol,
-            atol=atol,
-            check_shape=check_shape,
-            check_dtype=check_dtype,
-            acceptable_error_percentage=acceptable_error_percentage,
-            backend=onnx_backend,
-        )
-
         _compare_onnx_pytorch_model(
             pt_model=model_copy,
             onnx_model_f=model_f,
             input_args=input_args,
             input_kwargs=input_kwargs,
             additional_test_inputs=additional_test_inputs,
-            remained_onnx_input_idx=remained_onnx_input_idx,
             options=options,
         )
