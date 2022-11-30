@@ -857,7 +857,10 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    # NB: Ensure each input to make_fx has a distinct identity, so we don't
+    # duplicate specialize
+    # TODO: Should this be passed on to fw_compiler?  :think:
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*[a.detach() for a in flat_args])
     if config.debug_graphs:
         print("====== Forward (only) graph {aot_config.aot_id} ======")
         fw_module.print_readable()
@@ -1066,25 +1069,131 @@ def format_guard_bug_msg(aot_config, expected):
     )
 
 
-# Wraps aot_dispatch_deduplicated_autograd, ensuring that duplicate arguments
-# are dropped from the inner compilation function.
+# MOTIVATION:
 #
-# In Haskell types, suppose you have:
+# When tracing functions for future execution, one must be careful not to pass
+# in the same input tensor multiple times (e.g., f(x, x), as this can result
+# in graphs that are ONLY valid if you later pass a new tensor in exactly the
+# same way (e.g., f(y, y)).  (NB: we really mean duplicate; two distinct
+# tensors that alias each other is a different situation that is covered by
+# aot_dispatch_deduplicated_autograd). Here are two examples:
 #
-#   add_dupe_args :: DedupedArgs -> Args
-#   remove_dupe_args :: Args -> DedupedArgs
+# (1) Suppose you have a function:
 #
-#   aot_dispatch_deduplicated_autograd
-#       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-#   aot_dispatch_autograd
-#       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+#   def f(x, y):
+#       return x + y
 #
-# Then the code below can be written in point-free style as:
+# If you make_fx(f)(x, x), you will trace out:
 #
-#   aot_dispatch_deduplicate_autograd f a c =
-#       aot_dispatch_autograd (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+#   def f(x, y):
+#       return y + y
+#
+# Oops!
+#
+# (2) For most tensors x and y, you can compute f's gradient with respect to
+# these to inputs by saying torch.autograd.grad(f(x, y), (x, y)).  However,
+# if x is y, you will trace out a program that gets incorrect gradients:
+#
+#   >>> x = torch.randn(1, requires_grad=True)
+#   >>> torch.autograd.grad(x + x, (x, x))
+#   (tensor([2.]), tensor([2.]))
+#
+# In other words, the gradient is double-counted.  Deduplicating the arguments
+# gives you an appropriate gradient:
+#
+#   >>> y = torch.randn(1, requires_grad=True)
+#   >>> torch.autograd.grad(x + y, (x, y))
+#   (tensor([1.]), tensor([1.]))
+#
+# HOW TO DEDUPLICATE:
+#
+# There are a few strategies, in order of preference:
+#
+# 1. For every duplicate argument to the function, detach it into
+#    a separate leaf tensor, so that it is no longer duplicated.
+#
+#       PRO: The resulting compiled graph works for any configuration
+#       of duplicated arguments.
+#
+#       CON: It does not (naively) work if you mutate the metadata of inputs:
+#
+#           def f(x, y):
+#               x.transpose_(0, 1)
+#               y.transpose_(0, 2)
+#
+#           x = torch.randn(2, 3, 4)
+#           f(x, x)
+#
+#       The ordering of the transposes inside f dictates whether or not
+#       you get [4, 2, 3] or [3, 4, 2].  This means that you cannot precompute
+#       what metadata mutations should get applied to each input; you need to
+#       assume they aren't duplicates (what we do today) or preserve
+#       the original metadata mutations exactly in order, so that they work
+#       for any duplicate configuration.
+#
+#       CON: It does not (naively) work if you mutate the data of inputs.
+#       In particular, leaf tensors that require grad cannot be mutated,
+#       this makes it impossible to differentiate with respect to the original
+#       base.
+#
+# 2. For every duplicate argument to the function, remove it, so it is
+#    no longer part of the "true" signature:
+#
+#       PRO: Implemented naively, it still works for metadata/data mutation.
+#
+#       CON: The resulting compiled graph is duplicate-specialized: it only
+#       works if future calls duplicate arguments in exactly the same way.
+#       Horribly, Dynamo doesn't guard on this at the moment.  But even if
+#       it did, you could still end up recompiling a bunch of each duplicate.
+#
+# Our strategy is to do (1) if we can, and do (2) otherwise, erroring if
+# Dynamo's guards are not enough.  In practice, this seems to cover
+# everything.
 #
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    # Get information about whether or not flat_fn mutates its arguments
+    # or not
+    with enable_python_dispatcher():
+        fw_metadata, _out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            flat_fn
+        )(*flat_args)
+
+    # Strategy 1: For any input that is not mutated, we can leafify it if we
+    # need to remove a duplicate.
+    leaf_flat_args = []
+    args_set = set()
+    ok = True
+
+    for i, a in enumerate(flat_args):
+        if a not in args_set:
+            args_set.add(a)
+            leaf_flat_args.append(a)
+        elif fw_metadata.mutated_input_info[i] == MutationType.none:
+            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+        else:
+            ok = False
+            break
+
+    if ok:
+        return aot_dispatch_deduplicated_autograd(flat_fn, leaf_flat_args, aot_config)
+
+    # Strategy 2: Duplicate specialize.
+    #
+    # In Haskell types, suppose you have:
+    #
+    #   add_dupe_args :: DedupedArgs -> Args
+    #   remove_dupe_args :: Args -> DedupedArgs
+    #
+    #   aot_dispatch_deduplicated_autograd
+    #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
+    #   aot_dispatch_autograd
+    #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
+    #
+    # Then the code below can be written in point-free style as:
+    #
+    #   aot_dispatch_deduplicate_autograd f a c =
+    #       aot_dispatch_autograd (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+    #
     # Suppose you have:
     #
     #   [a, b, a, c]
@@ -1096,7 +1205,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     #
     # This is done via (respectively):
     #
-    #   seen_args = {2}  # what to drop
+    #   seen_args = {a: 0, b: 1, c: 2}
     #   add_dupe_map = {  # how to get args from the deduped list
     #       0: 0,
     #       1: 1,
@@ -1107,15 +1216,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     seen_args = {}
     keep_arg_mask = []
-    dropped_args = False
     add_dupe_map = {}
     duped_arg_len = len(flat_args)
+    leafified_inputs = False
 
     j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
             keep_arg_mask.append(False)
-            dropped_args = True
             add_dupe_map[i] = seen_args[t]
             continue
         keep_arg_mask.append(True)
@@ -1133,41 +1241,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def add_dupe_args(args):
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
 
-    def maybe_wrap_debug(f):
-        if not config.debug_assert:
-            return f
-
-        @wraps(f)
-        def debug_wrapper(*args):
-            # Test that the computed remove/add arg functions are an inverse
-            new_args = add_dupe_args(remove_dupe_args(args))
-            seen = {}
-            for i, (x, y) in enumerate(zip(new_args, args)):
-                seen[y] = None
-                assert x is y, format_guard_bug_msg(
-                    aot_config,
-                    f"{describe_input(i, aot_config)} would be a duplicate of "
-                    f"{describe_input(add_dupe_map[i], aot_config)}"
-                )
-            # This is only an error if there is metadata mutation on both of
-            # the duped arguments; in this case, we need to know what order
-            # the metadata mutation applies in.  You'll get the correct result
-            # otherwise, because a graph that assumes distinct inputs works if
-            # you dupe the inputs (the gradient contributions from each input
-            # will get summed up appropriately.)
-            """
-            assert len(seen) == unique_args, format_guard_bug_msg(aot_config,
-                f"there would be {unique_args} distinct arguments"
-            )
-            """
-            return f(*args)
-
-        return debug_wrapper
-
-    # Fastpath
-    if not dropped_args:
-        return maybe_wrap_debug(aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config))
-
     deduped_flat_args = remove_dupe_args(flat_args)
 
     @wraps(flat_fn)
@@ -1180,7 +1253,39 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def wrapped_compiled_fn(*args):
         return compiled_fn(*remove_dupe_args(args))
 
-    return maybe_wrap_debug(wrapped_compiled_fn)
+    # This can be uncommented when we properly guard for duplicates,
+    # but right now we must not do it.
+    # if not config.debug_assert:
+    #     return wrapped_compiled_fn
+
+    @wraps(wrapped_compiled_fn)
+    def debugged_compiled_fn(*args):
+        # Test that the computed remove/add arg functions are an inverse
+        new_args = add_dupe_args(remove_dupe_args(args))
+        seen = {}
+        for i, (x, y) in enumerate(zip(new_args, args)):
+            seen[y] = None
+            assert x is y, format_guard_bug_msg(
+                aot_config,
+                f"{describe_input(i, aot_config)} would be a duplicate of "
+                f"{describe_input(add_dupe_map[i], aot_config)}"
+            )
+        # This is only an error if there is metadata mutation on both of
+        # the duped arguments; in this case, we need to know what order
+        # the metadata mutation applies in.  You'll get the correct result
+        # otherwise, because a graph that assumes distinct inputs works if
+        # you dupe the inputs (the gradient contributions from each input
+        # will get summed up appropriately.)
+        #
+        # TODO: work out how to setup this assert correctly
+        """
+        assert len(seen) == unique_args, format_guard_bug_msg(aot_config,
+            f"there would be {unique_args} distinct arguments"
+        )
+        """
+        return wrapped_compiled_fn(*args)
+
+    return debugged_compiled_fn
 
 
 def describe_input(i, aot_config):

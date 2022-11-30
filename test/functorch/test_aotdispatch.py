@@ -1016,15 +1016,26 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
 
+    def test_dupe_arg_torture(self):
+        def f(x, y):
+            x.t_()
+            y.t_()
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        self.verify_aot_autograd(f, [x, x])
+
     @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("functorch._src.config.debug_assert", True)
     def test_invalid_dupe(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
+                x.t_()
+                y.t_()
                 return (x + y,)
 
-        x = torch.randn(3, 3, requires_grad=True)
-        y = torch.randn(3, 3, requires_grad=True)
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
 
         fxy = aot_module_simplified(F(), (x, y), nop)
         fxy(x, y)
