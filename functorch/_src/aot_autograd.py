@@ -5,7 +5,7 @@ import itertools
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
-from functools import wraps
+from functools import wraps, partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from torch.fx.experimental.proxy_tensor import is_sym_node
 
@@ -236,9 +236,15 @@ def gen_alias_from_base(aliased_base_tensor, size, stride, storage_offset, targe
 # TODO: Provide a faster version of this that assumes flat arguments
 # (so no pytree necessary)
 def run_functionalized_fw_and_collect_metadata(f):
+    memo = {}
+
     def to_fun(t):
         if isinstance(t, Tensor):
-            return torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            if t in memo:
+                return memo[t]
+            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            memo[t] = r
+            return r
         else:
             return t
 
@@ -857,10 +863,7 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    # NB: Ensure each input to make_fx has a distinct identity, so we don't
-    # duplicate specialize
-    # TODO: Should this be passed on to fw_compiler?  :think:
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*[a.detach() for a in flat_args])
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
         print("====== Forward (only) graph {aot_config.aot_id} ======")
         fw_module.print_readable()
@@ -876,6 +879,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     def new_fn(args):
         fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
         return fw_outs
+    new_fn._boxed_call = True
 
     return new_fn
 
@@ -1150,7 +1154,7 @@ def format_guard_bug_msg(aot_config, expected):
 # Dynamo's guards are not enough.  In practice, this seems to cover
 # everything.
 #
-def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, compiler_fn):
     # Get information about whether or not flat_fn mutates its arguments
     # or not
     with enable_python_dispatcher():
@@ -1175,7 +1179,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             break
 
     if ok:
-        return aot_dispatch_deduplicated_autograd(flat_fn, leaf_flat_args, aot_config)
+        return compiler_fn(flat_fn, leaf_flat_args, aot_config)
 
     # Strategy 2: Duplicate specialize.
     #
@@ -1184,15 +1188,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     #   add_dupe_args :: DedupedArgs -> Args
     #   remove_dupe_args :: Args -> DedupedArgs
     #
-    #   aot_dispatch_deduplicated_autograd
+    #   compiler_fn
     #       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-    #   aot_dispatch_autograd
+    #   deped_compiler_fn
     #       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
     #
     # Then the code below can be written in point-free style as:
     #
-    #   aot_dispatch_deduplicate_autograd f a c =
-    #       aot_dispatch_autograd (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
+    #   deduped_compiler_fn f a c =
+    #       compiler_fn (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
     #
     # Suppose you have:
     #
@@ -1247,11 +1251,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def wrapped_flat_fn(*args):
         return flat_fn(*add_dupe_args(args))
 
-    compiled_fn = aot_dispatch_deduplicated_autograd(wrapped_flat_fn, deduped_flat_args, aot_config)
+    compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config)
+
+    if not hasattr(compiled_fn, "_boxed_call"):
+        compiled_fn = make_boxed_func(compiled_fn)
 
     @wraps(compiled_fn)
-    def wrapped_compiled_fn(*args):
-        return compiled_fn(*remove_dupe_args(args))
+    def wrapped_compiled_fn(args):
+        deduped_args = remove_dupe_args(args)
+        args.clear()
+        return compiled_fn(deduped_args)
+    wrapped_compiled_fn._boxed_call = True
 
     # This can be uncommented when we properly guard for duplicates,
     # but right now we must not do it.
@@ -1259,7 +1269,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     #     return wrapped_compiled_fn
 
     @wraps(wrapped_compiled_fn)
-    def debugged_compiled_fn(*args):
+    def debugged_compiled_fn(args):
         # Test that the computed remove/add arg functions are an inverse
         new_args = add_dupe_args(remove_dupe_args(args))
         seen = {}
@@ -1283,7 +1293,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             f"there would be {unique_args} distinct arguments"
         )
         """
-        return wrapped_compiled_fn(*args)
+        return wrapped_compiled_fn(args)
+    debugged_compiled_fn._boxed_call = True
 
     return debugged_compiled_fn
 
@@ -1295,11 +1306,11 @@ def describe_input(i, aot_config):
         return f"input {i - aot_config.num_params_buffers}"
 
 
-# Like aot_dispatch_autograd, but with the precondition that there
+# Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     with enable_python_dispatcher():
         _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
@@ -1757,11 +1768,19 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
-            )
+            compiler_fn = aot_dispatch_autograd
         else:
-            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
+            compiler_fn = aot_dispatch_base
+
+        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
+        # You can put more passes here
+
+        compiled_fn = compiler_fn(flat_fn, fake_flat_tensor_args, aot_config)
+
+        if not hasattr(compiled_fn, '_boxed_call'):
+            compiled_fn = make_boxed_func(compiled_fn)
+
+        return compiled_fn
 
 
 # Inspired by autodidax (thanks!)
