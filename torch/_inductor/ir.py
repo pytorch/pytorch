@@ -2483,9 +2483,7 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            if isinstance(
-                x.get_layout(), FlexibleLayout
-            ):
+            if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
                     x, freeze=True, want_contiguous=False, stride_order=order
