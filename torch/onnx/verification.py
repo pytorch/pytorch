@@ -914,10 +914,12 @@ def verify_aten_graph(
     graph = graph.copy()
 
     # Execute aten graph and get reference torch jit outputs.
-    graph_inputs = [v for v in graph.inputs()]
+    graph_inputs = list(v for v in graph.inputs())
     jit_inputs = tuple([arg for arg in input_args if arg is not None])
     weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
     assert all([w is not None for w in weights])
+    # TODO: Only copy the argument if mutation is detected in Graph.
+    jit_inputs = copy.deepcopy(jit_inputs)
     jit_input_and_parameters = jit_inputs + tuple(weights)
     jit_outs = torch._C._jit_interpret_graph(graph, jit_input_and_parameters)  # type: ignore[attr-defined]
     if not isinstance(jit_outs, (list, tuple)):
@@ -1128,6 +1130,12 @@ class GraphInfoPrettyPrinter:
 
 
 class OnnxTestCaseRepro:
+    def __init__(self, repro_dir):
+        self.repro_dir = repro_dir
+        self.proto, self.inputs, self.outputs = onnx_proto_utils.load_test_case(
+            repro_dir
+        )
+
     @_beartype.beartype
     @classmethod
     def create_test_case_repro(
@@ -1156,24 +1164,21 @@ class OnnxTestCaseRepro:
         )
 
     @_beartype.beartype
-    @classmethod
-    def validate_test_case_repro(cls, repro_dir: str, backend: OnnxBackend):
-        """Validate a repro under "{repro_dir}" for an ONNX test case.
+    def validate_test_case_repro(self, backend: OnnxBackend):
+        """Validate an ONNX test case.
 
         Args:
-            repro_dir: Directory to the repro.
             backend: Backend to validate the repro.
         """
-        proto, inputs, outputs = onnx_proto_utils.load_test_case(repro_dir)
-        onnx_session = _onnx_backend_session(io.BytesIO(proto), backend)
-        run_outputs = onnx_session.run(None, inputs)
+        onnx_session = _onnx_backend_session(io.BytesIO(self.proto), backend)
+        run_outputs = onnx_session.run(None, self.inputs)
         if hasattr(onnx_session, "get_outputs"):
             output_names = [o.name for o in onnx_session.get_outputs()]
         elif hasattr(onnx_session, "output_names"):
             output_names = onnx_session.output_names
         else:
             raise ValueError(f"Unknown onnx session type: {type(onnx_session)}")
-        expected_outs = [outputs[name] for name in output_names]
+        expected_outs = [self.outputs[name] for name in output_names]
         options = VerificationOptions()
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
@@ -1459,7 +1464,7 @@ class GraphInfo:
                 new_input.copyMetadata(input)
 
         for node in reversed(upper_nodes):
-            if not node in complete_lower_nodes_set:
+            if node not in complete_lower_nodes_set:
                 try:
                     node.destroy()
                 except RuntimeError as e:
@@ -1516,7 +1521,7 @@ class GraphInfo:
         graph: torch.Graph,
         pivot: int,
         process_bridge_value: Callable[[torch.Value], torch.Value],
-    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node], Set[torch.Node],]:
+    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node], Set[torch.Node]]:
         nodes = list(graph.nodes())
         upper_nodes = nodes[:pivot]
         lower_nodes = nodes[pivot:]
@@ -1528,7 +1533,6 @@ class GraphInfo:
         complete_upper_nodes_set = _all_nodes(upper_nodes)
         complete_lower_nodes_set = _all_nodes(lower_nodes)
         original_graph_outputs = set(graph.outputs())
-        nodes_to_duplicate: Set[torch.Node] = set()
         # Bridge values are values produced from upper graph, and consumed
         # by lower graph. These values need to be become upper graph outputs
         # and lower graph inputs, to bridge the interaction.

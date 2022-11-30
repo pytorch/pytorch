@@ -267,8 +267,8 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         repro_dir = leaf_info.export_repro(temp_dir.name)
 
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
-            verification.OnnxTestCaseRepro.validate_test_case_repro(
-                repro_dir, self.onnx_backend
+            verification.OnnxTestCaseRepro(repro_dir).validate_test_case_repro(
+                self.onnx_backend
             )
 
 
