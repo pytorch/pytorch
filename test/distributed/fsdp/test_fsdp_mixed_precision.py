@@ -757,7 +757,6 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
 
 
-
 class IgnoredModule(nn.Module):
     def __init__(self):
         super().__init__()
