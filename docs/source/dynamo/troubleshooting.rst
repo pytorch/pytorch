@@ -193,14 +193,8 @@ an error occurs deep within a model’s Python code, it can be useful to
 execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
-- Setting the
-environment variable ``TORCHDYNAMO_DEBUG_FUNCTION`` to the desired function
-name will only run torchdynamo on functions with that name.
-- Enabling the
-record/replay tool (set
-``torch._dynamo.config.replay_record_enabled = True``) which dumps an
-execution record when an error is encountered. This record can then be
-replayed to run only the frame where an error occurred.
+- Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION`` to the desired function name will only run torchdynamo on functions with that name.
+- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``) which dumps anexecution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 TorchInductor Errors
 --------------------
@@ -575,13 +569,9 @@ that are encountered. Here is an example usage:
 
 Outputs include:
 
-- ``out_guards`` - a list of lists where each
-sublist contains the guards that must pass to ensure the traced graphs
-are valid.
-- ``graphs`` - a list of graph modules which were successfully
-traced.
-- ``ops_per_graph`` - a list of lists where each sublist contains
-the ops that are run in the graph.
+- ``out_guards`` - a list of lists where each sublist contains the guards that must pass to ensure the traced graphs are valid.
+- ``graphs`` - a list of graph modules which were successfully traced.
+- ``ops_per_graph`` - a list of lists where each sublist contains the ops that are run in the graph.
 
 To throw an error on the first graph break encountered, use the ``nopython``
 mode. This mode disables TorchDynamo’s Python fallback, and only

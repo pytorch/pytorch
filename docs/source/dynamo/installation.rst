@@ -45,7 +45,7 @@ Install from Local Source
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Alternatively, you can build PyTorch from `source
-https://github.com/pytorch/pytorch#from-source`__, which has TorchDynamo
+<https://github.com/pytorch/pytorch#from-source>`__, which has TorchDynamo
 included.
 
 To install GPU TorchDynamo dependencies, run ``make triton`` in the

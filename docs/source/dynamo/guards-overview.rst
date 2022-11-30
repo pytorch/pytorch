@@ -499,11 +499,8 @@ Summary
 
 In this section, we have reviewed:
 
-- The role of ``.valid`` and invalidation
-around weak references (and potentially soon to be NN Module
-invalidations).
-- How the C++ side of guard functions
-(``___check_type_id``, ``___check_tensors``, etc) operate
+- The role of ``.valid`` and invalidation around weak references (and potentially soon to be NN Moduleinvalidations).
+- How the C++ side of guard functions (``___check_type_id``, ``___check_tensors``, etc) operate
 - What happens when guards fail.
 - What happens if we produce invalid guard code.
 
