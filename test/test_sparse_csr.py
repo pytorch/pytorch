@@ -2893,7 +2893,7 @@ class TestSparseCSR(TestCase):
             for batch_index in np.ndindex(batch_shape):
                 pt_matrix = pt_tensor[batch_index]
                 dense_matrix = dense[batch_index]
-                dense_matrix_pt = dense_matrix.to_sparse(layout=layout, blocksize=blocksize)
+                dense_matrix_pt = dense_matrix.to_sparse(layout=layout, blocksize=blocksize or None)
                 # sanity check, selecting batch of to_<layout> and dense[batch].to_<layout> should give the same result
                 self.assertEqual(pt_matrix, dense_matrix_pt)
                 check_batch(pt_matrix, dense_matrix, blocksize, **kwargs)
@@ -2933,7 +2933,7 @@ class TestSparseCSR(TestCase):
             check_content = functools.partial(_check_batched, check_batch=check_content)
 
         sparse_sizes = [(6, 10), (0, 10), (6, 0), (0, 0)]
-        blocksizes = [(2, 2), (1, 1), (1, 2)] if layout in blocked_layouts else [None]
+        blocksizes = [(2, 2), (1, 1), (1, 2)] if layout in blocked_layouts else [()]
         batch_sizes = [(3,), (1, 3), (2, 1, 3)] if batched else [()]
         hybrid_sizes = [(4, ), (2, 2)] if hybrid else [()]
         if not hybrid:
@@ -2942,7 +2942,7 @@ class TestSparseCSR(TestCase):
                     sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
                 dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
                 if expect_to_layout_support:
-                    sparse = dense.to_sparse(layout=layout, blocksize=blocksize)
+                    sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
                     check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
                     if expect_from_layout_support:
                         dense_back = sparse.to_dense()
@@ -2952,7 +2952,7 @@ class TestSparseCSR(TestCase):
                             sparse.to_dense()
                 else:
                     with self.assertRaises(RuntimeError):
-                        dense.to_sparse(layout=layout, blocksize=blocksize)
+                        dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
         # special cases for batched tensors
         if batched and expect_to_layout_support:
@@ -2986,7 +2986,7 @@ class TestSparseCSR(TestCase):
                 mask = mask.transpose(-3, -2)
                 mask = mask.reshape_as(dense)
             dense = dense * mask
-            sparse = dense.to_sparse(layout=layout, blocksize=blocksize)
+            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
             check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
 
             if expect_from_layout_support:
@@ -3004,14 +3004,14 @@ class TestSparseCSR(TestCase):
             dense = dense * mask
             msg = "Expect the same number of specified elements per batch."
             with self.assertRaisesRegex(RuntimeError, msg):
-                dense.to_sparse(layout=layout, blocksize=blocksize)
+                dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
             # Should throw if there is a zero in the batch size
             dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
             layout_code = str(layout).split("_")[-1]
             msg = f"to_sparse_{layout_code}: Expected product of batch dimensions to be non-zero."
             with self.assertRaisesRegex(RuntimeError, msg):
-                dense.to_sparse(layout=layout, blocksize=blocksize)
+                dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
         if hybrid:
             # conversion from sparse -> dense should be blocked with dense dims
