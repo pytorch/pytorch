@@ -275,39 +275,6 @@ class TestBaseStructuredSparsifier(TestCase):
                 model = model.to(device)
                 self._test_prepare_conv2d_on_device(model, config, torch.device(device))
 
-    def _test_squash_mask_linear_on_device(self, model, device):
-        model = copy.deepcopy(model).to(device)
-        x = torch.ones(128, 16, device=device)
-        pruner = SimplePruner(None)
-        pruner.prepare(model, None)
-        pruner.squash_mask()
-        self._check_pruner_mask_squashed(model, pruner, device)
-        assert model(x).shape == (128, 16)
-
-    def test_squash_mask_linear(self):
-        models = [Linear(), LinearB()]  # without and with bias
-        for device in DEVICES:
-            for model in models:
-                self._test_squash_mask_linear_on_device(model, torch.device(device))
-
-    def _test_squash_mask_conv2d_on_device(self, model, config, device):
-        model = copy.deepcopy(model).to(device)
-        x = torch.ones((1, 1, 28, 28), device=device)
-        pruner = SimplePruner(None)
-        pruner.prepare(model, config)
-        pruner.squash_mask()
-        self._check_pruner_mask_squashed(model, pruner, device)
-        assert model(x).shape == (1, 64, 24, 24)
-
-    def test_squash_mask_conv2d(self):
-
-        models = [Conv2dA(), Conv2dB(), Conv2dC()]
-        configs = [None, None, None]
-        for device in DEVICES:
-            for model, config in zip(models, configs):
-                model = model.to(device)
-                self._test_squash_mask_conv2d_on_device(model, config, torch.device(device))
-
     def _test_step_linear_on_device(self, model, is_basic, device):
         model = model.to(device)
         if is_basic:
