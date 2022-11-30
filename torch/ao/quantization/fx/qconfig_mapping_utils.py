@@ -3,8 +3,8 @@ from collections import defaultdict, OrderedDict
 from typing import Callable, Any, Dict, Tuple, Set, List
 from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import _add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
-from torch.ao.quantization.observer import (
-    _is_activation_post_process,
+from torch.ao.quantization.quantize import (
+    is_activation_post_process,
 )
 from torch.ao.quantization.backend_config import (
     DTypeConfig,
@@ -158,7 +158,7 @@ def generate_node_name_to_qconfig(
 
         elif node.op == 'call_module':
             # if the node is an observer, just continue - don't add it to the qconfig_map
-            if _is_activation_post_process(modules[node.target]):
+            if is_activation_post_process(modules[node.target]):
                 continue
             qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[node.target]), node.target, global_qconfig)
@@ -242,7 +242,7 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         weight_dtype = dtype_config.weight_dtype or torch.float
         bias_dtype = dtype_config.bias_dtype or torch.float
         output_dtype = dtype_config.output_dtype or torch.float
-        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
+        qconfig_activation_dtype, qconfig_weight_dtype, qconfig_input_act_is_dynamic = \
             get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
             if (
@@ -252,7 +252,8 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
             ) else torch.float
 
         if is_dynamic:
-            is_match = input_dtype == qconfig_compute_dtype and \
+            is_match = qconfig_input_act_is_dynamic and \
+                input_dtype == qconfig_activation_dtype and \
                 output_dtype == torch.float and \
                 weight_dtype == qconfig_weight_dtype
         else:

@@ -66,6 +66,8 @@ decompositions = get_decompositions(
         aten.mv,
         aten.narrow,
         aten.native_batch_norm,
+        aten._native_batch_norm_legit,
+        aten._native_batch_norm_legit_functional,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -350,11 +352,6 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
-
-
 @register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
@@ -364,30 +361,6 @@ def log2(x):
 def round_dec(x, decimals=0):
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
-
-
-@register_decomposition([aten.special_erf, aten.erf])
-def special_erf(x):
-    # TODO(jansel): this might be crazy slow.  Triton doesn't have the
-    #               cuda ::erf() builtin.  I've made a feature request for this,
-    #               so it may be coming soon.
-
-    # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-    p = 0.3275911
-
-    sign = torch.sign(x)
-    x = torch.abs(x)
-
-    # A & S 7.1.26
-    t = 1.0 / (1.0 + p * x)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
-
-    return sign * y
 
 
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
@@ -438,6 +411,17 @@ def all(input):
 @register_decomposition([aten.all.dim])
 def all_dim(input, dim, keeepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+
+
+# NB: this decomposition is not stride accurate, do not put it in the main
+# library
+@register_decomposition(aten.copy)
+def copy(self, src, non_blocking=False):
+    intermediate = src.to(self, non_blocking)
+    if self.size() != intermediate.size():
+        return aten.expand_copy.default(intermediate, self.size())
+    else:
+        return intermediate
 
 
 @register_decomposition(aten.hardswish_)

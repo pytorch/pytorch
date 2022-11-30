@@ -150,13 +150,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
 
 
 def check_significant_strides(
-    a: TensorLikeType, b: TensorLikeType
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
 ) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
     # and for tensors with more than one element
-    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+    if (not only_cuda or a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
         for idx in range(a.ndim):
             if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
                 return False, idx
@@ -290,6 +290,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     A tensor is non-overlapping and dense when there exists a permutation of
     its dimensions that is contiguous.
     """
+
+    if a.is_sparse:
+        return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
     if is_contiguous(a) or is_channels_last_contiguous(a):
@@ -470,8 +473,9 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing dims to be
-# specified using negative indices. For scalar tensors with rank 0, then idx
-# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
+# specified using negative indices. If `wrap_scalar` is true then scalar
+# tensors of rank 0 will allow dimensions in the range [-1, 0]. Otherwise,
+# idx should be in the range [-rank, rank-1].
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"
@@ -504,20 +508,20 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
     pass
 
 
 @overload
-def canonicalize_dims(rank: int, indices: int) -> int:
+def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
 
-def canonicalize_dims(rank, indices):
+def canonicalize_dims(rank, indices, wrap_scalar=True):
     if isinstance(indices, Dim):
-        return canonicalize_dim(rank, indices)
+        return canonicalize_dim(rank, indices, wrap_scalar)
 
-    return tuple(canonicalize_dim(rank, x) for x in indices)
+    return tuple(canonicalize_dim(rank, x, wrap_scalar) for x in indices)
 
 
 def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
@@ -717,12 +721,14 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         check(
             newsize != 0,
-            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-            f"unspecified dimension size -1 can be any value and is ambiguous",
+            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                     f"unspecified dimension size -1 can be any value and is ambiguous"),
         )
-        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 
@@ -1338,15 +1344,17 @@ def reduction_dtypes(
         result_dtype = torch.bool
     return computation_dtype, result_dtype
 
-
+# This function's logic is borrowed from the following functions defined in C++:
+# batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
 ) -> Tuple[int, ...]:
     """
-    Returns the strides of a contriguous tensor if row_major
+    Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
     This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
     """
+    # contiguous_strides from c10/util/strides.h
     validate_shape(shape)
     if not shape:
         return ()
@@ -1360,6 +1368,7 @@ def make_contiguous_strides_for(
 
     result = tuple(reversed(strides))
 
+    # batched_matrix_contiguous_strides from aten/src/ATen/native/LinearAlgebraUtils.h
     if row_major:
         return result
     else:
