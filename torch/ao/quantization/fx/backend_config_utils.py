@@ -5,7 +5,6 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.utils import (
-    activation_dtype,
     get_combined_dict,
     Pattern,
     NodePattern,
@@ -16,14 +15,12 @@ from ..backend_config import BackendConfig
 from .quantization_patterns import QuantizeHandler
 from .fusion_patterns import DefaultFuseHandler
 
-from typing import Dict, Any, Callable, Optional
+from typing import Callable, Dict
 
 def get_quantize_handler_cls(
         observation_type,
         dtype_configs,
         num_tensor_args_to_observation_type,
-        overwrite_output_fake_quantizer,
-        overwrite_output_observer,
         input_output_observed):
 
     class ConfigurableQuantizeHandler(QuantizeHandler):
@@ -41,34 +38,10 @@ def get_quantize_handler_cls(
             else:
                 self.observation_type = observation_type
             self.dtype_configs = dtype_configs
-            self.overwrite_output_fake_quantizer = overwrite_output_fake_quantizer
-            self.overwrite_output_observer = overwrite_output_observer
             self.input_output_observed_ = input_output_observed
 
         def is_general_tensor_value_op(self) -> bool:
             return self.observation_type == ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
-
-        # TODO: change this to output activation
-        def get_activation_ctr(
-                self,
-                qconfig: Any,
-                pattern: Pattern,
-                is_training: bool,
-        ) -> Optional[Callable]:
-            """
-            Returns the constructor for the activation observer which should be
-            used for the pattern matched to this handler. Some handlers override
-            this to a different value than what is specified in the qconfig.
-            """
-            act_dtype = activation_dtype(qconfig)
-            # TODO: change to is_qat
-            if is_training:
-                if act_dtype == torch.quint8 and self.overwrite_output_fake_quantizer is not None:
-                    return self.overwrite_output_fake_quantizer
-            else:
-                if act_dtype == torch.quint8 and self.overwrite_output_observer is not None:
-                    return self.overwrite_output_observer
-            return qconfig.activation
 
         # This is temporary, and will be removed soon
         def input_output_observed(self):
@@ -89,8 +62,6 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
         observation_type = config.observation_type
         dtype_configs = config.dtype_configs
         num_tensor_args_to_observation_type = config._num_tensor_args_to_observation_type
-        overwrite_fake_quantizer = config._overwrite_output_fake_quantize
-        overwrite_observer = config._overwrite_output_observer
         input_output_observed = config._input_output_observed
         if input_output_observed is None:
             input_output_observed = True
@@ -99,8 +70,6 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
                 observation_type,
                 dtype_configs,
                 num_tensor_args_to_observation_type,
-                overwrite_fake_quantizer,
-                overwrite_observer,
                 input_output_observed)
 
     return pattern_to_quantize_handlers

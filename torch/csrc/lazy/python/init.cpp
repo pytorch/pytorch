@@ -305,6 +305,10 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         return result;
       });
+
+  // When libtorch_python is loaded, we register the python frame getter
+  // otherwise, debug util simply omits python frames
+  GetPythonFramesFunction() = GetPythonFrames;
 }
 
 } // namespace lazy

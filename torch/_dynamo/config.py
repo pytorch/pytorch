@@ -67,9 +67,6 @@ guard_nn_modules = False
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True
 
-# Run the FX graph with FakeTensors
-fake_tensor_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
@@ -86,6 +83,9 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 replay_record_enabled = False
+
+# Rewrite assert statement in python with torch._assert
+rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
