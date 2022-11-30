@@ -68,7 +68,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
-#if !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,

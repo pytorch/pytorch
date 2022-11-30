@@ -9,7 +9,9 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 
-#if !defined(_MSC_VER)
+// cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
+// added bf16 support
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 #include <cublasLt.h>
 #endif
 
@@ -542,7 +544,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 
-#if !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 
 namespace {
 // Following the pattern of CuSparseDescriptor
@@ -830,7 +832,7 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
-#endif // !defined(_MSC_VER)
+#endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
@@ -1097,7 +1099,7 @@ void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 8000
+#if !defined(USE_ROCM)
   TORCH_CUDABLAS_CHECK(cublasDotEx(
       handle,
       n,
@@ -1126,7 +1128,7 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 
 template <>
 void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
-#if !defined(ROCM_VERSION)
+#if !defined(USE_ROCM)
   TORCH_CUDABLAS_CHECK(cublasDotEx(
       handle,
       n,
@@ -1149,7 +1151,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       incy,
       reinterpret_cast<rocblas_bfloat16*>(result)));
 #else
-  AT_ERROR("Cublas_bfdot requires ROCM_VERSION >= 21000");
+  AT_ERROR("Cublas_bfdot requires CUDA 11.0+");
 #endif
 }
 
