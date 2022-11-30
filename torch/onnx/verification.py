@@ -14,7 +14,16 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 
@@ -32,7 +41,7 @@ _NumericType = Union[Number, torch.Tensor, np.ndarray]
 
 
 @dataclasses.dataclass
-class _VerificationOptions:
+class VerificationOptions:
     """Options for ONNX export verification.
 
     Attributes:
@@ -50,6 +59,11 @@ class _VerificationOptions:
         ort_providers: ONNX Runtime providers to use. Default to ("CPUExecutionProvider", ).
         rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
         atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
+        remained_onnx_input_idx: If provided, only the specified inputs will be passed
+            to the ONNX model. Supply a list when there are unused inputs in the model.
+            Since unused inputs will be removed in the exported ONNX model, supplying
+            all inputs will cause an error on unexpected inputs. This parameter tells
+            the verifier which inputs to pass into the ONNX model.
         acceptable_error_percentage: acceptable percentage of element mismatches in comparison.
             It should be a float of value between 0.0 and 1.0.
     """
@@ -61,6 +75,7 @@ class _VerificationOptions:
     ort_providers: Sequence[str] = dataclasses.field(default=_ORT_PROVIDERS)
     rtol: float = dataclasses.field(default=1e-3)
     atol: float = dataclasses.field(default=1e-7)
+    remained_onnx_input_idx: Optional[Sequence[int]] = dataclasses.field(default=None)
     acceptable_error_percentage: Optional[float] = dataclasses.field(default=None)
 
 
@@ -163,7 +178,7 @@ def _ort_session(
 def _compare_ort_pytorch_outputs(
     ort_outs: Union[Sequence[_NumericType], Sequence],
     pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
-    options: _VerificationOptions,
+    options: VerificationOptions,
 ):
     """
     Compare ONNX Runtime and PyTorch outputs.
@@ -326,8 +341,7 @@ def _compare_ort_pytorch_model(
     input_args,
     input_kwargs,
     additional_test_inputs,
-    remained_onnx_input_idx,
-    options: _VerificationOptions,
+    options: VerificationOptions,
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
@@ -346,7 +360,7 @@ def _compare_ort_pytorch_model(
         pt_outs = model_copy(*pt_args, **pt_kwargs)
 
         ort_inputs = _prepare_input_for_ort(
-            input_args, input_kwargs, remained_onnx_input_idx, options.flatten
+            input_args, input_kwargs, options.remained_onnx_input_idx, options.flatten
         )
         ort_outs = _run_ort(ort_session, ort_inputs)
 
@@ -638,15 +652,7 @@ def verify(
     additional_test_inputs: Optional[
         Sequence[Union[torch.Tensor, Tuple[Any, ...]]]
     ] = None,
-    remained_onnx_input_idx: Optional[Sequence[int]] = None,
-    flatten: bool = True,
-    ignore_none: bool = True,
-    check_shape: bool = True,
-    check_dtype: bool = True,
-    ort_providers: Sequence[str] = _ORT_PROVIDERS,
-    rtol: float = 0.001,
-    atol: float = 1e-7,
-    acceptable_error_percentage: Optional[float] = None,
+    options: Optional[VerificationOptions] = None,
     **_,
 ):
     """Verify model export to ONNX with ONNX Runtime.
@@ -668,35 +674,17 @@ def verify(
             model with external data.
         additional_test_inputs (list, optional): List of tuples. Each tuple is a group of
             input arguments to test. Currently only *args are supported.
-        remained_onnx_input_idx (list, optional): If provided, only the specified inputs
-            will be passed to the ONNX model. Supply a list when there are unused inputs
-            in the model. Since unused inputs will be removed in the exported ONNX
-            model, supplying all inputs will cause an error on unexpected inputs.
-            This parameter tells the verifier which inputs to pass into the ONNX model.
-        flatten (bool, optional): Default True. If True, unpack nested list/tuple/dict
-            inputs into a flattened list of Tensors for ONNX. Set this to False if nested
-            structures are to be preserved for ONNX, which is usually the case with
-            exporting ScriptModules.
-        ignore_none (bool, optional): Whether to ignore None type in
-            torch output, which is usually the case with tracing. Set this to False, if
-            torch output should keep None type, which is usually the case with exporting
-            ScriptModules. Default to True.
-        check_shape (bool, optional): Whether to check the shapes between
-            PyTorch and ONNX Runtime outputs are exactly the same. Set this to False to allow
-            output shape broadcasting. Default to True.
-        check_dtype (bool, optional): Whether to check the dtypes between
-            PyTorch and ONNX Runtime outputs are consistent. Default to True.
-        ort_providers (sequence, optional): ONNX Runtime providers to use.
-        rtol (float, optional): relative tolerance in comparison between ONNX and PyTorch outputs.
-        atol (float, optional): absolute tolerance in comparison between ONNX and PyTorch outputs.
-        acceptable_error_percentage (float, optional): acceptable percentage of element mismatches in comparison.
-            It should be a float of value between 0.0 and 1.0.
+        options (_VerificationOptions, optional): A _VerificationOptions object that
+            controls the verification behavior.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
         ValueError: if arguments provided are invalid.
     """
+    if options is None:
+        options = VerificationOptions()
+
     if training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training == torch.onnx.TrainingMode.EVAL:
@@ -726,24 +714,15 @@ def verify(
             verbose=verbose,
         )
 
+        ort_providers = options.ort_providers
+
         ort_session = _ort_session(model_f, ort_providers)
 
-        options = _VerificationOptions(
-            flatten=flatten,
-            ignore_none=ignore_none,
-            rtol=rtol,
-            atol=atol,
-            check_shape=check_shape,
-            check_dtype=check_dtype,
-            acceptable_error_percentage=acceptable_error_percentage,
-            ort_providers=ort_providers,
-        )
         _compare_ort_pytorch_model(
             model=model_copy,
             ort_session=ort_session,
             input_args=input_args,
             input_kwargs=input_kwargs,
             additional_test_inputs=additional_test_inputs,
-            remained_onnx_input_idx=remained_onnx_input_idx,
             options=options,
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from typing import Any, Mapping, Type
 
@@ -28,18 +29,23 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
-_ORT_PROVIDERS = ("CPUExecutionProvider",)
-
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
-    kwargs["ort_providers"] = _ORT_PROVIDERS
+    options = verification.VerificationOptions()
+
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
     if hasattr(test_suite, "check_shape"):
-        kwargs["check_shape"] = test_suite.check_shape
+        options.check_shape = test_suite.check_shape
     if hasattr(test_suite, "check_dtype"):
-        kwargs["check_dtype"] = test_suite.check_dtype
-    return verification.verify(*args, **kwargs)
+        options.check_dtype = test_suite.check_dtype
+
+    names = set([f.name for f in dataclasses.fields(options)])
+    for k, v in kwargs.items():
+        if k in names:
+            setattr(options, k, v)
+
+    return verification.verify(*args, options=options, **kwargs)
 
 
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):

@@ -1,9 +1,9 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
 import pytorch_test_common
+from pytorch_test_common import skipIfNoCuda
 
 import torch
-from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
 from torch.testing._internal import common_utils
 
@@ -64,7 +64,7 @@ class _TestJITIRToONNX:
         )
         ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        options = verification._VerificationOptions(
+        options = verification.VerificationOptions(
             rtol=1e-3,
             atol=1e-7,
             check_shape=self.check_shape,
