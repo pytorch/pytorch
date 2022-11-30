@@ -211,9 +211,22 @@ class GuardBuilder:
         self.argnames: List[str] = []
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
+
+        # Most of the time, we generate Python code in a guard to directly
+        # check various properties.  However, tensors are a bit special;
+        # it is too slow to check their properties one-by-one in Python.
+        # Instead, there is a C++ function TensorGuards.check which takes
+        # all of the tensor arguments and checks them all against compile-time
+        # examples entirely in C++.  Thus, every time we process a
+        # TENSOR_MATCH guard, we just add another entry to
+        # tensor_check_names/tensor_check_examples, saying "for this local,
+        # check it against this example", and it all ends up getting
+        # swept up into a single call to ___check_tensors.  Invariant:
+        # len(tensor_check_names) == len(tensor_check_examples).
         self.tensor_check_names: List[str] = []
+        self.tensor_check_examples: List[torch.Tensor] = []
+
         self.tensor_check_ids: Dict[str, int] = {}
-        self.tensor_check_examples: List[object] = []
         # TODO: tf is this naming
         self.guarded_code: CheckFunctionManager = guarded_code
 
@@ -461,6 +474,7 @@ class GuardBuilder:
             self.ID_MATCH(guard)
         else:
             value = self.get(guard.name)
+            assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
             self.tensor_check_names.append(tensor_name)
             self.tensor_check_examples.append(value)
