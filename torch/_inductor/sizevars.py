@@ -355,6 +355,7 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
+        assert val in self.shape_env.val_to_var
         return self.shape_env.create_symbol(val)
 
     def size_hint(self, expr: Expr) -> int:
