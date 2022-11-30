@@ -222,6 +222,12 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    sync_line = ""
+    for arg in args:
+        if arg.is_cuda:
+            sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
+            break
+
     if "inductor" in compiler_name:
         fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
@@ -243,7 +249,8 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(args)
+                ref = compiled(args)
+                {sync_line}
                 """
             )
         )
@@ -296,16 +303,26 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         stderr.seek(0)
         print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
         print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
+        # print(f"Isolated test failed - {file_name}")
         return True
     return False
 
 
 def inductor_fails(fx_g, args, check_str=None):
+    has_cuda = False
+    for arg in args:
+        if arg.is_cuda:
+            has_cuda = True
+            break
+
+    def sync():
+        if has_cuda:
+            # Ensures that segfaults are surfaced
+            torch.cuda.synchronize()
+
     compile_fx_inner = import_module(
         f"{config.inductor_import}.compile_fx"
     ).compile_fx_inner
-
-    import_module(f"{config.inductor_import}.config").triton.autotune = False
 
     try:
         result = fx_g(*args)
@@ -313,10 +330,14 @@ def inductor_fails(fx_g, args, check_str=None):
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
+    result = None
+
+    sync()
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
+        sync()
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -536,7 +557,19 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
-    res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    try:
+        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return True.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph."
+            )
+        )
+        return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
@@ -710,7 +743,20 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 
 
 def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
-    compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    try:
+        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return False.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph"
+            )
+        )
+        return False
+
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
 
 
