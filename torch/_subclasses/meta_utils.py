@@ -113,6 +113,9 @@ class MetaConverter:
     def successful(self):
         return self.hit > 0 and self.miss == 0
 
+    def no_hits_or_miss(self):
+        return self.hit == 0 and self.miss == 0
+
     def check_for_expired_weak_storages(self):
         new_li = []
         stor_to_delete = []

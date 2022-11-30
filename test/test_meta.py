@@ -469,13 +469,16 @@ def run_meta_crossref(
         # often skipped as well).
         raise unittest.SkipTest("Original OpInfo is broken")
 
-
     # TODO: also handle cases where func raise an exception
+
+    # This is needed to ensure that we run meta tests for constructors, since Meta Converter above
+    # won't get any hits for non _like constructors that don't take any tensor args
+    is_tensor_constructor = to_meta.no_hits_or_miss() and isinstance(rs, torch.Tensor)
 
     # For now, only attempt if we managed to convert all tensor types
     # (if any of them failed, we're in a mixed device situation and
     # this isn't well supported)
-    if do_meta and to_meta.successful():
+    if do_meta and (to_meta.successful() or is_tensor_constructor):
         # Special cases
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
