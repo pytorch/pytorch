@@ -226,6 +226,14 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def clone_preserve_strides(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -246,7 +254,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = example_inputs
+    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
     original_lowp_dtype = torch.half
@@ -326,6 +334,16 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+        )
+        # In case of input mutations, check that inputs are the same
+        self.assertEqual(
+            ref_inputs,
+            example_inputs,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            # our testing sometimes uses higher precision inputs for the reference
+            exact_dtype=False,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -4677,6 +4695,22 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
+
 
 if HAS_CPU:
 
@@ -5009,6 +5043,24 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            sys.platform != "linux", "cpp kernel profile only support linux now"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        @patch.object(config.cpp, "enable_kernel_profile", True)
+        def test_cpp_kernel_profile(self):
+            from torch.profiler import profile
+
+            @torch._dynamo.optimize("inductor", nopython=True)
+            def fn(a, b):
+                return a + b
+
+            a = torch.rand((100,))
+            b = torch.rand((100,))
+            with profile() as prof:
+                fn(a, b)
+            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
 
 
 if HAS_CUDA:

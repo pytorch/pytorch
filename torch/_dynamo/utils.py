@@ -1144,3 +1144,14 @@ def get_real_value(node, output_graph):
     except RuntimeError as e:
         raise TorchRuntimeError() from e
     return real_value
+
+
+def assert_no_fake_params_or_buffers(gm):
+    for name, buffer in gm.named_buffers():
+        assert not isinstance(
+            buffer, torch._subclasses.FakeTensor
+        ), f"Unexpected fake buffer {name}"
+    for name, param in gm.named_parameters():
+        assert not isinstance(
+            param, torch._subclasses.FakeTensor
+        ), f"Unexpected fake param {name}"
