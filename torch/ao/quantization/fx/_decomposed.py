@@ -7,18 +7,17 @@ from typing import Tuple
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 
+_DTYPE_TO_QVALUE_BOUNDS = {
+    torch.uint8: (0, 255),
+    torch.int8: (-128, 127),
+    torch.int32: (-(2**31), 2**31 - 1)
+}
+
 # Helper to check the passed in quant min and max are valid for the dtype
 def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
-    quant_min_lower_bound = 0
-    quant_max_upper_bound = 0
-    if dtype == torch.uint8:
-        quant_min_lower_bound = 0
-        quant_max_upper_bound = 255
-    elif dtype == torch.int8:
-        quant_min_lower_bound = -128
-        quant_max_upper_bound = 127
-    else:
+    if dtype not in _DTYPE_TO_QVALUE_BOUNDS:
         raise ValueError(f"Unsupported dtype: {dtype}")
+    quant_min_lower_bound, quant_max_upper_bound = _DTYPE_TO_QVALUE_BOUNDS[dtype]
 
     assert quant_min >= quant_min_lower_bound, \
         "quant_min out of bound for dtype, " \
@@ -126,7 +125,7 @@ def dequantize_per_tensor(
        dequantized float32 Tensor
     """
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
-    if dtype in [torch.uint8, torch.int8]:
+    if dtype in [torch.uint8, torch.int8, torch.int32]:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
         # failed the test
