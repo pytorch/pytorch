@@ -27,9 +27,8 @@ Tensor _mps_linear(
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
-  TORCH_CHECK(input.scalar_type() == ScalarType::Double
-              || input.scalar_type() == ScalarType::Float
-              || input.scalar_type() == ScalarType::Half, "MPS device does not support linear for non-float inputs");
+  TORCH_CHECK(input.scalar_type() == ScalarType::Float ||
+              input.scalar_type() == ScalarType::Half, "MPS device does not support linear for non-float inputs");
 
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
@@ -170,8 +169,9 @@ Tensor _mps_linear_backward_input(
 {
   TORCH_CHECK(grad_output.is_mps(),
       "mps_linear_backward: grad_output needs to be mps layout");
-  TORCH_CHECK(weight.device().is_mps() && weight.scalar_type() == kFloat,
-      "mps_linear_backward: weight needs to be a dense tensor");
+  TORCH_CHECK(weight.device().is_mps() &&
+             (weight.scalar_type() == kFloat || (weight.scalar_type() == kHalf)),
+             "mps_linear_backward: unsupported weights data type: ", weight.scalar_type());
 
   TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double
               || grad_output.scalar_type() == ScalarType::Float
@@ -253,9 +253,8 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
       "_mps_linear_backward: grad_output and input needs to be mps layout");
 
-  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double
-              || grad_output.scalar_type() == ScalarType::Float
-              || grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");
+  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Float ||
+              grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");
 
    struct CachedGraph : public mps::MPSCachedGraph
   {
