@@ -411,6 +411,9 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
 
+@register_decomposition([aten.expm1.default])
+def expm1(input):
+    return torch.exp(input) - 1
 
 @register_decomposition([aten.all.dim])
 def all_dim(input, dim, keeepdim=False):
