@@ -371,6 +371,11 @@ TORCH_CUDA_CU_API TensorView* expand(
 // non broadcasted iter domain, inp will be expanded to other's size.
 TORCH_CUDA_CU_API TensorView* expand_as(TensorView* inp, TensorView* other);
 
+// This is a function used to give the symbolic sizes of a tensor for use
+// with functions like broadcast_in_size that take in a vector of sizes
+// to use to expand an input tensor
+TORCH_CUDA_CU_API std::vector<Val*> tensor_sizes(TensorView* inp);
+
 // BINARY OPERATIONS
 // add
 TORCH_CUDA_CU_API Val* add(Val* v1, Val* v2);
