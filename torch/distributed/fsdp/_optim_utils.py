@@ -1103,15 +1103,15 @@ def _is_zero_dim_tensor(x: Any) -> bool:
 
 
 def _check_rank_missing_keys(
-    r0_optim_state_key: List[_OptimStateKey],
+    r0_optim_state_keys: List[_OptimStateKey],
     optim_state_key_to_param_id: Dict[_OptimStateKey, int],
     param_id_to_param: List[nn.Parameter],
-    group: dist.ProcessGroup,
+    group: Optional[dist.ProcessGroup],
 ) -> None:
     # Ensure that all ranks have at least the optimizer states needed by
     # rank 0's optimizer
     missing_keys: List[_OptimStateKey] = []
-    for r0_optim_state_key in r0_optim_state_key:
+    for r0_optim_state_key in r0_optim_state_keys:
         if r0_optim_state_key not in optim_state_key_to_param_id:
             # A parameter from rank 0's optimizer does not exist for this
             # rank's optimizer
@@ -1146,7 +1146,7 @@ def _map_param_id_to_optim_keys(
     optim_state_dict: Dict[str, Any],
     group: Optional[dist.ProcessGroup],
     param_id_to_param: List[nn.Parameter],
-    param_to_fqns: Dict[nn.Parameter, str],
+    param_to_fqns: Dict[nn.Parameter, List[str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
     merge_key: bool = False,
 ) -> Tuple[List[_OptimStateKey], Dict[_OptimStateKey, int]]:
@@ -1204,8 +1204,8 @@ def _process_param_groups(
     state_dict: Dict[str, Any],
     param_id_to_param: List[nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
-) -> Dict[str, Any]:
-    param_groups = []
+) -> List[Dict[str, Any]]:
+    param_groups: List[Dict[str, Any]] = []
     for flat_param_group in state_dict["param_groups"]:
         unflat_param_group = copy.deepcopy(flat_param_group)
         param_group_params = [
@@ -1343,6 +1343,7 @@ def _get_fqn_to_fsdp_param_info(
     model: nn.Module, dedup_shared_fqns: Set[str]
 ) -> Dict[str, FSDPParamInfo]:
     """Construct the mapping from fqn to the corrsponding FSDPParamInfo."""
+
     def module_fn(module, prefix, fqn_to_param_info):
         # TODO: make it work with composable API.
         if not isinstance(module, fsdp_file.FullyShardedDataParallel):
@@ -1397,7 +1398,7 @@ def _gather_orig_param_state(
     }
 
     object_list: List[Dict[str, Any]] = [
-        {} for _ in range(fsdp_param_info.state.world_size)
+        {} for _ in range(cast(int, fsdp_state.world_size))
     ]
     dist.all_gather_object(object_list, state_objects)
     orig_state: Dict[str, Any] = {}
@@ -1412,7 +1413,7 @@ def _gather_orig_param_state(
                 else:
                     orig_state[state_name] = value
             else:
-                assert curr_state == [] or curr_value == value
+                assert curr_value == [] or curr_value == value
                 orig_state[state_name] = value
 
     for state_name in orig_state.keys():
@@ -1424,11 +1425,11 @@ def _gather_orig_param_state(
         )
         if shard_state:
             value = _ext_chunk_tensor(
-                optim_state,
-                fsdp_state.rank,
-                fsdp_state.world_size,
+                value,
+                cast(int, fsdp_state.rank),
+                cast(int, fsdp_state.world_size),
                 torch.cuda.device_count(),
-                fsdp_state.process_group,
+                cast(dist.ProcessGroup, fsdp_state.process_group),
             )
         value = value.cpu()
         orig_state[state_name] = value
@@ -1450,7 +1451,9 @@ def _shard_orig_param_state(
     flat_param = fsdp_param_info.flat_param
     param_idx = fsdp_param_info.fqn_indices[fqn]
 
-    optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
+    optim_state = _gather_state_dict(
+        optim_state, cast(dist.ProcessGroup, fsdp_state.process_group)
+    )
     start, end = flat_param._shard_indices  # type: ignore[attr-defined]
     if not (start <= param_idx <= end and flat_param._shard_param_offsets):  # type: ignore[attr-defined]
         return {}
