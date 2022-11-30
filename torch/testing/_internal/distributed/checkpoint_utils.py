@@ -25,7 +25,7 @@ def with_temp_dir(
         else:
             temp_dir = ""
         object_list = [temp_dir]
-        
+
         # Broadcast temp_dir to all the other ranks
         dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
