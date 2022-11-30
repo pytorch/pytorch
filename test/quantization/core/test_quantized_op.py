@@ -3654,7 +3654,7 @@ class TestQuantizedLinear(TestCase):
                 X_q = X_q.view(3, int(batch_size / 3), input_channels)
             # Quantized Linear operator with prepacked weight
             if use_fused_qdq_skip_quant:
-                Y_q_dq = qlinear(X, X_scale, X_zp, W_prepack, Y_scale, Y_zp)
+                Y_q_dq = qlinear(X, X_scale, X_zp, W_prepack)
             else:
                 Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
             if not use_channelwise:

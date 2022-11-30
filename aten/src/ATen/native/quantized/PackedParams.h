@@ -38,12 +38,11 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
 
 #ifdef USE_FBGEMM
   // input is NOT quantized; quantization of input occurs within the function
+  // output is NOT quantized
   virtual at::Tensor apply_fused_qdq_skip_quant(
       at::Tensor input,
       double input_scale,
-      int64_t input_zero_point,
-      double output_scale,
-      int64_t output_zero_point) {
+      int64_t input_zero_point) {
     throw std::runtime_error(
         "apply_fused_qdq_skip_quant is not implemented for this packed "
         "parameter type");
@@ -51,12 +50,11 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   }
 
   // input is NOT quantized; quantization of input occurs within the function
+  // output is NOT quantized
   virtual at::Tensor apply_fused_qdq_skip_quant_relu(
       at::Tensor input,
       double input_scale,
-      int64_t input_zero_point,
-      double output_scale,
-      int64_t output_zero_point) {
+      int64_t input_zero_point) {
     throw std::runtime_error(
         "apply_fused_qdq_skip_quant_relu is not implemented for this packed "
         "parameter type");

@@ -286,25 +286,21 @@ at::Tensor& PackedLinearWeight::apply_relu_out(
 at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant(
   at::Tensor input,
   double input_scale,
-  int64_t input_zero_point,
-  double output_scale,
-  int64_t output_zero_point) {
+  int64_t input_zero_point) {
   TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq_skip_quant is quantized; "
   "Expected input tensor in PackedLinearWeight::apply_fused_qdq_skip_quant to be full precision.");
 
-  return apply_fused_qdq_skip_quant_impl<false>(input, input_scale, input_zero_point, output_scale, output_zero_point);
+  return apply_fused_qdq_skip_quant_impl<false>(input, input_scale, input_zero_point);
 }
 
 at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant_relu(
   at::Tensor input,
   double input_scale,
-  int64_t input_zero_point,
-  double output_scale,
-  int64_t output_zero_point) {
+  int64_t input_zero_point) {
   TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq_skip_quant is quantized; "
   "Expected input tensor in PackedLinearWeight::apply_fused_qdq_skip_quant to be full precision.");
 
-  return apply_fused_qdq_skip_quant_impl<true>(input, input_scale, input_zero_point, output_scale, output_zero_point);
+  return apply_fused_qdq_skip_quant_impl<true>(input, input_scale, input_zero_point);
 }
 
 
@@ -312,9 +308,7 @@ template <bool ReluFused>
 at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant_impl(
     const at::Tensor& input,
     double input_scale,
-    int64_t input_zero_point,
-    double output_scale,
-    int64_t output_zero_point) {
+    int64_t input_zero_point) {
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
@@ -908,15 +902,13 @@ class QLinearInt8FusedQDQ final {
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point,
-      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
-      double output_scale,
-      int64_t output_zero_point) {
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     if (ReluFused) {
       return packed_weight->apply_fused_qdq_skip_quant_relu(
-          std::move(input), input_scale, input_zero_point, output_scale, output_zero_point);
+          std::move(input), input_scale, input_zero_point);
     } else {
       return packed_weight->apply_fused_qdq_skip_quant(
-          std::move(input), input_scale, input_zero_point, output_scale, output_zero_point);
+          std::move(input), input_scale, input_zero_point);
     }
   }
 };
