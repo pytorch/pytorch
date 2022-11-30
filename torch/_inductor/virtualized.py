@@ -57,6 +57,9 @@ def _arg_str(a):
 
 class MockHandler:
     def __getattr__(self, name):
+        if name == "name":
+            return "MockHandler"
+
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
@@ -74,7 +77,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var):
-        return sympy_symbol(str(index_var))
+        return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
     def _init_cls(cls):
