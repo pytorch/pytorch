@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+Tensor argsort_stable_mps(const Tensor & self, bool stable, int64_t dim, bool descending) {
 
   if(!is_macos_13_or_newer()){
         TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
