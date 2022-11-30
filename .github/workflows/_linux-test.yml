@@ -76,7 +76,8 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux GCP A100
-        uses: ./.github/actions/setup-linux-gcp-a100
+#        uses: ./.github/actions/setup-linux-gcp-a100
+        uses: ./.github/actions/setup-linux
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
