@@ -1309,6 +1309,7 @@ if __name__ == "__main__":
     args.compilers = compilers
     args.devices = devices
     args.dtypes = dtypes
+    flag_compilers = list(set(flag_compilers) & set(compilers))
     args.flag_compilers = flag_compilers
     args.suites = suites
 
