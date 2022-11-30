@@ -371,7 +371,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-class _NullDecorator(contextlib.nullcontext):
+class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
         assert callable(fn)
         return fn

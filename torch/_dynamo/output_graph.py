@@ -79,7 +79,7 @@ def _get_gen_rand_values_fn(random_calls):
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict):
+    def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
         super(FakeRootModule, self).__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
