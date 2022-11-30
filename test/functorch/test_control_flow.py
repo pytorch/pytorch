@@ -1,7 +1,7 @@
 # Owner(s): ["module: functorch"]
 import torch
-from functorch.experimental.cond import cond
 from functorch.experimental import control_flow
+from functorch.experimental.control_flow import cond
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.testing._internal.common_utils import run_tests, TestCase
