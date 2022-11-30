@@ -564,6 +564,8 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 def matches_module_function_pattern(pattern, node, modules):
     if len(node.args) == 0:
         return False
+    if len(node.args[0].users) > 1:
+        return False
     if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
         node, torch.fx.Node
     ):
@@ -648,8 +650,6 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
-                    continue
                 # TODO: support kwargs.
                 if len(node.args) != 8:
                     continue
