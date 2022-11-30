@@ -8,6 +8,7 @@ from enum import Enum
 from functools import wraps, partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from torch.fx.experimental.proxy_tensor import is_sym_node
+import logging
 
 import torch
 import torch.fx.traceback as fx_traceback
