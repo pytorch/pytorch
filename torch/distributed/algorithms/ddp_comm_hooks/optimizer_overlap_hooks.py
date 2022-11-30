@@ -2,6 +2,9 @@ from typing import Any, Callable, List
 
 import torch
 import torch.distributed as dist
+from torch.autograd import Variable
+from functools import partial
+from dataclasses import dataclass
 
 __all__: List[str] = []
 
@@ -32,6 +35,12 @@ class _OptimizerHookState(object):
             )
 
 
+@dataclass
+class OptimInBackwardHookState:
+    optim_stream: torch.cuda.Stream
+    wait_for_optim_stream_enqueued: bool
+
+
 def _apply_optim_in_backward_hook(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
@@ -40,23 +49,55 @@ def _apply_optim_in_backward_hook(
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
     """
+    optim_in_bwd_state = OptimInBackwardHookState(
+        optim_stream=torch.cuda.Stream(),
+        wait_for_optim_stream_enqueued=False,
+    )
+
     def apply_optim_in_backward_hook(
-        hook_state: Any, bucket: dist.GradBucket,
+        hook_state: Any, bucket: dist.GradBucket, optim_stream_state,
     ) -> torch.futures.Future[torch.Tensor]:
         # Run original hook
         fut = hook(hook_state, bucket)
-        def optimizer_step(fut):
+        optimizer_stream = optim_stream_state.optim_stream
+        with torch.cuda.stream(optimizer_stream):
+            fut.wait()
             model_params = bucket.parameters()
             for p in model_params:
                 if hasattr(p, '_in_backward_optimizers'):
                     for optim in p._in_backward_optimizers:
                         optim.step()
 
-            return bucket.buffer()
+        # Need to return a Future[Tensor] to obey comm hook API contract.
+        fut = torch.futures.Future()
+        fut.set_result(bucket.buffer())
 
-        return fut.then(optimizer_step)
+        # enqueue a callback to wait for this optimizer stream at the end of
+        # backward.
+        def wait_for_optim_stream_callback():
+            torch.cuda.current_stream().wait_stream(
+                optim_stream_state.optim_stream
+            )
+            # reset for the next backwards pass
+            optim_stream_state.wait_for_optim_stream_enqueued = False
 
-    return apply_optim_in_backward_hook
+        if not optim_stream_state.wait_for_optim_stream_enqueued:
+            Variable._execution_engine.queue_callback(
+                wait_for_optim_stream_callback
+            )
+            # mark that the callback is enqueued
+            optim_stream_state.wait_for_optim_stream_enqueued = True
+
+        return fut
+
+    comm_hook = partial(
+        apply_optim_in_backward_hook, optim_stream_state=optim_in_bwd_state
+    )
+    # These are needed for DDP's logging of comm hooks
+    setattr(comm_hook, '__name__', apply_optim_in_backward_hook.__name__)
+    setattr(comm_hook, '__qualname__', apply_optim_in_backward_hook.__qualname__)
+
+    return comm_hook
 
 def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
