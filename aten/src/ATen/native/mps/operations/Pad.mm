@@ -15,7 +15,6 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   const int padding_size = (int) padding.size();
   const int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
 
-  TORCH_CHECK(input_.numel() != 0, "MPS currently doesn't support zero-element input.")
   TORCH_CHECK(padding_size == 2 || padding_size == 4 || padding_size == 6,
               "invalid padding argument of size ", padding_size);
 
@@ -64,6 +63,8 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
 
   if (!is_backward_pass) {
     if (mode == MPSGraphPaddingModeConstant) {
+      TORCH_CHECK(input_.numel() != 0, "MPS currently doesn't support zero-element input.")
+
       std::vector<int64_t> output_shape;
       auto input_sizes = input_.sizes();
       auto l_diff = ndims - padding_dim;
@@ -114,7 +115,7 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
           output.resize_({output_w});
       }
     }
-    if (output.numel() == 0)
+    if (output.numel() == 0 || input_.numel() == 0)
       return output;
     input = input_.contiguous();
   } else {
