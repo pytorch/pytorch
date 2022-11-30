@@ -35,7 +35,6 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
 .. toctree::
    :glob:
    :maxdepth: 1
-   :hidden:
 
    dynamo/index
    dynamo/installation
