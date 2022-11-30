@@ -75,6 +75,11 @@ SKIP = {
 }
 
 
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "cait_m36_384": 4,
+}
+
+
 def refresh_model_names():
     import glob
 
@@ -222,6 +227,10 @@ class TimmRunnner(BenchmarkRunner):
                 int(recorded_batch_size / BATCH_SIZE_DIVISORS[model_name]), 1
             )
         batch_size = batch_size or recorded_batch_size
+
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
 
         # example_inputs = torch.randn(
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
