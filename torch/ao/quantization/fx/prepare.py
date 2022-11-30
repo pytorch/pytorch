@@ -924,9 +924,7 @@ def maybe_propagate_dtype_for_node(
 ) -> None:
     """
     Assigns `target_dtype` to `node`, setting `is_dynamic` to False. If `node`
-    is a general tensor shape op
-    (see GeneralTensorShapeOpQuantizeHandler in quantize_handler.py for more details)
-    also call this function recursively on
+    is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype_info[node.name]["input_activation_dtype"] = (target_dtype, False)
