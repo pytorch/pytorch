@@ -297,11 +297,13 @@ reduce_scatter_cpu_(
     int64_t timeout) {
   auto output_tensors_vec = output_tensors.vec();
   auto input_tensors_vec = toTensorVectorVector(input_tensors);
-  auto work = process_group->getBackend(c10::DeviceType::CPU)->reduce_scatter(
-      output_tensors_vec,
-      input_tensors_vec,
-      ReduceScatterOptions{
-          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+  auto work =
+      process_group->getBackend(c10::DeviceType::CPU)
+          ->reduce_scatter(
+              output_tensors_vec,
+              input_tensors_vec,
+              ReduceScatterOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors_vec, work);
@@ -316,11 +318,13 @@ reduce_scatter_cuda_(
     int64_t timeout) {
   auto output_tensors_vec = output_tensors.vec();
   auto input_tensors_vec = toTensorVectorVector(input_tensors);
-  auto work = process_group->getBackend(c10::DeviceType::CUDA)->reduce_scatter(
-      output_tensors_vec,
-      input_tensors_vec,
-      ReduceScatterOptions{
-          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+  auto work =
+      process_group->getBackend(c10::DeviceType::CUDA)
+          ->reduce_scatter(
+              output_tensors_vec,
+              input_tensors_vec,
+              ReduceScatterOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors_vec, work);

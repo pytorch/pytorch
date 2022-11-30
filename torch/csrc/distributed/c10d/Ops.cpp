@@ -106,7 +106,6 @@ c10::intrusive_ptr<Work> allgather_coalesced_(
       input_list_vec);
 }
 
-
 c10::intrusive_ptr<Work> _reduce_scatter_base_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -118,35 +117,6 @@ c10::intrusive_ptr<Work> _reduce_scatter_base_(
       input_tensor,
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
-}
-
-c10::intrusive_ptr<Work> gather_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const at::TensorList& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      input_tensors_vec,
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
-}
-
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
-    const at::TensorList& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto work = process_group->scatter(
-      output_tensors_vec,
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(output_tensors_vec), work);
 }
 
 c10::intrusive_ptr<Work> alltoall_(
@@ -258,7 +228,7 @@ TORCH_LIBRARY(c10d, m) {
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, allgather_coalesced_));
   m.def(
-      "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors,  __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "_reduce_scatter_base_",
       dispatch(
@@ -267,11 +237,9 @@ TORCH_LIBRARY(c10d, m) {
       "reduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
   m.def(
-      "gather_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
+      "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "scatter_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, scatter_));
+      "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "alltoall_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));

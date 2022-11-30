@@ -648,7 +648,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.gather(output_ts, tensors, opts)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Tensor list must be nonempty"
+            RuntimeError, "There were no tensor arguments to this function"
         ):
             opts = c10d.GatherOptions()
             opts.rootRank = 0
@@ -782,7 +782,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.scatter(tensors, scatter_list, opts)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Tensor list must be nonempty"
+            RuntimeError, "There were no tensor arguments to this function"
         ):
             opts = c10d.ScatterOptions()
             opts.rootRank = 0
