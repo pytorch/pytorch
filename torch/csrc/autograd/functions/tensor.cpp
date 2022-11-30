@@ -88,9 +88,9 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
         result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
   }
 
-  // Adding the missing nodes to the current graph's `exec_info`.
-  // This is a workaround because the current `GraphTask::init_to_execute`
-  // does not traverse into CopySlices node.
+  // Since the gradient edge for the 0th input is different between `this` and
+  // `fn`, make sure that the one from `fn` has the same metadata in the current
+  // GraphTask's exec_info as the one on `this`.
   const auto exec_info = get_current_graph_task_exec_info();
   if (exec_info && !exec_info->empty()) {
     const auto& fn_edge = fn->next_edge(0);
