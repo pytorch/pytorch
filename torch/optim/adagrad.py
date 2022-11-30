@@ -124,6 +124,20 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state["sum"].share_memory_()
 
+    def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
+        has_sparse_grad = False
+        for p in group["params"]:
+            if p.grad is not None:
+                if p.grad.is_sparse:
+                    has_sparse_grad = True
+                params_with_grad.append(p)
+                grads.append(p.grad)
+                state = self.state[p]
+                state_sums.append(state["sum"])
+                state_steps.append(state["step"])
+
+        return has_sparse_grad
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -144,16 +158,7 @@ class Adagrad(Optimizer):
             state_sums = []
             state_steps = []
 
-            has_sparse_grad = False
-            for p in group["params"]:
-                if p.grad is not None:
-                    if p.grad.is_sparse:
-                        has_sparse_grad = True
-                    params_with_grad.append(p)
-                    grads.append(p.grad)
-                    state = self.state[p]
-                    state_sums.append(state["sum"])
-                    state_steps.append(state["step"])
+            has_sparse_grad = self._init_group(group, params_with_grad, grads, state_sums, state_steps)
 
             adagrad(
                 params_with_grad,

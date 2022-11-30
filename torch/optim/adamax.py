@@ -99,6 +99,31 @@ class Adamax(Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
+    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError("Adamax does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = torch.tensor(0.0)
+                state["exp_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                state["exp_inf"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+
+            exp_avgs.append(state["exp_avg"])
+            exp_infs.append(state["exp_inf"])
+            state_steps.append(state["step"])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -127,29 +152,7 @@ class Adamax(Optimizer):
             maximize = group["maximize"]
             differentiable = group["differentiable"]
 
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError("Adamax does not support sparse gradients")
-                grads.append(p.grad)
-
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    state["exp_inf"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-
-                exp_avgs.append(state["exp_avg"])
-                exp_infs.append(state["exp_inf"])
-                state_steps.append(state["step"])
+            self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
             adamax(
                 params_with_grad,
