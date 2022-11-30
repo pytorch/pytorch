@@ -1,12 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
-from typing import Any
-
 import torch
-from torch.distributed.fsdp._symbolic_trace import _init_execution_info, _patch_tracer
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    TestCase,
     run_tests,
 )
 
@@ -26,38 +24,37 @@ class Model(torch.nn.Module):
         )
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x: Any, run_all_layers: bool):
+    def forward(self, x: torch.Tensor, run_all_layers: bool) -> torch.Tensor:
         z = self.relu(self.layer0(x))
         z = self.relu(self.layer2(z))
         z = z @ self.weight1
         if run_all_layers:
             z = self.relu(self.layer1(z))
             z = z @ self.weight2
-            # used to test the case where a module is called more than once
+            # Use `layer0` twice to check the handling of multiplicity in the
+            # saved data structures
             z = self.relu(self.layer0(x))
         return z
 
 
-class TestSymbolicTracing(FSDPTest):
+class TestSymbolicTracing(TestCase):
     def test_symbolic_tracing_outputs(self):
         """
-        test ``execution_info.module_forward_order`` and ``execution_info.module_to_execution_infos``
-        after running ``tracer.trace()`` inside ``_patch_tracer``.
+        Tests running ``tracer.trace()`` inside ``patch_tracer()`` by checking
+        the saved data structures.
         """
         model = Model()
         tracer = torch.fx.Tracer()
-        execution_info = _init_execution_info(model)
-        original_call_module = tracer.call_module
-        original_create_proxy = tracer.create_proxy
-        with _patch_tracer(
-            tracer=tracer, root_module=model, execution_info=execution_info
-        ):
+        orig_call_module = tracer.call_module
+        orig_create_proxy = tracer.create_proxy
+        exec_order_tracer = _ExecOrderTracer()
+        with exec_order_tracer.patch_tracer(tracer=tracer, root_module=model):
             concrete_args = {"run_all_layers": True}
             tracer.trace(model, concrete_args)
-        # the member functions of tracer should not be changed
-        self.assertEqual(original_call_module, tracer.call_module)
-        self.assertEqual(original_create_proxy, tracer.create_proxy)
-        # test tracer.module_forward_order
+        # Check that the tracer methods are unchanged after exiting the context
+        self.assertEqual(orig_call_module, tracer.call_module)
+        self.assertEqual(orig_create_proxy, tracer.create_proxy)
+        # Check `module_forward_order`
         correct_module_forward_order = [
             model,
             model.layer0,
@@ -72,12 +69,11 @@ class TestSymbolicTracing(FSDPTest):
             model.layer0,
             model.relu,
         ]
+        exec_info = exec_order_tracer.exec_info
+        self.assertEqual(exec_info.module_forward_order, correct_module_forward_order)
+        # Check `module_to_param_usage_infos`
         self.assertEqual(
-            execution_info.module_forward_order, correct_module_forward_order
-        )
-        # test execution_info.module_to_execution_infos
-        self.assertEqual(
-            execution_info.module_to_execution_infos[model],
+            exec_info.module_to_param_usage_infos[model],
             [
                 (model.layer0, list(model.layer0.named_parameters())),
                 (model.layer2, list(model.layer2.named_parameters())),
@@ -88,22 +84,22 @@ class TestSymbolicTracing(FSDPTest):
             ],
         )
         self.assertEqual(
-            execution_info.module_to_execution_infos[model.layer0],
+            exec_info.module_to_param_usage_infos[model.layer0],
             [(model.layer0, list(model.layer0.named_parameters()))],
         )
         self.assertEqual(
-            execution_info.module_to_execution_infos[model.layer1],
+            exec_info.module_to_param_usage_infos[model.layer1],
             [(model.layer1, list(model.layer1.named_parameters()))],
         )
         self.assertEqual(
-            execution_info.module_to_execution_infos[model.layer2],
+            exec_info.module_to_param_usage_infos[model.layer2],
             [
                 (model.layer2[0], list(model.layer2[0].named_parameters())),
                 (model.layer2[2], list(model.layer2[2].named_parameters())),
             ],
         )
-        self.assertEqual(execution_info.module_to_execution_infos[model.relu], [])
-        # test tracer.param_exec_order
+        self.assertEqual(exec_info.module_to_param_usage_infos[model.relu], [])
+        # Check `param_forward_order`
         correct_param_order = [
             model.layer0.weight,
             model.layer0.bias,
@@ -113,7 +109,12 @@ class TestSymbolicTracing(FSDPTest):
             model.layer1.weight,
             model.weight2,
         ]
-        self.assertEqual(execution_info.param_exec_order, correct_param_order)
+        self.assertEqual(exec_info.param_forward_order, correct_param_order)
+        # Check `visited_params`
+        self.assertEqual(
+            len(exec_info.visited_params), len(exec_info.param_forward_order)
+        )
+        self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
 
 
 instantiate_parametrized_tests(TestSymbolicTracing)
