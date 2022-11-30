@@ -80,6 +80,21 @@ class GuardSource(enum.Enum):
 
 @dataclasses.dataclass
 class Guard:
+    # The name of a Guard specifies what exactly it is the guard is guarding
+    # on.  The meaning of the name is dependent on the create_fn; you must
+    # look at the use-site inside create_fn to know what name means.
+    #
+    # That being said, although you might think this is just a "name", name is
+    # usually an arbitrary Python expression that will be evaluated with all
+    # globals (and locals, if you create a LOCAL guard) to extract the Python
+    # object that we want to perform guard tests on.  This evaluation
+    # typically happens in GuardBuilder.eval.  In these cases, name is
+    # typically produced by Source.name() (not to be confused with
+    # GuardSource)--morally, we could have stored a Source here.
+    #
+    # Occasionally, name is not a valid Python expression; sometimes
+    # it is meaningless.  Example create_fns that are like this include
+    # GRAD_MODE and SYMBOL_MATCH.
     name: str
     source: GuardSource
     create_fn: Callable[["GuardBuilder", "Guard"], None]

@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import cast, Dict, List, Optional
+from typing import Callable, cast, Dict, List, Optional, Set
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -23,7 +23,7 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
-from .guards import CheckFunctionManager, GuardedCode
+from .guards import CheckFunctionManager, Guard, GuardedCode
 from .output_graph import CompilerFn, OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
@@ -265,7 +265,10 @@ def exception_handler(e, code, frame=None):
 
 
 def convert_frame_assert(
-    compiler_fn: CompilerFn, guard_export_fn=None, one_graph=True, export=False
+    compiler_fn: CompilerFn,
+    guard_export_fn=None,
+    one_graph: bool = True,
+    export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
@@ -351,14 +354,14 @@ def convert_frame_assert(
 
 def _compile(
     code: types.CodeType,
-    globals,
-    locals,
-    builtins,
-    compiler_fn,
-    one_graph,
-    export,
-    guard_export_fn=None,
-    frame=None,
+    globals: Dict[str, object],
+    locals: Dict[str, object],
+    builtins: Dict[str, object],
+    compiler_fn: CompilerFn,
+    one_graph: bool,
+    export: bool,
+    guard_export_fn: Optional[Callable[[Set[Guard]], None]] = None,
+    frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
 
@@ -496,10 +499,10 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
-            False,  # one_graph
-            None,  # export_fn
-            None,  # frame
-            False,  # Export
+            one_graph=False,
+            export=False,
+            guard_export_fn=None,
+            frame=None,
         )
     except Exception:
         pass
