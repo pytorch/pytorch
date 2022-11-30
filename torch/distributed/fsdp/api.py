@@ -46,12 +46,15 @@ class ShardingStrategy(Enum):
       :class:`DistributedDataParallel` API. For gradients, this strategy
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
+    - ``HYBRID_SHARD``: foo
+    - ``HYBRID_SHARD_ZERO2``: foo
     """
 
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-    # HYBRID_SHARD = auto()
+    HYBRID_SHARD = auto()
+    HYBRID_SHARD_ZERO2 = auto()
 
 
 class BackwardPrefetch(Enum):

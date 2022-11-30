@@ -46,6 +46,9 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
+    HYBRID_SHARDING_STRATEGIES,
+    HybridShardProcessGroupType,
+    ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
@@ -314,7 +317,7 @@ class FullyShardedDataParallel(nn.Module):
     def __init__(
         self,
         module: nn.Module,
-        process_group: Optional[ProcessGroup] = None,
+        process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
@@ -364,6 +367,12 @@ class FullyShardedDataParallel(nn.Module):
                 # FSDP module directly
                 submodule._fsdp_use_orig_params = use_orig_params
 
+        # Initializes self.process_group, along with rank and world size. This will
+        # also set another attribute, _inter_node_pg, to control the process group
+        # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, HYBRID_SHARD_ZERO2}.
+        # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
+        # the same process group state as the root FSDP module.
+        _init_process_group_state(self, process_group, sharding_strategy)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -386,9 +395,14 @@ class FullyShardedDataParallel(nn.Module):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
             }
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                # Share root process groups with children to maintain
+                # the invariant that all FSDP modules will have the same
+                # process groups.
+                fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
+
             _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
 
-        _init_process_group_state(self, process_group)
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
         _init_core_state(
