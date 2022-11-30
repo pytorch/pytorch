@@ -42,6 +42,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics
+    from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -226,6 +227,14 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def clone_preserve_strides(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -246,7 +255,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = example_inputs
+    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
     original_lowp_dtype = torch.half
@@ -326,6 +335,16 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+        )
+        # In case of input mutations, check that inputs are the same
+        self.assertEqual(
+            ref_inputs,
+            example_inputs,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            # our testing sometimes uses higher precision inputs for the reference
+            exact_dtype=False,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -4677,6 +4696,22 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
+
 
 if HAS_CPU:
 
@@ -4911,6 +4946,39 @@ if HAS_CPU:
                 compiled_out = opt_fn(value, mask)
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
+
+        def test_cpu_vec_cosim(self):
+            cpp_vec_op_list = []
+            cpp_op_list = []
+
+            for k, v in CppVecOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_vec_op_list.append(k)
+            for k, v in CppOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_op_list.append(k)
+
+            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_erf_cpu_only(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
