@@ -14,7 +14,7 @@ from torch.distributed._tensor import (
     DeviceMesh,
     Replicate,
 )
-from torch.distributed._tensor.parallel import (
+from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     TensorParallelMultiheadAttention,
     parallelize_module,

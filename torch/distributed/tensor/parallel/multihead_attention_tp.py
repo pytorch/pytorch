@@ -6,11 +6,13 @@ import math
 import torch
 from torch.distributed._tensor import DTensor as DT
 from torch.distributed._tensor.placement_types import Shard
-from torch.distributed._tensor.parallel._view_with_dim_change import (
+from torch.distributed.tensor.parallel._view_with_dim_change import (
     _view_with_sharding_dim_change,
 )
 
 from typing import Optional, Union
+
+__all__ = ["TensorParallelMultiheadAttention"]
 
 
 # TODO: Add a test to test equivalence between our Multihead Attention

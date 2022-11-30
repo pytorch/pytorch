@@ -4,18 +4,18 @@ import torch
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
 from torch.distributed._tensor import DeviceMesh, Replicate, DTensor
-from torch.distributed._tensor.parallel.style import (
+from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.distributed._tensor.parallel.api import (
+from torch.distributed.tensor.parallel.api import (
     _parallelize_linear,
     _parallelize_mlp,
 )
-from torch.distributed._tensor.parallel.utils import _create_1d_device_mesh
-from torch.distributed._tensor.parallel.style import (
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel.style import (
     make_input_replicate_1d,
     make_output_replicate_1d,
 )

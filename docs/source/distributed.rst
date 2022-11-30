@@ -856,3 +856,4 @@ the `NCCL` backend is used and the user attempts to use a GPU that is not availa
 .. py:module:: torch.distributed.pipeline
 .. py:module:: torch.distributed.pipeline.sync
 .. py:module:: torch.distributed.pipeline.sync.skip
+.. py:module:: torch.distributed.tensor

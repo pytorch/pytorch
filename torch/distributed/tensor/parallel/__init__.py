@@ -1,9 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from torch.distributed._tensor.parallel.multihead_attention_tp import (
+from torch.distributed.tensor.parallel.multihead_attention_tp import (
     TensorParallelMultiheadAttention,
 )
 
-from torch.distributed._tensor.parallel.style import (
+from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
@@ -16,7 +16,7 @@ from torch.distributed._tensor.parallel.style import (
     make_output_tensor,
 )
 
-from torch.distributed._tensor.parallel.api import (
+from torch.distributed.tensor.parallel.api import (
     parallelize_module,
 )
 
