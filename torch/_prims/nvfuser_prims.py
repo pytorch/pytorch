@@ -355,7 +355,7 @@ def _full_nvfuser(
     requires_grad: bool = False,
 ):
     assert device != torch.device("cpu")
-    assert layout is None
+    assert layout is None or layout is torch.strided
     assert pin_memory is False
     assert requires_grad is False
     dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
