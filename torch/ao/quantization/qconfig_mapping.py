@@ -1,7 +1,7 @@
 from __future__ import annotations
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Tuple, Union
-import re
+from typing import Any, Callable, Dict, Tuple, Union, List
+
 import torch
 
 from .fake_quantize import (
@@ -270,7 +270,7 @@ class QConfigMapping:
         for style_name in _QCONFIG_STYLE_ORDER:
             output += f"\n {style_name}"
             qconfigs = getattr(self, style_name)
-            if isinstance(qconfigs, OrderedDict) and len(qconfigs)>0:
+            if isinstance(qconfigs, OrderedDict) and len(qconfigs) > 0:
                 for key, qconfig in qconfigs.items():
                     output += f"\n  {key}: {qconfig}"
             else:
