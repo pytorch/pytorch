@@ -1251,14 +1251,15 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::return_value_policy::reference);
   nvf_ops.def(
       "full",
-      [](nvfuser::FusionDefinition& fd,
+      [](nvfuser::FusionDefinition::Operators& self,
          std::vector<int64_t>& size,
          nvfuser::Scalar arg,
          Nvf::DataType dtype) -> nvfuser::Tensor {
-        nvfuser::Tensor output = fd.defineTensor();
-        fd.defineRecord(new nvfuser::FullOpRecord(
-            {fd.recordingState(arg())},
-            {fd.recordingState(output())},
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::FullOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
             size,
             dtype));
         return output;

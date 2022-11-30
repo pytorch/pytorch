@@ -360,7 +360,7 @@ def _full_nvfuser(
     assert requires_grad is False
     dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
     nvfuser_dtype = getnvFuserDtype(dtype)
-    return fd.full(shape, fill_value, nvfuser_dtype)
+    return fd.ops.full(shape, fill_value, nvfuser_dtype)
 
 
 _nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
