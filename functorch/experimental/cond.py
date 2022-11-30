@@ -1,5 +1,6 @@
 # TODO(zhxchen17) Expose API through functorhc.experimental.control_flow
 #                 and rename this file to _cond.py.
+from functorch._src.eager_transforms import functionalize
 import torch
 
 import torch.utils._pytree as pytree
@@ -151,7 +152,21 @@ def cond_python_dispatcher(*args):
     return cond(*args)
 
 
+@cond.py_impl(DispatchKey.FuncTorchDynamicLayerFrontMode)
+def cond_functionalize(pred, true_fn, false_fn, inputs):
+    functional_true_fn = functionalize(true_fn)
+    functional_false_fn = functionalize(false_fn)
+
+    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchDynamicLayerFrontMode))
+
+    if pred:
+        return functional_true_fn(*inputs)
+    return functional_false_fn(*inputs)
+
+
 # TODO(voz): Make this automatic for keys, this is very ugly atm
+cond.fallthrough(DispatchKey.Functionalize)
+cond.fallthrough(DispatchKey.FuncTorchDynamicLayerBackMode)
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
