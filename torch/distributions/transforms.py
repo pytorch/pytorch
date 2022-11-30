@@ -984,7 +984,7 @@ class PositiveDefiniteTransform(LowerCholeskyTransform):
 
     def _call(self, x):
         x = super()._call(x)
-        return x @ x.transpose(-1, -2)
+        return x @ x.mT
 
     def _inverse(self, y):
         y = torch.linalg.cholesky(y)
