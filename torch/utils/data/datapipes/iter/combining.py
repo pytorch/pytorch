@@ -587,20 +587,8 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
-        try:
-            for data in zip(*iterators):
-                yield data
-        finally:
-            unused = []
-            for iterator in iterators:
-                try:
-                    unused += list(iterator)
-                except RuntimeError:  # Some iterators may have been invalidated by single iterator constraints
-                    pass
-
-            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
-            for item in unused:
-                StreamWrapper.close_streams(item)
+        for data in zip(*iterators):
+            yield data
 
     def __len__(self) -> int:
         if self.length is not None:
