@@ -66,7 +66,7 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: Python API
 
    torch
@@ -80,7 +80,7 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cuda
    torch.backends <backends>
-   torch.compile <dynamo/index>
+   torch.compile <dynamo/*>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>

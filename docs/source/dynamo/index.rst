@@ -33,6 +33,7 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    * `dev-discuss topics <https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest>`__
 
 .. toctree::
+   :maxdepth: 1
 
    installation
    get-started
