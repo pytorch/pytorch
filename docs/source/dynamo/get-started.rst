@@ -14,7 +14,7 @@ significant speedups the newer your GPU is.
        return a + b
    new_fn = optimize("inductor")(fn)
    input_tensor = torch.randn(10000).to(device="cuda:0")
-   a = new_fn()
+   a = new_fn(input_tensor, input_tensor)
 
 This example will not actually run faster. Its purpose is to demonstrate
 the ``torch.cos()`` and ``torch.sin()`` features which are
