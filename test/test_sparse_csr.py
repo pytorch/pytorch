@@ -2761,33 +2761,6 @@ class TestSparseCSR(TestCase):
             detached_inp = inp.detach()
             self.assertEqual(inp, detached_inp)
 
-    def _convert_to_layout(self, a, target_layout, blocksize=(2, 2)):
-        """
-        Helper function to call the correct layout conversion
-        with reasonable defaults for the block size. Clearly there
-        is a need for a to.layout overload.
-        """
-        if target_layout is torch.sparse_csr:
-            result = a.to_sparse_csr()
-        elif target_layout is torch.sparse_csc:
-            result = a.to_sparse_csc()
-        elif target_layout is torch.sparse_bsr:
-            result = a.to_sparse_bsr(blocksize)
-        elif target_layout is torch.sparse_bsc:
-            result = a.to_sparse_bsc(blocksize)
-        else:
-            raise NotImplementedError(repr(a))
-        assert result.layout is target_layout
-        # to_sparse_xyz methods use unsafe construction of sparse
-        # compressed tensors. Here we explicitly validate the results
-        # to make sure that the sparse tensors are consistent with the
-        # corresponding sparse tensor invariants.
-        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[result.layout]
-        compressed_indices, plain_indices = compressed_indices_mth(result), plain_indices_mth(result)
-        torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, result.values(),
-                                                      result.shape, result.layout)
-        return result
-
     def _construct_sp_matrix(self, tensor, layout, blocksize=(2, 2)):
         if tensor.layout in [torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.strided]:
             tensor = tensor.to_dense()
@@ -2806,9 +2779,13 @@ class TestSparseCSR(TestCase):
     @all_sparse_compressed_layouts('to_layout')
     @all_sparse_compressed_layouts('from_layout')
     def test_compressed_layout_conversions_coverage(self, device, from_layout, to_layout):
-        """
-        This test performs a smoke test for covered conversion and verifies
+        """This test performs a smoke test for covered conversion and verifies
         that an exception is thrown for unsupported conversions.
+
+        TODO: This test covers a subset of
+        TestSparseAny.test_to_sparse tests and can be
+        eliminated. Keeping the test until the new
+        `Tensor.to_sparse(*, layout, blocksize)` has landed.
         """
 
         allowed_pairwise_layouts_sets = {
@@ -2835,19 +2812,21 @@ class TestSparseCSR(TestCase):
                 if a.dim() > 2:
                     expect_error = True
 
-            b = self._convert_to_layout(a, layout_a)
+            blocksize_a = (1, 1) if layout_a in {torch.sparse_bsr, torch.sparse_bsc} else None
+            blocksize_b = (1, 1) if layout_b in {torch.sparse_bsr, torch.sparse_bsc} else None
+            b = a.to_sparse(layout=layout_a, blocksize=blocksize_a)
             if expect_error:
                 with self.assertRaises(RuntimeError):
-                    self._convert_to_layout(b, layout_b)
+                    b.to_sparse(layout=layout_b, blocksize=blocksize_b)
             else:
-                c = self._convert_to_layout(b, layout_b)
+                c = b.to_sparse(layout=layout_b, blocksize=blocksize_b)
                 self.assertEqual(a.to_dense(), c.to_dense())
 
                 # change of blocksize upon conversion is not yet supported.
                 if b.layout in block_layouts:
                     for block_layout in block_layouts:
-                        with self.assertRaisesRegex(RuntimeError, "blocksize does not match the blocksize"):
-                            self._convert_to_layout(b, block_layout, blocksize=3)
+                        with self.assertRaisesRegex(RuntimeError, "conversion from.*to.*is not implemented"):
+                            b.to_sparse(layout=block_layout, blocksize=(3, 3))
 
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
         sparse_dims = (6, 12)
@@ -2861,11 +2840,13 @@ class TestSparseCSR(TestCase):
     @hybrid_nonhybrid()
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_dense_to_from_sparse_compressed(self, device, hybrid, batched, layout):
-        """
-        This test tests conversion from dense to/from CSR and CSC
+        """This test tests conversion from dense to/from CSR and CSC
         by comparing to SciPy's implementation.
 
-        TODO: Eventually this is meant to be merged into test_compressed_layout_conversions_coverage
+        Here we test only those conversion combinations that SciPy
+        supports to ensure that PyTorch conversions are in the same
+        page with SciPy.  Independent from SciPy, all conversion
+        combinations are tested in TestSparseAny.test_to_sparse.
         """
 
         # adjust this block as support is added
@@ -2912,7 +2893,7 @@ class TestSparseCSR(TestCase):
             for batch_index in np.ndindex(batch_shape):
                 pt_matrix = pt_tensor[batch_index]
                 dense_matrix = dense[batch_index]
-                dense_matrix_pt = self._convert_to_layout(dense_matrix, layout, blocksize)
+                dense_matrix_pt = dense_matrix.to_sparse(layout=layout, blocksize=blocksize or None)
                 # sanity check, selecting batch of to_<layout> and dense[batch].to_<layout> should give the same result
                 self.assertEqual(pt_matrix, dense_matrix_pt)
                 check_batch(pt_matrix, dense_matrix, blocksize, **kwargs)
@@ -2956,12 +2937,12 @@ class TestSparseCSR(TestCase):
         batch_sizes = [(3,), (1, 3), (2, 1, 3)] if batched else [()]
         hybrid_sizes = [(4, ), (2, 2)] if hybrid else [()]
         if not hybrid:
-            # general cases, always run, hybrid excluded untill dense->sparse api exists
+            # general cases, always run, hybrid excluded until dense->sparse api exists
             for sparse_shape, blocksize, batch_shape, hybrid_shape in itertools.product(
                     sparse_sizes, blocksizes, batch_sizes, hybrid_sizes):
                 dense = _generate_subject(sparse_shape, batch_shape, hybrid_shape)
                 if expect_to_layout_support:
-                    sparse = self._convert_to_layout(dense, layout, blocksize)
+                    sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
                     check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
                     if expect_from_layout_support:
                         dense_back = sparse.to_dense()
@@ -2971,7 +2952,7 @@ class TestSparseCSR(TestCase):
                             sparse.to_dense()
                 else:
                     with self.assertRaises(RuntimeError):
-                        self._convert_to_layout(dense, layout, blocksize)
+                        dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
         # special cases for batched tensors
         if batched and expect_to_layout_support:
@@ -3005,7 +2986,7 @@ class TestSparseCSR(TestCase):
                 mask = mask.transpose(-3, -2)
                 mask = mask.reshape_as(dense)
             dense = dense * mask
-            sparse = self._convert_to_layout(dense, layout, blocksize)
+            sparse = dense.to_sparse(layout=layout, blocksize=blocksize or None)
             check_content(sparse, dense, blocksize=blocksize, batch_shape=batch_shape, hybrid_shape=hybrid_shape)
 
             if expect_from_layout_support:
@@ -3023,14 +3004,14 @@ class TestSparseCSR(TestCase):
             dense = dense * mask
             msg = "Expect the same number of specified elements per batch."
             with self.assertRaisesRegex(RuntimeError, msg):
-                self._convert_to_layout(dense, layout, blocksize)
+                dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
             # Should throw if there is a zero in the batch size
             dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
             layout_code = str(layout).split("_")[-1]
             msg = f"to_sparse_{layout_code}: Expected product of batch dimensions to be non-zero."
             with self.assertRaisesRegex(RuntimeError, msg):
-                self._convert_to_layout(dense, layout, blocksize=blocksize)
+                dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
         if hybrid:
             # conversion from sparse -> dense should be blocked with dense dims
@@ -3063,21 +3044,24 @@ class TestSparseCSR(TestCase):
         This test tests conversion from COO to CSR and CSC and CSC to CSR and CSC
         by comparing to SciPy's implementation.
 
-        TODO: Eventually this is meant to be merged into test_compressed_layout_conversions_coverage
+        Here we test only those conversion combinations that SciPy
+        supports to ensure that PyTorch conversions are in the same
+        page with SciPy.  Independent from SciPy, all conversion
+        combinations are tested in TestSparseAny.test_to_sparse.
         """
         if layout is torch.sparse_bsc:
             # TODO: Remove this once support has been enabled
-            return
+            self.skipTest('NOT IMPL')
         if layout is torch.sparse_bsr:
             # TODO: Remove this once support has been enabled
-            return
+            self.skipTest('NOT IMPL')
 
         for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
             sparse_dim = 2
             nnz = shape[0] * shape[1] // 2
             sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
             sp_matrix = self._construct_sp_matrix(sparse, layout)
-            pt_matrix = self._convert_to_layout(sparse, layout)
+            pt_matrix = sparse.to_sparse(layout=layout)
 
             compressed_indices_mth = {
                 torch.sparse_csr: torch.Tensor.crow_indices,
@@ -3097,7 +3081,7 @@ class TestSparseCSR(TestCase):
 
             sparse_csc = sparse.to_sparse_csc()
             sp_matrix = self._construct_sp_matrix(sparse_csc, layout)
-            pt_matrix = self._convert_to_layout(sparse_csc, layout)
+            pt_matrix = sparse_csc.to_sparse(layout=layout)
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
