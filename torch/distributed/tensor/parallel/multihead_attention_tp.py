@@ -12,6 +12,8 @@ from torch.distributed.tensor.parallel._view_with_dim_change import (
 
 from typing import Optional, Union
 
+__all__ = ["MultiheadAttentionTP"]
+
 
 # TODO: Add a test to test equivalence between our Multihead Attention
 # with other mainstream ones (Megatron-LM or PyTorch).
