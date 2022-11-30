@@ -564,8 +564,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 def matches_module_function_pattern(pattern, node, modules):
     if len(node.args) == 0:
         return False
-    if len(node.args[0].users) > 1:
-        return False
     if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
         node, torch.fx.Node
     ):
@@ -583,6 +581,9 @@ def matches_module_function_pattern(pattern, node, modules):
     if node.op != "call_function":
         return False
     if node.target != pattern[1]:
+        return False
+    # make sure node.args[0] output is only used by current node.
+    if len(node.args[0].users) > 1:
         return False
     return True
 
