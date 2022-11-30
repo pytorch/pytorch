@@ -347,7 +347,10 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        if hasattr(V.kernel, "mutations"):
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
                             V.kernel.mutations.add(input_node.get_name())
                             V.kernel.mutations.add(self.get_name())
                         return
