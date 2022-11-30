@@ -145,6 +145,12 @@ set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
+
+target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+# NB: This must be target_compile_definitions, not target_compile_options,
+# as the latter is not respected by nvcc
+target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+
 target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB})
 if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
@@ -170,6 +176,11 @@ if(BUILD_PYTHON)
   #pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
   #add_library(${NVFUSER_PYTHON} MODULE ${NVFUSER_PYTHON_SRCS})
   add_library(${NVFUSER_PYTHON} SHARED ${NVFUSER_PYTHON_SRCS})
+  target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+
   message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
   message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
   target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
