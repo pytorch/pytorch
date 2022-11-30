@@ -62,6 +62,59 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def test_copy_slices_graph_task_updates(self):
+        def f1(x, y):
+            out = x.clone().view(-1)
+            out += y
+            return out
+
+        def f2(x, y):
+            out = x.clone().view(-1)
+            b = out * 2
+            out += y
+            return out + b
+
+        x = torch.rand(2, requires_grad=True)
+        y = torch.rand(2, requires_grad=True)
+
+        y_safe = torch._C._functions.DelayedError("Boom!", 1)(y)
+
+        for f in [f1, f2]:
+            # Ensure that the error Node works
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                out.sum().backward()
+
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                torch.autograd.grad(out.sum(), y)
+
+            # Ensure that if we don't ask for y, it doesn't crash
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), x)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), y_safe)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), (x, y_safe))
+
+        # Ensure that we don't run extra view Node
+        def f3(x, y):
+            out = x.clone().view(-1)
+
+            def hook(*args):
+                # This should never be called!
+                self.assertTrue(False)
+            out.register_hook(hook)
+
+            b = out + y
+            out += y
+            return out + b, b
+
+        out, b = f3(x, y_safe)
+        torch.autograd.grad(out.sum(), (b, y_safe))
+
 
     def test_grad_mode_class_decoration(self):
         # Decorating class is deprecated and should not be used
@@ -7235,6 +7288,28 @@ get_out().sum().backward()
         except subprocess.CalledProcessError as e:
             err_msg = "RuntimeError: one of the variables needed for gradient computation"
             self.assertTrue(err_msg in e.output.decode("utf-8"))
+
+    def test_view_func_replay(self):
+        def _assert_match_metadata(a, b):
+            self.assertEqual(a.size(), b.size())
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.storage_offset(), b.storage_offset())
+
+        def _test_op(fn, inp, args):
+            out = fn(inp, *args)
+            self.assertTrue(out._is_view)
+            self.assertTrue(out._base is inp)
+
+            new_inp = inp.clone()
+            _assert_match_metadata(new_inp, inp)
+            new_out = out._view_func(new_inp)
+            _assert_match_metadata(new_out, out)
+
+        _test_op(torch.select, torch.rand(2, 2), (0, 0))
+        _test_op(torch.as_strided, torch.rand(2, 2), ((4,), (1,)))
+        _test_op(torch.view_as_complex, torch.rand(2, 2), ())
+        _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
