@@ -46,6 +46,7 @@ Features described in this documentation are classified by release status:
    :glob:
    :maxdepth: 1
    :caption: torch.compile
+   :hidden:
 
    dynamo/index
    dynamo/installation
@@ -65,7 +66,7 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: Python API
 
    torch
