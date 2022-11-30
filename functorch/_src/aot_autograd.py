@@ -1157,29 +1157,43 @@ def format_guard_bug_msg(aot_config, expected):
 def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, compiler_fn):
     # Get information about whether or not flat_fn mutates its arguments
     # or not
-    with enable_python_dispatcher():
-        fw_metadata, _out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-            flat_fn
-        )(*flat_args)
+    try:
+        with enable_python_dispatcher():
+            fw_metadata, _out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+                flat_fn
+            )(*flat_args)
+    except RuntimeError as e:
+        logging.warning(
+            "Failed to collect metadata on function, produced code may be suboptimal.  "
+            "Known situations this can occur are inference mode only compilation involving "
+            "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
+            "if your situation looks different please file a bug to PyTorch.",
+            exc_info=True
+        )
+        # Analysis failed, fall back to duplicate specialize
+        # TODO: Known analysis problems:
+        #   - resize_: TestInductorOpInfoCPU.test_comprehensive_resize__cpu_bool
+        #   - prims: test_tmp_not_defined_issue1_cpu
+        pass
+    else:
+        # Strategy 1: For any input that is not mutated, we can leafify it if we
+        # need to remove a duplicate.
+        leaf_flat_args = []
+        args_set = set()
+        ok = True
 
-    # Strategy 1: For any input that is not mutated, we can leafify it if we
-    # need to remove a duplicate.
-    leaf_flat_args = []
-    args_set = set()
-    ok = True
+        for i, a in enumerate(flat_args):
+            if a not in args_set:
+                args_set.add(a)
+                leaf_flat_args.append(a)
+            elif fw_metadata.mutated_input_info[i] == MutationType.none:
+                leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+            else:
+                ok = False
+                break
 
-    for i, a in enumerate(flat_args):
-        if a not in args_set:
-            args_set.add(a)
-            leaf_flat_args.append(a)
-        elif fw_metadata.mutated_input_info[i] == MutationType.none:
-            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
-        else:
-            ok = False
-            break
-
-    if ok:
-        return compiler_fn(flat_fn, leaf_flat_args, aot_config)
+        if ok:
+            return compiler_fn(flat_fn, leaf_flat_args, aot_config)
 
     # Strategy 2: Duplicate specialize.
     #
