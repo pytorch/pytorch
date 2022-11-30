@@ -35,7 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     HandleTrainingState,
     TrainingState,
 )
-from torch.distributed.fsdp._dynamo_utils import _annotate_modules
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
     _get_default_comm_hook,
@@ -334,7 +334,7 @@ class FullyShardedDataParallel(nn.Module):
         _init_ignored_module_states(self, module, ignored_modules)
 
         # Add module annotations for Dynamo support (see function for details)
-        _annotate_modules(module, self._ignored_modules, use_orig_params)
+        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
 
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {

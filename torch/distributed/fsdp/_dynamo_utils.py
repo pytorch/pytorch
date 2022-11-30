@@ -6,15 +6,15 @@ FSDP_MANAGED_MODULE = "_is_fsdp_managed_module"
 FSDP_USE_ORIG_PARAMS = "_fsdp_use_orig_params"
 
 
-def _annotate_modules(
+def _annotate_modules_for_dynamo(
     module: nn.Module,
     ignored_modules: Set[nn.Module],
     use_orig_params: bool,
 ):
     """
-    Annotates the submodules in ``module`` 's tree except those in
-    ``ignored_modules``, indicating that they are FSDP-managed and saving the
-    ``use_orig_params`` setting passed to the FSDP constructor.
+    Annotates the submodules in ``module`` 's tree, except those in
+    ``ignored_modules``, indicating that the submodules are FSDP-managed and
+    saving the ``use_orig_params`` setting passed to the FSDP constructor.
     """
     for submodule in module.modules():
         if submodule not in ignored_modules:
