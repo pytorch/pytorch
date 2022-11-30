@@ -41,9 +41,13 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
         options.check_dtype = test_suite.check_dtype
 
     names = set([f.name for f in dataclasses.fields(options)])
+    keywords_to_pop = []
     for k, v in kwargs.items():
         if k in names:
             setattr(options, k, v)
+            keywords_to_pop.append(k)
+    for k in keywords_to_pop:
+        kwargs.pop(k)
 
     return verification.verify(*args, options=options, **kwargs)
 
