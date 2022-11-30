@@ -1814,6 +1814,8 @@ def run(runner, args, original_dir=None):
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
     optimize_ctx = NullContext()
 
+    inductor_config.implicit_fallbacks = False
+
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
