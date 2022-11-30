@@ -529,7 +529,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
@@ -557,7 +557,19 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
-    res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    try:
+        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return True.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph."
+            )
+        )
+        return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
@@ -731,7 +743,20 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 
 
 def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
-    compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    try:
+        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return False.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph"
+            )
+        )
+        return False
+
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
 
 
