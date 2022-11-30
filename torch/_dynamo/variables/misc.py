@@ -281,7 +281,7 @@ class GradModeVariable(ContextWrappingVariable):
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
         torch._C._set_grad_enabled(value)
@@ -337,12 +337,12 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.mode = None
 
     def exit(self, tx, *args):
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
     def enter(self, tx):
-        self.mode = tx.output.graph.create_node(
+        self.mode = tx.output.create_node(
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
