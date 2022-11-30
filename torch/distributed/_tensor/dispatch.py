@@ -151,7 +151,9 @@ def _reshape_alias(
 
 _CURRENT_DECOMPOSITION_TABLE: Dict[
     Callable[..., object], Callable[..., object]
-] = {torch.ops.aten._reshape_alias.default: _reshape_alias}
+] = {
+    torch.ops.aten._reshape_alias.default: _reshape_alias,
+}
 
 
 def propagate_input_sharding(
