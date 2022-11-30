@@ -36,7 +36,6 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
     return output;
   }
 
-#ifdef USE_FBGEMM
   // input is NOT quantized; quantization of input occurs within the function
   // output is NOT quantized
   virtual at::Tensor apply_fused_qdq_skip_quant(
@@ -60,7 +59,6 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
         "parameter type");
     return {};
   }
-#endif // USE_FBGEMM
 
   virtual at::Tensor apply_dynamic(
       at::Tensor input,
