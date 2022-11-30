@@ -31,3 +31,17 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
 
    * `TorchDynamo deep-dive video <https://www.youtube.com/watch?v=egZB5Uxki0I>`__
    * `dev-discuss topics <https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest>`__
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :hidden:
+
+   dynamo/index
+   dynamo/installation
+   dynamo/get-started
+   dynamo/guards-overview
+   dynamo/custom-backends
+   dynamo/deep-dive
+   dynamo/troubleshooting
+   dynamo/faq
