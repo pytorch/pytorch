@@ -5378,6 +5378,48 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+
+.. method:: to_sparse(*, layout=None, blocksize=None) -> Tensor
+   :noindex:
+
+Returns a sparse tensor with the specified layout and blocksize (when
+applicable).
+
+.. note:: If the :attr:`self` layout and blocksize parameters match
+          with the specified layout and blocksize, the method returns
+          :attr:`self`. Otherwise, return a sparse tensor copy
+          :attr:`self`.
+
+Args:
+
+    layout (:class:`torch.layout`, optional): one of
+      ``torch.sparse_coo``, ``torch.sparse_csr``,
+      ``torch.sparse_csc``, ``torch.sparse_bsr``, or
+      ``torch.sparse_bsc``. Default: if ``None``,
+      ``torch.sparse_coo``.
+
+    blocksize (list, tuple, :class:`torch.Size`, optional): Block size
+      of the resulting BSR or BSC tensor. For other layouts,
+      specifying the block size will result a RuntimeError exception.
+      The block size must be compatible with the size of :attr:`self`:
+      ``self.shape[B] % blocksize[0] == self.shape[B + 1] %
+      blocksize[1] == 0`` where ``B`` is the number of batch
+      dimensions if :attr:`self` is a sparse CSR/CSC/BSR/BSC tensor,
+      otherwise, ``B = 0``.
+
+Example::
+
+    >>> x = torch.tensor([[1, 0], [3, 0]])
+    >>> x.to_sparse(layout=torch.sparse_coo)
+    tensor(indices=tensor([[0, 1],
+                           [0, 0]]),
+           values=tensor([1, 3]),
+           size=(2, 2), nnz=2, layout=torch.sparse_coo)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(2, 1))
+    tensor(crow_indices=tensor([0, 1]),
+           col_indices=tensor([0]),
+           values=tensor([[[1],
+                           [3]]]), size=(2, 2), nnz=1, layout=torch.sparse_bsr)
 """,
 )
 
