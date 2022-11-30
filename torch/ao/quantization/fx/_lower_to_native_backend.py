@@ -829,7 +829,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        dq_node_or_nodes = ref_node.args[0]
+        assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
+        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
         assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
