@@ -402,8 +402,6 @@ static PyObject* THPVariable_numel(
     PyObject* args,
     PyObject* kwargs);
 
-int num = 0;
-
 static PyObject* THPVariable__to_functional_tensor(
     PyObject* self,
     PyObject* args,
@@ -432,7 +430,6 @@ static PyObject* THPVariable__to_functional_tensor(
             torch::autograd::deleteNode);
         torch::autograd::set_history(wrapped, new_grad_fn);
       }
-      num = num + 1;
     }
   }
   return wrap(wrapped);

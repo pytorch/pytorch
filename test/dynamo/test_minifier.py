@@ -131,7 +131,9 @@ class MinifierTests(MinifierTestBase):
 
     @requires_cuda()
     def test_after_dynamo_cuda_accuracy_error(self):
-        self._test_after_dynamo("cuda", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
+        self._test_after_dynamo(
+            "cuda", 4, RELU_ACCURACY_ERROR_BACKEND, "Accuracy failed"
+        )
 
     # Ensure that the testing backends pass when relu is not present.
     def _test_after_dynamo_backend_passes(self, device, repro_level, backend_code):

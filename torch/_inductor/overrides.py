@@ -532,9 +532,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     )
 
     fake_mode = fake_mode_from_tensors(example_inputs)
-    # if fake_mode:
-    # breakpoint()
-    # gm = deepcopy_to_fake_tensor(gm, fake_mode)
 
     if config.permute_fusion and not is_cpu:
         # For linear permute fusion, we need to check input info to identify

@@ -747,9 +747,11 @@ def torchxla_trivial(subgraph):
 def torchxla_trace_once(subgraph):
     import torch._dynamo.optimizations.torchxla_integration as integration
 
-    model = subgraph.model
-    example_inputs = subgraph.example_inputs
-    return integration.extract_compiled_graph(model, example_inputs)
+    def fwd(*args):
+        model = subgraph.model
+        return integration.extract_compiled_graph(model, args)
+
+    return fwd
 
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
