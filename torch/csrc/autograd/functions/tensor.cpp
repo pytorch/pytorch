@@ -88,9 +88,10 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
         result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
   }
 
-  // Since the gradient edge for the 0th input is different between `this` and
-  // `fn`, make sure that the one from `fn` has the same metadata in the current
-  // GraphTask's exec_info as the one on `this`.
+  // See Note [View + Inplace update for view tensor] For more details on this
+  // block Since the gradient edge for the 0th input is different between `this`
+  // and `fn`, make sure that the one from `fn` has the same metadata in the
+  // current GraphTask's exec_info as the one on `this`.
   const auto exec_info = get_current_graph_task_exec_info();
   if (exec_info && !exec_info->empty()) {
     const auto& fn_edge = fn->next_edge(0);
