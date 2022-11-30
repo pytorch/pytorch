@@ -1,9 +1,25 @@
 import types
 from typing import Any, Callable, Dict, Optional, Union, List, OrderedDict
+import dataclasses
 
 from typing_extensions import Protocol
 
-from torch._dynamo.guards import GuardedCode
+
+class GuardFn(Protocol):
+    closure_vars: OrderedDict[str, object]
+    code_parts: List[str]
+    verbose_code_parts: List[str]
+    global_scope: Dict[str, object]
+
+    # maps locals of user function to bool
+    def __call__(self, *maybe_dotzero: object, **f_locals: object) -> bool:
+        ...
+
+
+@dataclasses.dataclass
+class GuardedCode:
+    code: types.CodeType
+    check_fn: GuardFn
 
 
 class DynamoCallbackFn(Protocol):
@@ -14,16 +30,6 @@ class DynamoCallbackFn(Protocol):
 
 
 DynamoCallback = Union[DynamoCallbackFn, None, bool]
-
-
-class GuardFn(Protocol):
-    closure_vars: OrderedDict[str, object]
-    code_parts: List[str]
-    verbose_code_parts: List[str]
-    global_scope: Dict[str, object]
-
-    def __call__(*args: object) -> bool:
-        ...
 
 
 class DynamoGuardHook(Protocol):

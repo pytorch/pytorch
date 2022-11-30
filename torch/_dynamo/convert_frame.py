@@ -25,7 +25,7 @@ from .exc import (
     Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
-from .output_graph import OutputGraph
+from .output_graph import OutputGraph, CompilerFn
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -266,7 +266,7 @@ def exception_handler(e, code, frame=None):
 
 
 def convert_frame_assert(
-    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
+    compiler_fn: CompilerFn, guard_export_fn=None, one_graph=True, export=False
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
@@ -456,7 +456,7 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
+def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
 

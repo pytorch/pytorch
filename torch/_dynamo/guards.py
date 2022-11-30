@@ -8,7 +8,8 @@ import re
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, OrderedDict, Union
+from typing import Any, Callable, Dict, List, Optional, Set, OrderedDict, Union, Type
+from weakref import ReferenceType
 from typing_extensions import Protocol
 
 import numpy as np
@@ -21,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .types import GuardFn
+from .types import GuardFn, GuardedCode
 from .utils import (
     dict_const_keys,
     dict_param_key_ids,
@@ -82,7 +83,7 @@ class GuardSource(enum.Enum):
 class Guard:
     name: str
     source: GuardSource
-    create_fn: Callable
+    create_fn: Callable[['GuardBuilder', 'Guard'], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -195,7 +196,7 @@ def strip_getattr_getitem(name):
 
 class GuardBuilder:
     def __init__(
-        self, id_ref: Callable, scope: Optional[Dict[str, object]], guarded_code: 'CheckFunctionManager', renames=True
+        self, id_ref: Callable[[Type[object]], str], scope: Optional[Dict[str, object]], guarded_code: 'CheckFunctionManager', renames=True
     ):
         self.id_ref = id_ref
         if scope:
@@ -242,7 +243,7 @@ class GuardBuilder:
         m = re.match(r"^type\((.+)\)$", guard.name)
         if m:
             # optional optimization to produce cleaner/faster guard code
-            return self.TYPE_MATCH(Guard(m.group(1), guard.source, self.TYPE_MATCH))
+            return self.TYPE_MATCH(Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH))
 
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         self._produce_guard_code(guard, [code])
@@ -447,9 +448,8 @@ class GuardBuilder:
     # This is a bit of a crutch for export case for symbolic shape guards.
     # SYMBOL_MATCH is only ever, and must only ever, be used for setting this value on
     # the create_fn field for tracking guards in export.
-    @staticmethod
-    def SYMBOL_MATCH():
-        pass
+    def SYMBOL_MATCH(self, guard: Guard):
+        assert False, "this should not actually be called"
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -510,12 +510,6 @@ class GuardBuilder:
             code_list,
             obj_ref,
         )
-
-
-@dataclasses.dataclass
-class GuardedCode:
-    code: types.CodeType
-    check_fn: Callable
 
 
 from sympy.printing.str import StrPrinter
@@ -593,11 +587,11 @@ class CheckFunctionManager:
         self,
         output_graph=None,
         guards: Optional[Set[Guard]] = None,
-        f_locals: Optional[Dict] = None,
-        f_globals: Optional[Dict] = None,
+        f_locals: Optional[Dict[str, object]] = None,
+        f_globals: Optional[Dict[str, object]] = None,
     ):
         self.valid = True
-        self._weakrefs: List[weakref.ref] = []
+        self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
         self.output_graph = output_graph
 
