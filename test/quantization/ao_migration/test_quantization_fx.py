@@ -102,7 +102,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_function_import('fx._equalize', function_list)
 
     def test_package_import_fx_quantization_patterns(self):
-        self._test_package_import('fx.quantization_patterns')
+        self._test_package_import(
+            'fx.quantization_patterns',
+            new_package_name='fx.quantize_handler',
+        )
 
     def test_function_import_fx_quantization_patterns(self):
         function_list = [
