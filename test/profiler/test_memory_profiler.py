@@ -1463,9 +1463,21 @@ class TestMemoryProfilerE2E(TestCase):
                 return f"{size / 1024:3.1f} kB"
             return f"{size // 1024} kB"
 
+
+        # We generate sequential IDs for Tensors; however platforms vary
+        # slightly in the exact computation executed. If this results in
+        # tensor creation the IDs will be shifted and the unit test will fail.
+        # (Even though the behavior we're testing is unchanged.) To correct for
+        # this we assign sequential numbers to the tensors which are actually
+        # tested, effectively suppressing the extraneous implementation details.
+        id_map = {}
+
+        def id_for_testing(key):
+            return id_map.setdefault(key.storage.allocation_id, len(id_map))
+
         lines = [
             f"{action.name.lower():<25}  {format_action(action, key, version):<25}  "
-            f"{key.storage.allocation_id:>3}(v{version}) {format_size(size):>15}"
+            f"{id_for_testing(key):>3}(v{version}) {format_size(size):>15}"
             for _, action, (key, version), size in prof._memory_profile().timeline
 
             # We generally don't care about tiny allocations during memory
@@ -1476,71 +1488,71 @@ class TestMemoryProfilerE2E(TestCase):
         self.assertExpectedInline(
             textwrap.indent("\n".join(lines), " " * 12),
             """\
-            preexisting                PARAMETER                    3(v0)          128 kB
-            preexisting                PARAMETER                    4(v0)            2 kB
-            preexisting                PARAMETER                    7(v0)         1024 kB
-            create                     INPUT                        1(v0)          256 kB
-            create                     INPUT                        2(v0)         2048 kB
+            preexisting                PARAMETER                    0(v0)          128 kB
+            preexisting                PARAMETER                    1(v0)            2 kB
+            preexisting                PARAMETER                    2(v0)         1024 kB
+            create                     INPUT                        3(v0)          256 kB
+            create                     INPUT                        4(v0)         2048 kB
             create                     ACTIVATION                   5(v0)         2048 kB
             create                     ACTIVATION                   6(v0)         2048 kB
             destroy                    ACTIVATION                   5(v0)         2048 kB
+            create                     ACTIVATION                   7(v0)         2048 kB
             create                     ACTIVATION                   8(v0)         2048 kB
+            destroy                    ACTIVATION                   7(v0)         2048 kB
             create                     ACTIVATION                   9(v0)         2048 kB
-            destroy                    ACTIVATION                   8(v0)         2048 kB
-            create                     ACTIVATION                  10(v0)         2048 kB
-            create                     TEMPORARY                   11(v0)         2048 kB
-            destroy                    TEMPORARY                   11(v0)         2048 kB
+            create                     TEMPORARY                   10(v0)         2048 kB
+            destroy                    TEMPORARY                   10(v0)         2048 kB
+            create                     AUTOGRAD_DETAIL             11(v0)         2048 kB
+            create                     AUTOGRAD_DETAIL             12(v0)         2048 kB
+            destroy                    AUTOGRAD_DETAIL             11(v0)         2048 kB
+            create                     GRADIENT                    13(v0)         1024 kB
+            create                     AUTOGRAD_DETAIL             14(v0)         2048 kB
+            destroy                    AUTOGRAD_DETAIL             12(v0)         2048 kB
             create                     AUTOGRAD_DETAIL             15(v0)         2048 kB
-            create                     AUTOGRAD_DETAIL             16(v0)         2048 kB
-            destroy                    AUTOGRAD_DETAIL             15(v0)         2048 kB
-            create                     GRADIENT                    17(v0)         1024 kB
-            create                     AUTOGRAD_DETAIL             18(v0)         2048 kB
-            destroy                    AUTOGRAD_DETAIL             16(v0)         2048 kB
-            create                     AUTOGRAD_DETAIL             19(v0)         2048 kB
-            destroy                    AUTOGRAD_DETAIL             18(v0)         2048 kB
+            destroy                    AUTOGRAD_DETAIL             14(v0)         2048 kB
             destroy                    ACTIVATION                   6(v0)         2048 kB
-            create                     GRADIENT                    20(v0)          128 kB
-            create                     GRADIENT                    21(v0)            2 kB
-            destroy                    AUTOGRAD_DETAIL             19(v0)         2048 kB
-            create                     OPTIMIZER_STATE             23(v0)          128 kB
-            create                     OPTIMIZER_STATE             24(v0)          128 kB
-            create                     OPTIMIZER_STATE             26(v0)            2 kB
-            create                     OPTIMIZER_STATE             27(v0)            2 kB
-            create                     OPTIMIZER_STATE             29(v0)         1024 kB
-            create                     OPTIMIZER_STATE             30(v0)         1024 kB
-            increment_version          OPTIMIZER_STATE             23(v0)          128 kB
-            increment_version          OPTIMIZER_STATE             23(v1)          128 kB
-            increment_version          OPTIMIZER_STATE             24(v0)          128 kB
-            increment_version          OPTIMIZER_STATE             24(v1)          128 kB
-            create                     ???                         37(v0)          128 kB
-            create                     ???                         40(v0)          128 kB
-            destroy                    ???                         37(v0)          128 kB
-            increment_version          ???                         40(v0)          128 kB
-            increment_version          PARAMETER                    3(v0)          128 kB
-            increment_version          OPTIMIZER_STATE             26(v0)            2 kB
-            increment_version          OPTIMIZER_STATE             26(v1)            2 kB
-            increment_version          OPTIMIZER_STATE             27(v0)            2 kB
-            increment_version          OPTIMIZER_STATE             27(v1)            2 kB
-            create                     ???                         49(v0)            2 kB
-            create                     ???                         52(v0)            2 kB
-            destroy                    ???                         49(v0)            2 kB
-            increment_version          ???                         52(v0)            2 kB
-            destroy                    ???                         40(v1)          128 kB
-            increment_version          PARAMETER                    4(v0)            2 kB
-            increment_version          OPTIMIZER_STATE             29(v0)         1024 kB
-            increment_version          OPTIMIZER_STATE             29(v1)         1024 kB
-            increment_version          OPTIMIZER_STATE             30(v0)         1024 kB
-            increment_version          OPTIMIZER_STATE             30(v1)         1024 kB
-            create                     ???                         61(v0)         1024 kB
-            create                     ???                         64(v0)         1024 kB
-            destroy                    ???                         61(v0)         1024 kB
-            increment_version          ???                         64(v0)         1024 kB
-            destroy                    ???                         52(v1)            2 kB
-            increment_version          PARAMETER                    7(v0)         1024 kB
-            destroy                    ???                         64(v1)         1024 kB
-            increment_version          GRADIENT                    20(v0)          128 kB
-            increment_version          GRADIENT                    21(v0)            2 kB
-            increment_version          GRADIENT                    17(v0)         1024 kB""")
+            create                     GRADIENT                    16(v0)          128 kB
+            create                     GRADIENT                    17(v0)            2 kB
+            destroy                    AUTOGRAD_DETAIL             15(v0)         2048 kB
+            create                     OPTIMIZER_STATE             18(v0)          128 kB
+            create                     OPTIMIZER_STATE             19(v0)          128 kB
+            create                     OPTIMIZER_STATE             20(v0)            2 kB
+            create                     OPTIMIZER_STATE             21(v0)            2 kB
+            create                     OPTIMIZER_STATE             22(v0)         1024 kB
+            create                     OPTIMIZER_STATE             23(v0)         1024 kB
+            increment_version          OPTIMIZER_STATE             18(v0)          128 kB
+            increment_version          OPTIMIZER_STATE             18(v1)          128 kB
+            increment_version          OPTIMIZER_STATE             19(v0)          128 kB
+            increment_version          OPTIMIZER_STATE             19(v1)          128 kB
+            create                     ???                         24(v0)          128 kB
+            create                     ???                         25(v0)          128 kB
+            destroy                    ???                         24(v0)          128 kB
+            increment_version          ???                         25(v0)          128 kB
+            increment_version          PARAMETER                    0(v0)          128 kB
+            increment_version          OPTIMIZER_STATE             20(v0)            2 kB
+            increment_version          OPTIMIZER_STATE             20(v1)            2 kB
+            increment_version          OPTIMIZER_STATE             21(v0)            2 kB
+            increment_version          OPTIMIZER_STATE             21(v1)            2 kB
+            create                     ???                         26(v0)            2 kB
+            create                     ???                         27(v0)            2 kB
+            destroy                    ???                         26(v0)            2 kB
+            increment_version          ???                         27(v0)            2 kB
+            destroy                    ???                         25(v1)          128 kB
+            increment_version          PARAMETER                    1(v0)            2 kB
+            increment_version          OPTIMIZER_STATE             22(v0)         1024 kB
+            increment_version          OPTIMIZER_STATE             22(v1)         1024 kB
+            increment_version          OPTIMIZER_STATE             23(v0)         1024 kB
+            increment_version          OPTIMIZER_STATE             23(v1)         1024 kB
+            create                     ???                         28(v0)         1024 kB
+            create                     ???                         29(v0)         1024 kB
+            destroy                    ???                         28(v0)         1024 kB
+            increment_version          ???                         29(v0)         1024 kB
+            destroy                    ???                         27(v1)            2 kB
+            increment_version          PARAMETER                    2(v0)         1024 kB
+            destroy                    ???                         29(v1)         1024 kB
+            increment_version          GRADIENT                    16(v0)          128 kB
+            increment_version          GRADIENT                    17(v0)            2 kB
+            increment_version          GRADIENT                    13(v0)         1024 kB""")
 
 
 if __name__ == "__main__":
