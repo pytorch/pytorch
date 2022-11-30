@@ -2933,7 +2933,7 @@ class TestSparseCSR(TestCase):
             check_content = functools.partial(_check_batched, check_batch=check_content)
 
         sparse_sizes = [(6, 10), (0, 10), (6, 0), (0, 0)]
-        blocksizes = [(2, 2), (1, 1), (1, 2)] if layout in blocked_layouts else [()]
+        blocksizes = [(2, 2), (1, 1), (1, 2)] if layout in blocked_layouts else [None]
         batch_sizes = [(3,), (1, 3), (2, 1, 3)] if batched else [()]
         hybrid_sizes = [(4, ), (2, 2)] if hybrid else [()]
         if not hybrid:
