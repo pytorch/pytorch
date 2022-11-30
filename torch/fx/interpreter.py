@@ -16,7 +16,7 @@ __all__ = ['Interpreter', 'Transformer']
 @compatibility(is_backward_compatible=True)
 class Interpreter:
     """
-    An Interpreter executes an FX graph Node-by-Node. This pattern`
+    An Interpreter executes an FX graph Node-by-Node. This pattern
     can be useful for many things, including writing code
     transformations as well as analysis passes.
 
