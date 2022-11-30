@@ -178,13 +178,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
                     [ConstantVariable(k, **options) for k in keys], **options
-                ).add_guard(
-                    Guard(
-                        self.source.name(),
-                        self.source.guard_source(),
-                        GuardBuilder.ODICT_KEYS,
-                    )
-                )
+                ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
                 method is collections.OrderedDict.items
