@@ -12,7 +12,7 @@ import torch.nn
 
 from .. import variables
 from ..exc import unimplemented
-from ..guards import Guard, GuardBuilder
+from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import is_namedtuple_cls, namedtuple_fields
 from .base import MutableLocal, VariableTracker
