@@ -47,6 +47,7 @@ class VariableTracker(object, metaclass=HasPostInit):
 
         def visit(var):
             if hasattr(var, "inner_guards") and var.inner_guards is not None:
+                guards.update(var.guards)
                 guards.update(var.inner_guards)
                 return
 
