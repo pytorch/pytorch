@@ -5399,26 +5399,27 @@ Args:
 
     blocksize (list, tuple, :class:`torch.Size`, optional): Block size
       of the resulting BSR or BSC tensor. For other layouts,
-      specifying the block size that is not ``None`` will result a
-      RuntimeError exception.  A block size must be a 2-sequence and
-      compatible with the shape of :attr:`self`: ``self.shape[B] %
-      blocksize[0] == self.shape[B + 1] % blocksize[1] == 0`` where
-      ``B`` is the number of batch dimensions if :attr:`self` is a
-      sparse CSR/CSC/BSR/BSC tensor, otherwise, ``B = 0``.
+      specifying the block size that is not ``None`` will result in a
+      RuntimeError exception.  A block size must be a tuple of length
+      two such that its items evenly divide the two sparse dimensions.
 
 Example::
 
-    >>> x = torch.tensor([[1, 0], [3, 0]])
+    >>> x = torch.tensor([[1, 0], [0, 0], [2, 3]])
     >>> x.to_sparse(layout=torch.sparse_coo)
-    tensor(indices=tensor([[0, 1],
-                           [0, 0]]),
-           values=tensor([1, 3]),
-           size=(2, 2), nnz=2, layout=torch.sparse_coo)
+    tensor(indices=tensor([[0, 2, 2],
+                           [0, 0, 1]]),
+           values=tensor([1, 2, 3]),
+           size=(3, 2), nnz=3, layout=torch.sparse_coo)
+    >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(1, 2))
+    tensor(crow_indices=tensor([0, 1, 1, 2]),
+           col_indices=tensor([0, 0]),
+           values=tensor([[[1, 0]],
+                          [[2, 3]]]), size=(3, 2), nnz=2, layout=torch.sparse_bsr)
     >>> x.to_sparse(layout=torch.sparse_bsr, blocksize=(2, 1))
-    tensor(crow_indices=tensor([0, 1]),
-           col_indices=tensor([0]),
-           values=tensor([[[1],
-                           [3]]]), size=(2, 2), nnz=1, layout=torch.sparse_bsr)
+    RuntimeError: Tensor size(-2) 3 needs to be divisible by blocksize[0] 2
+    >>> x.to_sparse(layout=torch.sparse_csr, blocksize=(3, 1))
+    RuntimeError: to_sparse for Strided to SparseCsr conversion does not use specified blocksize
 """,
 )
 
