@@ -387,10 +387,6 @@ def register_full():
         "full(SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, "
         + "bool? pin_memory=None, bool? requires_grad=None) -> Tensor"
     )
-    nvprim.define(
-        "full.names(int[] size, Scalar fill_value, *, Dimname[]? names, "
-        + "ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"
-    )
 
     def _meta_impl(
         size,
@@ -435,27 +431,6 @@ def register_full():
 
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_impl)
-
-    def _names_overload_impl(
-        size,
-        fill_value,
-        *,
-        names=None,
-        dtype=None,
-        layout=None,
-        device=None,
-        pin_memory=False,
-    ):
-        return prim(
-            size,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-        )
-
-    nvprim_implicit_impl.impl("full.names", _names_overload_impl)
 
     prim_packet = getattr(torch.ops.nvprims, name)
     prim = prim_packet.default
