@@ -1470,7 +1470,7 @@ class TestQuantizedTensor(TestCase):
         test_cases = [
             (torch.quint8, torch.uint8, 0, 255),
             (torch.qint8, torch.int8, -128, 127),
-            (torch.qint32, torch.int32, -2**31, 2**31-1),
+            (torch.qint32, torch.int32, -2**31, 2**31 - 1),
         ]
         for qdtype, dtype, quant_min, quant_max in test_cases:
             scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
@@ -1487,7 +1487,7 @@ class TestQuantizedTensor(TestCase):
         test_cases = [
             (torch.quint8, torch.uint8, 0, 255),
             (torch.qint8, torch.int8, -128, 127),
-            (torch.qint32, torch.int32, -2**31, 2**31-1),
+            (torch.qint32, torch.int32, -2**31, 2**31 - 1),
         ]
 
         for qdtype, dtype, quant_min, quant_max in test_cases:
