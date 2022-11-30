@@ -358,6 +358,12 @@ class FullyShardedDataParallel(nn.Module):
                 """
                 submodule._is_fsdp_managed_module = True
 
+                # Dynamo only supports FSDP with use_orig_params=True.
+                # This is hacky, but I could not think of another way to add an assertion to dynamo
+                # for this, since Dynamo skips all the FSDP code frames and thus can't inspect the
+                # FSDP module directly
+                submodule._fsdp_use_orig_params = use_orig_params
+
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
