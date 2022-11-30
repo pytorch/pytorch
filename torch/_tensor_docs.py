@@ -5382,30 +5382,29 @@ Example::
 .. method:: to_sparse(*, layout=None, blocksize=None) -> Tensor
    :noindex:
 
-Returns a sparse tensor with the specified layout and blocksize (when
-applicable).
+Returns a sparse tensor with the specified layout and blocksize.
 
 .. note:: If the :attr:`self` layout and blocksize parameters match
-          with the specified layout and blocksize, the method returns
-          :attr:`self`. Otherwise, return a sparse tensor copy
+          with the specified layout and blocksize, return
+          :attr:`self`. Otherwise, return a sparse tensor copy of
           :attr:`self`.
 
 Args:
 
-    layout (:class:`torch.layout`, optional): one of
-      ``torch.sparse_coo``, ``torch.sparse_csr``,
+    layout (:class:`torch.layout`, optional): The desired sparse
+      layout. One of ``torch.sparse_coo``, ``torch.sparse_csr``,
       ``torch.sparse_csc``, ``torch.sparse_bsr``, or
       ``torch.sparse_bsc``. Default: if ``None``,
       ``torch.sparse_coo``.
 
     blocksize (list, tuple, :class:`torch.Size`, optional): Block size
       of the resulting BSR or BSC tensor. For other layouts,
-      specifying the block size will result a RuntimeError exception.
-      The block size must be compatible with the size of :attr:`self`:
-      ``self.shape[B] % blocksize[0] == self.shape[B + 1] %
-      blocksize[1] == 0`` where ``B`` is the number of batch
-      dimensions if :attr:`self` is a sparse CSR/CSC/BSR/BSC tensor,
-      otherwise, ``B = 0``.
+      specifying the block size that is not ``None`` will result a
+      RuntimeError exception.  A block size must be a 2-sequence and
+      compatible with the shape of :attr:`self`: ``self.shape[B] %
+      blocksize[0] == self.shape[B + 1] % blocksize[1] == 0`` where
+      ``B`` is the number of batch dimensions if :attr:`self` is a
+      sparse CSR/CSC/BSR/BSC tensor, otherwise, ``B = 0``.
 
 Example::
 
