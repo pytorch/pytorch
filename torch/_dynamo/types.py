@@ -1,6 +1,6 @@
-import types
-from typing import Any, Callable, Dict, Optional, Union, List, OrderedDict
 import dataclasses
+import types
+from typing import Dict, List, Optional, OrderedDict, Union
 
 from typing_extensions import Protocol
 

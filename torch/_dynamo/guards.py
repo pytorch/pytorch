@@ -8,9 +8,8 @@ import re
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, OrderedDict, Union, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
 from weakref import ReferenceType
-from typing_extensions import Protocol
 
 import numpy as np
 
@@ -22,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .types import GuardFn, GuardedCode
+from .types import GuardedCode, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
     dict_param_key_ids,
@@ -83,7 +82,7 @@ class GuardSource(enum.Enum):
 class Guard:
     name: str
     source: GuardSource
-    create_fn: Callable[['GuardBuilder', 'Guard'], None]
+    create_fn: Callable[["GuardBuilder", "Guard"], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -196,7 +195,11 @@ def strip_getattr_getitem(name):
 
 class GuardBuilder:
     def __init__(
-        self, id_ref: Callable[[Type[object]], str], scope: Optional[Dict[str, object]], guarded_code: 'CheckFunctionManager', renames=True
+        self,
+        id_ref: Callable[[Type[object]], str],
+        scope: Optional[Dict[str, object]],
+        guarded_code: "CheckFunctionManager",
+        renames=True,
     ):
         self.id_ref = id_ref
         if scope:
@@ -243,7 +246,9 @@ class GuardBuilder:
         m = re.match(r"^type\((.+)\)$", guard.name)
         if m:
             # optional optimization to produce cleaner/faster guard code
-            return self.TYPE_MATCH(Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH))
+            return self.TYPE_MATCH(
+                Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
+            )
 
         code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         self._produce_guard_code(guard, [code])
@@ -449,7 +454,7 @@ class GuardBuilder:
     # SYMBOL_MATCH is only ever, and must only ever, be used for setting this value on
     # the create_fn field for tracking guards in export.
     def SYMBOL_MATCH(self, guard: Guard):
-        assert False, "this should not actually be called"
+        raise AssertionError("this should not actually be called")
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -477,11 +482,16 @@ class GuardBuilder:
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
+        # WARNING: It is important that cur_frame/caller do NOT stay in
+        # the current frame, because they will keep things live longer
+        # than they should.  See TestMisc.test_release_module_memory
         cur_frame = currentframe()
         assert cur_frame is not None
         caller = cur_frame.f_back
+        del cur_frame
         assert caller is not None
         func_name = getframeinfo(caller)[2]
+        del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
         assert func_name in dir(
             self.__class__
@@ -548,7 +558,11 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref: Dict[sympy.Symbol, Dict[TensorReference, None]], id_to_name_map, shape_env, intermediary_symbols
+        self,
+        expr_to_tensor_ref: Dict[sympy.Symbol, Dict[TensorReference, None]],
+        id_to_name_map,
+        shape_env,
+        intermediary_symbols,
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref

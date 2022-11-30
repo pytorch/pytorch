@@ -4,10 +4,9 @@ import logging
 import os
 import traceback
 import types
-import typing
 import weakref
 from traceback import FrameSummary
-from typing import Callable, cast, Dict, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -25,7 +24,7 @@ from .exc import (
     Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
-from .output_graph import OutputGraph, CompilerFn
+from .output_graph import CompilerFn, OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
