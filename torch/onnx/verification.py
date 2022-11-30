@@ -419,6 +419,7 @@ def _compare_onnx_pytorch_model(
 
     Args:
         pt_model: PyTorch model.
+        onnx_model_f: ONNX model file path or file-like object.
         input_args: positional arguments for PyTorch model forward method.
         input_kwargs: keyword arguments for PyTorch model forward method.
         additional_test_inputs: additional positional arguments for PyTorch model
@@ -827,7 +828,7 @@ def verify(
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
     options: Optional[VerificationOptions] = None,
 ):
-    """Verify model export to ONNX with original PyTorch model.
+    """Verify model export to ONNX against original PyTorch model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -903,7 +904,7 @@ def verify_aten_graph(
     export_options: _experimental.ExportOptions,
     params_dict: Optional[Dict[str, Any]] = None,
     verification_options: Optional[VerificationOptions] = None,
-) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType,]:
+) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -1032,6 +1033,7 @@ class GraphInfoPrettyPrinter:
 
     @_beartype.beartype
     def _graph_segment_str_at_line(self, line: int) -> str:
+        """Get the string representation of the graph segment at the given line."""
         if line == 0:
             result_str = self._node_count_segment_str()
             result_str += " " * (self._max_segment_columns() - len(result_str))
@@ -1046,6 +1048,7 @@ class GraphInfoPrettyPrinter:
 
     @_beartype.beartype
     def _connector_segment_str_at_line(self, line: int) -> str:
+        """Get the connector segment string at the given line."""
         if self.upper_printer is None and self.lower_printer is None:
             return ""
         upper_total_rows = self.upper_printer._total_rows() if self.upper_printer else 1
@@ -1062,6 +1065,10 @@ class GraphInfoPrettyPrinter:
 
     @_beartype.beartype
     def _children_str_at_line(self, line: int) -> str:
+        """Get the string representation of the children at the given line.
+
+        Recursively calls `_str_at_line` on children nodes.
+        """
         if self.upper_printer is None and self.lower_printer is None:
             return ""
         upper_total_rows = self.upper_printer._total_rows() if self.upper_printer else 1
@@ -1080,6 +1087,7 @@ class GraphInfoPrettyPrinter:
 
     @_beartype.beartype
     def _str_at_line(self, line: int) -> str:
+        """Get the string representation of the graph at the given line."""
         return (
             self._graph_segment_str_at_line(line)
             + self._connector_segment_str_at_line(line)
@@ -1212,26 +1220,25 @@ class GraphInfo:
 
         Example:
         ```
-        343 X  __171 ✓
-        id:   |  id: 0
-              |
-              |__172 X  __86 X    __43 ✓
-                 id: 1 |  id: 10 |  id: 100
-                       |         |
-                       |         |__43 X     __21 X      __10 ✓
-                       |            id: 101 |  id: 1010 |  id: 10100
-                       |                    |           |
-                       |                    |           |__11 X       __5 ✓
-                       |                    |              id: 10101 |  id: 101010
-                       |                    |                        |
-                       |                    |                        |__6 ✓
-                       |                    |                           id: 101011
-                       |                    |
-                       |                    |__22 ✓
-                       |                       id: 1011
-                       |
-                       |__86 ✓
-                          id: 11
+        ==================================== Tree: =====================================
+        5 X   __2 X    __1 ✓
+        id:  |  id: 0 |  id: 00
+            |        |
+            |        |__1 X (aten::relu)
+            |           id: 01
+            |
+            |__3 X    __1 ✓
+                id: 1 |  id: 10
+                    |
+                    |__2 X     __1 X (aten::relu)
+                        id: 11 |  id: 110
+                                |
+                                |__1 ✓
+                                id: 111
+        =========================== Mismatch leaf subgraphs: ===========================
+        ['01', '110']
+        ============================= Mismatch node kinds: =============================
+        {'aten::relu': 2}
         ```
         """
         GraphInfoPrettyPrinter(self).pretty_print()
@@ -1384,7 +1391,7 @@ class GraphInfo:
         process_bridge_value_for_upper = functools.partial(
             _process_bridge_value_for_upper, new_outputs
         )
-        _, dropped_nodes, _, upper_nodes_set, _ = self._partition_nodes(
+        _, dropped_nodes, complete_upper_nodes_set, _ = self._partition_nodes(
             graph, pivot, process_bridge_value_for_upper
         )
 
@@ -1398,7 +1405,7 @@ class GraphInfo:
 
         for i, input in reversed(list(enumerate(list(graph.inputs())))):
             if (
-                not _has_uses_by_nodes(input, upper_nodes_set)
+                not _has_uses_by_nodes(input, complete_upper_nodes_set)
                 and input not in new_outputs
             ):
                 try:
@@ -1433,13 +1440,9 @@ class GraphInfo:
             _process_bridge_value_for_lower, graph
         )
 
-        (
-            upper_nodes,
-            lower_nodes,
-            _,
-            _,
-            lower_nodes_set,
-        ) = self._partition_nodes(graph, pivot, process_bridge_value_for_lower)
+        upper_nodes, lower_nodes, _, complete_lower_nodes_set = self._partition_nodes(
+            graph, pivot, process_bridge_value_for_lower
+        )
 
         for output in original_outputs:
             if _produced_by(output, lower_nodes):
@@ -1450,13 +1453,13 @@ class GraphInfo:
             graph.registerOutput(output)
 
         for input in original_inputs:
-            if _has_uses_by_nodes(input, lower_nodes_set):
+            if _has_uses_by_nodes(input, complete_lower_nodes_set):
                 new_input = graph.addInput()
                 input.replaceAllUsesWith(new_input)
                 new_input.copyMetadata(input)
 
         for node in reversed(upper_nodes):
-            if not node in lower_nodes_set:
+            if not node in complete_lower_nodes_set:
                 try:
                     node.destroy()
                 except RuntimeError as e:
@@ -1472,31 +1475,28 @@ class GraphInfo:
     def _partition_node(
         self,
         node: torch.Node,
-        upper_nodes_set: Set[torch.Node],
-        lower_nodes_set: Set[torch.Node],
+        complete_upper_nodes_set: Set[torch.Node],
+        complete_lower_nodes_set: Set[torch.Node],
         original_graph_outputs: Set[torch.Value],
-        nodes_to_duplicate: Set[torch.Node],
         covered_bridge_values: Set[torch.Value],
         process_bridge_value: Callable[[torch.Value], torch.Value],
     ):
-        if node in lower_nodes_set:
+        if node in complete_lower_nodes_set:
             return
 
         if (
-            _node_has_uses_by(node, lower_nodes_set)
+            _node_has_uses_by(node, complete_lower_nodes_set)
             and node.kind() in self._EXCLUDED_NODE_KINDS
         ):
-            lower_nodes_set.update(_all_nodes([node]))
-            nodes_to_duplicate.add(node)
+            complete_lower_nodes_set.update(_all_nodes([node]))
             for input in node.inputs():
                 if input in covered_bridge_values:
                     continue
                 self._partition_node(
                     input.node(),
-                    upper_nodes_set,
-                    lower_nodes_set,
+                    complete_upper_nodes_set,
+                    complete_lower_nodes_set,
                     original_graph_outputs,
-                    nodes_to_duplicate,
                     covered_bridge_values,
                     process_bridge_value,
                 )
@@ -1505,7 +1505,7 @@ class GraphInfo:
                 if output in covered_bridge_values:
                     continue
                 if (
-                    _has_uses_by_nodes(output, lower_nodes_set)
+                    _has_uses_by_nodes(output, complete_lower_nodes_set)
                     or output in original_graph_outputs
                 ):
                     covered_bridge_values.add(process_bridge_value(output))
@@ -1516,23 +1516,17 @@ class GraphInfo:
         graph: torch.Graph,
         pivot: int,
         process_bridge_value: Callable[[torch.Value], torch.Value],
-    ) -> Tuple[
-        List[torch.Node],
-        List[torch.Node],
-        Set[torch.Node],
-        Set[torch.Node],
-        Set[torch.Node],
-    ]:
+    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node], Set[torch.Node],]:
         nodes = list(graph.nodes())
         upper_nodes = nodes[:pivot]
         lower_nodes = nodes[pivot:]
-        # `upper_nodes` and `upper_nodes_set` differs in that the latter
+        # `upper_nodes` and `complete_upper_nodes_set` differs in that the latter
         # recursively contains nodes in subblock of `upper_nodes`.
-        # The same applies for `lower_nodes` and `lower_nodes_set`.
-        # With addition that `lower_nodes_set` will include nodes that
+        # The same applies for `lower_nodes` and `complete_lower_nodes_set`.
+        # With addition that `complete_lower_nodes_set` will include nodes that
         # are determined to be copied from `upper_nodes` to `lower_nodes`.
-        upper_nodes_set = _all_nodes(upper_nodes)
-        lower_nodes_set = _all_nodes(lower_nodes)
+        complete_upper_nodes_set = _all_nodes(upper_nodes)
+        complete_lower_nodes_set = _all_nodes(lower_nodes)
         original_graph_outputs = set(graph.outputs())
         nodes_to_duplicate: Set[torch.Node] = set()
         # Bridge values are values produced from upper graph, and consumed
@@ -1544,19 +1538,17 @@ class GraphInfo:
         for node in upper_nodes:
             self._partition_node(
                 node,
-                upper_nodes_set,
-                lower_nodes_set,
+                complete_upper_nodes_set,
+                complete_lower_nodes_set,
                 original_graph_outputs,
-                nodes_to_duplicate,
                 covered_bridge_values,
                 process_bridge_value,
             )
         return (
             upper_nodes,
             lower_nodes,
-            nodes_to_duplicate,
-            upper_nodes_set,
-            lower_nodes_set,
+            complete_upper_nodes_set,
+            complete_lower_nodes_set,
         )
 
     @_beartype.beartype
@@ -1589,7 +1581,7 @@ class GraphInfo:
     @_beartype.beartype
     def verify_export(
         self, options: VerificationOptions
-    ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType,]:
+    ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
         return verify_aten_graph(
             self.graph,
             input_args=self.input_args,

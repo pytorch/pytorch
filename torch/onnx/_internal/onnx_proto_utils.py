@@ -78,7 +78,7 @@ def load_test_case(dir: str):
 
 
 @_beartype.beartype
-def export_data(data, value_info_proto, f: Union[io.BytesIO, str]) -> None:
+def export_data(data, value_info_proto, f: str) -> None:
     try:
         from onnx import numpy_helper
     except ImportError:
