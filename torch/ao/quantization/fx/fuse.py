@@ -40,6 +40,9 @@ from torch.ao.quantization.utils import Pattern, NodePattern
 
 __all__ = [
     "fuse",
+    # TODO: We should make this private in the future
+    # This is currently needed for test_public_bindings for some reason
+    "FuseHandler",
 ]
 
 
