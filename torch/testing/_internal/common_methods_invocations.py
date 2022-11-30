@@ -10778,6 +10778,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_gradgrad'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo',
                             'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                # Fail but are also flaky
                DecorateInfo(unittest.skip("Test changes in memory layout"), 'TestMathBits'),
                DecorateInfo(unittest.skip("Modifies input strides and storage_offset"), 'TestCommon',
@@ -18321,9 +18323,6 @@ python_ref_db = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_nvfuser=False,
         skips=(
-            # TODO: fix and/or update to xfails
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"),
-                         'TestCommon', 'test_python_ref_meta'),
             # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
@@ -18338,13 +18337,11 @@ python_ref_db = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_nvfuser=False,
         skips=(
-            # TODO: fix and/or update to xfails
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"),
-                         'TestCommon', 'test_python_ref_meta'),
             # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
