@@ -5,6 +5,7 @@ import traceback
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
+from torch._dynamo.utils import deepcopy_to_fake_tensor
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
@@ -111,9 +112,21 @@ class ShapeProp(torch.fx.Interpreter):
          module (GraphModule): The module to be executed
 
     """
+    def __init__(self, gm, fake_mode=None):
+        super().__init__(gm)
+        if fake_mode:
+            self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
+
+        self.real_module = self.module
+
     def run_node(self, n : Node) -> Any:
         try:
+            if self.fake_module is not None:
+                # Hacky little swap lol
+                self.module = self.fake_module
+
             result = super().run_node(n)
+            self.module = self.real_module
         except Exception:
             traceback.print_exc()
             raise RuntimeError(
