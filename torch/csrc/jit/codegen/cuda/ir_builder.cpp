@@ -30,13 +30,34 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   TORCH_CHECK(
       lhs != nullptr && rhs != nullptr,
       "Either lhs or rhs is a nullptr in newArithmeticExpr.");
-  TORCH_CHECK(
-      lhs->dtype() == rhs->dtype(),
-      "Incompatible operand types: ",
-      lhs->dtype(),
-      " and ",
-      rhs->dtype());
-  auto result = newScalar(lhs->dtype());
+
+  auto dtype = lhs->dtype();
+
+  // In principle, we should keep these IrBuilder functions as
+  // simple as possible since they are just used by the lowering for
+  // scalar computations. We should enforce strict typing with no
+  // implicit type promotion unless required. However, for
+  // int and int64_t, our usages are pretty loose in many places. Originally we
+  // only had int64_t, then we added nvfuser_index_t and replaced the types of
+  // some of the values from int64_t to int just at the beginning of lowering.
+  // This resulted in inconsistent usages of integer types in many places, and
+  // fixing all of them to make everything consistent would be a lot of work
+  // than just allowing the integer type promotion for the two inputs as below.
+  // Note that this is only needed for integer types. See also PR #2228.
+  if (lhs->dtype() != rhs->dtype()) {
+    if ((lhs->dtype() == DataType::Int && rhs->dtype() == DataType::Int32) ||
+        (lhs->dtype() == DataType::Int32 && rhs->dtype() == DataType::Int)) {
+      dtype = DataType::Int;
+    } else {
+      TORCH_CHECK(
+          false,
+          "Incompatible operand types: ",
+          lhs->dtype(),
+          " and ",
+          rhs->dtype());
+    }
+  }
+  auto result = newScalar(dtype);
   IrBuilder::create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;

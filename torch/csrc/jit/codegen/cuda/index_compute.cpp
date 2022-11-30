@@ -1345,7 +1345,11 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
       indexing.indexMap().find(contig_id_it->second) !=
           indexing.indexMap().end(),
       "Invalid contig index: ",
-      contig_id_it->second->toString());
+      contig_id_it->second->toString(),
+      ", root ID: ",
+      root_id->toString(),
+      ", TV: ",
+      tv->toString());
 
   return indexed_id;
 }
@@ -1406,7 +1410,15 @@ Val* hoistProducerIndex(
     std::vector<IterDomain*> loop_domains,
     const std::unordered_map<IterDomain*, Val*> initial_loop_index_map,
     const std::vector<kir::ForLoop*>& loops,
-    Val* index) {
+    Val* index,
+    bool is_overriden_index) {
+  if (is_overriden_index) {
+    // do not hoist overridden index. It is used by
+    // select/index_select, so IterDomain equivalence does not mean
+    // the same index math
+    return index;
+  }
+
   auto maybe_indexed_producer_id = getMaybeIndexedIdToHoist(
       producer_root_id, producer_tv, producer_indexing, index);
 
@@ -1573,7 +1585,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
     Val* root_ind = nullptr;
     auto override_it = override_index.find(root_dom[i]);
-    if (override_it != override_index.end()) {
+    const bool is_overriden = override_it != override_index.end();
+    if (is_overriden) {
       root_ind = override_it->second;
     } else if (
         producer_indexing.indexMap().find(root_dom[i]) !=
@@ -1602,14 +1615,11 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
         producer_indexing_from_idgraph.resolved_loop_domains,
         producer_indexing_from_idgraph.initial_concrete_index_map,
         loops,
-        root_ind);
+        root_ind,
+        is_overriden);
 
     root_ind = getProducerIndexWithHalo(
-        producer_tv,
-        i,
-        root_ind,
-        consumer_tv,
-        override_index.count(root_dom[i]));
+        producer_tv, i, root_ind, consumer_tv, is_overriden);
 
     root_ind = getProducerIndexWithGather(
         root_ind,
@@ -1822,9 +1832,9 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         root_dom[i]->toString());
 
     auto override_it = override_index.find(root_dom[i]);
+    const bool is_overriden = override_it != override_index.end();
     auto root_ind_i =
-        (override_it != override_index.end() ? override_it->second
-                                             : index_map.at(root_dom[i]));
+        is_overriden ? override_it->second : index_map.at(root_dom[i]);
 
     // index hoist must be done before the adjustments for halo
     root_ind_i = hoistProducerIndex(
@@ -1836,14 +1846,11 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         producer_indexing_from_idgraph.resolved_loop_domains,
         producer_indexing_from_idgraph.initial_concrete_index_map,
         loops,
-        root_ind_i);
+        root_ind_i,
+        is_overriden);
 
     root_ind_i = getProducerIndexWithHalo(
-        producer_tv,
-        i,
-        root_ind_i,
-        consumer_tv,
-        override_index.count(root_dom[i]));
+        producer_tv, i, root_ind_i, consumer_tv, is_overriden);
 
     root_ind_i = getProducerIndexWithGather(
         root_ind_i,

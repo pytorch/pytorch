@@ -65,7 +65,7 @@ TensorIndex::TensorIndex(
       std::all_of(
           indices.begin(),
           indices.end(),
-          [](Val* v) { return v->dtype() == DataType::Int; }),
+          [](Val* v) { return isIntegralType(v->dtype()); }),
       "Cannot index with a value other than an int.");
   indices_.erase(
       std::remove_if(
