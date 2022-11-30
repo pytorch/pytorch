@@ -47,7 +47,14 @@ Features described in this documentation are classified by release status:
    :maxdepth: 1
    :caption: torch.compile
 
-   dynamo/*
+   dynamo/index
+   dynamo/installation
+   dynamo/get-started
+   dynamo/guards-overview
+   dynamo/custom-backends
+   dynamo/deep-dive
+   dynamo/troubleshooting
+   dynamo/faq
 
 .. toctree::
    :maxdepth: 1
@@ -58,7 +65,7 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
    :caption: Python API
 
    torch
@@ -72,6 +79,7 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cuda
    torch.backends <backends>
+   torch.compile <dynamo/index>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
