@@ -5,7 +5,6 @@ import traceback
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
-from torch._dynamo.utils import deepcopy_to_fake_tensor
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
@@ -115,7 +114,10 @@ class ShapeProp(torch.fx.Interpreter):
     def __init__(self, gm, fake_mode=None):
         super().__init__(gm)
         if fake_mode:
+            from torch._dynamo.utils import deepcopy_to_fake_tensor
             self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
+        else:
+            self.fake_module = None
 
         self.real_module = self.module
 
