@@ -4,12 +4,25 @@ import torch
 from abc import ABC
 from typing import Union, Optional
 from torch.distributed._tensor import DTensor, Shard, Replicate, DeviceMesh
-from torch.distributed._tensor.parallel.utils import (
+from torch.distributed.tensor.parallel._utils import (
     _PrepareInputType,
     _PrepareOutputType,
     _prepare_input_validate,
     _prepare_output_validate,
 )
+
+__all__ = [
+    "ParallelStyle",
+    "RowwiseParallel",
+    "ColwiseParallel",
+    "PairwiseParallel",
+    "make_input_replicate_1d",
+    "make_input_shard_1d",
+    "make_input_shard_1d_dim_last",
+    "make_output_replicate_1d",
+    "make_output_tensor",
+    "make_output_shard_1d"
+]
 
 
 class ParallelStyle(ABC):

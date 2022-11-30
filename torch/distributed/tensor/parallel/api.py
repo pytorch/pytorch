@@ -9,14 +9,14 @@ from torch.distributed._tensor import (
     Replicate,
     DeviceMesh,
 )
-from torch.distributed._tensor.parallel import TensorParallelMultiheadAttention
-from torch.distributed._tensor.parallel.style import (
+from torch.distributed.tensor.parallel import TensorParallelMultiheadAttention
+from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.distributed._tensor.parallel.utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 
 
 __all__ = [
