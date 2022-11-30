@@ -662,8 +662,6 @@ def quantized_linear(
 ):
     input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
     weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
-    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.linear(g, input, weight, bias)
 
@@ -811,8 +809,6 @@ def quantized_conv1d_relu(
 ):
     input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
     weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
-    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
     output = opset9.relu(g, output)
@@ -836,8 +832,6 @@ def quantized_conv2d_relu(
 ):
     input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
     weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
-    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
     output = opset9.relu(g, output)
@@ -861,8 +855,6 @@ def quantized_conv2d(
 ):
     input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
     weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
-    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
 
