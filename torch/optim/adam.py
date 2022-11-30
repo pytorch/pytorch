@@ -165,7 +165,7 @@ class Adam(Optimizer):
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
 
-    def _init(
+    def _init_group(
         self,
         group,
         grad_scaler,
@@ -245,7 +245,7 @@ class Adam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            grad_scale, found_inf = self._init(
+            grad_scale, found_inf = self._init_group(
                 group,
                 grad_scaler,
                 params_with_grad,
