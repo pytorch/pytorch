@@ -6,7 +6,6 @@
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/OpMathType.h>
 
-
 namespace at {
 namespace native {
 namespace {
@@ -41,13 +40,10 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
             scalar_t self_val,
             scalar_t end_val,
             scalar_t weight_val) -> scalar_t {
-          opmath_t self_val_f = self_val;
-          opmath_t end_val_f = end_val;
-          opmath_t weight_val_f = weight_val;
-          return (std:abs(weight_val_f) < 0.5)
-              ? self_val_f + weight_val_f * (end_val_f - self_val_f)
-              : end_val_f -
-                  (end_val_f - self_val_f) * (static_cast<opmath_t>(1) - weight_val_f);
+           opmath_t self_val_f = self_val;
+           opmath_t end_val_f = end_val;
+           opmath_t weight_val_f = weight_val;
+          return lerp(self_val, end_val, weight_val);
         });
       });
 #endif
@@ -75,8 +71,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
 #if AT_USE_JITERATOR()
   static const auto lerp_scalar_string = jiterator_stringify(
       template <typename T>
-      T lerp_scalar(T self_val, T end_val, float weight) {
-        auto weight_val = weight.to<T>();
+      T lerp_scalar(T self_val, T end_val, T weight_val) {
         return (std::abs(weight_val) < 0.5)
             ? self_val + weight_val * (end_val - self_val)
             : end_val -
@@ -84,6 +79,8 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
       }
   ); // lerp_scalar_string
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "lerp_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
+      auto weight_val = weight.to<opmath_t>();
       jitted_gpu_kernel<
         /*name=*/ lerp_scalar_name,
         /*return_dtype=*/ scalar_t,
@@ -93,21 +90,18 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
         lerp_scalar_string,
         /*scalar_pos=*/ at::cuda::jit::BinaryFuncVariant::NoScalar,
         /*scalar_val=*/ 0,
-        /*extra_args=*/ std::make_tuple(weight.to<scalar_t>()));
+        /*extra_args=*/ std::make_tuple(weight_val));
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "lerp_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     auto weight_val = weight.to<opmath_t>();
-    gpu_kernel(
+    at::native::gpu_kernel(
         iter,
         [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
           opmath_t self_val_f = self_val;
           opmath_t end_val_f = end_val;
-          return (std::abs(weight_val) < 0.5)
-              ? self_val_f + weight_val * (end_val_f - self_val_f)
-              : end_val_f -
-                  (end_val_f - self_val_f) * (static_cast<opmath_t>(1) - weight_val);
+          return lerp(self_val, end_val, weight_val);
         });
   });
 #endif
