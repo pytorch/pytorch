@@ -1,6 +1,5 @@
 import copy
 import functools
-from dataclasses import dataclass
 from typing import (
     Any,
     cast,
@@ -77,8 +76,7 @@ class _PosDimTensorInfo(NamedTuple):
     dtype: torch.dtype
 
 
-@dataclass(frozen=True)
-class _OptimStateKey:
+class _OptimStateKey(NamedTuple):
     """
     This represents an optimizer state key that may be used commonly across
     ranks. It is based on the unflattened parameter names rather than parameter
@@ -87,7 +85,6 @@ class _OptimStateKey:
 
     unflat_param_names: Tuple[str, ...]
     is_flat_param: bool
-    is_fsdp_wrapped: bool = False
 
 
 def _unflatten_optim_state(
@@ -315,7 +312,7 @@ def _flatten_optim_state_dict(
                 param,
                 shard_state,
             )
-            key = _OptimStateKey(tuple(unflat_param_names), True, True)
+            key = _OptimStateKey(tuple(unflat_param_names), True)
             if flat_state:
                 # Only include non-empty states since as expected by
                 # `torch.optim.Optimizer` s
@@ -328,7 +325,7 @@ def _flatten_optim_state_dict(
                 # was not passed into the optimizer (e.g. if it is not an
                 # FSDP-managed parameter)
                 continue
-            key = _OptimStateKey(tuple(unflat_param_names), False, False)
+            key = _OptimStateKey(tuple(unflat_param_names), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[unflat_param_name])
 
     # Construct the "param_groups" part -- copy as is since it will be
@@ -1102,7 +1099,6 @@ def _map_param_id_to_optim_keys(
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(param_to_fqns[param]),
             is_flat_param=isinstance(param, FlatParameter),
-            is_fsdp_wrapped=isinstance(param, FlatParameter),
         )
         if rank == 0:
             r0_param_id_to_optim_state_key[param_id] = optim_state_key
