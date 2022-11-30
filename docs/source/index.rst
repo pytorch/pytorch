@@ -66,6 +66,7 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
+   :glob:
    :maxdepth: 2
    :caption: Python API
 
