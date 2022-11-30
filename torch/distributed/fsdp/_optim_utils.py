@@ -38,9 +38,10 @@ from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 @dataclass
 class FSDPParamInfo:
+    # The typing will be changed to FSDPState in the future.
     state: nn.Module
     flat_param: FlatParameter
-    fqn_indices: Dict[str, int]
+    param_indices: Dict[str, int]
 
 
 def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
@@ -98,7 +99,7 @@ class _OptimStateKey(NamedTuple):
     """
 
     unflat_param_names: Tuple[str, ...]
-    is_fsdp_wrapped: bool
+    is_fsdp_managed: bool
 
 
 def _unflatten_optim_state(
@@ -308,9 +309,7 @@ def _flatten_optim_state_dict(
             '"param_groups" to be a valid optimizer state dict'
         )
     param_to_fqns = _get_param_to_fqns(model)
-    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(
-        model, set(fqn for v in param_to_fqns.values() for fqn in v)
-    )
+    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
 
     # Construct the "state" part
     flat_osd_state: Dict[_OptimStateKey, Any] = {}
@@ -684,7 +683,7 @@ def _process_pos_dim_tensor_state(
             if not is_pos_dim_tensor_state:
                 no_tensor_osd["state"][key][state_name] = value
                 continue
-            if key.is_fsdp_wrapped:  # FSDP parameter
+            if key.is_fsdp_managed:  # FSDP parameter
                 sharded_size = FlatParamHandle._get_sharded_size(
                     value, rank=0, world_size=world_size
                 )
@@ -767,7 +766,7 @@ def _broadcast_pos_dim_tensor_states(
             else:
                 unsharded_tensor = None
             shape, dtype = value.shape, value.dtype
-            if key.is_fsdp_wrapped:  # FSDP parameter
+            if key.is_fsdp_managed:  # FSDP parameter
                 _broadcast_sharded_pos_dim_tensor_state(
                     unsharded_tensor,
                     param_state,
@@ -1110,13 +1109,13 @@ def _map_param_id_to_optim_keys(
         if param_id not in optim_state_dict["state"]:
             continue
         fqns = param_to_fqns[param]
-        is_fsdp_wrapped = isinstance(param, FlatParameter)
-        if is_fsdp_wrapped:
+        is_fsdp_managed = isinstance(param, FlatParameter)
+        if is_fsdp_managed:
             assert fqns[0] in fqn_to_fsdp_param_info
-        is_fsdp_wrapped = fqns[0] in fqn_to_fsdp_param_info
+        is_fsdp_managed = fqns[0] in fqn_to_fsdp_param_info
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(fqns),
-            is_fsdp_wrapped=is_fsdp_wrapped,
+            is_fsdp_managed=is_fsdp_managed,
         )
         if rank == 0:
             r0_param_id_to_optim_state_key[param_id] = optim_state_key
@@ -1164,7 +1163,7 @@ def _map_param_id_to_optim_keys(
     return r0_param_id_to_optim_state_key, optim_state_key_to_param_id
 
 
-def _process_param_groups(
+def _unflatten_process_groups(
     state_dict: Dict[str, Any],
     param_id_to_param: List[nn.Parameter],
     param_to_fqns: Dict[nn.Parameter, List[str]],
@@ -1238,9 +1237,7 @@ def _optim_state_dict(
         if using_optim_input
         else _get_param_id_to_param(optim)
     )
-    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(
-        model, set(fqn for v in param_to_fqns.values() for fqn in v)
-    )
+    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
 
     (
         param_id_to_optim_state_key,
@@ -1257,7 +1254,10 @@ def _optim_state_dict(
     # all-gathers across ranks
     for optim_state_key in param_id_to_optim_state_key.values():
         param_id = optim_state_key_to_param_id[optim_state_key]
-        if optim_state_key.is_fsdp_wrapped:
+        if optim_state_key.is_fsdp_managed:
+            # If there are multiple unflat_param_names (not use_orig_params),
+            # they share the same FSDPParamInfo. So the first unflat_param_name
+            # is sufficient to fetch the FSDPParamInfo.
             fqn = optim_state_key.unflat_param_names[0]
             fsdp_param_info = fqn_to_fsdp_param_info[fqn]
             unflat_state = _unflatten_optim_state(
@@ -1285,16 +1285,20 @@ def _optim_state_dict(
                     fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     if to_save:
-        fsdp_osd["param_groups"] = _process_param_groups(
+        fsdp_osd["param_groups"] = _unflatten_process_groups(
             optim_state_dict, param_id_to_param, param_to_fqns
         )
 
     return fsdp_osd
 
 
-def _get_fqn_to_fsdp_param_info(
-    model: nn.Module, dedup_shared_fqns: Set[str]
-) -> Dict[str, FSDPParamInfo]:
+def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
+    """
+    Construct the maaping from a param's fqn to its corresponding FSDPParamInfo
+    if the param is managed by FSDP. FlatParam only stores the first FQN of a
+    shared parameter. So the keys in the mapping are guranteed to map to unique
+    parameters.
+    """
     def module_fn(module, prefix, fqn_to_param_info):
         # TODO: make it work with composable API.
         if not isinstance(module, fsdp_file.FullyShardedDataParallel):
@@ -1309,9 +1313,8 @@ def _get_fqn_to_fsdp_param_info(
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 assert fqn_to_param_info[fqn].flat_param == flat_param
-            if fqn in dedup_shared_fqns:
-                fqn_to_param_info[fqn] = fsdp_param_info
-                fsdp_param_info.fqn_indices[fqn] = idx
+            fqn_to_param_info[fqn] = fsdp_param_info
+            fsdp_param_info.param_indices[fqn] = idx
 
     def return_fn(fqn_to_param_info):
         return fqn_to_param_info
