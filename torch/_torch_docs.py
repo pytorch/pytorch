@@ -112,14 +112,11 @@ factory_common_args = merge_dicts(
         "sparse_factory_device_note": """\
 .. note::
 
-   If the ``device`` argument is specified, the device of the
-   constructed sparse tensor will be the specified device. All the
-   input tensors will be converted to the specified device if needed.
-
-   If the ``device`` argument is not specified, the device of the
-   constructed sparse tensor will be the device of :attr:`values`. A
-   RuntimeError exception is raised if the devices of indices tensors
-   and :attr:`values` turn out to be different."""
+   If the ``device`` argument is not specified the device of the given
+   :attr:`values` and indices tensor(s) must match. If, however, the
+   argument is specified the input Tensors will be converted to the
+   given device and in turn determine the device of the constructed
+   sparse tensor."""
     },
 )
 
