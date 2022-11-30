@@ -64,7 +64,7 @@ comment_origin = False
 @lru_cache(1)
 def is_fbcode():
     try:
-        import torch.fb
+        import torch.fb  # noqa: F401
     except ImportError:
         return False
     return True
