@@ -661,9 +661,8 @@ def _optimize_graph(
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
-    print("torch: ", graph)
+
     graph = _C._jit_pass_onnx(graph, operator_export_type)
-    print("onnx-torch: ", graph)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
 
@@ -690,7 +689,6 @@ def _optimize_graph(
         _C._jit_pass_onnx_graph_shape_type_inference(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
-    print("onnx: ", graph)
     return graph
 
 
