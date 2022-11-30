@@ -749,7 +749,7 @@ def torchxla_trace_once(subgraph):
 
     def fwd(*args):
         model = subgraph.model
-        return integration.extract_compiled_graph(model, args)
+        return integration.extract_compiled_graph(model, args)(*args)
 
     return fwd
 
