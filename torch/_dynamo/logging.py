@@ -89,7 +89,7 @@ _step_counter = itertools.count(1)
 
 if not disable_progress:
     try:
-        import triton
+        import triton  # noqa: F401
 
         num_steps = 3
     except ImportError:

@@ -3953,6 +3953,7 @@ class LoopBodyBlock:
 
         class CaptureIndexing(V.WrapperHandler):
             self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4036,6 +4037,7 @@ class LoopBodyBlock:
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
                 self.name = V.get_ops_handler().name
+
         return InterpreterShim().run(V.get_ops_handler())
 
     def debug_str(self, name="block"):
