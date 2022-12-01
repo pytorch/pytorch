@@ -37,7 +37,6 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .optimizations.distributed import DDPOptimizer
 from .output_graph import CompilerFn
 from .types import DynamoCallback
 from .utils import compile_times
@@ -301,7 +300,11 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
-        if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
+        if (
+            frame.f_lasti >= 0
+            or skipfiles.check(frame.f_code.co_filename)
+            or config.disable
+        ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
@@ -311,6 +314,8 @@ def catch_errors_wrapper(callback):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
+                    from .optimizations.distributed import DDPOptimizer
+
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
