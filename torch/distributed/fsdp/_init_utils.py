@@ -1,6 +1,7 @@
 import collections
 import warnings
 from typing import (
+    Any,
     Callable,
     Dict,
     Generator,
@@ -89,11 +90,21 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
+    policy: Optional[_FSDPPolicy],
 ) -> _FSDPState:
     if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-        state = _init_process_group_state_for_hybrid_shard(state, process_group)
-        assert state.process_group is not None, "Expected to populate state.process_group for hybrid shard"
-        assert state._inter_node_pg is not None, "Expected to populate state._inter_node_pg for hybrid shard"
+        if process_group is None and policy is None:
+            # Raise an error here, since this is manual wrapping with no process group
+            # passed in, there is no way to ensure all wrapped FSDP units use the same
+            # process groups.
+            raise ValueError(
+                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+            )
+        else:
+            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+            assert state.process_group is not None, "Expected to populate state.process_group for hybrid shard"
+            assert state._inter_node_pg is not None, "Expected to populate state._inter_node_pg for hybrid shard"
+            assert state._inter_node_state is not None, "Expected to populate state._inter_node_state for hybrid shad."
     else:
         if process_group is not None and not isinstance(process_group, dist.ProcessGroup):
             raise ValueError(
@@ -110,7 +121,7 @@ def _init_process_group_state(
     return state
 
 @no_type_check
-def _init_process_group_state_for_hybrid_shard(state, process_group):
+def _init_process_group_state_for_hybrid_shard(state, process_group) -> _FSDPState:
     if process_group is None:
         default_group = _get_default_group()
         intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(default_group)
@@ -130,6 +141,11 @@ def _init_process_group_state_for_hybrid_shard(state, process_group):
                 "Expected process_group to be passed in as either None or "
                 f"Tuple[dist.ProcessGroup, dist.ProcessGroup] but got {type(process_group)}"
             )
+    # Create state for allreduce
+    state._inter_node_state = _get_default_comm_hook_state(
+        process_group=state._inter_node_pg,
+    )
+    return state
 
 @no_type_check
 def _validate_hybrid_shard_pg_type(process_group: Any) -> bool:
@@ -140,9 +156,7 @@ def _validate_hybrid_shard_pg_type(process_group: Any) -> bool:
     )
 
 @no_type_check
-def _init_intra_node_process_group(
-    global_process_group: dist.ProcessGroup
-) -> dist.ProcessGroup:
+def _init_intra_node_process_group() -> dist.ProcessGroup:
     """
     Returns a process group across the current machine.
     For example, given each row is a distinct machine:
@@ -153,7 +167,7 @@ def _init_intra_node_process_group(
     {0, 1, 2} or {3, 4, 5}, depending on the process's rank.
     For example, rank 3 would get {3, 4, 5}.
     """
-    intra_node_subgroup, _ = dist.new_subgroups(global_process_group)
+    intra_node_subgroup, _ = dist.new_subgroups()
     return intra_node_subgroup
 
 @no_type_check
@@ -172,7 +186,7 @@ def _init_inter_node_process_group(
     # the inter-node pg that is returned
     inter_node_pg = None
     sharding_backend = dist.get_backend(global_process_group)
-    world_size = dist.get_world_size(self.process_group)
+    world_size = dist.get_world_size(global_process_group)
     # Assuming fully homogeneous setup
     num_devices = torch.cuda.device_count()
     num_distinct_nodes = world_size // num_devices
@@ -196,29 +210,16 @@ def _init_intra_and_inter_node_groups(
     global_process_group: dist.ProcessGroup,
 ) -> Tuple[dist.ProcessGroup, dist.ProcessGroup]:
     """
-    Initializes all intra-node and inter-node process groups for
-    ``HYBRID_SHARD``, and returns the ones corresponding to the calling rank.
-    .. note:: This function can be used to initialize process groups for
-        ``HYBRID_SHARD``.
-    Example::
-        >>> intra_node_pg, inter_node_pg = init_intra_and_inter_node_groups(),
-        >>> hybrid_shard_model = FSDP(
-        >>>     model,
-        >>>     process_group=(intra_node_pg, inter_node_pg),
-        >>>     ...,
-        >>> )
-    .. warning:: This assumes a homogeneous setup where each node has the same
-        number of devices.
+    Initializes intra and inter-node process groups and returns the ones corresponding
+    to this process's rank.
+    This function can be used to initialize process groups for ``HYBRID_SHARD`` or
+    ``HYBRID_SHARD_ZERO2`` in FSDP.
+    This function assumes each node has an equal number of CUDA-enabled devices.
     Returns:
-        Tuple[dist.ProcessGroup, dist.ProcessGroup]: This rank's intra-node
-        process group and its inter-node process group, in that order.
+        Tuple[dist.ProcessGroup, dist.ProcessGroup]: Intra and inter-node process group.
     """
-    # TODO: To support manual wrapping, expose this function to be public,
-    # in which case, we may make `global_process_group` default to `None`.
-    if not torch.cuda.is_available():
-        raise RuntimeError("`HYBRID_SHARD` requires CUDA for initialization")
     return (
-        _init_intra_node_process_group(global_process_group),
+        _init_intra_node_process_group(),
         _init_inter_node_process_group(global_process_group),
     )
 

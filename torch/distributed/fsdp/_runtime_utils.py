@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
+from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS, default_hooks
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
@@ -14,6 +14,7 @@ from torch.distributed.fsdp._common_utils import (
     _is_composable,
     TrainingState,
 )
+from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp._utils import (
     _apply_to_tensors,
     _no_dispatch_record_stream,
@@ -29,6 +30,24 @@ from torch.distributed.fsdp.flat_param import (
 )
 from torch.distributed.utils import _to_kwargs
 
+@no_type_check
+def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
+    """
+    Performs validation that hybrid sharding strategy is setup. In particular, we:
+    1) Ensure root and passed in FSDP module have the same hybrid sharding strategy,
+    i.e. both should be using the same hybrid shard strategy or no hybrid shard at all.
+    2) Ensure that inter and intra-node process groups are the same across root and
+    this FSDP module.
+    """
+    if (
+        state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+        or fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+    ):
+        if state.sharding_strategy != fsdp_module.sharding_strategy:
+            raise ValueError(
+                "When using hybrid sharding strategy, expect sharding strategies"
+                f"to be the same, but got {state.sharding_strategy} vs {fsdp_module.sharding_strategy}"
+            )
 
 @no_type_check
 def _lazy_init(
@@ -71,6 +90,12 @@ def _lazy_init(
     for fsdp_module in state.fsdp_modules(root_module):
         if fsdp_module is root_module:
             continue
+
+        _validate_hybrid_shard_setup(state, fsdp_module)
+        # Share the allreduce state across FSDP units. This is not strictly necessary
+        # as each one already uses the same process group, but can slightly save memory
+        # since other FSDP units allreduce state can be garbage collected.
+        fsdp_module._inter_node_state = state._inter_node_state
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
         # training to run inference)
@@ -305,9 +330,15 @@ def _post_forward_reshard(
     # Do not free the root's parameters in the post-forward for `FULL_SHARD`
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
+
+    reshard_after_forward_strategies = {
+        HandleShardingStrategy.FULL_SHARD,
+        HandleShardingStrategy.HYBRID_SHARD,
+    }
+
     free_unsharded_flat_params = [
         not state._is_root
-        and handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+        and handle._config.sharding_strategy in reshard_after_forward_strategies
         for handle in handles
     ]
     _reshard(state, handles, free_unsharded_flat_params)
@@ -548,6 +579,15 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
+                if handle._config.sharding_strategy in {
+                    HandleShardingStrategy.HYBRID_SHARD,
+                    HandleShardingStrategy.HYBRID_SHARD_ZERO2
+                }:
+                    default_hooks.allreduce_hook(
+                        state=state._inter_node_state,
+                        grad=new_sharded_grad,
+                    )
+
                 _cast_grad_to_param_dtype(state, handle, new_sharded_grad, param)
 
                 # Save the sharded gradient in `_saved_grad_shard` to support
@@ -609,9 +649,17 @@ def _should_free_in_backward(
     Returns whether FSDP should free the unsharded flattened parameter in the
     post-backward or not.
     """
-    return (
-        state._sync_gradients and handle.uses_sharded_strategy
-    ) or handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+    # We always free if we are syncing gradients (i.e. not in no_sync) and parameters
+    # are sharded.
+    free_unsharded = state._sync_gradients and handle.uses_sharded_strategy
+    # For NO_SHARD we don't need to free full parameters, for Zero-2 strategies, we skip
+    # freeing in backward. Note that this also applies for HYBRID_SHARD_ZERO2.
+    return free_unsharded or (
+        handle._config.sharding_strategy in {
+            HandleShardingStrategy.FULL_SHARD,
+            HandleShardingStrategy.HYBRID_SHARD,
+        }
+    )
 
 
 @no_type_check
