@@ -206,7 +206,7 @@ class InductorConfigContext:
     rematerialize_threshold: int
     rematerialize_acc_threshold: int
 
-    def save(self):
+    def _save(self):
         self.static_memory = triton.cudagraphs
         self.matmul_tune = triton.mm
         self.matmul_padding = shape_padding
@@ -217,7 +217,7 @@ class InductorConfigContext:
         self.rematerialize_threshold = realize_reads_threshold
         self.rematerialize_acc_threshold = realize_acc_reads_threshold
 
-    def apply(self):
+    def _apply(self):
         triton.cudagraphs = self.static_memory
         triton.mm = self.matmul_tune
         shape_padding = self.matmul_padding
@@ -228,19 +228,8 @@ class InductorConfigContext:
         realize_reads_threshold = self.rematerialize_threshold
         realize_acc_reads_threshold = self.rematerialize_acc_threshold
 
-    # "default" -> trition.cudagraphs = False
-    # "reduce-overhead" -> trition.cudagraphs = True
-    # "max-autotune" -> triton.mm = "autotune" + trition.convolution = "autotune", cudagraphs = False, shape_padding = True
-
-    # "static-memory":bool == tirton.cudagraphs
-    # "matmul-tune":str == trition.mm
-    # "matmul-padding":bool == shape_padding
-    # "triton-autotune": bool == triton.autotune
-    # "triton-bmm":bool = trition.use_bmm
-    # "remiterialize_threshold" : int = realize_reads_threshold
-    # "remiterialize_acc_threshold" : int = realize_acc_reads_threshold
     def __init__(self, arg=None):
-        self.save()
+        self._save()
         if arg is None:
             return
         # Handle mode
@@ -262,16 +251,23 @@ class InductorConfigContext:
         for (name, val) in arg.items():
             attr_name = name.replace("-", "_")
             if not hasattr(self, attr_name):
-                raise RuntimeError(f"Unexpected optimization pass {name}")
-            if type(val) != type(getattr(self, attr_name)):
+                known_passes = ", ".join(
+                    [x.replace("_", "-") for x in dir(self) if not x.startswith("_")]
+                )
                 raise RuntimeError(
-                    f"Unexpected type of attr {name}, got {type(val)} should be {type(getattr(self, attr_name))}"
+                    f"Unexpected optimization pass {name}, known passes are {known_passes}"
+                )
+            if type(val) != type(getattr(self, attr_name)):
+                val_type_str = type(val).__name__
+                expected_type_str = type(getattr(self, attr_name)).__name__
+                raise RuntimeError(
+                    f"Unexpected type of attr {name}, got {val_type_str} should be {expected_type_str}"
                 )
             setattr(self, attr_name, val)
 
     def __enter__(self):
         self._prev = InductorConfigContext()
-        self.apply()
+        self._apply()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self._prev.apply()
+        self._prev._apply()
