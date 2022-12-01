@@ -311,14 +311,14 @@ class TestBaseStructuredSparsifier(TestCase):
     def _test_step_linear_on_device(self, model, is_basic, device):
         model = model.to(device)
         if is_basic:
-            x = torch.ones(16, 16)
+            x = torch.ones(16, 16, device=device)
             pruner = SimplePruner(None)
             pruner.prepare(model, None)
             self._check_pruner_valid_before_step(model, pruner, device)
             pruner.step()
             self._check_pruner_valid_after_step(model, pruner, 1, device)
         else:
-            x = torch.ones(7, 7)
+            x = torch.ones(7, 7, device=device)
             pruner = MultiplePruner(None)
             pruner.prepare(model, None)
             self._check_pruner_valid_before_step(model, pruner, device)
