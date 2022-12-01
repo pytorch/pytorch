@@ -58,14 +58,14 @@ if 'REBUILD' not in os.environ:
 # Override VS env here
 with pushd('.'):
     if 'VC_VERSION' not in os.environ:
-        subprocess.call('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+        subprocess.call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
             os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +
-                'VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True)
+                'VC\\Auxiliary\\Build\\vcvarsall.bat\" x64', shell=True)
 
     else:
-        subprocess.call('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+        subprocess.call('\"C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
             os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +
-                'VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
+                'VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
 
     subprocess.call('@echo on', shell=True)
 
@@ -109,7 +109,7 @@ os.environ['PATH'] = os.environ['TMP_DIR_WIN'] + '\\bin;' + os.environ['PATH']
 :: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
 :: jenkins has M40, which is 5.2
 '''
-os.environ['TORCH_CUDA_ARCH_LIST'] = '5.2' if os.environ['TORCH_CUDA_ARCH_LIST'] == "" else None
+os.environ['TORCH_CUDA_ARCH_LIST'] = '5.2' if 'TORCH_CUDA_ARCH_LIST' not in os.environ else None
 
 
 # The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
