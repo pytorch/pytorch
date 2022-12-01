@@ -118,7 +118,7 @@ class TestLazyModules(TestCase):
         self.assertTrue(module.weight.shape == (10, 5))
         self.assertTrue(module.bias.shape == (10,))
         y = module(input)
-        self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
+        self.assertEqual(torch.nn.functional.linear(input, module.weight, module.bias), y, rtol=0, atol=0, exact_device=True)
 
     @suppress_warnings
     def test_lazy_linear_pickle(self):
@@ -170,7 +170,7 @@ class TestLazyModules(TestCase):
         if module.bias is not None:
             self.assertEqual(module.bias.shape, expected_bias_shape)
         y = module(input)
-        self.assertTrue(torch.equal(func(input, module.weight, module.bias), y))
+        self.assertEqual(func(input, module.weight, module.bias), y, rtol=0, atol=0, exact_device=True)
 
     def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape,
                                 expected_weight_shape, expected_bias_shape):

@@ -404,7 +404,7 @@ class TestSaveLoad(JitTestCase):
             m2 = torch.jit.load(path)
 
         x = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        self.assertTrue(torch.equal(m(x), m2(x)))
+        self.assertEqual(m(x), m2(x), rtol=0, atol=0, exact_device=True)
 
     def test_save_nonexit_file(self):
         class Foo(torch.nn.Module):
@@ -880,7 +880,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             m2 = torch.jit.load(path)
 
         x = torch.tensor([1.0, 2.0, 3.0, 4.0])
-        self.assertTrue(torch.equal(m(x), m2(x)))
+        self.assertEqual(m(x), m2(x), rtol=0, atol=0, exact_device=True)
 
     def test_save_namedtuple_input_only(self):
         """

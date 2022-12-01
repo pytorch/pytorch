@@ -116,7 +116,7 @@ If all dimensions are regular, the NestedTensor is intended to be semantically i
 torch.Size([2, 20, 128])
 >>> torch.stack([a, a]).size()
 torch.Size([2, 20, 128])
->>> torch.equal(torch.stack(nt.unbind()), torch.stack([a, a]))
+>>> (torch.stack(nt.unbind()) == torch.stack([a, a])).all().item()
 True
 
 In the future we might make it easier to detect this condition and convert seamlessly.

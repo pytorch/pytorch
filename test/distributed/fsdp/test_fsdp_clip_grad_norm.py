@@ -191,12 +191,12 @@ class TestClipGradNorm(FSDPTest):
 
         # Check that the gradients were modified by `clip_grad_norm_()`
         for param, orig_grad in zip(ddp_model.parameters(), orig_ddp_grads):
-            assert not torch.equal(param.grad, orig_grad)
+            self.assertNotEqual(param.grad, orig_grad, rtol=0, atol=0, exact_device=True)
         for param, orig_grad in zip(fsdp_model.parameters(), orig_fsdp_grads):
             if param.grad is None:
-                self.assertEqual(param.grad, orig_grad)  # `None`
+                self.assertIsNone(orig_grad)
             else:
-                assert not torch.equal(param.grad, orig_grad)
+                self.assertNotEqual(param.grad, orig_grad, rtol=0, atol=0, exact_device=True)
 
         # Run an optimizer step to ensure gradients matched after clipping
         ddp_optim.step()

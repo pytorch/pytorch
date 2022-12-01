@@ -2244,7 +2244,7 @@ class TestQuantizedOps(TestCase):
             XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
             YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
             MQ = XQ.mean((2, 3), keepdim=keep)
-            self.assertTrue(torch.equal(MQ, YQ))
+            self.assertEqual(MQ, YQ, rtol=0, atol=0, exact_device=True)
 
     @override_qengines
     def test_std(self):
@@ -3171,7 +3171,7 @@ class TestDynamicQuantizedOps(TestCase):
         w_packed_fp16 = torch.ops.quantized.linear_prepack_fp16(w, bias)
         w_unpacked_fp16 = torch.ops.quantized.linear_unpack_fp16(w_packed_fp16)
         w_fp16 = w.to(torch.float16).to(torch.float32)
-        self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
+        self.assertEqual(w_fp16, w_unpacked_fp16[0], rtol=0, atol=0, exact_device=True)
 
     @skipIfNoFBGEMM
     def test_qlinear_dynamic_fp16(self):

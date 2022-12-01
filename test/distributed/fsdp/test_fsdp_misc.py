@@ -159,7 +159,7 @@ class TestFSDPMisc(FSDPTest):
                     # above check would be vacuously true.
                     self.assertTrue(
                         any(
-                            not torch.equal(p1, p2)
+                            (p1 != p2).all()
                             for p1, p2 in zip(prev_params, m_local.parameters())
                         )
                     )

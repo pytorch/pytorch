@@ -242,7 +242,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
         ):
             param_rrefs = remote_module.remote_parameters()
             self.assertEqual(len(param_rrefs), 1)
-            self.assertTrue(torch.equal(param_rrefs[0].to_here(), _PARAM_VAL))
+            self.assertEqual(param_rrefs[0].to_here(), _PARAM_VAL, rtol=0, atol=0, exact_device=True)
 
     @dist_utils.dist_init
     def test_get_module_rref(self):
@@ -257,7 +257,7 @@ class RemoteModuleTest(CommonRemoteModuleTest):
             rref = remote_module.get_module_rref()
             self.assertEqual(rref, remote_module.module_rref)
             for param in rref.to_here().parameters():
-                self.assertTrue(torch.equal(param, _PARAM_VAL))
+                self.assertEqual(param, _PARAM_VAL, rtol=0, atol=0, exact_device=True)
 
     @dist_utils.dist_init
     def test_train_eval(self):
