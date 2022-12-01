@@ -5486,7 +5486,7 @@ class TestQuantizeFx(QuantizationTestCase):
         transpose (observed) -> reshape -> output (observed) ->
         """
 
-        def _get_pooling_configs():
+        def _get_pattern_configs():
             backend_pattern_configs = []
             observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
             weighted_op_quint8_dtype_config = DTypeConfig(
@@ -5508,7 +5508,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 ._set_root_node_getter(root_node_getter))
             return backend_pattern_configs
 
-        backend_config = BackendConfig().set_backend_pattern_configs(_get_pooling_configs())
+        backend_config = BackendConfig().set_backend_pattern_configs(_get_pattern_configs())
 
         class M(torch.nn.Module):
             def forward(self, x):
