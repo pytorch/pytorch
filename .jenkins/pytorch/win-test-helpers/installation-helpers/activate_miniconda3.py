@@ -17,10 +17,10 @@ install_fresh_conda = '1'
 
 if not os.path.exists(os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat'):
     os.environ['INSTALL_FRESH_CONDA'] = '1'
-    install_fresh_conda = '1'
-else:
+elif 'INSTALL_FRESH_CONDA' in os.environ:
     install_fresh_conda = os.environ['INSTALL_FRESH_CONDA']
-
+else:
+    os.environ['INSTALL_FRESH_CONDA'] = '1'
 
 
 conda_parent_dir = os.environ['CONDA_PARENT_DIR']
