@@ -1296,10 +1296,12 @@ def assert_close(
     only considered equal to each other if ``equal_nan`` is ``True``.
 
     In addition, they are only considered close if they have the same
+
     - :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``),
     - ``dtype`` (if ``check_dtype`` is ``True``),
     - ``layout`` (if ``check_layout`` is ``True``), and
     - stride (if ``check_stride`` is ``True``).
+
     If either ``actual`` or ``expected`` is a meta tensor, only the attribute checks will be performed.
 
     If ``actual`` and ``expected`` are sparse (either having COO, CSR, CSC, BSR, or BSC layout), their strided members are
@@ -1350,8 +1352,6 @@ def assert_close(
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
-        NotImplementedError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the
-            future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.
