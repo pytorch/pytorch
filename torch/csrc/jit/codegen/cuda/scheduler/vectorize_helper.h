@@ -2,21 +2,15 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+
+#include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-// TODO: Put implementations in a vectorize_helper.cpp
-namespace scheduler_utils {
-
-// Moved the definition of these to
-// torch/csrc/jit/codegen/cuda/scheduler/utils.cpp as making new CPP files is
-// painful for multiple reasons.
+namespace vectorize_helper {
 
 // Grab all values and expressions used to make the merged_domain and remove
 // them from the fusion
@@ -44,7 +38,7 @@ size_t expandVectorizationToContigMergedDomains(
     int break_point,
     size_t default_word_size);
 
-} // namespace scheduler_utils
+} // namespace vectorize_helper
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

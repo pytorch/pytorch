@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm
 import torch
+import torch._dynamo
 import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -11,6 +12,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.testing import FileCheck
 from torch import nn
 import unittest
@@ -18,6 +20,7 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+from torch.utils._pytree import tree_flatten
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -135,6 +138,18 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(out, FakeTensor))
 
+    def check_function_with_fake(self, fn):
+        out = fn()
+        with torch._subclasses.FakeTensorMode():
+            out_fake = fn()
+
+        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
+            if not isinstance(a, FakeTensor):
+                self.assertTrue(not isinstance(b, FakeTensor))
+                continue
+
+            prims.utils.compare_tensor_meta(a, b, check_strides=True)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_non_kwarg_device(self):
         with FakeTensorMode():
@@ -143,6 +158,13 @@ class FakeTensorTest(TestCase):
             self.assertIs(x, y)
             z = x.to(torch.device("cuda"))
             self.assertEqual(z.device.type, "cuda")
+
+    def test_non_overlapping_stride_zero(self):
+        def foo():
+            x = torch.empty_strided([1, 3, 427, 640], (0, 1, 1920, 3))
+            return x.half()
+
+        self.check_function_with_fake(foo)
 
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
@@ -194,6 +216,25 @@ class FakeTensorTest(TestCase):
             y1 = torch.randperm(5, device="cpu")
             prims.utils.compare_tensor_meta(y, y1)
 
+    def test_print_in_fake_mode(self):
+        x = torch.zeros(2)
+        # does not fail
+        with FakeTensorMode():
+            out = str(x)
+        assert "FakeTensor" not in out
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_upsample_bilinear_small_channels(self):
+        out = []
+        mode = FakeTensorMode()
+        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+            with context():
+                arg0_1 = torch.empty_strided((3, 427, 640), (1, 1920, 3), dtype=torch.float32, device='cuda')
+                unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
+                out.append(torch.ops.aten.upsample_bilinear2d.default(unsqueeze, [800, 1199], False))
+
+        self.assertTrue(out[1].is_contiguous())
+        self.checkMetaProps(out[0], out[1])
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
@@ -352,7 +393,7 @@ class FakeTensorTest(TestCase):
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
     def checkMetaProps(self, t1, t2):
-        prims.utils.compare_tensor_meta(t1, t2)
+        prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
     @skipIfCrossRef
     def test_deepcopy(self):
@@ -656,6 +697,63 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+class FakeTensorPropTest(TestCase):
+    def test_fake_tensor_prop_on_nn_module(self):
+        class ToyNnModuleWithParameters(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(4, 3)
+                self.layer2 = torch.nn.Linear(3, 2)
+
+            def forward(self, value):
+                value = self.layer1(value)
+                value = torch.relu(value)
+                value = self.layer2(value)
+                return value
+
+        model = ToyNnModuleWithParameters()
+        value = torch.randn(5, 4)
+        # Convert nn.Module to GraphModule so that FakeTensorProp runs.
+        graph_model = torch.fx.symbolic_trace(model, (value,))
+        # The following block runs FakeTensorProp on graph_module w/to the same FakeTensorMode
+        #
+        # TODO(wschin): there should be an API to run FakeTensorProp for GraphModule
+        # with parameters and buffers.
+        with FakeTensorMode() as fake_tensor_mode:
+
+            def to_fake_tensor(x):
+                if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
+                    return fake_tensor_mode.from_tensor(x)
+                return x
+
+            fake_parameters_and_buffers = {
+                k: to_fake_tensor(v)
+                for k, v in itertools.chain(
+                    graph_model.named_parameters(), graph_model.named_buffers()
+                )
+            }
+            with torch.nn.utils.stateless._reparametrize_module(
+                graph_model, fake_parameters_and_buffers
+            ):
+                # This case uses the **same** fake tensor mode to
+                #  1. create fake parameters and fake buffers, and
+                #  2. run FakeTensorProp
+                # The result should be correct.
+                result = FakeTensorProp(graph_model, fake_tensor_mode).propagate(value)
+                self.assertTrue(isinstance(result, FakeTensor))
+                self.assertEqual(result.shape, (5, 2))
+                # This case uses the **different** fake tensor modes to
+                #  1. create fake parameters and fake buffers, and
+                #  2. run FakeTensorProp
+                # The following code should fail.
+                failed = False
+                try:
+                    FakeTensorProp(graph_model).propagate(value)
+                except AssertionError:
+                    # AssertionError: tensor's device must be `meta`, got cpu instead
+                    failed = True
+                self.assertTrue(failed)
 
 if __name__ == "__main__":
     run_tests()

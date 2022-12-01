@@ -155,9 +155,7 @@ class TestSummonFullParams(FSDPTest):
 
             # shards are padded but the full_param tensor is not
             a, b = my_shard[0 : my_slice.numel()], my_slice
-            self.assertTrue(
-                torch.equal(my_shard[0 : my_slice.numel()].cpu(), my_slice.cpu())
-            )
+            self.assertEqual(my_shard[0 : my_slice.numel()].cpu(), my_slice.cpu(), rtol=0, atol=0, exact_device=True)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("recurse", [True, False])
@@ -212,7 +210,7 @@ class TestSummonFullParams(FSDPTest):
 
         model = FSDP(MyModule()).cuda(self.rank)
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState.FORWARD"
+            ValueError, "Current handle state is HandleTrainingState.FORWARD"
         ):
             model(model)
 
@@ -231,7 +229,7 @@ class TestSummonFullParams(FSDPTest):
         output.register_hook(bad_backwards_hook)
 
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState.FORWARD_BACKWARD"
+            ValueError, "Current handle state is HandleTrainingState.BACKWARD_PRE"
         ):
             output.backward()
 
