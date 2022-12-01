@@ -31,7 +31,7 @@ except Exception as e:
 
 with pushd('test'):
 
-    gflags_exe = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe"
+    gflags_exe = "C:\\Program Files (x86)\\Windows Kits\\10\\Debuggers\\x64\\gflags.exe"
     os.environ['GFLAGS_EXE'] = gflags_exe
 
 
@@ -41,16 +41,19 @@ with pushd('test'):
 
         try:
             subprocess.run([gflags_exe, '/i', 'python.exe', '+sls'])
-            subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\run_python_nn_smoketests.py', shell=True)
+            subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\run_python_nn_smoketests.py', shell=True)
             subprocess.run([gflags_exe, '/i', 'python.exe', '-sls'])
 
-        except:
-            sys.exit(1)
+        except Exception as e:
+
+            subprocess.run(['echo', 'shard dmoke test failed'])
+            subprocess.run(['echo', e])
+            sys.exit()
 
 
     subprocess.run(['echo', 'Copying over test times file'])
     subprocess.run(['copy', '/Y', str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +\
-     '\.pytorch-test-times.json', str(os.environ['PROJECT_DIR_WIN'])])
+     '\\.pytorch-test-times.json', str(os.environ['PROJECT_DIR_WIN'])])
 
 
     subprocess.run(['echo', 'Run nn tests'])
@@ -60,7 +63,8 @@ with pushd('test'):
         '--exclude-distributed-tests', '--shard', shard_number, str(os.environ['NUM_TEST_SHARDS']),\
         '--verbose'])
 
-    except:
-        sys.exit(1)
+    except Exception as e:
 
-sys.exit(0)
+        subprocess.run(['echo', 'shard nn tests failed'])
+        subprocess.run(['echo', e])
+        sys.exit()

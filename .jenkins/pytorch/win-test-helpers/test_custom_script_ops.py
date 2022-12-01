@@ -14,12 +14,12 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
-subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\setup_pytorch_env.py', shell=True)
+subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\setup_pytorch_env.py', shell=True)
 
 subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--jobs',\
  '0', 'third_party/pybind11'])
 
-os.chdir('test\custom_operator')
+os.chdir('test\\custom_operator')
 
 # Build the custom operator library.
 os.mkdir('build')
@@ -30,15 +30,18 @@ with pushd('build'):
         # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
         subprocess.run(['echo', 'Executing CMake for custom_operator test...'])
         subprocess.run(['cmake', '-DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +\
-         '\build\torch', '-DCMAKE_BUILD_TYPE=Release', '-GNinja', '..'])
+         '\\build\\torch', '-DCMAKE_BUILD_TYPE=Release', '-GNinja', '..'])
 
         subprocess.run(['echo', 'Executing Ninja for custom_operator test...'])
         subprocess.run(['ninja', '-v'])
 
         subprocess.run(['echo', 'Ninja succeeded for custom_operator test.'])
 
-    except:
-        sys.exit(1)
+    except Exception as e:
+
+        subprocess.run(['echo', 'custom_operator test failed'])
+        subprocess.run(['echo', e])
+        sys.exit()
 
 
 try:
@@ -53,10 +56,13 @@ try:
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
-    os.environ['PATH']='C:\Program Files\NVIDIA Corporation\NvToolsExt\bin\x64;'\
-     + str(os.environ['TMP_DIR_WIN']) + '\build\torch\lib;' + str(os.environ['PATH'])
+    os.environ['PATH']='C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
+     + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
     subprocess.run(['test_custom_ops.exe', 'model.pt'])
 
-except:
-    sys.exit(1)
+except Exception as e:
+
+    subprocess.run(['echo', 'test_custom_ops failed'])
+    subprocess.run(['echo', e])
+    sys.exit()

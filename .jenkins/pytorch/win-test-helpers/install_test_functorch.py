@@ -16,7 +16,7 @@ def pushd(new_dir):
 
 try:
 
-    subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\setup_pytorch_env.py', shell=True)
+    subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\setup_pytorch_env.py', shell=True)
 
 except Exception as e:
 
@@ -30,7 +30,10 @@ subprocess.run(['echo', 'Installing test dependencies'])
 try:
     subprocess.run(['pip', 'install', 'networkx'])
 
-except:
+except Exception as e:
+
+    subprocess.run(['echo', 'install networkx failed'])
+    subprocess.run(['echo', e])
     sys.exit()
 
 
@@ -42,8 +45,8 @@ try:
         subprocess.run(['python', 'run_test.py', '--functorch', '--shard',\
          str(os.environ['SHARD_NUMBER']), str(os.environ['NUM_TEST_SHARDS']), '--verbose'])
 
-except:
-    sys.exit(1)
+except Exception as e:
 
-
-sys.exit(0)
+    subprocess.run(['echo', 'run_test functorch shard failed'])
+    subprocess.run(['echo', e])
+    sys.exit()
