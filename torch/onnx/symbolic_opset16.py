@@ -90,10 +90,17 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
         # More detail on: https://github.com/onnx/onnx/issues/4672
         axes = list()
         ends = list()
+        # Align the dynamic sizes of src and index
+        # NOTE: Even if users set src and index with different dynamic axes, they are
+        # still expected to have the same shape in runtime in terms of ONNX spec.
+        # So the usage of different shape of src and index on dynamic size is not
+        # supported.
+        # More detail on: https://github.com/onnx/onnx/issues/4672
         for idx, d in enumerate(index_sizes):
-            if d is None:
-                # the axe with dynamic shape is ignored, and will be aligned by
+            if d is None or src_sizes[idx] == d:
+                # 1. the axe with dynamic shape is ignored, and will be aligned by
                 # setType later
+                # 2. if the shape are the same, we don't need to slice
                 continue
             if src_sizes[idx] < d:
                 return symbolic_helper._unimplemented(
@@ -107,14 +114,6 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
             src = symbolic_helper._slice_helper(
                 g, src, axes=axes, starts=starts, ends=ends
             )
-        # Align the dynamic sizes of src and index
-        # NOTE: Even if users set src and index with different dynamic axes, they are
-        # still expected to have the same shape in runtime in terms of ONNX spec.
-        # So the usage of different shape of src and index on dynamic size is not
-        # supported.
-        # More detail on: https://github.com/onnx/onnx/issues/4672
-        src_adjusted_type = src.type().with_sizes(index_sizes)
-        src.setType(src_adjusted_type)
 
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
