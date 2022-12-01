@@ -23,9 +23,18 @@ if torch.cuda.is_available():
         DataType,
         Fusion,
         FusionDefinition,
+        Tensor,
     )
 else:
     DataType = None
+
+import os
+
+
+@lru_cache(None)
+def get_nvprim_dump_nvtx():
+    return os.getenv("PYTORCH_NVFUSER_DUMP_NVTX")
+
 
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
@@ -133,6 +142,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         call_function_nodes
     ), "Constant tensors that are saved in the graph and used as arguments are not supported yet"
 
+    # Checking output dtypes
+    output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
+    orig_flat_out, _ = tree_flatten(output_node.args[0])
+
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
 
@@ -178,6 +191,18 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 args = (fd,) + args
                 return target(*args, **kwargs)
 
+            def output(self, target, args, kwargs):
+                flat_out, unflatten_spec = tree_flatten(args[0])
+                for o, orig_o in zip(flat_out, orig_flat_out):
+                    # casting outputs to the original data type
+                    # ensures outputs produced by fusion would always agree with original GraphModule
+                    out_dtype = _torch_dtype_to_nvfuser_dtype_map.get(orig_o.meta["tensor_meta"].dtype)  # type: ignore[union-attr]
+                    assert isinstance(
+                        o, Tensor
+                    ), "output from codegen has to be tensor type"
+                    fd.add_output(fd.ops.cast(o, dtype=out_dtype))
+                return args[0]
+
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(
@@ -194,8 +219,6 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         nv_args = tuple(map(templates_to_nvfuser_inputs, nv_args_templates))
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
-        for o in flat_out:
-            fd.add_output(o)
 
     return fusion, unflatten_spec
 
@@ -232,10 +255,30 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
         )
 
-        return tree_unflatten(
+        if get_nvprim_dump_nvtx():
+            torch.cuda.nvtx.range_push(
+                "fusion: {0}, graph: {1}".format(
+                    fusion.id(),
+                    str(
+                        [
+                            {
+                                "op": n.op,
+                                "name": n.name,
+                                "args": n.args,
+                                "kwargs": n.kwargs,
+                            }
+                            for n in gm.graph.nodes
+                        ]
+                    ),
+                )
+            )
+        result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
         )
+        if get_nvprim_dump_nvtx():
+            torch.cuda.nvtx.range_pop()
+        return result
     else:
         warn(
             "nvfuser_executor is executed with non-cuda args, fallback to aten executor"
@@ -309,25 +352,23 @@ def _remove_empty_like_fill(gm: GraphModule):
     # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
     # https://github.com/pytorch/pytorch/issues/86612
 
-    # Here when we see a `sub` node, we check if the first input is a result of
-    # filling a tensor with a scalar
-    # If so, we replace the first argument of the `sub` node with a scalar
-    for node in gm.graph.nodes:
-        if node.op == "call_function":
-            if node.target == torch.ops.nvprims.sub.default:
-                # check if the first argument is a fill
-                if (
-                    isinstance(node.args[0], torch.fx.Node)
-                    and node.args[0].op == "call_function"
-                    and node.args[0].target == torch.ops.aten.fill.Scalar
-                ):
-                    # Replace the first argument with the second argument of fill
-                    # aten.fill.Scalar(tensor, scalar)
-                    fill_node = node.args[0]
-                    scalar = fill_node.args[1]
-                    node.args = (scalar, *node.args[1:])
-    gm.graph.eliminate_dead_code()
-    gm.recompile()
+    def pattern(scalar, tensor):
+        # pattern for C++ trace of `scalar - tensor`. We are looking for the
+        # pattern of aten and nvprims.sub specifically because we want to remove
+        # the empty_like + fill nodes after lowering of AOT Autograd trace to
+        # nvprims In the future, nvFuser might support fill, and empty_like and
+        # this workaround can be removed.
+        empty_like = torch.ops.aten.empty_like.default(
+            tensor, memory_format=torch.preserve_format
+        )
+        fill = torch.ops.aten.fill.Scalar(empty_like, scalar)
+        sub = torch.ops.nvprims.sub.default(fill, tensor)
+        return sub
+
+    def replacement(scalar, tensor):
+        return torch.ops.nvprims.sub.default(scalar, tensor)
+
+    torch.fx.replace_pattern(gm, pattern, replacement)
     return gm
 
 
@@ -368,6 +409,7 @@ def maybe_partition_graph(
             allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
+        partitioner.remove_bookend_non_compute_ops(partitions)
         if len(partitions) == 0:
             warn(
                 "No partition found for the graph. "
@@ -405,6 +447,18 @@ def maybe_partition_graph(
         return gm, any_unsupported
 
 
+class NVTXInterpreter(torch.fx.Interpreter):
+    def run_node(self, n):
+        torch.cuda.nvtx.range_push(
+            "name: {0}, args: {1}, op: {2}, kwargs: {3}".format(
+                n.name, n.args, n.op, n.kwargs
+            )
+        )
+        result = super().run_node(n)
+        torch.cuda.nvtx.range_pop()
+        return result
+
+
 def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None):
     executor_parameters = executor_parameters or DEFAULT_NVFUSER_PYTHON_CONFIG
     # maybe_partition_graph function is cached so we can't use non-hashable arguments
@@ -424,6 +478,9 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None
         use_python_fusion_cache=use_python_fusion_cache,
     )
     if is_partitioned:
-        return gm(*args)
+        if get_nvprim_dump_nvtx():
+            return NVTXInterpreter(gm).run(*args)
+        else:
+            return gm(*args)
     else:
         return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)

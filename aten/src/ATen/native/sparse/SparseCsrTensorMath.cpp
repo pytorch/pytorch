@@ -48,6 +48,8 @@
 #include <ATen/ops/conj_physical.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
@@ -58,6 +60,8 @@
 #include <ATen/ops/fill_native.h>
 #include <ATen/ops/floor.h>
 #include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac.h>
+#include <ATen/ops/frac_native.h>
 #include <ATen/ops/isinf.h>
 #include <ATen/ops/isinf_native.h>
 #include <ATen/ops/isnan.h>
@@ -117,7 +121,8 @@ namespace meta {
 
 TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
 (const Tensor& self, const int64_t size, const bool out_int32) {
-  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
+  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector, but got ",
+              self.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -130,8 +135,10 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-      crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
+    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
+    crow_indices.dim(), " dimensional tensor.");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
+              col_indices.dim(), " dimensional tensor.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
@@ -355,10 +362,12 @@ CREATE_UNARY_UFUNC(asinh);
 CREATE_UNARY_UFUNC(atan);
 CREATE_UNARY_UFUNC(atanh);
 CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(deg2rad);
 CREATE_UNARY_UFUNC(erf);
 CREATE_UNARY_UFUNC(erfinv);
 CREATE_UNARY_UFUNC(expm1);
 CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(frac);
 CREATE_UNARY_UFUNC(log1p);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);

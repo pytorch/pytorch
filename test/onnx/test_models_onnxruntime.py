@@ -8,6 +8,7 @@ from typing import List, Mapping, Tuple
 import onnx_test_common
 import parameterized
 import PIL
+import pytorch_test_common
 import test_models
 
 import torch
@@ -64,7 +65,7 @@ def exportTest(
 
 TestModels = type(
     "TestModels",
-    (common_utils.TestCase,),
+    (pytorch_test_common.ExportTestCase,),
     dict(
         test_models.TestModels.__dict__,
         is_script_test_enabled=False,
@@ -77,7 +78,7 @@ TestModels = type(
 # model tests for scripting with new JIT APIs and shape inference
 TestModels_new_jit_API = type(
     "TestModels_new_jit_API",
-    (common_utils.TestCase,),
+    (pytorch_test_common.ExportTestCase,),
     dict(
         TestModels.__dict__,
         exportTest=exportTest,

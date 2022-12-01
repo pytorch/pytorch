@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from typing import Type, Set, Dict, Callable, Tuple, Any, Optional, Union
+from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
 
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook

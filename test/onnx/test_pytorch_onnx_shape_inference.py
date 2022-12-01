@@ -1,7 +1,10 @@
 # Owner(s): ["module: onnx"]
 
-import numpy as np
+import io
 
+import numpy as np
+import onnx
+import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
@@ -19,7 +22,7 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(common_utils.TestCase):
+class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):
         self.opset_version = _constants.ONNX_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)
@@ -281,6 +284,173 @@ class TestONNXShapeInference(common_utils.TestCase):
         input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
         reduce_prod = g.op("ReduceProd", input)
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
+
+
+class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
+    def setUp(self):
+        super().setUp()
+        self.opset_version = _constants.ONNX_MAX_OPSET
+
+    def test_setType_maintains_output_shape_for_single_custom_op(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def linalg_inv_settype(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(self.type())
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        dims = model_value_info[0].type.tensor_type.shape.dim
+        for i in range(len(dims)):
+            # If node output has shape info, it should have dim_value
+            # Otherwise, it has dim_params with dynamic shape
+            self.assertTrue(dims[i].HasField("dim_value"))
+        for dim, rank in zip(dims, x.size()):
+            self.assertEqual(dim.dim_value, rank)
+
+    def test_no_setType_for_single_custom_op(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def linalg_inv_no_settype(g, self):
+            return g.op("com.microsoft::Inverse", self)
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_no_settype, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        dims = model_value_info[0].type.tensor_type.shape.dim
+        for i in range(len(dims)):
+            # If node output has shape info, it should have dim_value
+            # Otherwise, it has dim_params with dynamic shape
+            self.assertTrue(dims[i].HasField("dim_param"))
+
+    def test_setType_maintains_output_shape_for_single_custom_op_with_dynamic_axes(
+        self,
+    ):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def linalg_inv_settype(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(
+                self.type().with_dtype(torch.float).with_sizes([None, 3, 3])
+            )
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+            input_names=["x"],
+            dynamic_axes={"x": {0: "batch"}},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        dims = model_value_info[0].type.tensor_type.shape.dim
+        # The first axe should be dynamic as we defined when exporting
+        self.assertTrue(dims[0].HasField("dim_param"))
+        for i in range(1, len(dims)):
+            # If node output has shape info, it should have dim_value
+            # Otherwise, it has dim_params with dynamic shape
+            self.assertTrue(dims[i].HasField("dim_value"))
+            self.assertEqual(dims[i].dim_value, x.size()[i])
+
+    def test_setType_maintains_output_shape_for_single_custom_op_with_onnx_ops(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x, y, z):
+                x = torch.inverse(x)
+                return x + y + z
+
+        def linalg_inv_settype(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(
+                self.type().with_dtype(torch.float).with_sizes([2, 3, 10, 10])
+            )
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 10, 10)
+        y = torch.randn(2, 3, 10, 10)
+        z = torch.randn(2, 3, 10, 10)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x, y, z),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        # To validate the shape of inverse Op, we need to find inverse output name,
+        # and then use it to identify its value_info for the shape.
+        output_name = ""
+        for node in model_proto.graph.node:
+            if node.op_type == "Inverse":
+                output_name = node.output[0]
+                break
+        assert output_name
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        for value_info in model_value_info:
+            assert value_info.name
+            if value_info.name == output_name:
+                dims = value_info.type.tensor_type.shape.dim
+                for i in range(len(dims)):
+                    # If node output has shape info, it should have dim_value
+                    # Otherwise, it has dim_params with dynamic shape
+                    self.assertTrue(dims[i].HasField("dim_value"))
+                for dim, rank in zip(dims, x.size()):
+                    self.assertEqual(dim.dim_value, rank)
 
 
 if __name__ == "__main__":
