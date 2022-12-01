@@ -377,7 +377,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         _test_module_empty_input(self, mod, inp, check_size=False)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_adaptive_pooling_empty_output_size(self, dtype, device):
         error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
@@ -388,7 +388,23 @@ class TestPoolingNNDeviceType(NNTestCase):
         for dim, pool_type in itertools.product((2, 3), ('avg', 'max')):
             cls_name = 'adaptive_{}_pool{}d'.format(pool_type, dim)
             module_cls = getattr(nn.functional, cls_name)
-            output_size = 0
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                res = module_cls(input, output_size)
+                res.sum().backward()
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_adaptive_pooling1d_empty_output_size(self, dtype, device):
+        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
+
+        input = torch.rand([1, 64], dtype=dtype, device=device, requires_grad=True)
+        output_size = 0
+
+        for pool_type in ('avg', 'max'):
+            cls_name = 'adaptive_{}_pool1d'.format(pool_type)
+            module_cls = getattr(nn.functional, cls_name)
 
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 res = module_cls(input, output_size)
