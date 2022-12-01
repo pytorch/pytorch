@@ -1548,13 +1548,13 @@ def assert_allclose(
     """
     .. warning::
 
-       :func:`torch.testing.assert_allclose` is deprecated since ``1.12``. Please use
-       :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
+       :func:`torch.testing.assert_allclose` is deprecated since ``1.12`` and will be removed in a future release.
+       Please use :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
        `here <https://github.com/pytorch/pytorch/issues/61844>`_.
     """
     warnings.warn(
-        "`torch.testing.assert_allclose()` is deprecated since 1.12. "
-        "Use `torch.testing.assert_close()` instead. "
+        "`torch.testing.assert_allclose()` is deprecated since 1.12 and will be removed in a future release. "
+        "Please use `torch.testing.assert_close()` instead. "
         "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
         FutureWarning,
         stacklevel=2,
