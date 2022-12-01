@@ -202,18 +202,6 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
-namespace {
-bool kAutogradFunctionExtensionEnabled = false;
-}
-
-bool isAutogradFunctionExtensionEnabled() {
-  return kAutogradFunctionExtensionEnabled;
-}
-
-void setAutogradFunctionExtensionEnabled(bool enabled) {
-  kAutogradFunctionExtensionEnabled = enabled;
-}
-
 } // namespace autograd
 } // namespace torch
 
