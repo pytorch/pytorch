@@ -1,5 +1,4 @@
 import copy
-import re
 import torch
 import torch.nn as nn
 from torch.ao.quantization import (
@@ -24,10 +23,7 @@ from torch.ao.quantization.qconfig import (
     qconfig_equals,
 )
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import (
-    activation_is_statically_quantized,
-    is_per_tensor,
-)
+from torch.ao.quantization.utils import activation_is_statically_quantized
 from torch.ao.quantization.quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
