@@ -785,11 +785,11 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_with_ignored_module(self):
         model = Model().cuda()
-        bfloat16 = MixedPrecision(param_dtype=torch.bfloat16)
+        float16 = MixedPrecision(param_dtype=torch.float16)
         model = FSDP(
             model,
             ignored_modules=[model.ignored],
-            mixed_precision=bfloat16,
+            mixed_precision=float16,
         )
 
         x = torch.ones(2, 100, device=torch.cuda.current_device())
