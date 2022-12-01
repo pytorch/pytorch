@@ -1128,6 +1128,7 @@ class InstructionTranslatorBase(object):
             ListVariable(
                 obj.items + [v],
                 recursively_contains=new_rec_contains,
+                regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
         )

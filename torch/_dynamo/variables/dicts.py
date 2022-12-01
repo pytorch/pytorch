@@ -16,17 +16,12 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(
-        self, items, user_cls, recursively_contains=None, guards=None, **kwargs
-    ):
+    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
         super(ConstDictVariable, self).__init__(
-            recursively_contains=recursively_contains, guards=guards, **kwargs
+            recursively_contains=recursively_contains, **kwargs
         )
 
-        # update with contained guards
-        if guards is None:
-            self.guards.update(VariableTracker.propagate(items.values())["guards"])
-
+        self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 

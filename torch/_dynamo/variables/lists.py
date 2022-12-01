@@ -27,17 +27,17 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         recursively_contains=None,
-        guards=None,
+        regen_guards=True,
         **kwargs,
     ):
         super(BaseListVariable, self).__init__(
-            recursively_contains=recursively_contains, guards=guards, **kwargs
+            recursively_contains=recursively_contains, **kwargs
         )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
 
-        # update with contained guards
-        if guards is None:
+        # Sometimes, we know that we have passed in the guards from the items in the list
+        if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
 
         self.items: List[VariableTracker] = items
@@ -173,7 +173,10 @@ class ListVariable(BaseListVariable):
             tx.replace_all(
                 self,
                 ListVariable(
-                    self.items + [arg], recursively_contains=new_rec_contains, **options
+                    self.items + [arg],
+                    recursively_contains=new_rec_contains,
+                    regen_guards=False,
+                    **options,
                 ),
             )
             return ConstantVariable(None)
@@ -189,6 +192,7 @@ class ListVariable(BaseListVariable):
                 self,
                 ListVariable(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
+                    regen_guards=False,
                     **options,
                 ),
             )
@@ -199,7 +203,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -207,14 +211,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], **options),
+                ListVariable([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -229,7 +233,7 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = list(value.items)
             else:
                 items[key.as_python_constant()] = value
-            result = ListVariable(items, **options)
+            result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
