@@ -746,8 +746,9 @@ def torchxla_trivial(subgraph):
 @create_backend
 def torchxla_trace_once(subgraph):
     import torch._dynamo.optimizations.torchxla_integration as integration
-    
+
     compiled_graph = None
+
     def fwd(*args):
         nonlocal compiled_graph
         model = subgraph.model

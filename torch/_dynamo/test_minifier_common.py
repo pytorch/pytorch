@@ -62,12 +62,10 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         return proc, None
 
     # Patch generated files with testing patches
-    def _inject_code(self, patch_code, filename, repro_after, repro_level):
+    def _inject_code(self, patch_code, filename):
         patch_code = f"""\
 {patch_code}
 torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
-torch._dynamo.config.repro_after = "{repro_after}"
-torch._dynamo.config.repro_level = {repro_level}
 """
         with open(filename, "r") as f:
             code = f.read()
@@ -77,13 +75,11 @@ torch._dynamo.config.repro_level = {repro_level}
         return code
 
     # Runs the minifier launcher script in `repro_dir`, patched with `patch_code`.
-    def _run_minifier_launcher(self, patch_code, repro_dir, repro_after, repro_level):
+    def _run_minifier_launcher(self, patch_code, repro_dir):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         self.assertTrue(os.path.exists(launch_file))
-        launch_code = self._inject_code(
-            patch_code, launch_file, repro_after, repro_level
-        )
+        launch_code = self._inject_code(patch_code, launch_file)
 
         launch_proc = subprocess.run(
             ["python3", launch_file],
@@ -94,11 +90,11 @@ torch._dynamo.config.repro_level = {repro_level}
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`, patched with `patch_code`
-    def _run_repro(self, patch_code, repro_dir, repro_after, repro_level):
+    def _run_repro(self, patch_code, repro_dir):
         self.assertIsNotNone(repro_dir)
         repro_file = os.path.join(repro_dir, "repro.py")
         self.assertTrue(os.path.exists(repro_file))
-        repro_code = self._inject_code(patch_code, repro_file, repro_after, repro_level)
+        repro_code = self._inject_code(patch_code, repro_file)
 
         repro_proc = subprocess.run(
             ["python3", repro_file], capture_output=True, cwd=repro_dir
@@ -132,10 +128,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         )
         test_proc, repro_dir = self._run_test_code(test_code)
         self.assertIsNotNone(repro_dir)
-        launch_proc, launch_code = self._run_minifier_launcher(
-            patch_code, repro_dir, repro_after, repro_level
-        )
-        repro_proc, repro_code = self._run_repro(
-            patch_code, repro_dir, repro_after, repro_level
-        )
+        launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
+        repro_proc, repro_code = self._run_repro(patch_code, repro_dir)
         return ((test_proc, launch_proc, repro_proc), (launch_code, repro_code))
