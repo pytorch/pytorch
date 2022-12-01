@@ -22,6 +22,7 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
+    'spmm_reduce'
 ]
 
 
