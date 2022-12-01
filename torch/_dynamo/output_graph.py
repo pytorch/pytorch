@@ -535,7 +535,14 @@ class OutputGraph(fx.Tracer):
 
             # We invoke the backend with real inputs if and only if
             # we are in doing accuracy evaluation in the minifier
-            if config.repro_after is not None and config.repro_level == 4:
+            # Note: This check is the same as in `save_graph_repro`
+            is_minifier_backend = "_accuracy" in str(
+                torch._dynamo.eval_frame.innermost_fn(compiler_fn)
+            )
+            is_top_level_minifiying = (
+                config.repro_after is not None and config.repro_level == 4
+            )
+            if is_minifier_backend or is_top_level_minifiying:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())

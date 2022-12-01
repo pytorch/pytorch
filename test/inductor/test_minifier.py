@@ -106,8 +106,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 
     def test_after_aot_cpu_accuracy_error(self):
         (tb1, tb2), _ = self._test_after_aot("cpu", CPP_ACCURACY_ERROR, 4)
-        self.assertIn("Accuracy failed", tb1)
-        self.assertIn("Accuracy failed", tb2)
+        self.assertIn("AccuracyError", tb1)
+        self.assertIn("AccuracyError", tb2)
 
     @requires_cuda()
     def test_after_aot_cuda_compile_error(self):
@@ -118,8 +118,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     @requires_cuda()
     def test_after_aot_cuda_accuracy_error(self):
         (tb1, tb2), _ = self._test_after_aot("cuda", TRITON_ACCURACY_ERROR, 4)
-        self.assertIn("Accuracy failed", tb1)
-        self.assertIn("Accuracy failed", tb2)
+        self.assertIn("AccuracyError", tb1)
+        self.assertIn("AccuracyError", tb2)
 
     # Test that runtime errors after aot can be repro'd (CPU only for now)
     def _test_after_aot_runtime_error(self, device, backend_code):
@@ -178,6 +178,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 
         test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code, True)
         proc, repro_dir = self._run_test_code(test_code)
+        print(proc.stdout)
+        print(proc.stderr)
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
 
