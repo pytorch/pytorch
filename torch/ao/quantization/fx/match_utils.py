@@ -5,7 +5,7 @@ from torch.fx.graph import (
     Node,
 )
 from torch.ao.quantization.utils import Pattern
-from .quantization_patterns import (
+from .quantize_handler import (
     QuantizeHandler,
 )
 from ..qconfig import (

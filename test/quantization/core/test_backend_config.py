@@ -14,7 +14,7 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
-from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
+from torch.ao.quantization.fx.quantize_handler import _default_root_node_getter
 
 
 class TestBackendConfig(QuantizationTestCase):

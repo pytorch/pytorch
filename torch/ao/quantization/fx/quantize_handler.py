@@ -44,7 +44,6 @@ def _default_root_node_getter(node_pattern):
         node_pattern = node_pattern[-1]
     return node_pattern
 
-# TODO: move to backend_config_utils.py
 # Base Pattern Handler
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns

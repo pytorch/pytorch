@@ -24,7 +24,7 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 
-from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
+from torch.ao.quantization.fx.quantize_handler import DefaultNodeQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,

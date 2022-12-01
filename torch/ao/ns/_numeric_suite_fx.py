@@ -123,7 +123,7 @@ from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_roo
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.match_utils import find_matches
 from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
-from torch.ao.quantization.fx.quantization_patterns import _get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,

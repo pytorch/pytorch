@@ -33,7 +33,8 @@ from .qconfig_mapping_utils import (
     update_qconfig_for_fusion,
 )
 
-from .quantization_patterns import (
+from .quantize_handler import (
+    _default_root_node_getter,
     _get_pattern_to_quantize_handlers,
     QuantizeHandler,
 )
@@ -296,12 +297,6 @@ def add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str])
     elif isinstance(matched_node_pattern, (list, tuple)):
         for maybe_node in matched_node_pattern:
             add_matched_node_name_to_set(maybe_node, s)
-
-# this is temporary, will be removed soon
-def _default_root_node_getter(node_pattern):
-    while not isinstance(node_pattern, Node):
-        node_pattern = node_pattern[-1]
-    return node_pattern
 
 def insert_observer(
     node: Node,
@@ -929,9 +924,7 @@ def maybe_propagate_dtype_for_node(
 ) -> None:
     """
     Assigns `target_dtype` to `node`, setting `is_dynamic` to False. If `node`
-    is a general tensor shape op
-    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
-    also call this function recursively on
+    is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype_info[node.name]["input_activation_dtype"] = (target_dtype, False)
