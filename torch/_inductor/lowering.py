@@ -1014,6 +1014,20 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
+        if torch._C.has_mkl:
+
+            @register_lowering(torch.ops.mkl._mkl_linear)
+            def mkl_packed_linear(
+                x: TensorBox,
+                packed_w: TensorBox,
+                orig_w: TensorBox,
+                b: TensorBox,
+                batch_size,
+            ):
+                return TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+                )
+
     else:
         pass
 
@@ -3483,18 +3497,16 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-# TODO - enable builtin and disable decomp to lower to ptx instruction
-# Causes compilation to not complete on timm_vision_transformers inference
-# @register_lowering(aten.rsqrt)
-# def rsqrt(x):
-#     dtype = x.get_dtype()
-#     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-#         x = to_dtype(x, torch.get_default_dtype())
-#
-#     def _rsqrt(x):
-#         return ops.rsqrt(x)
-#
-#     return make_pointwise(_rsqrt)(x)
+@register_lowering(aten.rsqrt)
+def rsqrt(x):
+    dtype = x.get_dtype()
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        x = to_dtype(x, torch.get_default_dtype())
+
+    def _rsqrt(x):
+        return ops.rsqrt(x)
+
+    return make_pointwise(_rsqrt)(x)
 
 
 @register_lowering([aten.sum, prims.sum])

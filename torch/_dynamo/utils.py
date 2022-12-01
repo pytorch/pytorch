@@ -319,8 +319,7 @@ def istensor(obj):
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
-    if fake_tensors_available:
-        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
     return istype(obj, tensor_list)
 
 
@@ -690,88 +689,86 @@ def rename_implicit(v):
     return v
 
 
-# FakeTensors were introduced after pytorch 1.12, so gate their use
-# to allow pytorch 1.12 to work
-fake_tensors_available = True
-try:
-    from torch._subclasses import (  # noqa: F401
-        FakeTensorMode,
-        UnsupportedFakeTensorException,
-    )
+from torch._subclasses import (  # noqa: F401
+    FakeTensorMode,
+    UnsupportedFakeTensorException,
+)
 
-    def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
-        fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-        if tx is not None:
-            from torch._dynamo.guards import TensorReference
 
-            def _record(tensor_ref):
-                if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
+    fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
+    if tx is not None:
+        from torch._dynamo.guards import TensorReference
 
-            def _extract(symbol):
-                if isinstance(symbol, int):
-                    return None
-                sym_expr = symbol.get_pyobj().expr
-                if not isinstance(sym_expr, sympy.Symbol):
-                    return None
-                return sym_expr
+        def _record(tensor_ref):
+            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
+                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
+            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
-            def _record_ref(e, index, symbol, kind):
-                sym_expr = _extract(symbol)
-                if sym_expr:
-                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                    _record(tensor_ref)
+        def _extract(symbol):
+            if isinstance(symbol, int):
+                return None
+            sym_expr = symbol.get_pyobj().expr
+            if not isinstance(sym_expr, sympy.Symbol):
+                return None
+            return sym_expr
 
-            for index, symbol in enumerate(fake_tensor.size()):
-                _record_ref(e, index, symbol, "size")
+        def _record_ref(e, index, symbol, kind):
+            sym_expr = _extract(symbol)
+            if sym_expr:
+                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                _record(tensor_ref)
 
-            for index, symbol in enumerate(fake_tensor.stride()):
-                _record_ref(e, index, symbol, "stride")
+        for index, symbol in enumerate(fake_tensor.size()):
+            _record_ref(e, index, symbol, "size")
 
-            offset = fake_tensor.storage_offset()
-            _record_ref(e, None, offset, "storage_offset")
+        for index, symbol in enumerate(fake_tensor.stride()):
+            _record_ref(e, index, symbol, "stride")
 
-        return fake_tensor
+        offset = fake_tensor.storage_offset()
+        _record_ref(e, None, offset, "storage_offset")
 
-    def wrap_fake_exception(fn):
-        try:
-            return fn()
-        except UnsupportedFakeTensorException as e:
-            from .exc import unimplemented
+    return fake_tensor
 
-            msg = f"Unsupported: {e.reason} with fake tensor propagation. Run with config.fake_tensor_propagation=False"
-            log.warning(msg)
-            raise unimplemented(msg)
 
-    def wrap_to_fake_tensor(e, fake_mode):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(
-                lambda: make_fake_tensor(
-                    e, fake_mode, static_shapes=config.dynamic_shapes is False
-                )
+def wrap_fake_exception(fn):
+    try:
+        return fn()
+    except UnsupportedFakeTensorException as e:
+        from .exc import unimplemented
+
+        msg = f"Unsupported: {e.reason} with fake tensor propagation."
+        log.warning(msg)
+        raise unimplemented(msg)
+
+
+def wrap_to_fake_tensor(e, fake_mode):
+    if type(e) in (torch.Tensor, torch.nn.Parameter):
+        return wrap_fake_exception(
+            lambda: make_fake_tensor(
+                e, fake_mode, static_shapes=config.dynamic_shapes is False
             )
-        else:
-            return e
+        )
+    else:
+        return e
 
-    def wrap_to_fake_tensor_and_record(e, tx):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            static_shapes = config.dynamic_shapes is False
-            if type(e) is torch.nn.Parameter:
-                # Always static for params
-                static_shapes = True
-            return wrap_fake_exception(
-                lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
-            )
-        else:
-            return e
 
-    def deepcopy_to_fake_tensor(obj, fake_mode):
-        with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
-            return wrap_fake_exception(lambda: copy.deepcopy(obj))
+def wrap_to_fake_tensor_and_record(e, tx):
+    if type(e) in (torch.Tensor, torch.nn.Parameter):
+        static_shapes = config.dynamic_shapes is False
+        if type(e) is torch.nn.Parameter:
+            # Always static for params
+            static_shapes = True
+        return wrap_fake_exception(
+            lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
+        )
+    else:
+        return e
 
-except ImportError:
-    fake_tensors_available = False
+
+def deepcopy_to_fake_tensor(obj, fake_mode):
+    with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
+        return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
 def rmse(ref, res):
@@ -1147,3 +1144,14 @@ def get_real_value(node, output_graph):
     except RuntimeError as e:
         raise TorchRuntimeError() from e
     return real_value
+
+
+def assert_no_fake_params_or_buffers(gm):
+    for name, buffer in gm.named_buffers():
+        assert not isinstance(
+            buffer, torch._subclasses.FakeTensor
+        ), f"Unexpected fake buffer {name}"
+    for name, param in gm.named_parameters():
+        assert not isinstance(
+            param, torch._subclasses.FakeTensor
+        ), f"Unexpected fake param {name}"
