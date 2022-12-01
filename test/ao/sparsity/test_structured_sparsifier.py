@@ -244,7 +244,7 @@ class TestBaseStructuredSparsifier(TestCase):
         model = model.to(device)
         model.eval()
         num_original_params = sum(p.numel() for p in model.parameters())
-        x = torch.ones(128, 7)
+        x = torch.ones(128, 7, device=device)
 
         pruner = ImplementedPruner({"prune_bias": also_prune_bias})
         pruner.prepare(model, config)
