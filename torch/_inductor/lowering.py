@@ -1826,19 +1826,26 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     )
 
 
-def check_and_broadcast_indices(indices):
+def check_and_broadcast_indices(indices, device):
     assert all(
         i.get_dtype() in (torch.int64, torch.int32, torch.bool, torch.uint8)
         for i in indices
         if i is not None
     ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
-    assert all(
-        [i.get_dtype() in (torch.int32, torch.int64) for i in indices if i is not None]
-    ), "bool indices are not supported yet"
+    if any(
+        i.get_dtype() in (torch.bool, torch.uint8) for i in indices if i is not None
+    ):
+        raise NotImplementedError("Fallback for bool indices")
+
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
     assert len(valid_idxs) > 0, "requires at least 1 non-None index"
     new_indices = [None] * len(indices)
     for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
+        # Eager allows indices to be CPU tensor when running on CUDA
+        # FIXME: Calling to_device(x, device) should work but
+        # test_advancedindex_mixed_cpu_devices still fails
+        if x.get_device() != device:
+            raise NotImplementedError("Fallback when indices is on a different device")
         new_indices[i] = x
         output_dim = len(x.get_size())
     start_offset = 0
@@ -1849,9 +1856,10 @@ def check_and_broadcast_indices(indices):
     while tmp and tmp[0] is None:
         tmp.pop(0)
         start_offset += 1
-    assert all((i is not None) for i in tmp)
-    end_offset = output_dim + start_offset
+    if any((i is None) for i in tmp):
+        raise NotImplementedError("Fallback when None is in the middle of indices")
 
+    end_offset = output_dim + start_offset
     return new_indices, start_offset, end_offset
 
 
@@ -1859,10 +1867,18 @@ def check_and_broadcast_indices(indices):
 def index(x, indices):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    try:
+        indices, start_offset, end_offset = check_and_broadcast_indices(
+            indices, x.get_device()
+        )
+    except NotImplementedError:
+        x.realize()
+        return fallback_handler(aten.index)(x, indices)
+
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
     # no guards on output size, all the guards are set in broadcast_tensors
+
     output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
@@ -1943,7 +1959,12 @@ def index_put_(self, indices, values, accumulate=False):
         return self
 
     values = to_dtype(values, self.get_dtype())
-    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    try:
+        indices, start_offset, end_offset = check_and_broadcast_indices(
+            indices, self.get_device()
+        )
+    except NotImplementedError:
+        return index_put_fallback(self, indices, values, accumulate)
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
 
