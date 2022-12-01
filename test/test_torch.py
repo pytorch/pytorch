@@ -358,7 +358,7 @@ class TestTorchDeviceType(TestCase):
             s0.tolist()
 
         with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
@@ -8477,6 +8477,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         y2 = y1.imag
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
+
+    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
+    def test_no_cuda_monkeypatch(self):
+        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
+        # is not available.
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+            torch.cuda.Stream()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+            torch.cuda.Event()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+            torch.cuda.graphs.CUDAGraph()
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

@@ -1237,7 +1237,6 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
     keep_arg_mask = []
     add_dupe_map = {}
     duped_arg_len = len(flat_args)
-    leafified_inputs = False
 
     j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):

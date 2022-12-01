@@ -1027,6 +1027,28 @@ def forward(self, primals_1, primals_2):
 
     @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_dupe_left_bias(self, counter):
+        # This test checks that, just because only the first
+        # argument did a metadata mutation, we still correctly
+        # switch to strategy 2 (deduplicate)
+        # See: https://github.com/pytorch/pytorch/pull/89896#discussion_r1036224447
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                x.t_()
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True)
+        self.verify_aot_autograd(F(), [x, x])
+
+        fxx = aot_module_simplified(F(), (x, x), nop)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""
+        )
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
     def test_invalid_dupe(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
