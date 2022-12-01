@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 
-if 'BUILD_ENVIRONMENT' not in os.environ:
+if 'BUILD_ENVIRONMENT' not in os.environ and 'CD' in os.environ:
     os.environ['CONDA_PARENT_DIR'] = os.environ['CD']
 else:
     os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
