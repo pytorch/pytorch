@@ -1026,6 +1026,11 @@ def get_debug_dir():
     return _get_debug_dir(debug_root)
 
 
+DYNAMO_SUPPORTED_COLLECTIVES = {
+    torch.distributed.all_reduce,
+}
+
+
 def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
@@ -1037,6 +1042,11 @@ def get_fake_value(node, tx):
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
+
+    if node.op == "call_function" and node.target in DYNAMO_SUPPORTED_COLLECTIVES:
+        # HACK- collectives generally mutate in-place and don't change shape/dtype
+        # and.. node.kwargs doesn't have example_value, so fails `visit`
+        return node.args[0].meta["example_value"].clone()
 
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
     args = tree_map(fake_wrapper, args)

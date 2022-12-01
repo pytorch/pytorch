@@ -121,13 +121,13 @@ class CheckSplitsCompiler:
         return gm
 
 @contextmanager
-def _per_rank_init(rank, world_size):
+def _per_rank_init(rank, world_size, backend="nccl"):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group(backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     yield
@@ -357,6 +357,54 @@ class TestDistributedMultiProc(MultiProcessTestCase):
                 opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
                 self.assertTrue(same(correct_results, opt_results))
 
+    def test_trace_allreduce(self):
+        """
+        Confirm allreduce op shows up in the graph, and ProcessGroup guards work
+        """
+        class CheckOpCompiler:
+            """
+            Records how many times the compiler is called,
+            and if the graph contains a particular op
+            """
+            def __init__(self, op_target):
+                self.compiler_called = 0
+                self.graphs_contain_op = 0
+                self.op_target = op_target
+
+            def compile_fn(self, gm, example_inputs):
+                self.compiler_called += 1
+                for node in gm.graph.nodes:
+                    if node.target == self.op_target:
+                        self.graphs_contain_op += 1
+                        break
+                return gm
+
+        input = torch.rand(20, 20).cuda(self.rank)
+        check_compiler = CheckOpCompiler(dist.all_reduce)
+
+        def test_fn(input: torch.Tensor, pg: dist.ProcessGroup) -> int:
+            tensor = input / (self.rank + 1)
+            dist.all_reduce(tensor, group=pg)
+            return tensor
+
+        opt_fn = torch._dynamo.optimize(check_compiler.compile_fn)(test_fn)
+        with _per_rank_init(self.rank, self.world_size, backend="gloo"):
+            ref_out = test_fn(input, dist.group.WORLD)
+            # repeated calls with the same PG reuse the compiled code
+            for _ in range(2):
+                opt_out = opt_fn(input, dist.group.WORLD)
+                self.assertTrue(same(ref_out, opt_out))
+                self.assertEqual(1, check_compiler.compiler_called)
+                self.assertEqual(1, check_compiler.graphs_contain_op)
+
+        with _per_rank_init(self.rank, self.world_size, backend="nccl"):
+            ref_out = test_fn(input, dist.group.WORLD)
+            # a new PG causes one recompilation
+            for _ in range(2):
+                opt_out = opt_fn(input, dist.group.WORLD)
+                self.assertTrue(same(ref_out, opt_out))
+                self.assertEqual(2, check_compiler.compiler_called)
+                self.assertEqual(2, check_compiler.graphs_contain_op)
 
 @requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
