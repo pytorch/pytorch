@@ -624,20 +624,22 @@ class Reduction(Loops):
             if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
         ]
         indices = []
-        for md in reversed(sorted(read_writes.reads)):
+        for md in sorted(read_writes.reads):
             if all([r in md.index.free_symbols for r in range_vars]):
                 indices.append(md.index)
                 if md.name in V.graph.name_to_buffer:
                     buf = V.graph.name_to_buffer[md.name]
                     buf.decide_layout()
-        if len(indices) == 0: #not index:
+        if len(indices) == 0:
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
         for md in sorted(read_writes.writes):
             write_index = md.index
         xranges = write_index.free_symbols
         reduction_vars = [
-            rv for rv in range_vars if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
+            rv
+            for rv in range_vars
+            if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
         ]
         num_outer = 0
         num_inner = 0
@@ -961,7 +963,11 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
             reduction_hint = ReductionHint.OUTER_TINY
-        if split <= 1024 and numel_hint <= 256 and reduction_hint == ReductionHint.OUTER:
+        if (
+            split <= 1024
+            and numel_hint <= 256
+            and reduction_hint == ReductionHint.OUTER
+        ):
             reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
@@ -1765,9 +1771,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(
-            device, dtype, size, strides
-        )
+        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -2062,8 +2066,6 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
-
-
     def simplify_and_reorder(self):
         """
         This is a main place where we do loop transformations in a
@@ -2136,7 +2138,6 @@ class ComputedBuffer(Buffer):
             sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
                 x_vars,
                 sizes,
-                #index_formulas,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
             x_vars = prune(x_vars)
