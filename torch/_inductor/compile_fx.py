@@ -132,7 +132,9 @@ def compile_fx_inner(
         if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
             shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
+    graph = GraphLowering(
+        gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id
+    )
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
