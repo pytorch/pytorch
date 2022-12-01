@@ -775,10 +775,6 @@ class CommonTemplate:
                 torch.randn(26),
             ),
         )
-        print(
-            torch._inductor.metrics.ir_nodes_pre_fusion,
-            torch._inductor.metrics.generated_kernel_count,
-        )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count,

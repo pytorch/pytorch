@@ -250,6 +250,13 @@ class FusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
+    def test_softmax_outer(self):
+        def f(a):
+            return torch.softmax(a, dim=0)
+
+        inp = (T(10, 10),)
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
+
     def test_layer_norm(self):
         # TODO: Suboptimal! We shouldn't need to save normalization stats.
         mod = torch.nn.LayerNorm(10, device=self.device)
@@ -396,14 +403,6 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """210""")
-
-    # TODO: We aren't fusing outer dim softmaxes
-    def test_softmax_outer(self):
-        def f(a):
-            return torch.softmax(a, dim=0)
-
-        inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     # TODO: The greedy fusion strategy results in suboptimal grouping
     @patch.object(config, "realize_bytes_threshold", 0)
