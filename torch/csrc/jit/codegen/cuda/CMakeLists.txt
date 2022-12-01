@@ -1,5 +1,15 @@
-cmake_minimum_required(VERSION 3.0)
-project(nvfuser)
+if(NOT BUILD_NVFUSER)
+  return()
+else()
+  cmake_minimum_required(VERSION 3.0)
+  project(nvfuser)
+endif()
+
+if(NOT USE_ROCM)
+  set(TORCHLIB_FLAVOR torch_cuda)
+else()
+  set(TORCHLIB_FLAVOR torch_hip)
+endif()
 
 # ---
 set(NVFUSER_ROOT ${PROJECT_SOURCE_DIR})
@@ -146,19 +156,33 @@ set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
 
-target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
-# NB: This must be target_compile_definitions, not target_compile_options,
-# as the latter is not respected by nvcc
-target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+if(NOT USE_ROCM)
+  target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+else()
+  target_compile_options(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+  target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+  target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE
+    USE_ROCM
+    __HIP_PLATFORM_HCC__
+    )
+endif()
 
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB} torch::nvtoolsext)
+if(NOT USE_ROCM)
+  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR} ${CUDA_NVRTC_LIB} torch::nvtoolsext)
+  target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${CUDA_INCLUDE_DIRS})
+else()
+  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR} ${ROCM_HIPRTC_LIB})
+  target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${Caffe2_HIP_INCLUDE})
+endif()
 if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
 endif()
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
-                           PRIVATE ${TORCH_ROOT} # replace this one with nvfuser_srcs_dir?!
-                           PRIVATE ${CUDA_INCLUDE_DIRS})
+                           PRIVATE ${TORCH_ROOT}) # replace this one with nvfuser_srcs_dir?!
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -176,14 +200,22 @@ if(BUILD_PYTHON)
   #pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
   #add_library(${NVFUSER_PYTHON} MODULE ${NVFUSER_PYTHON_SRCS})
   add_library(${NVFUSER_PYTHON} SHARED ${NVFUSER_PYTHON_SRCS})
-  target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
-  # NB: This must be target_compile_definitions, not target_compile_options,
-  # as the latter is not respected by nvcc
-  target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  if(NOT USE_ROCM)
+    target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+    # NB: This must be target_compile_definitions, not target_compile_options,
+    # as the latter is not respected by nvcc
+    target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+    target_link_libraries(${NVFUSER_PYTHON} PRIVATE torch::nvtoolsext)
+  else()
+    target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+    target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+    target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE
+      USE_ROCM
+      __HIP_PLATFORM_HCC__
+      )
+  endif()
 
-  message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
-  message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
-  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch torch_python torch_cuda pybind::pybind11 torch::nvtoolsext)
+  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch torch_python ${TORCHLIB_FLAVOR} pybind::pybind11)
   if(NOT MSVC)
     target_compile_options(${NVFUSER_PYTHON} PRIVATE -Wno-unused-variable)
   endif()
@@ -266,34 +298,39 @@ endforeach()
 target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/include")
 
 # -- tests
+if(USE_CUDA)
+  set(JIT_TEST_SRCS)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_record.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu1.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu2.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu3.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensor_factories.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_fused_reduction.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_shift.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensorcore.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_view.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_transpose.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_utils.cpp)
 
-set(JIT_TEST_SRCS)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_record.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu1.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu2.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu3.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensor_factories.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_fused_reduction.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_shift.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensorcore.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_view.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_transpose.cpp)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
-list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_utils.cpp)
+  add_executable(tests
+  	       ${TORCH_ROOT}/test/cpp/common/main.cpp
+  	       ${TORCH_ROOT}/test/cpp/jit/test_utils.cpp
+  	       ${JIT_TEST_SRCS})
 
-add_executable(tests
-	       ${TORCH_ROOT}/test/cpp/common/main.cpp
-	       ${TORCH_ROOT}/test/cpp/jit/test_utils.cpp
-	       ${JIT_TEST_SRCS})
+  target_compile_definitions(tests PRIVATE USE_GTEST)
+  if (NOT USE_ROCM)
+    target_compile_definitions(tests PRIVATE USE_CUDA)
+  else()
+    target_compile_definitions(tests PRIVATE USE_ROCM)
+  endif()
+  target_include_directories(tests PRIVATE "${NVFUSER_ROOT}" "${TORCH_ROOT}/torch/csrc/api/include/")
+  target_link_libraries(tests PRIVATE ${NVFUSER_CODEGEN} torch ${TORCHLIB_FLAVOR} gtest_main gmock_main)
+  if(NOT MSVC)
+    target_compile_options(tests PRIVATE -Wno-unused-variable)
+  endif()
 
-target_compile_definitions(tests PRIVATE USE_GTEST)
-target_compile_definitions(tests PRIVATE USE_CUDA)
-target_include_directories(tests PRIVATE "${NVFUSER_ROOT}" "${TORCH_ROOT}/torch/csrc/api/include/")
-target_link_libraries(tests PRIVATE ${NVFUSER_CODEGEN} torch torch_cuda gtest_main gmock_main)
-if(NOT MSVC)
-  target_compile_options(tests PRIVATE -Wno-unused-variable)
+  install(TARGETS tests DESTINATION bin)
 endif()
-
-install(TARGETS tests DESTINATION bin)

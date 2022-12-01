@@ -1169,7 +1169,7 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
-if(NOT USE_CUDA)
+if(NOT USE_CUDA AND NOT USE_ROCM)
   set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
 endif()
 
