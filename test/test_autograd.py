@@ -559,7 +559,7 @@ class TestAutograd(TestCase):
                 x, = ctx.saved_tensors
                 return gO * 2 * x
 
-        with torch.autograd.function._enable_autograd_function_extension():
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
             x = torch.randn([], requires_grad=True)
             y = MySquare.apply(x)
             gx, = torch.autograd.grad(y, x)
@@ -583,7 +583,7 @@ class TestAutograd(TestCase):
             def backward(ctx, gO, _):
                 return gO * ctx.two_x
 
-        with torch.autograd.function._enable_autograd_function_extension():
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
             x = torch.randn([], requires_grad=True)
             y, _ = MySquare.apply(x)
             gx, = torch.autograd.grad(y, x)
@@ -625,7 +625,7 @@ class TestAutograd(TestCase):
             self.assertEqual(y_expected, y)
             self.assertEqual(gx_expected, gx)
 
-        with torch.autograd.function._enable_autograd_function_extension():
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
             test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
             test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 

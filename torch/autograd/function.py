@@ -471,10 +471,10 @@ def traceable(fn_cls):
 
 # Private feature flag. Not user-facing.
 @contextlib.contextmanager
-def _enable_autograd_function_extension():
+def _set_autograd_function_extension_enabled(enabled=True):
     try:
         prev_state = torch._C._is_autograd_function_extension_enabled()
-        torch._C._set_autograd_function_extension_enabled(True)
+        torch._C._set_autograd_function_extension_enabled(enabled)
         yield
     finally:
         torch._C._set_autograd_function_extension_enabled(prev_state)
