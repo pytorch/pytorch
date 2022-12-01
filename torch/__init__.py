@@ -1120,6 +1120,31 @@ def compile(model: Optional[Callable] = None, *,
             mode: Union[str, None] = None,
             passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
             **kwargs) -> Callable:
+    """
+    Optimizes given model/function using Dynamo and specified backend
+
+    Args:
+       model (Callable): Module/function to optimize
+       fullgraph (bool): Whether it is ok to break model into several subgraphs
+       dynamic (bool): Use dynamic shape tracing
+       backend: (str or Callable): backend to be used
+       mode: (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       passes: (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
+                       - static-memory
+                       - matmul-tune
+                       - matmul-padding
+                       - trition-autotune
+                       - trition-bmm
+                       - triton-mm
+                       - trition-convolution
+                       - rematerialize-threshold
+                       - rematerialize-acc-threshold
+
+    Example::
+    @torch.compile(passes={"matmiul-padding": True}, fullgraph=True)
+    def foo(x):
+        return torch.sin(x) + torch.cos(x)
+    """
     # Decorator mode
     if model is None:
         def fn(model: Callable):
