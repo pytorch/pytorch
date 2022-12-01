@@ -53,7 +53,7 @@ try:
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
-    os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'
+    os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
         + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
     subprocess.run(['test_custom_backend.exe', 'model.pt'])

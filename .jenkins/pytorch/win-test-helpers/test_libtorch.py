@@ -46,7 +46,7 @@ subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\bin')
 os.environ['TMP_DIR_WIN'] = 'dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest'
 os.mkdir("dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest")
-os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;' +
+os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;' +\
     os.environ['TMP_DIR_WIN'] + '\\build\\torch\\lib;' + os.environ['PATH']
 
 os.environ['TEST_API_OUT_DIR'] = os.environ['TEST_OUT_DIR'] + '\\test_api'
