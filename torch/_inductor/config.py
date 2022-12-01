@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # dead code elimination
 dce = False
 
@@ -87,6 +93,8 @@ alignment_size = 4
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:

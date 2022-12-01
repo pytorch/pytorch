@@ -88,6 +88,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
