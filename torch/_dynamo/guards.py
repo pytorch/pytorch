@@ -805,7 +805,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
 
 def guard_fail_hook(
     guard_fn: Callable, code: types.CodeType, f_locals: Dict[str, Any], last: bool
-):
+) -> None:
     """
     called whenever a guard fails.
     """
