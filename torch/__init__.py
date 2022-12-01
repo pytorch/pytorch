@@ -1127,9 +1127,9 @@ def compile(model: Optional[Callable] = None, *,
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
        dynamic (bool): Use dynamic shape tracing
-       backend: (str or Callable): backend to be used
-       mode: (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       passes: (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
+       backend (str or Callable): backend to be used
+       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       passes (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
                        - static-memory
                        - matmul-tune
                        - matmul-padding
