@@ -15,9 +15,8 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo import disable as disable_torchdynamo
 from torch._dynamo.utils import dynamo_timed
-from torch._subclasses import FakeTensorMode, CrossRefFakeMode
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode, FakeTensor
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1197,9 +1196,10 @@ def describe_input(i, aot_config):
 # the same storage, so long as they have separate TensorImpls.)
 def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
-    _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-        flat_fn
-    )(*flat_args)
+    with enable_python_dispatcher():
+        _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            flat_fn
+        )(*flat_args)
 
     # pre-compute, so we can bail out quickly in the hotpath
     _num_outputs_aliased_to_inputs = len([
@@ -1315,7 +1315,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         fw_metadata = _fw_metadata
 
         @staticmethod
-        @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
 
             # There is a pretty complicated calling convention around what the compiled fw returns.
@@ -1361,7 +1360,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
-        @disable_torchdynamo
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
@@ -1607,17 +1605,29 @@ def create_aot_dispatcher_function(
     if config.use_dynamic_shapes:
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    # Check flat_args to see if they're already fake.  If so, use that fake
+    # mode instead.
+
+    for x in flat_args:
+        if isinstance(x, FakeTensor):
+            fake_mode = x.fake_mode
+            break
+    else:
+        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor:
+            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
                 def convert(idx, x):
                     if not isinstance(x, torch.Tensor):
+                        return x
+                    if isinstance(x, FakeTensor):
+                        assert x.fake_mode is fake_mode
                         return x
                     if idx < aot_config.num_params_buffers and config.static_weight_shapes:
                         return fake_mode.from_tensor(x, static_shapes=True)
@@ -1857,6 +1867,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
     mod: nn.Module,
+    args,
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
@@ -1937,27 +1948,30 @@ def aot_module_simplified(
         aot_id=next(AOT_COUNTER),
     )
 
-    compiled_fn = None
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
 
-    @wraps(functional_call)
-    def compiled_f(*args):
-        nonlocal compiled_fn
-        if compiled_fn is None:
-            compiled_fn = create_aot_dispatcher_function(
-                functional_call,
-                args,
-                aot_config,
-            )
-        return compiled_fn(args)
+    compiled_fn = create_aot_dispatcher_function(
+        functional_call,
+        full_args,
+        aot_config,
+    )
 
-    def forward(*args):
-        return compiled_f(
-            *params_flat,
-            *args,
-        )
+    # TODO: There is something deeply wrong here; compiled_fn running with
+    # the boxed calling convention, but aot_module_simplified somehow
+    # historically returned a function that was not the boxed calling
+    # convention.  This should get fixed...
+    def forward(*runtime_args):
+        full_args = []
+        full_args.extend(params_flat)
+        full_args.extend(runtime_args)
+        return compiled_fn(full_args)
 
+    # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+
     return forward
 
 

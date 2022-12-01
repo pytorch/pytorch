@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Union, Callable, List, Any
+from typing import Union, Callable, List, Any, Optional, Dict
 from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
 import torch
@@ -38,8 +38,9 @@ from common_utils import (
     skip,
     skipOps,
 )
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 USE_TORCHVISION = False
 try:
@@ -254,6 +255,7 @@ class TestAOTAutograd(AOTTestCase):
         *,
         test_mutation: bool = False,
         return_fw_graph: bool = False,
+        decompositions: Optional[Dict] = None,
     ):
         # Some tests pass in a callable for inp, to generate the inputs
         # (useful if we want to generate complicated aliasing inputs)
@@ -291,9 +293,11 @@ class TestAOTAutograd(AOTTestCase):
 
         fw_graph_cell = [None]
         if isinstance(f, nn.Module):
-            compiled_f = aot_module(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_module(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         else:
-            compiled_f = aot_function(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_function(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
         test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_grad, test_grad)
@@ -305,7 +309,10 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(ref_o, torch.Tensor):
                 self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                 self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                self.assertEqual(ref_o._is_view(), test_o._is_view())
+                if ref_o.requires_grad:
+                    # _is_view() should probably unconditionally be the same,
+                    # but in practice I don't think this matters for tensors that don't require grad
+                    self.assertEqual(ref_o._is_view(), test_o._is_view())
                 self.assertEqual(ref_o, test_o)
                 if test_mutation:
                     # This tests that autograd meta is set properly on the output we can
@@ -425,6 +432,29 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
 
+    def test_input_mutation_batchnorm(self):
+        def f(inpt, weight, bias, running_mean, running_var):
+            # This is additionally a good test, because the input tensors that we mutate
+            # are *also* saved for backwards.
+            # This tests that what we save for the backward is actually cloned inputs,
+            # and not the original inputs that got mutated.
+            return torch._native_batch_norm_legit(inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5)
+        inp = [
+            torch.ones(2, 5, 5, 5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5),
+            torch.ones(5),
+        ]
+
+        from torch._decomp import get_decompositions
+        # This simulates what inductor does (running the fw + bw decompositions)
+        decompositions = get_decompositions([
+            torch.ops.aten._native_batch_norm_legit_functional,
+            torch.ops.aten.native_batch_norm_backward,
+        ])
+        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True, decompositions=decompositions)
+
     def test_input_output_view_simple(self):
         def f(a):
             return a.view(-1)
@@ -524,6 +554,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add_1 = torch.ops.aten.add.Tensor(primals_4, 1);  primals_4 = None
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
     return [add, add_1, add_2, 2, 2, 1, 2, 0, 2, 3, 0]""")
+
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -995,11 +1026,11 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         y = torch.randn(3, 3, requires_grad=True)
 
-        fxy = aot_module_simplified(F(), nop)
+        fxy = aot_module_simplified(F(), (x, y), nop)
         fxy(x, y)
         fxy(x, x)  # is ok!
 
-        fxx = aot_module_simplified(F(), nop)
+        fxx = aot_module_simplified(F(), (x, x), nop)
         fxx(x, x)
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
@@ -1024,11 +1055,11 @@ def forward(self, primals_1, primals_2):
             self.assertEqual(r1, r2)
             self.assertEqual(g1, g2)
 
-        fxy = aot_module_simplified(F(), nop)
+        fxy = aot_module_simplified(F(), (x, y), nop)
         compare(F(), fxy, (x, y))
         compare(F(), fxy, (x, z))
 
-        fxz = aot_module_simplified(F(), nop)
+        fxz = aot_module_simplified(F(), (x, z), nop)
         compare(F(), fxz, (x, z))
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxz(x, y),
@@ -1420,6 +1451,14 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
+        def f(x):
+            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
+
+        ins, outs = get_ins_outs(fw_graph)
+        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_recomputable_ops(self):
         def f(x):
@@ -1537,14 +1576,51 @@ class TestAOTModuleSimplified(AOTTestCase):
         ref = mod(*inputs)
         ref[0].sum().backward()
 
-        aot_mod = aot_module_simplified(mod, nop)
-        aot_mod.zero_grad()
-        res = aot_mod(*cloned_inputs)
+        compiled_f = aot_module_simplified(mod, cloned_inputs, nop)
+        mod.zero_grad()
+        res = compiled_f(*cloned_inputs)
         res[0].sum().backward()
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    def test_aot_module_simplified_dynamic(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        mod = MockModule()
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+
+        inputs = [x, y]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        ref = mod(*inputs)
+        ref[0].sum().backward()
+
+        cloned_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+        res = compiled_f(*cloned_inputs)
+        res[0].sum().backward()
+
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(s1, 20)
+ - Eq(s2, 30)""")
+
+        assert torch.allclose(ref[0], res[0])
+        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
+        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
@@ -1577,12 +1653,12 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
-
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
-        res = aot_mod(*inputs)
+
+        compiled_f = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
+        res = compiled_f(*inputs)
         res[0].sum().backward()
 
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
@@ -1615,14 +1691,14 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod_fake = torch.fx.GraphModule(tracer.root, graph)
 
         self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
             """Unexpected fake buffer y"""
         )
         # Counterfactual to ensure that the raise is only due to real vs fake
         # Run the same exact thing except with a real buffer.
         graph = tracer.trace(MockModule(real_y))
         mod_real = torch.fx.GraphModule(tracer.root, graph)
-        aot_module_simplified(MockModule(real_y), nop)
+        aot_module_simplified(MockModule(real_y), (real_x,), nop)
 
     def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
         class MockModule(torch.nn.Module):
@@ -1644,7 +1720,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
         self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
             """Unexpected fake param linear.weight"""
         )
 
