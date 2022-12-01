@@ -1571,6 +1571,9 @@ def nop_decomposition(x):
     return aten.alias(x)
 
 
+# Also register to the Autograd dispatch key, so this decomp can run above autograd.
+# native_batch_norm needs to decompose into other ops before autograd.
+@torch.ops.aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.cudnn_batch_norm)
 def cudnn_batch_norm(
     input: Tensor,
@@ -1624,6 +1627,10 @@ def native_batch_norm_backward(
     output_mask: List[bool],
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_dtype = input.dtype
+    if weight is not None:
+        weight_dtype = weight.dtype
+    else:
+        weight_dtype = input_dtype
     computation_dtype = utils.get_computation_dtype(input.dtype)
     (
         grad_out_cast,
@@ -1701,8 +1708,8 @@ def native_batch_norm_backward(
 
     return (
         grad_input.to(input_dtype),
-        _maybe_cast(grad_weight, input_dtype),
-        _maybe_cast(grad_bias, input_dtype),
+        _maybe_cast(grad_weight, weight_dtype),
+        _maybe_cast(grad_bias, weight_dtype),
     )
 
 

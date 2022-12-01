@@ -542,14 +542,14 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      weight.options(),
+      bias_rearranged.options(),
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
     v_bias.set_is_quantized();
-    v_bias.set_scale(weight.q_scale());
-    v_bias.set_zero_point(weight.q_zero_point());
+    v_bias.set_scale(bias_rearranged.q_scale());
+    v_bias.set_zero_point(bias_rearranged.q_zero_point());
   }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);
