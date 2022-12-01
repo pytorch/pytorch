@@ -424,6 +424,13 @@ class Function(_SingleLevelFunction):
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
             return super().apply(*args, **kwargs)
+
+        if not hasattr(cls, 'setup_context'):
+            # TODO: link documentation in error message
+            raise RuntimeError(
+                'In order to use an autograd.Function with functorch transforms ',
+                '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
+                'staticmethod.')
         return custom_function_call(cls, *args, **kwargs)
 
 def once_differentiable(fn):
