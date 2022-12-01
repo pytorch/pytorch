@@ -15,6 +15,28 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
+def append_multiple_lines(file_name, lines_to_append):
+    # Open the file in append & read mode ('a+')
+    with open(file_name, "a+") as file_object:
+        appendEOL = False
+        # Move read cursor to the start of file.
+        file_object.seek(0)
+        # Check if file is not empty
+        data = file_object.read(100)
+        if len(data) > 0:
+            appendEOL = True
+        # Iterate over each string in the list
+        for line in lines_to_append:
+            # If file is not empty then append '\n' before first line for
+            # other lines always append '\n' before appending line
+            if appendEOL == True:
+                file_object.write("\n")
+            else:
+                appendEOL = True
+            # Append element at the end of file
+            file_object.write(line)
+
+
 
 if os.environ['DEBUG'] == '1':
     os.environ['BUILD_TYPE'] = 'debug'
@@ -151,11 +173,12 @@ if os.environ['USE_CUDA'] == '1':
 subprocess.run(['echo', '@echo', 'off', '>>', os.environ['TMP_DIR_WIN'] +
     '\\ci_scripts\\pytorch_env_restore.bat'])
 
-restore_file = open(str(os.environ['TMP_DIR_WIN']) + '\\ci_scripts\\pytorch_env_restore.bat', 'a+')
-set_file = open('set', 'r')
-restore_file.write(set_file.read())
-restore_file.close()
-set_file.close()
+env_arr = []
+
+for k, v in os.environ.items():
+    env_arr.append('set ' + k)
+
+append_multiple_lines(os.environ['TMP_DIR_WIN'] + '\\ci_scripts\\pytorch_env_restore.bat', env_arr)
 
 
 if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
