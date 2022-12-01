@@ -62,15 +62,15 @@ os.environ['PATH'] = 'C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;' +
 os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation-helpers'
 
 
-subprocess.run(['python', os.environ['INSTALLER_DIR'] + '\\install_mkl.py'])
-subprocess.run(['python', os.environ['INSTALLER_DIR'] + '\\install_magma.py'])
-subprocess.run(['python', os.environ['INSTALLER_DIR'] + '\\install_sccache.py'])
+subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
+subprocess.call(['python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
+subprocess.call(['python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-subprocess.run(['python', os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py'])
+subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
