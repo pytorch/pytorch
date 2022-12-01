@@ -14,11 +14,13 @@ else:
 # to install conda as before if it couldn't find the conda installation. This
 # can be removed eventually after we gain enough confidence in the AMI
 
+install_fresh_conda = ''
+
 if not exists(os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3'):
     os.environ['INSTALL_FRESH_CONDA'] = '1'
+    install_fresh_conda = os.environ['INSTALL_FRESH_CONDA']
 
 
-install_fresh_conda = os.environ['INSTALL_FRESH_CONDA']
 conda_parent_dir = os.environ['CONDA_PARENT_DIR']
 tmp_dir_win = os.environ['TMP_DIR_WIN']
 
