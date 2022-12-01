@@ -575,6 +575,8 @@ def handle_subgraph_candidate(
         else:
             if custom_prepare_kwargs is None:
                 custom_prepare_kwargs = {}
+            for kwarg_name in ["example_inputs", "prepare_custom_config", "qconfig_mapping"]:
+                assert kwarg_name not in custom_prepare_kwargs, "cannot specify {kwarg_name} in custom_prepare_kwargs"
             custom_prepare_kwargs["example_inputs"] = example_inputs
             custom_prepare_kwargs["prepare_custom_config"] = prepare_custom_config
             custom_prepare_kwargs["qconfig_mapping"] = qconfig_mapping
