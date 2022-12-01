@@ -2462,7 +2462,7 @@ void LLVMCodeGenImpl::visit(CondPtr v) {
   irb_.SetInsertPoint(end_block);
 }
 
- // "New" PassManager needed to replace TM.adjustPassManager
+// "New" PassManager needed to replace TM.adjustPassManager
 #if LLVM_VERSION_MAJOR >= 15
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   /*
