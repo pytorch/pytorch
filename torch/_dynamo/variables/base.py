@@ -46,21 +46,9 @@ class VariableTracker(object, metaclass=HasPostInit):
         guards = set()
 
         def visit(var):
-            if hasattr(var, "inner_guards") and var.inner_guards is not None:
-                guards.update(var.guards)
-                guards.update(var.inner_guards)
-                return
-
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
                     visit(i)
-            elif isinstance(var, variables.BaseListVariable):
-                guards.update(var.guards)
-                for i in var.items:
-                    visit(i)
-            elif isinstance(var, variables.ConstDictVariable):
-                guards.update(var.guards)
-                visit(var.items.values())
             else:
                 assert isinstance(var, VariableTracker), typestr(var)
                 guards.update(var.guards)
@@ -270,7 +258,6 @@ class VariableTracker(object, metaclass=HasPostInit):
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
-        inner_guards: Optional[Set] = None,
     ):
         super(VariableTracker, self).__init__()
         self.guards = guards or set()
@@ -279,12 +266,8 @@ class VariableTracker(object, metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
-        self.inner_guards = inner_guards
 
     def __post_init__(self, *args, **kwargs):
-        if self.inner_guards is None:
-            self.inner_guards = VariableTracker.propagate([self])["guards"]
-
         if self.recursively_contains is None:
             self.recursively_contains = set()
 

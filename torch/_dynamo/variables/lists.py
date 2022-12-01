@@ -24,13 +24,22 @@ class BaseListVariable(VariableTracker):
         }[obj]
 
     def __init__(
-        self, items: List[VariableTracker], recursively_contains=None, **kwargs
+        self,
+        items: List[VariableTracker],
+        recursively_contains=None,
+        guards=None,
+        **kwargs,
     ):
         super(BaseListVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
+            recursively_contains=recursively_contains, guards=guards, **kwargs
         )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
+
+        # update with contained guards
+        if guards is None:
+            self.guards.update(VariableTracker.propagate(items.values()))
+
         self.items: List[VariableTracker] = items
 
     def _as_proxy(self):

@@ -1123,14 +1123,12 @@ class InstructionTranslatorBase(object):
             if v.mutable_local:
                 new_rec_contains.add(v.mutable_local)
 
-        new_guards = VariableTracker.propagate([obj, v])
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
                 recursively_contains=new_rec_contains,
-                inner_guards=new_guards["guards"],  # don't compute this twice
-                **new_guards,
+                **VariableTracker.propagate([obj, v]),
             ),
         )
 
