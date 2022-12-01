@@ -68,7 +68,7 @@ using RegisterPass = RegisterPostPass;
  * types.
  */
 template <typename DerivedType>
-struct TORCH_API PassManager {
+struct C10_EXPORT PassManager {
  private:
   // We want this class to be abstract because it's
   virtual void abstract() = 0;
