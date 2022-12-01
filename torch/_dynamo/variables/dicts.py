@@ -25,7 +25,7 @@ class ConstDictVariable(VariableTracker):
 
         # update with contained guards
         if guards is None:
-            self.guards.update(VariableTracker.propagate(items.values()))
+            self.guards.update(VariableTracker.propagate(items.values())["guards"])
 
         self.items = items
         self.user_cls = user_cls
