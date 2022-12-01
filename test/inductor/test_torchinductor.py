@@ -1254,6 +1254,20 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_softmax_outer_dim_fusion(self):
+        def fn(a):
+            return torch.softmax(a, dim=0)
+
+        self.common(fn, (torch.randn(20, 20)))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_softmax_inner_dim_fusion(self):
+        def fn(a):
+            return torch.softmax(a, dim=1)
+
+        self.common(fn, (torch.randn(20, 20)))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     def test_log_softmax(self):
         def fn(a, b):
             return (F.log_softmax(a + b, -1), F.log_softmax(a, 0), F.log_softmax(b, 1))
