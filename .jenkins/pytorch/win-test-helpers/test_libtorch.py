@@ -42,7 +42,7 @@ def libtorch_check(file_name, file_full_path):
 if os.environ['USE_CUDA'] == '0' and not os.environ['CUDA_VERSION'] == 'cpu':
     sys.exit(0)
 
-subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\setup_pytorch_env.py', shell=True)
+subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\bin')
 os.environ['TMP_DIR_WIN'] = 'dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest'

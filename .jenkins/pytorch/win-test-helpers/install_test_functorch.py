@@ -16,7 +16,7 @@ def pushd(new_dir):
 
 try:
 
-    subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\setup_pytorch_env.py', shell=True)
+    subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 except Exception as e:
 

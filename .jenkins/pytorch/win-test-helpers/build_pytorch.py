@@ -41,15 +41,15 @@ os.environ['PATH'] = 'C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;'+\
 os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation-helpers'
 
 
-subprocess.run([os.environ['INSTALLER_DIR'] + '\\install_mkl.py'])
-subprocess.run([os.environ['INSTALLER_DIR'] + '\\install_magma.py'])
-subprocess.run([os.environ['INSTALLER_DIR'] + '\\install_sccache.py'])
+subprocess.run(['python', os.environ['INSTALLER_DIR'] + '\\install_mkl.py'])
+subprocess.run(['python',os.environ['INSTALLER_DIR'] + '\\install_magma.py'])
+subprocess.run(['python',os.environ['INSTALLER_DIR'] + '\\install_sccache.py'])
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-subprocess.run([os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py'])
+subprocess.run(['python',os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py'])
 
 # Install ninja and other deps
 if os.environ['REBUILD']=="":
@@ -179,7 +179,7 @@ if os.environ['REBUILD'] == '' and not os.environ['BUILD_ENVIRONMENT']=='':
     '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
 
 
-subprocess.call("setup.py bdist_wheel", shell=True)
+subprocess.call("python setup.py bdist_wheel", shell=True)
 subprocess.call("sccache --show-stats", shell=True)
 subprocess.call("python -c \"import os, glob; os.system(\'python -mpip install \' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"", shell=True)
 
@@ -197,7 +197,7 @@ else:
     '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z\" \"' + os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\\"', shell=True)
 
     # export test times so that potential sharded tests that'll branch off this build will use consistent data
-    subprocess.call('tools/stats/export_test_times.py', shell=True)
+    subprocess.call('python tools/stats/export_test_times.py', shell=True)
     shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
 
     # Also save build/.ninja_log as an artifact

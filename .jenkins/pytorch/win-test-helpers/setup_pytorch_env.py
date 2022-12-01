@@ -35,7 +35,7 @@ os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation
 # Miniconda has been installed as part of the Windows AMI with all the dependencies.
 # We just need to activate it here
 try:
-    subprocess.call(os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+    subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 except Exception as e:
 
     subprocess.run(['echo', 'activate conda failed'])

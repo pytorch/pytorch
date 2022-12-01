@@ -14,7 +14,7 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
-subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\setup_pytorch_env.py', shell=True)
+subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--jobs',\
  '0', 'third_party/pybind11'])

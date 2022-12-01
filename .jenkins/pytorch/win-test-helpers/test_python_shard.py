@@ -20,7 +20,7 @@ def pushd(new_dir):
 
 try:
 
-    subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\setup_pytorch_env.py', shell=True)
+    subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\setup_pytorch_env.py', shell=True)
 
 except Exception as e:
 
@@ -41,7 +41,7 @@ with pushd('test'):
 
         try:
             subprocess.run([gflags_exe, '/i', 'python.exe', '+sls'])
-            subprocess.call(str(os.environ['SCRIPT_HELPERS_DIR']) + '\\run_python_nn_smoketests.py', shell=True)
+            subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\run_python_nn_smoketests.py', shell=True)
             subprocess.run([gflags_exe, '/i', 'python.exe', '-sls'])
 
         except Exception as e:
