@@ -668,14 +668,27 @@ def _get_devices_properties(device_ids):
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
 
+# can be used in JIT script.
+def is_backend_available(device_type: str) -> bool:
+    if device_type == "cuda":
+        return torch._C._is_hooks_available("cuda") and torch.cuda.device_count() > 0
+    if device_type == "xpu":
+        return torch._C._is_hooks_available("xpu") and torch._xpu.device_count() > 0  # type: ignore[attr-defined]
+    # add more available device types here
+    return False
+
+
 def get_current_device_index() -> int:
-    r"""Checks if there are CUDA devices available and
-    returns the device index of the current default CUDA device.
-    Returns -1 in case there are no CUDA devices available.
+    r"""Checks if there are GPU devices available and
+    returns the device index of the current default GPU device.
+    Returns -1 in case there are no GPU devices available.
     Arguments: ``None``
     """
-    if torch.cuda.device_count() > 0:
+    if is_backend_available("cuda"):
         return torch.cuda.current_device()
+    if is_backend_available("xpu"):
+        return torch._xpu.current_device()  # type: ignore[attr-defined]
+    # add more available device types here
     return -1
 
 

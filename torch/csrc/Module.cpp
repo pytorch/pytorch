@@ -450,6 +450,54 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_isHooksAvailable_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_is_hooks_available expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "cuda" && at::hasCUDA()) {
+    Py_RETURN_TRUE;
+  }
+  if (device_type == "xpu" && at::hasXPU()) {
+    Py_RETURN_TRUE;
+  }
+  if (device_type == "mps" && at::hasMPS()) {
+    Py_RETURN_TRUE;
+  }
+  // add more available device types here
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_getDeviceCount_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_get_device_count expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "xpu" && at::hasXPU()) {
+    return THPUtils_packUInt64(at::detail::getXPUHooks().device_count());
+  }
+  // add more available device types here
+  return THPUtils_packUInt64(0);
+}
+
+PyObject* THPModule_getDevice_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_get_device expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "xpu" && at::hasXPU()) {
+    return THPUtils_packInt64(at::detail::getXPUHooks().current_device());
+  }
+  // add more available device types here
+  return THPUtils_packInt64(-1);
+}
+
 PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   size_t frames_to_skip;
@@ -1070,6 +1118,9 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_is_hooks_available", THPModule_isHooksAvailable_wrap, METH_O, nullptr},
+    {"_get_device_count", THPModule_getDeviceCount_wrap, METH_O, nullptr},
+    {"_get_device", THPModule_getDevice_wrap, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,

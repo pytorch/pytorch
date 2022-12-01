@@ -106,6 +106,18 @@ struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
       const std::string& field) override;
 };
 
+// Used for desugaring uses of the torch.xpu module. Only two XPU APIs
+// device_count and current_device are resolved using XPUPythonModuleValue in
+// order to support JIT script.
+struct VISIBILITY_HIDDEN XPUPythonModuleValue : public PythonValue {
+  explicit XPUPythonModuleValue(py::object mod) : PythonValue(std::move(mod)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      GraphFunction& m,
+      const std::string& field) override;
+};
+
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   ConstantParameterList(Value* the_list) : the_list_(the_list) {}

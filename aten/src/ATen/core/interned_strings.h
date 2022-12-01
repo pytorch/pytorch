@@ -18,6 +18,7 @@ namespace c10 {
   _(namespaces, nvprims)             \
   _(namespaces, aten)                \
   _(namespaces, cuda)                \
+  _(namespaces, xpu)                 \
   _(namespaces, onnx)                \
   _(namespaces, attr)                \
   _(namespaces, scope)               \

@@ -139,6 +139,7 @@ Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::strin
 bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 bool Symbol::is_cuda() const { return ns() == namespaces::cuda; }
+bool Symbol::is_xpu() const { return ns() == namespaces::xpu; }
 bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 bool Symbol::is_prims() const { return ns() == namespaces::prims; }
 bool Symbol::is_nvprims() const { return ns() == namespaces::nvprims; }

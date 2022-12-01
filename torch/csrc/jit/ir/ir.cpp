@@ -1209,7 +1209,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda() || kind_.is_xpu()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
