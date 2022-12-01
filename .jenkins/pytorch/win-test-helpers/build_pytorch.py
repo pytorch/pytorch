@@ -52,13 +52,13 @@ subprocess.run(['python',os.environ['INSTALLER_DIR'] + '\\install_sccache.py'])
 subprocess.run(['python',os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py'])
 
 # Install ninja and other deps
-if os.environ['REBUILD']=="":
+if 'REBUILD' not in os.environ:
     subprocess.run(['pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses',\
      'typing_extensions', "expecttest==0.1.3"])
 
 # Override VS env here
 with pushd('.'):
-    if os.environ['VC_VERSION'] == '':
+    if 'VC_VERSION' not in os.environ:
         subprocess.call('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +\
         os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +\
         'VC\Auxiliary\Build\vcvarsall.bat x64', shell=True)
@@ -163,7 +163,7 @@ set_file.close()
 subprocess.run(['@echo', 'on'])
 
 
-if os.environ['REBUILD'] == '' and not os.environ['BUILD_ENVIRONMENT']=='':
+if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
 
     # Create a shortcut to restore pytorch environment
     subprocess.run(['echo', '@echo', 'off', '>>', os.environ['TMP_DIR_WIN'] +\
@@ -184,7 +184,7 @@ subprocess.call("sccache --show-stats", shell=True)
 subprocess.call("python -c \"import os, glob; os.system(\'python -mpip install \' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"", shell=True)
 
 
-if os.environ['BUILD_ENVIRONMENT'] == '':
+if 'BUILD_ENVIRONMENT' not in os.environ:
     subprocess.call('echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call ' +\
     os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat ' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\'' +\
     ' in Command Prompt before running Git Bash.', shell=True)

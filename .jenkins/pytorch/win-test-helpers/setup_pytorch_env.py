@@ -15,7 +15,6 @@ def pushd(new_dir):
         os.chdir(previous_dir)
 
 
-build_environment = os.environ['BUILD_ENVIRONMENT']
 tmp_dir = os.environ['TMP_DIR']
 
 
@@ -43,7 +42,7 @@ except Exception as e:
     sys.exit()
 
 # extra conda dependencies for testing purposes
-if not build_environment == '':
+if 'BUILD_ENVIRONMENT' in os.environ:
 
     try:
         subprocess.run(['conda', 'install', '-y', '-q', 'mkl', 'protobuf',\
@@ -58,7 +57,7 @@ if not build_environment == '':
 with pushd('.'):
 
     try:
-        if os.environ['VC_VERSION'] == '':
+        if 'VC_VERSION' not in os.environ:
             subprocess.run(['C:\\Program Files (x86)\\Microsoft Visual Studio\\' +\
             os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +\
              '\\VC\Auxiliary\Build\vcvarsall.bat', 'x64'])
@@ -119,7 +118,7 @@ if os.environ['USE_CUDA'] == '1':
 
 os.environ['PYTHONPATH'] = str(os.environ['TMP_DIR_WIN']) + '\\build;' + str(os.environ['PYTHONPATH'])
 
-if not str(os.environ['BUILD_ENVIRONMENT']) == '':
+if 'BUILD_ENVIRONMENT' in os.environ:
 
     with pushd(str(os.environ['TMP_DIR_WIN']) + '\\build'):
 
@@ -149,7 +148,7 @@ set_file.close()
 
 subprocess.run(['@echo', 'on'])
 
-if not str(os.environ['BUILD_ENVIRONMENT']) == '':
+if 'BUILD_ENVIRONMENT' in os.environ:
 
     # Create a shortcut to restore pytorch environment
     subprocess.run(['echo', '\@echo', 'off', '>>', str(os.environ['TMP_DIR_WIN']) +\
