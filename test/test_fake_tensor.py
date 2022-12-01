@@ -204,6 +204,19 @@ class FakeTensorTest(TestCase):
         assert "FakeTensor" not in out
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_upsample_bilinear_small_channels(self):
+        out = []
+        mode = FakeTensorMode()
+        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+            with context():
+                arg0_1 = torch.empty_strided((3, 427, 640), (1, 1920, 3), dtype=torch.float32, device='cuda')
+                unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
+                out.append(torch.ops.aten.upsample_bilinear2d.default(unsqueeze, [800, 1199], False))
+
+        self.assertTrue(out[1].is_contiguous())
+        self.checkMetaProps(out[0], out[1])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             filters = torch.randn(8, 4, 3, 3).cuda()
@@ -360,7 +373,7 @@ class FakeTensorTest(TestCase):
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
     def checkMetaProps(self, t1, t2):
-        prims.utils.compare_tensor_meta(t1, t2)
+        prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
     @skipIfCrossRef
     def test_deepcopy(self):

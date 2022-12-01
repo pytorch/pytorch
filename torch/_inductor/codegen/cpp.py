@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import math
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
@@ -442,11 +443,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"std::min({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -1366,11 +1367,24 @@ class KernelGroup:
         if self.count == 0:
             return
 
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         arg_defs, call_args = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
+        # TODO: support kernel profile on other platforms
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
+            code.writelines(["#include <ATen/record_function.h>"])
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            if enable_kernel_profile:
+                code.writelines(
+                    [
+                        f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                    ]
+                )
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
@@ -1380,7 +1394,6 @@ class KernelGroup:
         codecache_def.splice(code)
         codecache_def.writeline("''')")
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

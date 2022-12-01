@@ -15,6 +15,7 @@
 - torch/_subclasses/fake_tensor.py
 - torch/_subclasses/fake_utils.py
 - torch/_subclasses/meta_utils.py
+- test/distributed/test_dynamo_distributed.py
 
 "module: cpu":
 - aten/src/ATen/cpu/**
