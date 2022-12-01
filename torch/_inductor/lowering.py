@@ -2656,7 +2656,6 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
-    grad_output.decide_layout()
     gO_stride = grad_output.get_stride()
     x_stride = x.get_stride()
     if x_stride[1] == 1 or gO_stride[1] == 1:
