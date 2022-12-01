@@ -183,6 +183,47 @@ def squeeze(li: List[int],
   torch.insert(out, dim0, 1)
   return out
 
+def prims_squeeze(li: List[int],
+    dims: List[int]) -> List[int]:
+  out = annotate(List[int], [])
+  for _0 in range(torch.len(li)):
+    elem = li[_0]
+    _1 = torch.append(out, elem)
+  torch.sort(dims, True)
+  out0 = out
+  for _2 in range(torch.len(dims)):
+    i = dims[_2]
+    out1 = annotate(List[int], [])
+    _3 = torch.len(out0)
+    if torch.le(_3, 0):
+      dim_post_expr = 1
+    else:
+      dim_post_expr = _3
+    min = torch.neg(dim_post_expr)
+    max = torch.sub(dim_post_expr, 1)
+    if torch.lt(i, min):
+      _4 = True
+    else:
+      _4 = torch.gt(i, max)
+    if torch.__not__(_4):
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    if torch.lt(i, 0):
+      wrapped_dim = torch.add(i, dim_post_expr)
+    else:
+      wrapped_dim = i
+    for i0 in range(torch.len(out0)):
+      if torch.eq(i0, wrapped_dim):
+        if torch.ne(out0[i0], 1):
+          _5 = torch.append(out1, out0[i0])
+        else:
+          pass
+      else:
+        _6 = torch.append(out1, out0[i0])
+    out0 = out1
+  return out0
+
 )=====")
 + std::string(R"=====(def slice(self: List[int],
     dim: int,
@@ -2805,6 +2846,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
     {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
     {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
+    {"prims::squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)", "prims_squeeze"},
     {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
     {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
     {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},

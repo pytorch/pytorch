@@ -426,6 +426,12 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
+def prims_squeeze(li: List[int], dims: List[int]) -> List[int]:
+    out = _copy(li)
+    dims.sort(reverse=True)
+    for i in dims:
+        out = squeeze(out, i)
+    return out
 
 def index_select(self: List[int], dim: int, index: List[int]):
     dim = maybe_wrap_dim(dim, len(self))
@@ -1042,6 +1048,7 @@ add_shape_compute_mapping("aten::arange.start_step(Scalar start, Scalar end, Sca
 add_shape_compute_mapping("aten::squeeze(Tensor(a) self) -> Tensor(a)", squeeze_nodim)
 add_shape_compute_mapping("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", squeeze)
 add_shape_compute_mapping("aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", unsqueeze)
+add_shape_compute_mapping("prims::squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)", prims_squeeze)
 add_shape_compute_mapping("aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", slice)
 add_shape_compute_mapping("aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", select)
 add_shape_compute_mapping("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", index_select)
