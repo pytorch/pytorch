@@ -2,6 +2,7 @@ import logging
 import operator
 import os
 import re
+import sys
 import time
 
 import sympy
@@ -13,7 +14,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
-from .codegen.wrapper import WrapperCodeGen
+from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -26,8 +27,8 @@ from .lowering import (
     make_fallback,
     needs_realized_inputs,
 )
-from .sizevars import SizeVarAllocator
-from .utils import dynamo_utils, gather_origins
+from .sizevars import CppSizeVarAllocator, SizeVarAllocator
+from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -88,6 +89,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
+        self._can_use_cpp_wrapper = config.cpp_wrapper
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
@@ -137,7 +140,21 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
+    def disable_cpp_wrapper(self, cond):
+        self._can_use_cpp_wrapper = False
+        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
+
+    def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
+        if isinstance(buffer, ir.ExternKernel):
+            self.disable_cpp_wrapper("ExternKernel")
+        if isinstance(buffer, ir.ComputedBuffer):
+            if buffer.data.get_reduction_type():
+                self.disable_cpp_wrapper("Reduction")
+
     def register_buffer(self, buffer: ir.ComputedBuffer):
+        if config.cpp_wrapper:
+            self.check_buffer_for_cpp_wrapper(buffer)
+
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -276,7 +293,15 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
-                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+                x,
+                (
+                    TensorBox,
+                    ir.Constant,
+                    type(None),
+                    ir.ConstantBuffer,
+                    sympy.Expr,
+                    int,
+                ),
             )
             for x in result
         ), result
@@ -330,9 +355,14 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        result = ir.ExternKernel.require_stride_order(
-                            result, ir.get_stride_order(n.meta["val"].stride())
-                        )
+                        if user.target in (
+                            torch.ops.aten.convolution.default,
+                            torch.ops.aten.convolution_backward.default,
+                            torch.ops.aten.mm.default,
+                        ):
+                            result = ir.ExternKernel.require_stride_order(
+                                result, ir.get_stride_order(n.meta["val"].stride())
+                            )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
@@ -348,13 +378,102 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize_hint()
         return result
 
+    def check_platform(self):
+        if sys.platform != "linux":
+            self.disable_cpp_wrapper("platform not linux")
+
+    def check_profiler_mark_wrapper_call(self):
+        if config.profiler_mark_wrapper_call:
+            self.disable_cpp_wrapper("profiler not supported")
+
+    def check_device_for_cpp_buffer(self):
+        if len(self.device_types) == 1:
+            device = self.device_types.pop()
+            if device == "cpu":
+                return
+        self.disable_cpp_wrapper("device not CPU")
+
+    def check_input_for_cpp_buffer(self):
+        for _, value in self.graph_inputs.items():
+            if value.get_dtype() != torch.float32:
+                self.disable_cpp_wrapper("inputs not FP32")
+
+    def check_output_for_cpp_buffer(self):
+        for item in self.graph_outputs:
+            if isinstance(item, ir.NoneAsConstantBuffer):
+                self.disable_cpp_wrapper("NoneAsConstantBuffer")
+
+    def check_constant_for_cpp_buffer(self):
+        if self.constants:
+            self.disable_cpp_wrapper("Constants")
+
+    def check_cpp_wrapper(self):
+        self.check_platform()
+        self.check_profiler_mark_wrapper_call()
+        self.check_device_for_cpp_buffer()
+        self.check_input_for_cpp_buffer()
+        self.check_output_for_cpp_buffer()
+        self.check_constant_for_cpp_buffer()
+
+    def init_wrapper_code(self):
+        if config.cpp_wrapper:
+            self.check_cpp_wrapper()
+            if self._can_use_cpp_wrapper:
+                self.sizevars = CppSizeVarAllocator(self._shape_env)
+                self.wrapper_code = CppWrapperCodeGen()
+                return
+        self.wrapper_code = WrapperCodeGen()
+        return
+
     def codegen(self):
         from .scheduler import Scheduler
 
-        self.wrapper_code = WrapperCodeGen()
+        self.init_wrapper_code()
+
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
         return self.wrapper_code.generate()
+
+    def count_bytes(self):
+        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+
+        scheduler = Scheduler(self.buffers)
+
+        def get_read_write_buffers_sizes(node):
+            if isinstance(node, NopKernelSchedulerNode):
+                return 0
+            reads = set(dep.name for dep in node.read_writes.reads)
+            writes = set(dep.name for dep in node.read_writes.writes)
+
+            def is_materialized(buf):
+                buf_uses = set(
+                    [user.node for user in scheduler.name_to_node[buf].users]
+                )
+                return len(buf_uses - set(node.snodes)) > 0
+
+            if isinstance(node, FusedSchedulerNode):
+                writes = set([dep for dep in writes if is_materialized(dep)])
+            node_bytes = 0
+            for buf in reads | writes:
+                if buf in self.name_to_buffer:
+                    buf = self.name_to_buffer[buf]
+                elif buf in self.graph_inputs:
+                    buf = self.graph_inputs[buf]
+                else:
+                    continue
+
+                node_bytes += V.graph.sizevars.size_hint(
+                    sympy_product(buf.get_size())
+                ) * get_dtype_size(buf.get_dtype())
+            return node_bytes
+
+        total_bytes = 0
+        node_counts = []
+        for node in scheduler.nodes:
+            num_bytes = get_read_write_buffers_sizes(node)
+            node_counts.append((node, num_bytes // 4))
+            total_bytes += num_bytes
+        return total_bytes, node_counts
 
     @dynamo_utils.dynamo_timed
     def compile_to_module(self):
