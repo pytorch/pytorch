@@ -624,7 +624,7 @@ class Reduction(Loops):
             if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
         ]
         indices = []
-        for md in sorted(read_writes.reads):
+        for md in sorted(read_writes.reads, key=lambda x: x.name):
             if all([r in md.index.free_symbols for r in range_vars]):
                 indices.append(md.index)
                 if md.name in V.graph.name_to_buffer:
