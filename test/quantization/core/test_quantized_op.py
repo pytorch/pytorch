@@ -5454,6 +5454,35 @@ class TestQuantizedConv(TestCase):
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
 
+    def test_conv_reorder_issue_onednn(self):
+        """ Ensure reorder failure issue in conv is fixed for onednn backend.
+            Onednn backend used to encounter reorder failure
+            when running conv with dynamic input shapes.
+            Solved by https://github.com/pytorch/pytorch/pull/86876
+        """
+        if 'onednn' not in supported_qengines:
+            return
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 128, 512
+            kh, kw = 1, 1
+            ih, iw = 28, 28
+            bias = None
+            strides, paddings, dilates, groups = (1, 1), (0, 0), (1, 1), 1
+            w = torch.randn((oc, ic, kh, kw))
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            w_packed = torch.ops.quantized.conv2d_prepack(
+                qw, bias, strides, paddings, dilates, groups
+            )
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            ih, iw = 5, 4
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            # The following should pass when input shape is changed
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
