@@ -27,7 +27,7 @@ namespace cuda {
 //! Class to represent unique indexed domains for index
 //! hoisting. Uniquenesss is determined with the indexed domain
 //! itself, the for-loops and their index values.
-class CommonIndexKey {
+class TORCH_CUDA_CU_API CommonIndexKey {
   friend struct CommonIndexKeyHash;
 
  public:
