@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import logging
-import unittest
 
 import torch
 import torch._dynamo as torchdynamo
@@ -19,8 +18,10 @@ class MLP(torch.nn.Module):
         x = torch.relu(self.l2(x))
         return x
 
+
 def _test_f(x):
     return x * x
+
 
 class SmokeTest(TestCase):
     def test_mlp(self):
@@ -45,12 +46,13 @@ class SmokeTest(TestCase):
             return x * x
 
         for _ in range(3):
-            foo(torch.full((3, 4), .7, device="cuda"))
+            foo(torch.full((3, 4), 0.7, device="cuda"))
             bar(torch.rand((2, 2), device="cuda"))
 
     def test_compile_invalid_options(self):
         with self.assertRaises(RuntimeError):
             opt_f = torch.compile(_test_f, mode="ha")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
