@@ -1133,10 +1133,10 @@ def compile(model: Optional[Callable] = None, *,
                        - static-memory
                        - matmul-tune
                        - matmul-padding
-                       - trition-autotune
-                       - trition-bmm
+                       - triton-autotune
+                       - triton-bmm
                        - triton-mm
-                       - trition-convolution
+                       - triton-convolution
                        - rematerialize-threshold
                        - rematerialize-acc-threshold
 

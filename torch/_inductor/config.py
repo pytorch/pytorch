@@ -199,10 +199,10 @@ class InductorConfigContext:
     static_memory: bool
     matmul_tune: str
     matmul_padding: bool
-    trition_autotune: bool
-    trition_bmm: bool
-    trition_mm: str
-    trition_convolution: str
+    triton_autotune: bool
+    triton_bmm: bool
+    triton_mm: str
+    triton_convolution: str
     rematerialize_threshold: int
     rematerialize_acc_threshold: int
 
@@ -244,8 +244,8 @@ class InductorConfigContext:
             def max_autotune():
                 self.static_memory = False
                 self.matmul_padding = True
-                self.trition_convolution = "autotune"
-                self.trition_mm = "autotune"
+                self.triton_convolution = "autotune"
+                self.triton_mm = "autotune"
                 self.matmul_padding = True
 
             modes = {
