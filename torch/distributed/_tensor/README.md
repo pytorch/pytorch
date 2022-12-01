@@ -7,7 +7,7 @@ We propose distributed tensor primitives to allow easier distributed computation
 
 ```python
 import torch
-from torch.distributed import DeviceMesh, Shard, distribute_tensor
+from torch.distributed._tensor import DeviceMesh, Shard, distribute_tensor
 
 # Create a mesh topology with the available devices.
 mesh = DeviceMesh("cuda", list(range(world_size)))
