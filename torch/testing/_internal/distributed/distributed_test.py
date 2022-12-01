@@ -1217,6 +1217,9 @@ class DistributedTest:
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
+            # Ensure the process group has been fully initialized (needed by
+            # the first sub-group batch_isend_irecv call)
+            dist.barrier()
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1251,6 +1254,9 @@ class DistributedTest:
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_ring_exchange_nccl(self):
             self._barrier()
+            # Ensure the process group has been fully initialized (needed by
+            # the first sub-group batch_isend_irecv call)
+            dist.barrier()
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1287,10 +1293,11 @@ class DistributedTest:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
                 # TODO figure out why this test uses send/recv from itself, is it even supported?
-                # recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
-                # p2p_op_list.append(recv_op)
-                # send_op = dist.P2POp(dist.isend, send_tensor, 0)
-                # p2p_op_list.append(send_op)
+                # When using NCCL_DEBUG=INFO, [0] enqueue.cc:638 NCCL WARN Trying to recv to self without a matching send
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
+                p2p_op_list.append(recv_op)
+                send_op = dist.P2POp(dist.isend, send_tensor, 0)
+                p2p_op_list.append(send_op)
 
                 print(p2p_op_list)
                 reqs = dist.batch_isend_irecv(p2p_op_list)

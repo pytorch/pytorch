@@ -74,15 +74,23 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 6,
   };
 
-  const std::unordered_map<std::string, BackendType> backendTypeResolver = {
-    {"undefined", BackendType::UNDEFINED},
-    {"gloo", BackendType::GLOO},
-    {"nccl", BackendType::NCCL},
-    {"ucc", BackendType::UCC},
-    {"mpi", BackendType::MPI},
-    {"tcp", BackendType::TCP},
-    {"custom", BackendType::CUSTOM}
-  };
+  BackendType backendTypeResolver(std::string backend) const {
+    if (backend == "undefined") {
+      return BackendType::UNDEFINED;
+    } else if (backend == "gloo") {
+      return BackendType::GLOO;
+    } else if (backend == "nccl") {
+      return BackendType::NCCL;
+    } else if (backend == "ucc") {
+      return BackendType::UCC;
+    } else if (backend == "mpi") {
+      return BackendType::MPI;
+    } else if (backend == "tcp") {
+      return BackendType::TCP;
+    } else {
+      return BackendType::CUSTOM;
+    }
+  }
 
   // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
   explicit ProcessGroup(int rank, int size);

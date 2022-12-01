@@ -46,6 +46,7 @@ c10::intrusive_ptr<Work> recv_cuda_(
     int64_t srcRank,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
+  std::cout << "recv_cuda_ " << tensors << std::endl;
   return process_group->getBackend(c10::DeviceType::CUDA)
       ->recv(tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }

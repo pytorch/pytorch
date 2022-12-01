@@ -110,7 +110,7 @@ ProcessGroup::ProcessGroup(
       rank_(rank),
       size_(size),
       options_(options),
-      backendType_(backendTypeResolver.at(options->backend)),
+      backendType_(backendTypeResolver(options->backend)),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 
