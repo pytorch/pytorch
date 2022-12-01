@@ -10,8 +10,10 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor.parallel import TensorParallelMultiheadAttention
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
+from torch.distributed.tensor.parallel.multihead_attention_tp import (
+    TensorParallelMultiheadAttention,
+)
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
