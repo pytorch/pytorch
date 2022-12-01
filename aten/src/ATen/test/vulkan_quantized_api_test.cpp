@@ -9,6 +9,8 @@
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <string.h>
 
 #include <c10/util/irange.h>
 
@@ -103,6 +105,79 @@ inline std::vector<c10::IValue> callOpByName(
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
+
+} // namespace
+
+namespace {
+
+double rand01() {
+  return (double)rand() / (double)RAND_MAX;
+}
+
+int64_t rand_pos_int(const int max_val) {
+  return 1 + int64_t(rand01() * (max_val - 1));
+}
+
+at::Tensor produce_random_tensor(
+    const at::IntArrayRef tensor_shape,
+    const float a,
+    const float b,
+    const float c) {
+  return (a + b * at::rand({1}, at::device(at::kCPU).dtype(at::kFloat))) *
+         (at::rand(tensor_shape, at::device(at::kCPU).dtype(at::kFloat)) - c);
+}
+
+double produce_random_scale(const double scale_min, const double scale_max) {
+  return rand01() * (scale_max - scale_min) + scale_min;
+}
+
+int64_t produce_random_zero_point(const c10::ScalarType dtype) {
+  int64_t zero_point;
+  switch (dtype) {
+    case c10::ScalarType::QUInt8:
+      zero_point = int64_t(rand01() * 255);
+      break;
+    case c10::ScalarType::QInt8:
+      zero_point = int64_t(rand01() * 255) - 127;
+      break;
+    case c10::ScalarType::QInt32:
+      zero_point = int64_t(rand01() * 100000) - 200000;
+      break;
+    default:
+      TORCH_CHECK(
+        false, "Vulkan quantization currently not supported for dtype ", dtype
+      );
+  }
+  return zero_point;
+}
+
+std::tuple<double, int64_t> compute_quant_params(
+    const at::Tensor tensor,
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8) {
+  int zero_point_min;
+  int zero_point_max;
+  if (dtype == c10::ScalarType::QUInt8) {
+    zero_point_min = 0;
+    zero_point_max = 255;
+  } else if (dtype == c10::ScalarType::QInt8) {
+    zero_point_min = -128;
+    zero_point_max = 127;
+  } else {
+    TORCH_CHECK(false, "Computation of quant params only available for dtypes",
+                       "QUInt8 and QInt8");
+  }
+  const auto tensor_max = tensor.max().item<double>();
+  const auto tensor_min = tensor.min().item<double>();
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/tensor_min,
+      /*max=*/tensor_max,
+      /*qmin=*/zero_point_min,
+      /*qmax=*/zero_point_max,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/false);
+  return std::tuple<double, int64_t>(q_params.scale, q_params.zero_point);
 }
 
 } // namespace
