@@ -91,6 +91,31 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_for_nested_inputs(sdp_params params, bool debug){
+  if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
+    TORCH_CHECK(!debug, "We are not enabling nested Tensors for Flash Attention because of cuda memory errors.");
+    return false;
+  }
+  return true;
+}
+
+inline bool check_requires_grad(sdp_params params, bool debug) {
+  if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+    TORCH_CHECK(!debug, "Flash Attention does not currently support training.");
+    return false;
+  }
+  return true;
+}
+
+inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
+  // If we fail both checks then we return false
+  if (!check_for_nested_inputs(params, false) && !check_requires_grad(params,false)){
+      TORCH_CHECK(!debug, "Memory efficient attention currently doesn't support training with NT inputs.");
+      return false;
+  }
+  return true;
+}
+
 inline bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
     TORCH_CHECK(!debug, "Flash Attention does not support attention mask.");
@@ -198,13 +223,15 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints {{
       check_runtime_disabled_flash,
+      check_requires_grad,
       check_tensor_shapes,
       check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
+      check_for_nested_inputs,
       check_for_seq_len_1_nested_tensor}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -232,14 +259,15 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  std::vector<std::function<bool(sdp_params, bool)>> constraints{
+  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
+      check_requires_grad_and_nested,
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
       check_for_seq_len_1_nested_tensor,
-      check_for_non_zero_dropout};
+      check_for_non_zero_dropout}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
