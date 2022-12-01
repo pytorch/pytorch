@@ -91,7 +91,7 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
             with torch.enable_grad(), maybe_interpreter.lower():
                 output = custom_function_call(autograd_function, *unwrapped_operands)
 
-            # autograd.Function users (and ctx.mark_dirty) expect a returned input
+            # autograd.Function's ctx.mark_dirty expect a returned input
             # to have the same object identity as the input.
             # Mode-only functorch will greatly simplify this logic.
             return wrap_outputs_maintaining_identity(
@@ -178,7 +178,7 @@ def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, le
 # will automatically unwrap the GradTensorWrapper when applied.
 # But since autograd.Function technically sits above the regular PyTorch
 # dispatcher, it doesn't get this treatment. So we manually do
-# the unwrapping to be consistent.
+# the unwrapping to be consistent with regular PyTorch dispatcher operations.
 
 
 @custom_function_call.py_impl(TransformType.Vmap)
