@@ -27,8 +27,11 @@ class CustomFunctionPyOperator(PyOperator):
         # PyTorch dispatcher.
         #
         # This will lead us into trouble later down the line, but this is
-        # pre-existing: one is unable to trace autograd.Function calls with
-        # ProxyTensor/AOTDispatcher.
+        # pre-existing. There is an invariant that a function traced by
+        # make_fx should have the same behavior when provided the same
+        # Tensor. However, make_fx sees autograd.Function as a composite
+        # (because autograd.Function happens before the Python dispatch key)
+        # and only traces the forward pass.
         if torch._C._are_functorch_transforms_active():
             return super().__call__(*args, **kwargs)
         autograd_function = args[0]
