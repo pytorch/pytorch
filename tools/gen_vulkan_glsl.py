@@ -1,9 +1,9 @@
 import copy
 import os
 
-import yaml
-
 from collections import OrderedDict
+
+import yaml
 from torchgen.code_template import CodeTemplate
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode

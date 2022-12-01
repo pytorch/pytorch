@@ -97,4 +97,4 @@ x = $TILE_SIZE_X + $TILE_SIZE_Y
                         self.assertTrue("1 + 1" in contents)
                     with open(file_name_2, "r") as f:
                         contents = f.read()
-                        self.assertTrue("2 + 1" in contents)
+                        self.assertTrue("1 + 2" in contents)
