@@ -24,7 +24,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_function_import('quantize_fx', function_list)
 
     def test_package_import_fx(self):
-        self._test_package_import('fx')
+        self._test_package_import('fx', skip=[
+            'fusion_patterns',
+            'quantization_patterns',
+        ])
 
     def test_function_import_fx(self):
         function_list = [
@@ -97,7 +100,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_function_import('fx._equalize', function_list)
 
     def test_package_import_fx_quantization_patterns(self):
-        self._test_package_import('fx.quantization_patterns')
+        self._test_package_import(
+            'fx.quantization_patterns',
+            new_package_name='fx.quantize_handler',
+        )
 
     def test_function_import_fx_quantization_patterns(self):
         function_list = [
@@ -116,7 +122,11 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             'GeneralTensorShapeOpQuantizeHandler',
             'StandaloneModuleQuantizeHandler'
         ]
-        self._test_function_import('fx.quantization_patterns', function_list)
+        self._test_function_import(
+            'fx.quantization_patterns',
+            function_list,
+            new_package_name='fx.quantize_handler',
+        )
 
     def test_package_import_fx_match_utils(self):
         self._test_package_import('fx.match_utils')
@@ -156,14 +166,21 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_function_import('fx.fuse', function_list)
 
     def test_package_import_fx_fusion_patterns(self):
-        self._test_package_import('fx.fusion_patterns')
+        self._test_package_import(
+            'fx.fusion_patterns',
+            new_package_name='fx.fuse_handler',
+        )
 
     def test_function_import_fx_fusion_patterns(self):
         function_list = [
             'FuseHandler',
             'DefaultFuseHandler'
         ]
-        self._test_function_import('fx.fusion_patterns', function_list)
+        self._test_function_import(
+            'fx.fusion_patterns',
+            function_list,
+            new_package_name='fx.fuse_handler',
+        )
 
     # we removed matching test for torch.quantization.fx.quantization_types
     # old: torch.quantization.fx.quantization_types

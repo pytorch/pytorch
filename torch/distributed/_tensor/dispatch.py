@@ -1,10 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import List, Callable, Dict, Tuple, Optional, cast
+from typing import Callable, cast, Dict, List, Optional, Tuple
+
+from torchgen.model import FunctionSchema, SchemaKind
 
 import torch
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torchgen.model import FunctionSchema, SchemaKind
 
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -16,6 +16,7 @@ from torch.distributed._tensor.utils import (
     unwrap_schema,
     wrap,
 )
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 """
@@ -76,8 +77,7 @@ class OpSchema(object):
     def __post_init__(self) -> None:
         schema_kind = self.func_schema.kind()
         self.is_inplace = (
-            schema_kind
-            == SchemaKind.inplace  # pyre-ignore [16] pyre bad at enum
+            schema_kind == SchemaKind.inplace  # pyre-ignore [16] pyre bad at enum
         )
         self.is_out_variant = (
             schema_kind == SchemaKind.out  # pyre-ignore [16] pyre bad at enum
@@ -92,9 +92,7 @@ class OpSchema(object):
         """
         # filter out non-relavant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
-        return tuple(
-            item for item in self.args_schema if isinstance(item, DTensorSpec)
-        )
+        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
         return (
@@ -149,9 +147,9 @@ def _reshape_alias(
     return torch.ops.aten.view(x, shape)
 
 
-_CURRENT_DECOMPOSITION_TABLE: Dict[
-    Callable[..., object], Callable[..., object]
-] = {torch.ops.aten._reshape_alias.default: _reshape_alias}
+_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
+    torch.ops.aten._reshape_alias.default: _reshape_alias,
+}
 
 
 def propagate_input_sharding(
@@ -171,9 +169,7 @@ def propagate_input_sharding(
     if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
         print(f"{op_call}({op_schema})")
         local_shapes = tree_map(
-            lambda t: t.to_local().shape
-            if isinstance(t, dtensor.DTensor)
-            else None,
+            lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
             args,
         )
         print(f"    local shapes: {local_shapes}")
