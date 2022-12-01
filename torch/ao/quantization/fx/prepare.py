@@ -34,6 +34,7 @@ from .qconfig_mapping_utils import (
 )
 
 from .quantization_patterns import (
+    _get_pattern_to_quantize_handlers,
     QuantizeHandler,
 )
 
@@ -98,10 +99,6 @@ from ..backend_config import (
     DTypeConfig,
     get_native_backend_config,
 )
-from .backend_config_utils import (
-    get_pattern_to_quantize_handlers,
-)
-
 from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
@@ -1520,7 +1517,7 @@ def prepare(
     pattern_to_quantize_handler: Dict[Pattern, QuantizeHandler] = {}
     if backend_config is None:
         backend_config = get_native_backend_config()
-    pattern_to_quantize_handler = get_pattern_to_quantize_handlers(backend_config)
+    pattern_to_quantize_handler = _get_pattern_to_quantize_handlers(backend_config)
     pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
     root_node_getter_mapping = \

@@ -2985,7 +2985,6 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
-            aten.upsample_bilinear2d.default,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
@@ -3952,6 +3951,8 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
+            self.name = "CaptureIndexing"
+
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4034,6 +4035,7 @@ class LoopBodyBlock:
                 self.garbage_collect_values = False
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
+                self.name = V.get_ops_handler().name
 
         return InterpreterShim().run(V.get_ops_handler())
 
