@@ -67,9 +67,6 @@ guard_nn_modules = False
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True
 
-# Run the FX graph with FakeTensors
-fake_tensor_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
@@ -87,8 +84,14 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # if an exception is encountered
 replay_record_enabled = False
 
+# Rewrite assert statement in python with torch._assert
+rewrite_assert_with_torch_assert = True
+
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Disable dynamo
+disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
@@ -138,8 +141,11 @@ capture_scalar_outputs = False
 enforce_cond_guards_match = True
 
 # Automatically split model graph into pieces to match DDP bucket sizes
-# to allow DDP comm/compute overlap
-optimize_ddp = False
+# to allow DDP comm/compute overlap.  Disable to allow DDP models to
+# run without graph-breaks, but also without comm/compute overlap.
+# set torch._dynamo.config.log_level to INFO or DEBUG for more info
+# about optimize_ddp behavior.
+optimize_ddp = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True

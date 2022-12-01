@@ -292,6 +292,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
     @skipIfNoSympy
+    def test_numel(self):
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        self.assertIsInstance(x.numel(), torch.SymInt)
+        self.assertIsInstance(torch.numel(x), torch.SymInt)
+
+        x = torch.rand(3, 3)
+        self.assertIsInstance(x.numel(), int)
+        self.assertIsInstance(torch.numel(x), int)
+
+    @skipIfNoSympy
     def test_int_to_float(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
