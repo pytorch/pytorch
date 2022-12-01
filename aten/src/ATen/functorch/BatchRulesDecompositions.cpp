@@ -67,15 +67,18 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
+  OP_DECOMPOSE(chunk);
   OP_DECOMPOSE(clip);
   OP_DECOMPOSE2(clip, Tensor );
   OP_DECOMPOSE(concat);
   OP_DECOMPOSE(conj_physical);
+  OP_DECOMPOSE(contiguous);
   OP_DECOMPOSE(combinations);
   OP_DECOMPOSE(corrcoef);
   OP_DECOMPOSE(cosine_embedding_loss);
   OP_DECOMPOSE(cosine_similarity);
   OP_DECOMPOSE(cov);
+  OP_DECOMPOSE(cross);
   m.impl("cross_entropy_loss", native::cross_entropy_loss_symint);
   OP_DECOMPOSE2(cumulative_trapezoid, x);
   OP_DECOMPOSE2(cumulative_trapezoid, dx);
@@ -83,6 +86,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
   OP_DECOMPOSE(diff);
+  OP_DECOMPOSE(diag);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
