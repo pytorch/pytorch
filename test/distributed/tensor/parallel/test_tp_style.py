@@ -2,17 +2,20 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
-from torch.distributed._tensor import distribute_tensor, DeviceMesh, Shard, Replicate
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import (
-    RowwiseParallel,
     ColwiseParallel,
-    make_input_shard_1d,
     make_input_replicate_1d,
-    make_output_shard_1d,
+    make_input_shard_1d,
     make_output_replicate_1d,
+    make_output_shard_1d,
     make_output_tensor,
+    RowwiseParallel,
+)
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
 )
 
 
@@ -61,12 +64,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         self._1d_input_func_check(tensor, tensor, make_input_shard_1d)
 
     # Common logic for testing prepare output funcs
-    def _test_prepare_output(
-        self, func, spec, dim=None, device_mesh_input_none=False
-    ):
-        device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size)
-        )
+    def _test_prepare_output(self, func, spec, dim=None, device_mesh_input_none=False):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         tensor = torch.rand(8, 16, device=self.device_type)
         dtensor = distribute_tensor(tensor, device_mesh, spec)
         device_mesh_input = None if device_mesh_input_none else device_mesh
@@ -99,16 +98,12 @@ class TensorParallelStyleTest(DTensorTestBase):
         output, dtensor, device_mesh = self._test_prepare_output(
             make_output_replicate_1d, [Shard(0)]
         )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()])
-        )
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
         # test when input device_mesh is None.
         output, dtensor, device_mesh = self._test_prepare_output(
             make_output_replicate_1d, [Shard(0)], None, True
         )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()])
-        )
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
 
     @with_comms
     def test_make_output_tensor(self):
@@ -137,9 +132,7 @@ class TensorParallelStyleTest(DTensorTestBase):
     # Common logic for testing prepare output funcs errors.
     def _test_prepare_output_error(self, func):
         tensor = torch.rand(8, 16, device=self.device_type)
-        device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size)
-        )
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
         output = [dtensor]
         with self.assertRaisesRegex(
@@ -173,16 +166,12 @@ class TensorParallelStyleTest(DTensorTestBase):
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_input, [Shard(0)]
         )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()])
-        )
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
         # test when input device_mesh is None.
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_input, [Shard(0)], None, True
         )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()])
-        )
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
         self._test_prepare_output_error(rs._prepare_output)
 
     @with_comms

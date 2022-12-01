@@ -3,21 +3,18 @@
 
 import torch
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed.tensor.parallel import (
+    PairwiseParallel,
+    parallelize_module,
+    TensorParallelMultiheadAttention,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    with_comms,
     NUM_DEVICES,
     skip_unless_torch_gpu,
-)
-from torch.distributed._tensor import (
-    DeviceMesh,
-    Replicate,
-)
-from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
-    TensorParallelMultiheadAttention,
-    parallelize_module,
+    with_comms,
 )
 
 
@@ -300,24 +297,18 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             add_bias_kv=True,
             device=self.device_type,
         )
-        model_tp = MultiheadAttnWrap(
-            16, 8, add_bias_kv=True, device=self.device_type
-        )
+        model_tp = MultiheadAttnWrap(16, 8, add_bias_kv=True, device=self.device_type)
 
         # TODO: somehow using torch.nn.MultiheadAttention's initial params does not work
         # Use TensorParallelMultiheadAttention parameters instead
         x = model.qkv.weight.clone().detach().requires_grad_()
-        model_tp.attn.register_parameter(
-            "in_proj_weight", torch.nn.Parameter(x)
-        )
+        model_tp.attn.register_parameter("in_proj_weight", torch.nn.Parameter(x))
 
         x = model.qkv.bias.clone().detach().requires_grad_()
         model_tp.attn.register_parameter("in_proj_bias", torch.nn.Parameter(x))
 
         x = model.proj.weight.clone().detach().requires_grad_()
-        model_tp.attn.out_proj.register_parameter(
-            "weight", torch.nn.Parameter(x)
-        )
+        model_tp.attn.out_proj.register_parameter("weight", torch.nn.Parameter(x))
 
         x = model.proj.bias.clone().detach().requires_grad_()
         model_tp.attn.out_proj.register_parameter("bias", torch.nn.Parameter(x))
