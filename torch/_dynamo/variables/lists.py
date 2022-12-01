@@ -38,7 +38,7 @@ class BaseListVariable(VariableTracker):
 
         # update with contained guards
         if guards is None:
-            self.guards.update(VariableTracker.propagate(items.values())["guards"])
+            self.guards.update(VariableTracker.propagate(items)["guards"])
 
         self.items: List[VariableTracker] = items
 
