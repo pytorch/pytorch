@@ -61,7 +61,7 @@ except ImportError:
 PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 FSDP_SYNCED = "_fsdp_synced"
 # Specification of process groups for hybrid sharding strategies.
-HybridShardProcessGroupType: type = Tuple[dist.ProcessGroup, dist.ProcessGroup]
+HybridShardProcessGroupType = Tuple[dist.ProcessGroup, dist.ProcessGroup]
 # Overall specification of process group.
 ProcessGroupType = Optional[Union[dist.ProcessGroup, HybridShardProcessGroupType]]
 

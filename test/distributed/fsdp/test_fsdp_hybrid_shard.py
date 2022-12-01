@@ -57,16 +57,16 @@ def patch_allreduce(new_allreduce):
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter):
-        """
-        Patches ``dist.reduce_scatter_tensor`` with ``new_reduce_scatter``
-        while in the context.
-        """
-        orig_reduce_scatter = dist.reduce_scatter_tensor
-        dist.reduce_scatter_tensor = new_reduce_scatter
-        try:
-            yield
-        finally:
-            dist.reduce_scatter_tensor = orig_reduce_scatter
+    """
+    Patches dist.reduce_scatter_tensor with a new reduce_scatter_tensor and
+    restores upon exiting.
+    """
+    orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.reduce_scatter_tensor = new_reduce_scatter
+    try:
+        yield
+    finally:
+        dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
 class MyModel(nn.Module):
@@ -79,7 +79,7 @@ class MyModel(nn.Module):
 class TestFSDPHybridShard(FSDPTest):
     @property
     def world_size(self):
-        return torch.cuda.device_count()
+        return max(torch.cuda.device_count(), 2)
 
     @property
     def process_group(self):
@@ -145,6 +145,9 @@ class TestFSDPHybridShard(FSDPTest):
                 process_group=self.process_group,
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD
             )
+
+    # TODO - add test for Zero-2 style sharding ensure params are not
+    # resharded after forward.
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_hybrid_shard_basic_setup(self):
