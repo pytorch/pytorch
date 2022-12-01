@@ -1141,9 +1141,11 @@ def compile(model: Optional[Callable] = None, *,
                        - rematerialize-acc-threshold
 
     Example::
-    @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
-    def foo(x):
-        return torch.sin(x) + torch.cos(x)
+
+        @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
+        def foo(x):
+            return torch.sin(x) + torch.cos(x)
+
     """
     # Decorator mode
     if model is None:
