@@ -89,7 +89,11 @@ class QuantizedGraphModule(GraphModule):
     """
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
         self.preserved_attr_names = preserved_attr_names
-        preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if isinstance(attr, str) and hasattr(root, attr)}
+        preserved_attrs = {
+            attr: getattr(root, attr)
+            for attr in self.preserved_attr_names
+            if isinstance(attr, str) and hasattr(root, attr)
+        }
         super().__init__(root, graph)
         for attr in preserved_attrs:
             setattr(self, attr, preserved_attrs[attr])

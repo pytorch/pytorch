@@ -111,7 +111,9 @@ def _create_sharded_tensor_md_from_dt(
             ShardMetadata(
                 shard_offsets=list(offsets),
                 shard_sizes=list(sizes),
-                placement=f"rank:{scapegoat_rank if i > 0 else my_rank}/{dt._local_tensor.device}",
+                placement=(
+                    f"rank:{scapegoat_rank if i > 0 else my_rank}/{dt._local_tensor.device}"
+                ),
             )
         )
 

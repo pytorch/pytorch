@@ -752,8 +752,8 @@ def prepare_n_shadows_model(
     example_inputs: Any,
     qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
-    exposed_prepare_function: Any=None,
-    exposed_prepare_kwargs: Any=None,
+    custom_prepare_fn: Optional[Callable]=None,
+    custom_prepare_kwargs: Dict[str, Any]=None,
     custom_tracer: Any=None,
 ) -> torch.nn.Module:
     """
@@ -841,7 +841,7 @@ def prepare_n_shadows_model(
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
-            exposed_prepare_function, exposed_prepare_kwargs
+            custom_prepare_fn, custom_prepare_kwargs
         )
 
     mt.recompile()
@@ -870,7 +870,11 @@ def loggers_set_save_activations(
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 
-def convert_n_shadows_model(model: GraphModule, exposed_convert_function: Any=None, exposed_convert_kwargs: Any=None) -> GraphModule:
+def convert_n_shadows_model(
+    model: GraphModule,
+    custom_convert_fn: Optional[Callable]=None,
+    custom_convert_kwargs: Dict[str, Any]=None
+) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`
     on each shadow submodule.
@@ -880,13 +884,13 @@ def convert_n_shadows_model(model: GraphModule, exposed_convert_function: Any=No
         # node name string match
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
             orig_mod = getattr(model, node.name)
-            if exposed_convert_function is None:
+            if custom_convert_fn is None:
                 converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
                     orig_mod)
             else:
-                if exposed_convert_kwargs is None:
-                    exposed_convert_kwargs = {}
-                converted_mod = exposed_convert_function(orig_mod, **exposed_convert_kwargs)
+                if custom_convert_kwargs is None:
+                    custom_convert_kwargs = {}
+                converted_mod = custom_convert_fn(orig_mod, **custom_convert_kwargs)
             setattr(model, node.name, converted_mod)
 
     return model

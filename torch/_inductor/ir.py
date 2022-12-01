@@ -2439,7 +2439,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, sympy.Expr):
+        if isinstance(x, (sympy.Expr, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -2478,6 +2478,9 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order):
+        if x.get_numel() == 0:  # Layout doesn't matter
+            return x
+
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
             if isinstance(
@@ -2982,6 +2985,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
+            aten.upsample_bilinear2d.default,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
@@ -3371,10 +3375,12 @@ def _prepare_convolution_fusion_create(
             [0, 0],
             groups,
         )
-        req_stride_order = get_stride_order(output.stride())
+        output_size = output.size()
+        req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
+        req_stride_order = [len(req_stride_order)] + req_stride_order
+        output_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
-    weight = cls.require_stride1(cls.realize_input(weight))
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
@@ -3382,7 +3388,7 @@ def _prepare_convolution_fusion_create(
         x.get_device(),
         x.get_dtype(),
         output.size(),
-        output.stride(),
+        output_stride,
     )
     constant_args = [padding, stride, dilation, groups]
 
@@ -3558,6 +3564,60 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+
+class MKLPackedLinear(ExternKernelAlloc):
+    kernel = "torch.ops.mkl._mkl_linear"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkl._mkl_linear",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, packed_w, orig_w, bias, batch_size):
+        kernel = "torch.ops.mkl._mkl_linear"
+
+        with torch._subclasses.FakeTensorMode():
+            x_fake = ir_node_to_tensor(x, guard_shape=True)
+            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+            )
+            output = torch.ops.aten.linear(
+                x_fake,
+                weight_fake,
+                bias_fake,
+            )
+            output_size = output.size()
+            req_stride_order = list(reversed(range(len(output_size))))
+            output_stride = output.stride()
+        x = cls.require_stride_order(x, req_stride_order)
+        inputs = [x, packed_w, orig_w]
+        constant_args = [batch_size]
+        if bias is not None:
+            inputs.append(bias)
+        else:
+            constant_args.insert(0, bias)
+
+        return MKLPackedLinear(
+            layout=FixedLayout(
+                x.get_device(), x.get_dtype(), output_size, output_stride
+            ),
             inputs=inputs,
             constant_args=constant_args,
             kernel=kernel,
