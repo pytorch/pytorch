@@ -6,7 +6,7 @@ tmp_dir_win = os.environ['TMP_DIR_WIN']
 directory = tmp_dir_win + '\\bin'
 os.mkdir(directory, mode=0o666)
 
-if os.environ['REBUILD'] == "":
+if 'REBUILD' not in os.environ:
 
     while True:
 
@@ -32,7 +32,7 @@ if os.environ['REBUILD'] == "":
                 pass
 
 
-            if os.environ['BUILD_ENVIRONMENT'] == "":
+            if 'BUILD_ENVIRONMENT'] not in os.environ:
 
                 subprocess.run(['curl', '--retry', '3', '-k',
                  'https://s3.amazonaws.com/ossci-windows/sccache.exe', '--output',

@@ -5,11 +5,11 @@ import sys
 
 tmp_win_dir = os.environ['TMP_DIR_WIN']
 
-if os.environ['REBUILD'] == "":
+if 'REBUILD' not in os.environ:
 
     try:
 
-        if os.environ['BUILD_ENVIRONMENT'] == "":
+        if 'BUILD_ENVIRONMENT' not in os.environ:
 
             subprocess.run(['curl', '--retry', '3', '-k',\
              'https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z',\

@@ -42,11 +42,11 @@ if cuda_suffix == '':
     sys.exit(1)
 
 
-if os.environ['REBUILD'] == "":
+if 'REBUILD' not in os.environ:
 
     try:
 
-        if os.environ['BUILD_ENVIRONMENT'] == "":
+        if 'BUILD_ENVIRONMENT' not in os.environ:
 
             subprocess.run(['curl', '--retry', '3', '-k',\
              'https://s3.amazonaws.com/ossci-windows/magma_2.5.4_' + cuda_suffix +\
