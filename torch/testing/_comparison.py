@@ -343,7 +343,7 @@ class Pair(abc.ABC):
         if not all(isinstance(input, cls) for input in inputs):
             Pair._inputs_not_supported()
 
-    def _raise_error_meta(
+    def _fail(
         self, type: Type[Exception], msg: str, *, id: Optional[Tuple[Any, ...]] = None
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
@@ -413,7 +413,7 @@ class ObjectPair(Pair):
             ) from error
 
         if not equal:
-            self._raise_error_meta(AssertionError, f"{self.actual} != {self.expected}")
+            self._fail(AssertionError, f"{self.actual} != {self.expected}")
 
 
 class NonePair(Pair):
@@ -427,7 +427,7 @@ class NonePair(Pair):
 
     def compare(self) -> None:
         if not (self.actual is None and self.expected is None):
-            self._raise_error_meta(
+            self._fail(
                 AssertionError, f"None mismatch: {self.actual} is not {self.expected}"
             )
 
@@ -480,7 +480,7 @@ class BooleanPair(Pair):
 
     def compare(self) -> None:
         if self.actual is not self.expected:
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 f"Booleans mismatch: {self.actual} is not {self.expected}",
             )
@@ -576,7 +576,7 @@ class NumberPair(Pair):
 
     def compare(self) -> None:
         if self.check_dtype and type(self.actual) is not type(self.expected):
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 f"The (d)types do not match: {type(self.actual)} != {type(self.expected)}.",
             )
@@ -593,7 +593,7 @@ class NumberPair(Pair):
         if cmath.isfinite(abs_diff) and abs_diff <= tolerance:
             return
 
-        self._raise_error_meta(
+        self._fail(
             AssertionError,
             make_scalar_mismatch_msg(
                 self.actual, self.expected, rtol=self.rtol, atol=self.atol
@@ -736,7 +736,7 @@ class TensorLikePair(Pair):
         def raise_mismatch_error(
             attribute_name: str, actual_value: Any, expected_value: Any
         ) -> NoReturn:
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 f"The values for attribute '{attribute_name}' do not match: {actual_value} != {expected_value}.",
             )
@@ -873,7 +873,7 @@ class TensorLikePair(Pair):
         - the values for closeness.
         """
         if actual.sparse_dim() != expected.sparse_dim():
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 (
                     f"The number of sparse dimensions in sparse COO tensors does not match: "
@@ -882,7 +882,7 @@ class TensorLikePair(Pair):
             )
 
         if actual._nnz() != expected._nnz():
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 (
                     f"The number of specified values in sparse COO tensors does not match: "
@@ -944,7 +944,7 @@ class TensorLikePair(Pair):
         }[actual.layout]
 
         if actual._nnz() != expected._nnz():
-            self._raise_error_meta(
+            self._fail(
                 AssertionError,
                 (
                     f"The number of specified values in sparse {format_name} tensors does not match: "
@@ -1014,7 +1014,7 @@ class TensorLikePair(Pair):
             msg = make_tensor_mismatch_msg(
                 actual, expected, ~matches, rtol=rtol, atol=atol, identifier=identifier
             )
-        self._raise_error_meta(AssertionError, msg)
+        self._fail(AssertionError, msg)
 
     def _promote_for_comparison(
         self, actual: torch.Tensor, expected: torch.Tensor
