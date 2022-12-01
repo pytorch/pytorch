@@ -569,6 +569,7 @@ class OutputGraph(fx.Tracer):
         for arg in self.graphargs:
             expanded_graphargs.extend([arg] * len(arg))
             arg.uses = 0
+
         for node, arg in zip(self.graph.nodes, expanded_graphargs):
             assert node.op == "placeholder"
             arg.uses += len(node.users)

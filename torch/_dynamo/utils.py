@@ -146,6 +146,17 @@ tensortype_to_dtype = {
     torch.BoolTensor: (torch.bool,),
 }
 
+# TODO where should these live? circular import...
+# Control which distributed collectives and process group types are specially supported
+DYNAMO_SUPPORTED_COLLECTIVES = {
+    torch.distributed.all_reduce,
+}
+
+DYNAMO_SUPPORTED_PROCESS_GROUPS = {
+    torch.distributed.ProcessGroupGloo,
+    torch.distributed.ProcessGroupNCCL,
+}
+
 
 class DuplicateWarningChecker(object):
     def __init__(self, maxsize=4096):
@@ -1024,11 +1035,6 @@ def _get_debug_dir(root_dir):
 def get_debug_dir():
     debug_root = config.debug_dir_root
     return _get_debug_dir(debug_root)
-
-
-DYNAMO_SUPPORTED_COLLECTIVES = {
-    torch.distributed.all_reduce,
-}
 
 
 def get_fake_value(node, tx):
