@@ -109,7 +109,8 @@ os.environ['PATH'] = os.environ['TMP_DIR_WIN'] + '\\bin;' + os.environ['PATH']
 :: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
 :: jenkins has M40, which is 5.2
 '''
-os.environ['TORCH_CUDA_ARCH_LIST'] = '5.2' if 'TORCH_CUDA_ARCH_LIST' not in os.environ else None
+if 'TORCH_CUDA_ARCH_LIST' not in os.environ:
+    os.environ['TORCH_CUDA_ARCH_LIST'] = '5.2'
 
 
 # The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
