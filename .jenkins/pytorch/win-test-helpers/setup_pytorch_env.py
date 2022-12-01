@@ -94,7 +94,7 @@ except Exception as e:
     sys.exit()
 
 
-os.environ['DISTUTILS_USE_SDK'] = 1
+os.environ['DISTUTILS_USE_SDK'] = '1'
 
 if os.environ['USE_CUDA'] == '1':
 

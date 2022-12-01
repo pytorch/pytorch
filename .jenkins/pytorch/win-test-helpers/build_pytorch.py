@@ -101,7 +101,7 @@ if os.environ['USE_CUDA'] == '1':
      '\\libnvvp;' + os.environ['PATH']
 
 
-os.environ['DISTUTILS_USE_SDK']=1
+os.environ['DISTUTILS_USE_SDK']='1'
 os.environ['PATH']=os.environ['TMP_DIR_WIN'] + '\\bin;' + os.environ['PATH']
 
 
@@ -110,12 +110,12 @@ os.environ['PATH']=os.environ['TMP_DIR_WIN'] + '\\bin;' + os.environ['PATH']
 :: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
 :: jenkins has M40, which is 5.2
 '''
-os.environ['TORCH_CUDA_ARCH_LIST']=5.2 if os.environ['TORCH_CUDA_ARCH_LIST'] == "" else None
+os.environ['TORCH_CUDA_ARCH_LIST']='5.2' if os.environ['TORCH_CUDA_ARCH_LIST'] == "" else None
 
 
 # The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
-os.environ['SCCACHE_IDLE_TIMEOUT']=0
-os.environ['SCCACHE_IGNORE_SERVER_IO_ERROR']=1
+os.environ['SCCACHE_IDLE_TIMEOUT']='0'
+os.environ['SCCACHE_IGNORE_SERVER_IO_ERROR']='1'
 subprocess.run(['sccache', '--stop-server'])
 subprocess.run(['sccache', '--start-server'])
 subprocess.run(['sccache', '--zero-stats'])
