@@ -746,10 +746,14 @@ def torchxla_trivial(subgraph):
 @create_backend
 def torchxla_trace_once(subgraph):
     import torch._dynamo.optimizations.torchxla_integration as integration
-
+    
+    compiled_graph = None
     def fwd(*args):
+        nonlocal compiled_graph
         model = subgraph.model
-        return integration.extract_compiled_graph(model, args)(*args)
+        if compiled_graph is None:
+            compiled_graph = integration.extract_compiled_graph(model, args)
+        return compiled_graph(*args)
 
     return fwd
 
