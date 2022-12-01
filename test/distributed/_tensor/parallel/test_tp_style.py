@@ -144,7 +144,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         output = [dtensor]
         with self.assertRaisesRegex(
             AssertionError,
-            f"Expect output of Tensor Parallel to be a DTensor, but found {type(output)}.",
+            "Expect output of Tensor Parallel to be a DTensor, but found"
+            f" {type(output)}.",
         ):
             func(output, device_mesh)
         device_mesh = DeviceMesh(
@@ -189,7 +190,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
         self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(None, cs._prepare_output)
+        self.assertEqual(make_output_replicate_1d, cs._prepare_output)
 
 
 if __name__ == "__main__":

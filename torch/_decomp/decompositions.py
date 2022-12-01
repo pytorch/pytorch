@@ -1312,8 +1312,7 @@ def native_layer_norm_backward(
     )
 
 
-@register_decomposition(aten.native_batch_norm)
-def native_batch_norm(
+def native_batch_norm_helper(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1322,16 +1321,21 @@ def native_batch_norm(
     training: bool,
     momentum: float,
     eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
+    functional: bool,
+) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
+    new_running_mean = running_mean
+    new_running_var = running_var
     if training:
         output, mean, rstd = normalize(input, reduction_dims, eps)
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
-            running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+            new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+            if not functional:
+                running_mean.copy_(new_running_mean)
         if running_var is not None:
             n = input.numel() / input.shape[1]
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
@@ -1340,11 +1344,15 @@ def native_batch_norm(
             unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
                 n / (n - 1)
             )
-            running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+            new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+            if not functional:
+                running_var.copy_(new_running_var)
     else:
         assert running_mean is not None and running_var is not None
         running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        new_running_mean = running_mean
         running_var = running_var.to(dtype=computation_dtype, copy=True)
+        new_running_var = running_var
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -1370,7 +1378,127 @@ def native_batch_norm(
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
-    return output.to(dtype=input.dtype), save_mean, save_rstd
+    return (
+        output.to(dtype=input.dtype),
+        save_mean,
+        save_rstd,
+        new_running_mean,
+        new_running_var,
+    )
+
+
+@register_decomposition(aten.native_batch_norm)
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, False
+    )
+    return output, save_mean, save_rstd
+
+
+# TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm
+# with our new correctly schema'd _native_batch_norm_legit and its variants, but
+# we cannot do that immediately in the C++ because it would be forwards incompatible
+# with some mobile use cases.
+#
+# Since this change is most impactful for aot autograd/functionalization, we simply
+# register this decomposition on the Autograd key for the python dispatcher (which is
+# currently only used by aot autograd/functionalization and no one else, really).
+# In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
+# to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
+@torch.ops.aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+def native_batch_norm_decomposition(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if running_mean is None and running_var is None:
+        return aten._native_batch_norm_legit(
+            input, weight, bias, training, momentum, eps
+        )
+    if running_mean is None:
+        raise RuntimeError(
+            "running_mean is None, but running_var is provided. "
+            "They should both be None or both be provided."
+        )
+    if running_var is None:
+        raise RuntimeError(
+            "running_var is None, but running_mean is provided. "
+            "They should both be None or both be provided."
+        )
+    return aten._native_batch_norm_legit(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
+
+
+@register_decomposition(aten._native_batch_norm_legit.default)
+def _native_batch_norm_legit(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, False
+    )
+    return output, save_mean, save_rstd
+
+
+@register_decomposition(aten._native_batch_norm_legit.no_stats)
+def _native_batch_norm_legit_no_stats(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, None, None, training, momentum, eps, False
+    )
+    return output, save_mean, save_rstd
+
+
+@register_decomposition(aten._native_batch_norm_legit_functional.default)
+def _native_batch_norm_legit_functional(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    (
+        output,
+        save_mean,
+        save_rstd,
+        new_running_mean,
+        new_running_var,
+    ) = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, True
+    )
+    assert new_running_mean is not None, "new_running_mean should not be None"
+    assert new_running_var is not None, "new_running_var should not be None"
+    return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
 @register_decomposition(aten._fused_dropout)
@@ -1775,7 +1903,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 
 @register_decomposition(aten.norm)
 @out_wrapper()
-@reduction_complex_to_real
 def norm(
     self: Tensor,
     p: Optional[float] = None,
@@ -1783,9 +1910,16 @@ def norm(
     keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
 ):
-    if p is None:
-        p = 2.0
-    return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
+    p = p if p is not None else 2.0
+    if dtype:
+        return torch.linalg.vector_norm(self.to(dtype), p, dim, keepdim, dtype=dtype)
+
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+    )
+    return torch.linalg.vector_norm(
+        self.to(computation_dtype), p, dim, keepdim, dtype=dtype
+    ).to(result_dtype)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -1904,8 +2038,13 @@ def upsample_bilinear2d(
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
 
     # convert output to correct memory format, if necessary
-    input_memory_format = utils.suggest_memory_format(input)
-    result = result.contiguous(memory_format=input_memory_format)
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    if input.device.type == "cuda" and n_channels < 16:
+        memory_format = torch.contiguous_format
+
+    result = result.contiguous(memory_format=memory_format)
 
     return result
 

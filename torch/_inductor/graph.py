@@ -20,7 +20,12 @@ from .exc import (
     MissingOperatorWithoutDecomp,
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
-from .lowering import lowerings, make_fallback, needs_realized_inputs
+from .lowering import (
+    layout_constraints,
+    lowerings,
+    make_fallback,
+    needs_realized_inputs,
+)
 from .sizevars import SizeVarAllocator
 from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
@@ -271,7 +276,15 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
-                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+                x,
+                (
+                    TensorBox,
+                    ir.Constant,
+                    type(None),
+                    ir.ConstantBuffer,
+                    sympy.Expr,
+                    int,
+                ),
             )
             for x in result
         ), result
@@ -301,7 +314,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
-            result = super().run_node(n)
+            if n.op == "call_function" and n.target in layout_constraints:
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                result = self.call_function(n.target, args, kwargs)
+            else:
+                result = super().run_node(n)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -310,7 +328,25 @@ class GraphLowering(torch.fx.Interpreter):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
-                    elif user.op == "output":
+                        # This inclusion is somewhat controversial (from
+                        # discussion between Horace, Natalia, and Elias).
+                        # Currently, it's not very clear why this is helpful.
+                        # The general idea here is that even though a node may
+                        # have FlexibleLayout, we still often *treat* it as if
+                        # it was contiguous. This appears to sometime result in
+                        # suboptimal behavior.
+                        #
+                        # When we do a better job selecting layout, we should
+                        # revisit this.
+                        if user.target in (
+                            torch.ops.aten.convolution.default,
+                            torch.ops.aten.convolution_backward.default,
+                            torch.ops.aten.mm.default,
+                        ):
+                            result = ir.ExternKernel.require_stride_order(
+                                result, ir.get_stride_order(n.meta["val"].stride())
+                            )
+                    if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
