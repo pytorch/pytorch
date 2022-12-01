@@ -45,15 +45,36 @@ static inline void fractional_max_pool_check_shape(
   int64_t C = randomSamples.size(1);
   int64_t D = randomSamples.size(2);
 
-  int64_t input_channel = ndim == 3 ? input.size(-4) : input.size(-3);
+  int64_t input_batch, input_channel;
+  if (ndim == 2) {
+    // fractional_max_pool2d
+    if (input.ndimension() == 3) {
+      input_batch = 1;
+      input_channel = input.size(0);
+    } else {
+      input_batch = input.size(0);
+      input_channel = input.size(1);
+    }
+  } else {
+    // factional_max_pool3d
+    if (input.ndimension() == 4) {
+      input_batch = 1;
+      input_channel = input.size(0);
+    } else {
+      input_batch = input.size(0);
+      input_channel = input.size(1);
+    }
+  }
+
+  TORCH_CHECK(
+      N == input_batch,
+      "Expect _random_samples.size(0) equals to input batch size.");
   TORCH_CHECK(
       C == input_channel,
       "Expect _random_samples.size(1) equals to input channel size.");
   TORCH_CHECK(
-      N > 0 && C > 0 && D == ndim,
-      "Expect _random_samples to in shape of {nbatch, channels, ", ndim,
-      "}; nbatch and channels must be positive, got: ",
-      "{", N, ", ", C, ", ", D, "}.");
+      D == ndim,
+      "Expect _random_samples.size(2) equals to ", ndim, "; got ", D, ".");
 }
 
 }} // at::native

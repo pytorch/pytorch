@@ -231,6 +231,10 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
 
   fractional_max_pool_check_shape</*ndim*/ 3>(input_, randomSamples_);
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   /* get contiguous input and samples */
   auto input = input_.contiguous();
   auto randomSamples = randomSamples_.contiguous();

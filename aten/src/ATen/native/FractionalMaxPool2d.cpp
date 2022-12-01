@@ -290,6 +290,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
 
   fractional_max_pool_check_shape</*ndim*/ 2>(input_, randomSamples_);
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   int64_t numBatch = 1;
   int64_t planeDim = 0;
   int64_t heightDim = 1;
