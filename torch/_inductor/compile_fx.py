@@ -12,7 +12,7 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 
-from . import config, overrides
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -27,7 +27,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
 
-aot_autograd = dynamo_optimizations.backends.aot_autograd
+aot_autograd = dynamo_optimizations.training.aot_autograd
 normalize_ir = dynamo_optimizations.normalize.normalize_ir
 is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
 count_calls = dynamo_utils.count_calls
@@ -84,7 +84,23 @@ def _step_logger():
 
 
 @DebugContext.wrap
-@dynamo_utils.disable_current_modes()
+def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
+    shape_env = None
+    for inp in example_inputs:
+        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
+            shape_env = inp.fake_mode.shape_env
+
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
+    with V.set_graph_handler(graph):
+        graph.run(*example_inputs)
+        num_bytes, nodes_num_elem = graph.count_bytes()
+        metrics.num_bytes_accessed += num_bytes
+        metrics.nodes_num_elem += nodes_num_elem
+    return make_boxed_func(gm.forward)
+
+
+@DebugContext.wrap
+@torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -326,7 +342,11 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 _graph_counter = itertools.count(0)
 
 
-def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+def compile_fx(
+    model_: torch.fx.GraphModule,
+    example_inputs_: List[torch.Tensor],
+    inner_compile=compile_fx_inner,
+):
     """Main entrypoint to a compile given FX graph"""
 
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
@@ -348,7 +368,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
-        return compile_fx_inner(
+        return inner_compile(
             model,
             example_inputs,
             num_fixed=fixed,
@@ -359,7 +379,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
-        return compile_fx_inner(
+        return inner_compile(
             model,
             example_inputs,
             num_fixed=fixed,
@@ -374,12 +394,17 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
-            model_,
-            example_inputs_,
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-        )
+            # A "tiny" graph can actually decompose into multiple
+            # operators (if it's a decomposition) and inductor can
+            # do a better job on it in this case
+            #
+            # Also, for some reason, test_comprehensive___rmatmul___cpu
+            # fails without forcing a compile lol.
+            force_compile_tiny_graphs=True,
+        )(model_, example_inputs_)

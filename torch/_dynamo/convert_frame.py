@@ -6,7 +6,8 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Callable
+from traceback import FrameSummary
+from typing import Callable, cast, Dict, List, Optional
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -15,12 +16,7 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
-from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
-    TorchPatcher,
-    WrapperBackend,
-)
+from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
@@ -29,6 +25,7 @@ from .exc import (
     Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
+from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -86,18 +83,6 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_compiler_fn(compiler_fn):
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
-
-
 def wrap_convert_context(fn):
     """
     Context manager to:
@@ -123,7 +108,7 @@ def wrap_convert_context(fn):
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
-    _fn._torchdynamo_orig_callable = fn
+    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
 
 
@@ -140,7 +125,7 @@ def has_tensor_in_frame(frame):
             if is_allowed(frame.f_globals[co_name]):
                 return True
 
-    seen_ids = dict()
+    seen_ids: Dict[int, bool] = dict()
 
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""
@@ -156,16 +141,17 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj])
             return seen_ids[obj_id]
         elif istype(obj, dict):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.values()])
+            # Some packages like pytest can be updated during runtime. So, make a
+            # copy of values to avoid issues like "RuntimeError: dictionary
+            # changed size during iteration"
+            values = list(obj.values())
+            seen_ids[obj_id] = any([has_tensor(v) for v in values])
             return seen_ids[obj_id]
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
-            return seen_ids[obj_id]
-        elif not is_allowed(obj) and hasattr(obj, "__dict__") and len(obj.__dict__):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
             # if config.debug:
@@ -210,9 +196,11 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
             msg += "".join(
                 traceback.format_list(
-                    stack_above_dynamo + list(reversed(exc.real_stack))
+                    stack_above_dynamo + list(reversed(get_real_stack(exc)))
                 )
             )
+            msg += "\n"
+            msg += "=" * 10
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
@@ -221,21 +209,33 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     return msg
 
 
+def get_real_stack(exc) -> List[FrameSummary]:
+    assert hasattr(exc, "real_stack")
+    return cast(List[FrameSummary], exc.real_stack)
+
+
 def augment_exc_message(exc, msg="\n"):
-    if hasattr(exc, "real_stack") and len(exc.real_stack) > 0 and not config.verbose:
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+    if (
+        hasattr(exc, "real_stack")
+        and len(exc.real_stack) > 0
+        and not (config.verbose and config.suppress_errors)
+    ):
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  {config.dynamo_import}.replay('{exc.record_filename}').\n"
 
-    msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+    if not config.verbose:
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
     ):
         msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run"
+            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
@@ -243,10 +243,9 @@ def augment_exc_message(exc, msg="\n"):
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
-            "    torchdynamo.config.suppress_errors = True\n"
+            "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    msg += "=" * 10
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
     new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
@@ -272,8 +271,6 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     init_logging()
 
-    compiler_fn = wrap_compiler_fn(compiler_fn)
-
     @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
         code = frame.f_code
@@ -294,6 +291,7 @@ def convert_frame_assert(
             # setattr could be tricky to handle generally,
             # but also not likely useful to compile- skip the whole frame
             return None
+
         # Check if the frame is generated by an exec builtin call
         # TODO - Running exec generated frame seems propagates f_globals to the
         # next frames.
@@ -353,7 +351,7 @@ def convert_frame_assert(
 
 
 def _compile(
-    code,
+    code: types.CodeType,
     globals,
     locals,
     builtins,
@@ -362,8 +360,8 @@ def _compile(
     export,
     guard_export_fn=None,
     frame=None,
-):
-    output = None
+) -> Optional[GuardedCode]:
+    output: Optional[OutputGraph] = None
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -381,6 +379,7 @@ def _compile(
         )
         tracer.run()
         output = tracer.output
+        assert output is not None
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
@@ -409,7 +408,7 @@ def _compile(
         output_codes.add(out_code)
 
         log.log(
-            logging.CODE,
+            logging.CODE,  # type: ignore[attr-defined]
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
@@ -419,7 +418,7 @@ def _compile(
             ),
         )
         log.log(
-            logging.CODE,
+            logging.CODE,  # type: ignore[attr-defined]
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
@@ -429,6 +428,7 @@ def _compile(
             ),
         )
 
+        assert output is not None
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(output, output.guards, locals, globals)
@@ -437,7 +437,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(logging.CODE, guard_str)
+        log.log(logging.CODE, guard_str)  # type: ignore[attr-defined]
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)
@@ -473,7 +473,7 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
                 raise
         return None
 
-    _convert_frame._torchdynamo_orig_callable = compiler_fn
+    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return _convert_frame
 
 

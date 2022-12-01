@@ -5,7 +5,6 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Dict,
     Generator,
     Iterator,
@@ -24,13 +23,20 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import _alloc_storage, _free_storage, _same_storage, p_assert
+from ._utils import (
+    _alloc_storage,
+    _free_storage,
+    _no_dispatch_record_stream,
+    _same_storage,
+    p_assert,
+)
 
 __all__ = [
     "FlatParameter",
@@ -368,8 +374,8 @@ class FlatParamHandle:
         prefixed_param_names: List[str] = []
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
-        params_to_flatten: List[nn.Parameter] = []
-        shared_params: List[nn.Parameter] = []
+        params_to_flatten: List[Union[torch.Tensor, nn.Parameter]] = []
+        shared_params: List[Union[torch.Tensor, nn.Parameter]] = []
         param_extensions: List[Any] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
@@ -431,6 +437,16 @@ class FlatParamHandle:
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
+        # For `use_orig_params=True`, ensure that the logical parameters are
+        # `nn.Parameter`s (and not plain `torch.Tensor`)
+
+        def convert_to_params(
+            tensors: List[Union[torch.Tensor, nn.Parameter]]
+        ) -> List[nn.Parameter]:
+            return [
+                t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors
+            ]
+
         self.flat_param._init_metadata(
             param_infos,
             numels,
@@ -438,8 +454,8 @@ class FlatParamHandle:
             prefixed_param_names,
             shared_param_infos,
             param_extensions,
-            params_to_flatten if use_orig_params else None,
-            shared_params if use_orig_params else None,
+            convert_to_params(params_to_flatten) if use_orig_params else None,
+            convert_to_params(shared_params) if use_orig_params else None,
         )
 
     @staticmethod
@@ -488,7 +504,7 @@ class FlatParamHandle:
                 flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
-            orig_storage = flat_param.storage()
+            orig_storage = flat_param._typed_storage()
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
             )
@@ -496,8 +512,8 @@ class FlatParamHandle:
             start = sharded_flat_param.numel() * self.rank
             end = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start, end)
-            if orig_storage.size() > 0:
-                orig_storage.resize_(0)
+            if orig_storage._size() > 0:
+                orig_storage._resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
 
@@ -833,7 +849,8 @@ class FlatParamHandle:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
-            unsharded_flat_param.storage().size() == unsharded_flat_param.numel()
+            unsharded_flat_param._typed_storage()._size()
+            == unsharded_flat_param.numel()
         )
         return not already_unsharded
 
@@ -1136,9 +1153,9 @@ class FlatParamHandle:
         # the padded unsharded flattened parameter as expected
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
-        unpadded_storage_ptr = self.flat_param.storage().data_ptr()
+        unpadded_storage_ptr = self.flat_param._typed_storage()._data_ptr()
         padded_storage_ptr = (
-            self._get_padded_unsharded_flat_param().storage().data_ptr()
+            self._get_padded_unsharded_flat_param()._typed_storage()._data_ptr()
         )
         p_assert(
             unpadded_storage_ptr == padded_storage_ptr,
@@ -1200,9 +1217,7 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        unsharded_flat_param.record_stream(
-            cast(torch._C.Stream, torch.cuda.current_stream())
-        )
+        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
@@ -1277,6 +1292,12 @@ class FlatParamHandle:
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if self._use_orig_params and as_params:
+                if type(view) is DTensor:
+                    # A `DTensor` `view` is not compatible with assigning
+                    # `param.data = view`, so we cannot preserve the parameter
+                    # variable.
+                    setattr(module, param_name, nn.Parameter(view))
+                    continue
                 param = self.flat_param._params[i]  # type: ignore[index]
                 setattr(module, param_name, param)
                 param.data = view
@@ -1303,6 +1324,11 @@ class FlatParamHandle:
                         assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
+                if (
+                    self._use_orig_params
+                    and self._training_state == HandleTrainingState.FORWARD
+                ):
+                    module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
             module,
@@ -1333,6 +1359,11 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
+                if (
+                    self._use_orig_params
+                    and self._training_state == HandleTrainingState.FORWARD
+                ):
+                    module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:
         """
@@ -1821,7 +1852,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(
             storage_size == 0,
             f"Expects storage to be freed but got storage with size {storage_size}",
@@ -1829,7 +1860,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(storage_size > 0, "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):

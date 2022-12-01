@@ -54,9 +54,12 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const bool _virtual) {
+cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const at::MemoryFormat memory_format, const bool _virtual) {
   auto sizes = t.sizes();
   auto strides = t.strides();
+  bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d;
+  fixSizeOneDimStride<int64_t>(sizes.size(), &sizes[0], (int64_t *) &strides[0], channels_last);
   auto r = cudnn_frontend::TensorBuilder()
     .setDim(sizes.size(), sizes.data())
     .setStrides(strides.size(), strides.data())
@@ -68,8 +71,8 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const
   return r;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, const uint8_t alignment) {
-  return getTensorDescriptorWithTypeVirtual(t, id, alignment, getCudnnDataType(t), false);
+cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, const uint8_t alignment, const at::MemoryFormat memory_format) {
+  return getTensorDescriptorWithTypeVirtual(t, id, alignment, getCudnnDataType(t), memory_format, false);
 }
 
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, const at::ScalarType scalar_type) {
@@ -209,9 +212,9 @@ void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y,
 
 auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
   auto op = cudnn_frontend::OperationBuilder(desc)
-      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
-      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
-      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
+      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment, key.params.memory_format))
+      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment, key.params.memory_format))
+      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment, key.params.memory_format))
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type()))
       .build();
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
@@ -241,33 +244,33 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   const float alpha1 = 1.0;
   const float alpha2 = alpha;
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-                   .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
+                   .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment, key.params.memory_format))
                    // virtual output of conv
-                   .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.y_alignment, precision, true))
-                   .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
+                   .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.y_alignment, precision, key.params.memory_format, true))
+                   .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment, key.params.memory_format))
                    .setAlpha(alpha1)
                    .setcDesc(convDesc)
                    .build();
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(conv_op.getOutputTensor())
-                           .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment))
+                           .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment, key.params.memory_format))
                            // another virtual output (of add)
-                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.y_alignment, precision, true))
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.y_alignment, precision, key.params.memory_format, true))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
                            .setAlpha2(alpha2)
                            .build();
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
-                           .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
+                           .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment, key.params.memory_format))
                            // another virtual output (of add bias)
-                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.y_alignment, precision, true))
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.y_alignment, precision, key.params.memory_format, true))
                            .setpwDesc(addBiasDesc)
                            .build();
   auto act_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                           .setxDesc(add_bias_op.getOutputTensor())
                           // final output is in original datatype
-                          .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+                          .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment, key.params.memory_format))
                           .setpwDesc(actDesc)
                           .build();
   std::array<cudnn_frontend::Operation const*, 4> ops = {&conv_op, &add_op, &add_bias_op, &act_op};

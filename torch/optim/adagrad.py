@@ -4,7 +4,8 @@ from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
-__all__ = ['Adagrad', 'adagrad']
+__all__ = ["Adagrad", "adagrad"]
+
 
 class Adagrad(Optimizer):
     r"""Implements Adagrad algorithm.
@@ -60,7 +61,7 @@ class Adagrad(Optimizer):
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
-        differentiable: bool = False
+        differentiable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -85,7 +86,7 @@ class Adagrad(Optimizer):
             initial_accumulator_value=initial_accumulator_value,
             foreach=foreach,
             maximize=maximize,
-            differentiable=differentiable
+            differentiable=differentiable,
         )
         super(Adagrad, self).__init__(params, defaults)
 
@@ -166,7 +167,7 @@ class Adagrad(Optimizer):
                 has_sparse_grad=has_sparse_grad,
                 foreach=group["foreach"],
                 maximize=group["maximize"],
-                differentiable=group["differentiable"]
+                differentiable=group["differentiable"],
             )
 
         return loss
@@ -222,7 +223,7 @@ def adagrad(
         eps=eps,
         has_sparse_grad=has_sparse_grad,
         maximize=maximize,
-        differentiable=differentiable
+        differentiable=differentiable,
     )
 
 
@@ -245,7 +246,7 @@ def _single_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
-    differentiable: bool
+    differentiable: bool,
 ):
 
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
@@ -303,7 +304,7 @@ def _multi_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
-    differentiable: bool
+    differentiable: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"

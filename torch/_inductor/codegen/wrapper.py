@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import functools
 import hashlib
@@ -255,8 +256,8 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
 
-    def next_kernel_name(self):
-        return f"kernel{next(self._names_iter)}"
+    def next_kernel_suffix(self):
+        return f"{next(self._names_iter)}"
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
@@ -330,7 +331,12 @@ class WrapperCodeGen(CodeGen):
         result.splice(self.prefix)
 
         out_names = V.graph.get_output_names()
-        with result.indent():
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(result.indent())
+            if config.profiler_mark_wrapper_call:
+                result.writeline("from torch.profiler import record_function")
+                result.writeline("with record_function('inductor_wrapper_call'):")
+                stack.enter_context(result.indent())
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)

@@ -58,6 +58,8 @@ AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
     "Autograd" + component for component in BACKEND_COMPONENTS
 ]
 
+FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
+
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen or want pyi entries for
 class DispatchKey(Enum):
@@ -79,6 +81,7 @@ class DispatchKey(Enum):
     SparseCsrCUDA = auto()
 
     Python = auto()
+    FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -89,6 +92,8 @@ class DispatchKey(Enum):
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
+    FuncTorchDynamicLayerFrontMode = auto()
+    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
