@@ -1433,9 +1433,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_module_layer(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(layer, val):
             return layer(val) * torch.tensor(2)
