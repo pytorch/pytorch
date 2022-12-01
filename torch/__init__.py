@@ -1163,7 +1163,7 @@ def compile(model: Optional[Callable] = None, *,
     from torch._dynamo.eval_frame import lookup_backend
     from torch._inductor.config import InductorConfigContext
     if mode is not None and passes is not None:
-        raise RuntimeError("Either mode or passes can be specified")
+        raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
     if mode is None and passes is None:
         mode = "default"
     if backend == "inductor":
