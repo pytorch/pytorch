@@ -217,7 +217,7 @@ class Adam(Optimizer):
                     raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
                 state_steps.append(state['step'])
 
-        return grad_scaler, found_inf
+        return grad_scale, found_inf
 
     @_use_grad_for_differentiable
     def step(self, closure=None, *, grad_scaler=None):
