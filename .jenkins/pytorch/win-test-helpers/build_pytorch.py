@@ -67,8 +67,6 @@ with pushd('.'):
             os.environ['VC_YEAR'] + '\\' + os.environ['VC_PRODUCT'] + '\\' +
                 'VC\\Auxiliary\\Build\\vcvarsall.bat\" x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
 
-    subprocess.call('@echo on', shell=True)
-
 
 if os.environ['USE_CUDA'] == '1':
 
@@ -150,7 +148,6 @@ if os.environ['USE_CUDA'] == '1':
         os.environ['TMP_DIR'] + '\\bin\\sccache.exe'
 
 
-subprocess.run(['@echo', 'off'])
 subprocess.run(['echo', '@echo', 'off', '>>', os.environ['TMP_DIR_WIN'] +
     '\\ci_scripts\\pytorch_env_restore.bat'])
 
@@ -159,8 +156,6 @@ set_file = open('set', 'r')
 restore_file.write(set_file.read())
 restore_file.close()
 set_file.close()
-
-subprocess.run(['@echo', 'on'])
 
 
 if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:

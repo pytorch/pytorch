@@ -67,7 +67,6 @@ with pushd('.'):
                 os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
                     '\\VC\\Auxiliary\\Build\\vcvarsall.bat', 'x64', '-vcvars_ver=' + os.environ['VC_VERSION']])
 
-        subprocess.run(['@echo', 'on'])
 
     except Exception as e:
 
@@ -136,7 +135,6 @@ else:
         '\\Miniconda3\\Lib\\site-packages\\torch', str(os.environ['TMP_DIR_WIN']) +
             '\\build\\torch\\'])
 
-subprocess.run(['@echo', 'off'])
 subprocess.run(['echo', '@echo', 'off', '>>', str(os.environ['TMP_DIR_WIN']) +
     '/ci_scripts/pytorch_env_restore.bat'])
 
@@ -146,7 +144,6 @@ restore_file.write(set_file.read())
 restore_file.close()
 set_file.close()
 
-subprocess.run(['@echo', 'on'])
 
 if 'BUILD_ENVIRONMENT' in os.environ:
 
