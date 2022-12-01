@@ -13,7 +13,7 @@ import sympy
 
 import torch
 
-from . import config, dependencies, ir
+from . import config, dependencies, ir, metrics
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, dynamo_utils, has_triton
@@ -588,6 +588,7 @@ class Scheduler:
         self.compute_predecessors()
         self.dead_node_elimination()
 
+        metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}

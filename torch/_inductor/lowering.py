@@ -3668,3 +3668,9 @@ def op_floordiv(a, b):
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
+
+
+@register_lowering(aten._test_inductor_realize)
+def _realize(x):
+    x.realize()
+    return clone(x)
