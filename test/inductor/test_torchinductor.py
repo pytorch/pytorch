@@ -2704,7 +2704,7 @@ class CommonTemplate:
             )
             self.common(
                 fn,
-                (torch.arange(-0.00001, 0.00001, 0.001).to(dtype=dtype),),
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
     def test_log1p(self):
@@ -2718,7 +2718,7 @@ class CommonTemplate:
             )
             self.common(
                 fn,
-                (torch.arange(-0.00001, 0.00001, 0.001).to(dtype=dtype),),
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
     def test_flip(self):
