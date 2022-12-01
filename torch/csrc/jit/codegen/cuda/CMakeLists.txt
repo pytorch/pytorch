@@ -183,7 +183,7 @@ if(BUILD_PYTHON)
 
   message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
   message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
-  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
+  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch torch_python torch_cuda pybind::pybind11 torch::nvtoolsext)
   if(NOT MSVC)
     target_compile_options(${NVFUSER_PYTHON} PRIVATE -Wno-unused-variable)
   endif()
