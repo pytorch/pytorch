@@ -6,13 +6,36 @@ from torch.fx.graph import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from torch.ao.quantization.quantization_types import (
-    Pattern,
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    DTypeConfig,
+    ObservationType,
+)
+from torch.ao.quantization.utils import (
     NodePattern,
+    Pattern,
+    QuantizerCls,
 )
 
 from abc import ABC
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, List, Type
+
+__all__ = [
+    "QuantizeHandler",
+    "BinaryOpQuantizeHandler",
+    "CatQuantizeHandler",
+    "ConvReluQuantizeHandler",
+    "LinearReLUQuantizeHandler",
+    "BatchNormQuantizeHandler",
+    "EmbeddingQuantizeHandler",
+    "RNNDynamicQuantizeHandler",
+    "DefaultNodeQuantizeHandler",
+    "FixedQParamsOpQuantizeHandler",
+    "CopyNodeQuantizeHandler",
+    "GeneralTensorShapeOpQuantizeHandler",
+    "CustomModuleQuantizeHandler",
+    "StandaloneModuleQuantizeHandler",
+]
 
 def _default_root_node_getter(node_pattern):
     if node_pattern is None:
@@ -81,24 +104,69 @@ class QuantizeHandler(ABC):
         """
         return False
 
-    def get_activation_ctr(
-        self,
-        qconfig: Any,
-        pattern: Pattern,
-        is_training: bool,
-    ) -> Optional[Callable]:
-        """
-        Returns the constructor for the activation observer which should be
-        used for the pattern matched to this handler. Some handlers override
-        this to a different value than what is specified in the qconfig.
-        """
-        return qconfig.activation
-
     def is_custom_module(self):
         return self.is_custom_module_
 
     def is_standalone_module(self):
         return self.is_standalone_module_
+
+def _get_quantize_handler_cls(
+        observation_type: ObservationType,
+        dtype_configs: List[DTypeConfig],
+        num_tensor_args_to_observation_type: Dict[int, ObservationType],
+        input_output_observed: bool) -> Type[QuantizeHandler]:
+    """
+    Return a configurable QuantizeHandler that matches the given specifications from the backend.
+    """
+
+    class ConfigurableQuantizeHandler(QuantizeHandler):
+        def __init__(
+                self,
+                node_pattern: NodePattern,
+                modules: Dict[str, torch.nn.Module],
+                root_node_getter: Callable = None):
+            super().__init__(node_pattern, modules, root_node_getter)
+            if num_tensor_args_to_observation_type:
+                assert self.num_tensor_args in num_tensor_args_to_observation_type, \
+                    f"Must provide observation_type config for tensor number {self.num_tensor_args}" \
+                    f" in num_tensor_args_to_observation_type for {node_pattern}"
+                self.observation_type = num_tensor_args_to_observation_type[self.num_tensor_args]
+            else:
+                self.observation_type = observation_type
+            self.dtype_configs = dtype_configs
+            self.input_output_observed_ = input_output_observed
+
+        def is_general_tensor_value_op(self) -> bool:
+            return self.observation_type == ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
+
+        # This is temporary, and will be removed soon
+        def input_output_observed(self):
+            return self.input_output_observed_
+
+    return ConfigurableQuantizeHandler
+
+def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pattern, QuantizerCls]:
+    """
+    Note: Quantize handler is just a holder for some check methods like
+    (should_insert_observer_for_output), maybe this can be a enum as well,
+    we can refactor this after we convert the path for fbgemm/qnnpack fully to the
+    new path, this is not exposed to backend developers
+    """
+    pattern_to_quantize_handlers = {}
+    for pattern, config in backend_config.configs.items():
+        observation_type = config.observation_type
+        dtype_configs = config.dtype_configs
+        num_tensor_args_to_observation_type = config._num_tensor_args_to_observation_type
+        input_output_observed = config._input_output_observed
+        if input_output_observed is None:
+            input_output_observed = True
+        pattern_to_quantize_handlers[pattern] = \
+            _get_quantize_handler_cls(
+                observation_type,
+                dtype_configs,
+                num_tensor_args_to_observation_type,
+                input_output_observed)
+    return pattern_to_quantize_handlers
 
 # TODO: remove this class, this is still exposed in torch.quantization
 # but we should be able to break bc

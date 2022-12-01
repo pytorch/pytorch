@@ -4,10 +4,12 @@ from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
+from . import config
 import torch.fx.traceback as fx_traceback
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
+from torch.hub import tqdm
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -57,7 +59,7 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The module to be executed
@@ -72,7 +74,7 @@ class Interpreter:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
-
+        self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
 
         if self.garbage_collect_values:
@@ -118,7 +120,9 @@ class Interpreter:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
-        for node in self.module.graph.nodes:
+        for node in tqdm(self.module.graph.nodes,
+                         desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
+                         initial=1, position=0, leave=True, disable=config.disable_progress, delay=15):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
@@ -134,7 +138,7 @@ class Interpreter:
                 msg += f"\nOriginal traceback:\n{node.stack_trace}"
                 e.args = (msg,) + e.args[1:]
                 if isinstance(e, KeyError):
-                    raise RuntimeError(*e.args)
+                    raise RuntimeError(*e.args) from e
                 raise
 
             if self.garbage_collect_values:
@@ -395,7 +399,7 @@ class Transformer(Interpreter):
 
             transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
-            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+            torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.

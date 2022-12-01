@@ -117,11 +117,12 @@ class Embedding(Module):
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
+    freeze: bool
     sparse: bool
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = False, _weight: Optional[Tensor] = None,
+                 sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Embedding, self).__init__()
@@ -138,12 +139,13 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
+            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs),
+                                    requires_grad=not _freeze)
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
-            self.weight = Parameter(_weight)
+            self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
 
@@ -212,12 +214,12 @@ class Embedding(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
+            _freeze=freeze,
             padding_idx=padding_idx,
             max_norm=max_norm,
             norm_type=norm_type,
             scale_grad_by_freq=scale_grad_by_freq,
             sparse=sparse)
-        embedding.weight.requires_grad = not freeze
         return embedding
 
 

@@ -116,7 +116,9 @@ class ComputeCodegenUnboxedKernels:
                 # from wrapping/unwrapping TensorOptios.
                 # However, we would look to include default args for schema parsing.
                 # Default args only show up in the nonfaithful C++ API,
-                arg_default = cpp.default_expr(arg.argument.default, arg.argument.type)
+                arg_default = cpp.default_expr(
+                    arg.argument.default, arg.argument.type, symint=False
+                )
                 if arg_default.startswith("{"):
                     arg_cpp = f"c10::IntArrayRef({arg_default})"
                 else:

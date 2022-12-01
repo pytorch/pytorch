@@ -470,7 +470,7 @@ at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
     c10::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t index) {
+    c10::SymInt index) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       select_backward)>::call(grad_output, input_sizes, dim, index);
 }
@@ -520,6 +520,15 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   out.resize_(out_unwrapped.sizes());
   out.copy_(out_unwrapped);
   return out;
+}
+
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
 }
 
 at::Tensor LazyNativeFunctions::diagonal_backward_symint(

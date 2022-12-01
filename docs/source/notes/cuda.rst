@@ -394,6 +394,12 @@ Available options:
   the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
   will be rounded to 1280 as the nearest ceiling of power-2 division.
+  Specify a single value to apply for all allocation sizes or specify an
+  array of key value pairs to set power-2 division individually for each
+  power of two interval. For example to set 1 division for all allocations
+  under 256MB, 2 division for allocations between 256MB and 512MB, 4 divisions
+  for allocations between 512MB and 1GB and 8 divisions for any larger allocations,
+  set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
@@ -423,6 +429,66 @@ Available options:
 
 .. _CUDA's built-in asynchronous allocator:
     https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
+
+.. _cuda-memory-custom-allocator:
+
+Using custom memory allocators for CUDA
+---------------------------------------
+
+It is possible to define allocators as simple functions in C/C++ and compile
+them as a shared library, the code below shows a basic allocator that just
+traces all the memory operations.
+
+.. code:: C++
+
+   #include <sys/types.h>
+   #include <cuda_runtime_api.h>
+   #include <iostream>
+   // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
+   extern "C" {
+   void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+      void *ptr;
+      cudaMalloc(&ptr, size);
+      std::cout<<"alloc "<<ptr<<size<<std::endl;
+      return ptr;
+   }
+
+   void my_free(void* ptr, ssize_t size, cudaStream_t stream) {
+      std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
+      cudaFree(ptr);
+   }
+   }
+
+
+This can be used in python through the :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+The user is responsible for supplying the path to the `.so` file and the name
+of the alloc/free functions that match the signatures specified above.
+
+.. code:: python
+
+   import torch
+
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # Swap the current allocator
+   torch.cuda.memory.change_current_allocator(new_alloc)
+   # This will allocate memory in the device using the new allocator
+   b = torch.zeros(10, device='cuda')
+
+
+.. code:: python
+
+   import torch
+
+   # Do an initial memory allocator
+   b = torch.zeros(10, device='cuda')
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # This will error since the current allocator was already instantiated
+   torch.cuda.memory.change_current_allocator(new_alloc)
+
 
 .. _cufft-plan-cache:
 
@@ -501,6 +567,26 @@ have a flag that can be used to disable CUDA, in combination with
         args.device = torch.device('cuda')
     else:
         args.device = torch.device('cpu')
+
+.. note::
+
+    When assessing the availability of CUDA in a given environment (:meth:`~torch.cuda.is_available`), PyTorch's default
+    behavior is to call the CUDA Runtime API method `cudaGetDeviceCount`_. Because this call in turn initializes the
+    CUDA Driver API (via `cuInit`_) if it is not already initialized, subsequent forks of a process that has run
+    :meth:`~torch.cuda.is_available` will fail with a CUDA initialization error.
+
+    One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
+    :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
+    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment (`nvmlDeviceGetCount_v2`_). If the
+    NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
+    :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
+
+    If NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard CUDA Runtime
+    API assessment and the aforementioned fork constraint will apply.
+
+    Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
+    Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
+    may succeed while later CUDA initialization fails.
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
 desired device.
@@ -582,6 +668,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
+
 .. _cuda-memory-pinning:
 
 Use pinned memory buffers
@@ -632,6 +719,15 @@ by GIL of Python interpreter.
 
 If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
+
+.. _cudaGetDeviceCount:
+    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g18808e54893cfcaafefeab31a73cc55f
+
+.. _cuInit:
+    https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3
+
+.. _nvmlDeviceGetCount_v2:
+    https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d
 
 .. _cuda-graph-semantics:
 

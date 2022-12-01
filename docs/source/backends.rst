@@ -52,7 +52,13 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
+.. autoclass:: torch.backends.cuda.SDPBackend
+
 .. autofunction:: torch.backends.cuda.flash_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_mem_efficient_sdp
+
+.. autofunction:: torch.backends.cuda.mem_efficient_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_flash_sdp
 

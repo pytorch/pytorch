@@ -1,7 +1,7 @@
 import torch
+from torch.ao.quantization.backend_config import BackendConfig
 from torch.fx.graph import Node, Graph
-from ..utils import _parent_name
-from torch.ao.quantization.quantization_types import NodePattern, Pattern
+from ..utils import _parent_name, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
@@ -109,3 +109,12 @@ class DefaultFuseHandler(FuseHandler):
         args.extend(extra_args)
         node.args = tuple(args)
         return node
+
+def _get_fusion_pattern_to_fuse_handler_cls(
+        backend_config: BackendConfig) -> Dict[Pattern, Callable]:
+    fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
+    for pattern, config in backend_config.configs.items():
+        if config.fuser_method is not None:
+            # TODO: is this logic right?
+            fusion_pattern_to_fuse_handlers[pattern] = DefaultFuseHandler
+    return fusion_pattern_to_fuse_handlers

@@ -1,3 +1,4 @@
+#include <ATen/core/Tensor.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/VmapTransforms.h>

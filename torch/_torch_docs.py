@@ -108,6 +108,16 @@ factory_common_args = merge_dicts(
         returned Tensor. Default: ``torch.contiguous_format``.
 """
     ),
+    {
+        "sparse_factory_device_note": """\
+.. note::
+
+   If the ``device`` argument is not specified the device of the given
+   :attr:`values` and indices tensor(s) must match. If, however, the
+   argument is specified the input Tensors will be converted to the
+   given device and in turn determine the device of the constructed
+   sparse tensor."""
+    },
 )
 
 factory_like_common_args = parse_kwargs(
@@ -164,6 +174,14 @@ and using CuDNN, this operator may select a nondeterministic algorithm to increa
 undesirable, you can try to make the operation deterministic (potentially at \
 a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
 See :doc:`/notes/randomness` for more information.""",
+}
+
+sparse_support_notes = {
+    "sparse_beta_warning": """
+.. warning::
+    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
+    or may not have autograd support. If you notice missing functionality please
+    open a feature request.""",
 }
 
 add_docstr(
@@ -534,6 +552,12 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. If
+:attr:`input` is sparse the result will have the same layout and if :attr:`out`
+is provided it must have the same layout as :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -557,7 +581,7 @@ Example::
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -3726,7 +3750,7 @@ Examples::
 add_docstr(
     torch.as_strided_scatter,
     r"""
-as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(input, src, size, stride, storage_offset=None) -> Tensor
 
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the elements corresponding to the result of calling
@@ -5744,7 +5768,7 @@ add_docstr(
     r"""
 ldexp(input, other, *, out=None) -> Tensor
 
-Multiplies :attr:`input` by 2**:attr:`other`.
+Multiplies :attr:`input` by 2 ** :attr:`other`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i * 2^\text{{other}}_i
@@ -7462,6 +7486,12 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
+If :attr:`out` is provided it's layout will be used. Otherwise, the result
+layout will be deduced from that of :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7481,7 +7511,7 @@ Example::
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7538,6 +7568,12 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
+matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
+as :func:`torch.mm`
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7582,7 +7618,7 @@ Example::
     torch.Size([10, 3, 5])
 
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7954,8 +7990,10 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (Tensor or int): the starting dimension
-    length (int): the distance to the ending dimension
+    start (int or Tensor): index of the element to start the narrowed dimension
+        from. Can be negative, which means indexing from the end of `dim`. If
+        `Tensor`, it must be an 0-dim integral `Tensor` (bools not allowed)
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Example::
 
@@ -7967,6 +8005,10 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+    >>> torch.narrow(x, -1, torch.tensor(-1), 1)
+    tensor([[3],
+            [6],
+            [9]])
 """,
 )
 
@@ -7982,8 +8024,9 @@ do not have a shared-storage narrow method.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting offset
-    length (int): the distance to the ending dimension
+    start (int): index of the element to start the narrowed dimension from. Can
+        be negative, which means indexing from the end of `dim`
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Keyword args:
     {out}
@@ -8001,19 +8044,21 @@ Example::
     >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
     >>> torch.narrow_copy(s, 0, 0, 1)
     tensor(indices=tensor([[0, 0],
-                        [0, 1]]),
-        values=tensor([[[0, 1],
-                        [2, 3]],
+                           [0, 1]]),
+           values=tensor([[[0, 1],
+                           [2, 3]],
 
-                        [[4, 5],
-                        [6, 7]]]),
-        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+                          [[4, 5],
+                           [6, 7]]]),
+           size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
 
 .. seealso::
 
         :func:`torch.narrow` for a non copy variant
 
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
@@ -8462,9 +8507,13 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
 .. seealso::
-
         :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
         from the QR decomposition.
+
+.. note::
+        This function supports backward but it is only fast when ``(input, tau)`` do not require gradients
+        and/or ``tau.size(-1)`` is very small.
+        ``
 
 Args:
     input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
@@ -8802,7 +8851,7 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
-          This behavior will propably change once QR supports pivoting.
+          This behavior will probably change once QR supports pivoting.
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
@@ -10117,6 +10166,8 @@ typically faster than that for sparse tensors in COO format. Make you
 have a look at :ref:`the note on the data type of the indices
 <sparse-compressed-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     compressed_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, compressed_dim_size + 1)``.  The last element of
@@ -10129,10 +10180,12 @@ Args:
     plain_indices (array_like): Plain dimension (column or row)
         co-ordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
+
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types.  that
-        represents a (1+K)-dimensional or (1+2+K)-dimensional tensor
-        where ``K`` is the number of dense dimensions.
+        represents a (1+K)-dimensional (for CSR and CSC layouts) or
+        (1+2+K)-dimensional tensor (for BSR and BSC layouts) where
+        ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
         blocksize[1], *densesize)`` where ``blocksize[0] ==
@@ -10182,6 +10235,8 @@ values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix 
 in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, nrows + 1)``.  The last element of each batch
@@ -10195,7 +10250,7 @@ Args:
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10242,6 +10297,8 @@ multiplication operations in CSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-csc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncols + 1)``.  The last element of each batch
@@ -10255,7 +10312,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10302,6 +10359,8 @@ multiplication operations in BSR format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsr-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, nrowblocks + 1)``.  The last element of each
@@ -10315,7 +10374,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10367,6 +10426,8 @@ multiplication operations in BSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncolblocks + 1)``. The last element of each
@@ -10380,7 +10441,7 @@ Args:
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10431,6 +10492,8 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 .. note::
 
    This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
@@ -11123,7 +11186,7 @@ add_docstr(
     r"""
 flip(input, dims) -> Tensor
 
-Reverse the order of a n-D tensor along given axis in dims.
+Reverse the order of an n-D tensor along given axis in dims.
 
 .. note::
     `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
@@ -11280,7 +11343,7 @@ add_docstr(
     r"""
 rot90(input, k=1, dims=[0,1]) -> Tensor
 
-Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
@@ -12365,7 +12428,7 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y) -> Tensor
+where(condition, x, y, *, out=None) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -12376,7 +12439,8 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-
+"""
+    + r"""
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -12386,6 +12450,9 @@ Arguments:
                           where :attr:`condition` is ``True``
     y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
+
+Keyword args:
+    {out}
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -12418,7 +12485,9 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
@@ -12581,7 +12650,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
 
 """.format(
         **factory_common_args
@@ -13081,7 +13150,7 @@ Args:
 
 Keyword args:
     output_size (int, optional): Total output size for the given axis
-        ( e.g. sum of repeats). If given, it will avoid stream syncronization
+        ( e.g. sum of repeats). If given, it will avoid stream synchronization
         needed to calculate output shape of the tensor.
 
 Returns:
@@ -13317,7 +13386,7 @@ Arguments:
     input (Tensor): quantized tensor
     kernel_size (list of int): the size of the sliding window
     stride (``list of int``, optional): the stride of the sliding window
-    padding (``list of int``, opttional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    padding (``list of int``, optional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
     dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
     ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
         Defaults to False.

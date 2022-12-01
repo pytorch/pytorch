@@ -202,7 +202,7 @@ class PackageExporter:
             f: The location to export to. Can be a  ``string``/``Path`` object containing a filename
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
-                If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
+                If a sequence of importers are passed, an ``OrderedImporter`` will be constructed out of them.
         """
         torch._C._log_api_usage_once("torch.package.PackageExporter")
 
@@ -574,7 +574,7 @@ class PackageExporter:
         pickle_protocol: int = 3,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
-        the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
+        the archive rather than a stand-alone file. Standard pickle does not save the code, only the objects.
         If ``dependencies`` is true, this method will also scan the pickled objects for which modules are required
         to reconstruct them and save the relevant code.
 
@@ -887,7 +887,7 @@ class PackageExporter:
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                untyped_storage = obj._storage
+                untyped_storage = obj._untyped_storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 storage_numel = obj.size()

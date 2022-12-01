@@ -1,11 +1,30 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmv.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul_cpu_dispatch.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#endif
 
 namespace at {
 namespace meta {

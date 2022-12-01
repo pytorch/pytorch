@@ -80,7 +80,7 @@ inline at::SymDimVector infer_size_dv(
     c10::SymInt numel) {
   auto res = at::SymDimVector(shape);
   infer_size_impl<c10::SymIntArrayRef, c10::SymInt, at::SymDimVector>(
-      shape, numel, res);
+      shape, std::move(numel), res);
   return res;
 }
 

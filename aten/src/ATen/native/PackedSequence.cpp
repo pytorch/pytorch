@@ -1,5 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_pack_padded_sequence_backward_native.h>
+#include <ATen/ops/_pack_padded_sequence_native.h>
+#include <ATen/ops/_pad_packed_sequence_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/pad_sequence_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -96,18 +111,20 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 // `grad` could be on arbitrary device and of arbitrary dtype, but `_batch_sizes`
 // is guaranteed to be a CPU int64 tensor.
 // See NOTE [ device and dtype of a PackedSequence ]
-Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
-  std::vector<int64_t> input_size_after_t = input_size.vec();
+Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
+  std::vector<c10::SymInt> input_size_after_t = input_size.vec();
   if (batch_first) {
     TORCH_CHECK(input_size.size() >= 2);
     std::swap(input_size_after_t[0], input_size_after_t[1]);
   }
-  auto grad_input = at::zeros(input_size_after_t, grad.options());
+  auto grad_input = at::zeros_symint(input_size_after_t, grad.options());
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
   int64_t offset = 0;
-  int64_t max_seq_len = batch_sizes_t.size(0);
+  // NOTE: this op advertises as CompositeImplicitAutograd, but uses data_ptr().
+  // we should fix this.
+  auto max_seq_len = batch_sizes_t.size(0);
   int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
   for (const auto i : c10::irange(max_seq_len)) {
     grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));

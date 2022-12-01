@@ -751,7 +751,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // Sends the warning to the warning handler with the
                 // "verbatim" flag. This flag ensures the warning handler
                 // will print the exception as configured.
-                c10::Warning::warn(location, msg, /*verbatim=*/true);
+                c10::warn(c10::Warning(
+                    c10::UserWarning(), location, msg, /*verbatim=*/true));
               }
               stack.pop_back();
             } else {
