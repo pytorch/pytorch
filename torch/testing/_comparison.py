@@ -1210,16 +1210,15 @@ def originate_pairs(
             )
 
 
-def assert_equal(
+def are_equal(
     actual: Any,
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]] = (ObjectPair,),
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
-    msg: Optional[Union[str, Callable[[str], str]]] = None,
     **options: Any,
-) -> None:
+) -> List[ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1250,12 +1249,12 @@ def assert_equal(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None
 
-    error_metas: List[ErrorMeta] = []
+    comparison_error_metas: List[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()
         except ErrorMeta as error_meta:
-            error_metas.append(error_meta)
+            comparison_error_metas.append(error_meta)
         # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
         # about what happened. If applicable, the exception should be expected in the future.
         except Exception as error:
@@ -1269,11 +1268,7 @@ def assert_equal(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    if not error_metas:
-        return
-
-    # TODO: compose all metas into one AssertionError
-    raise error_metas[0].to_error(msg)
+    return comparison_error_metas
 
 
 def assert_close(
@@ -1522,7 +1517,7 @@ def assert_close(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    assert_equal(
+    comparison_error_metas = are_equal(
         actual,
         expected,
         pair_types=(
@@ -1541,6 +1536,10 @@ def assert_close(
         check_stride=check_stride,
         msg=msg,
     )
+
+    if comparison_error_metas:
+        # TODO: compose all metas into one AssertionError
+        raise comparison_error_metas[0].to_error(msg)
 
 
 def assert_allclose(
