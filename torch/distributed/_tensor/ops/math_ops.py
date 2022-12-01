@@ -2,15 +2,17 @@
 from typing import cast, Optional, Sequence
 
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import reduction_rule, pointwise_rule
-from torch.distributed._tensor.ops.utils import register_prop_rule, as_list, normalize_dims
+from torch.distributed._tensor.ops.common_rules import pointwise_rule, reduction_rule
+from torch.distributed._tensor.ops.utils import (
+    as_list,
+    normalize_dims,
+    register_prop_rule,
+)
+from torch.distributed._tensor.placement_types import DTensorSpec
 
 
-def _infer_reduction_dims(
-    dims_arg: object, ndim: int
-) -> Optional[Sequence[int]]:
+def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[Sequence[int]]:
     if dims_arg is None:
         return None
     dims = cast(Sequence[int], as_list(dims_arg))
@@ -69,9 +71,7 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     if softmax_dim < len(grad_out_dim_map) and (
         grad_out_dim_map[softmax_dim] >= 0 or out_dim_map[softmax_dim] >= 0
     ):
-        raise RuntimeError(
-            "Cannot run _softmax_backward_data on sharding dimension!"
-        )
+        raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
     return pointwise_rule(op_schema)
 
 

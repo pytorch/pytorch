@@ -1,7 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from typing import Dict, Optional, Sequence, Tuple, Union
+
 import torch
-from typing import Union, Dict, Tuple, Optional, Sequence
 
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.placement_types import DTensorSpec
