@@ -81,7 +81,7 @@ Features described in this documentation are classified by release status:
    torch.library <library>
    cuda
    torch.backends <backends>
-   torch.compile <dynamo/*>
+   torch.compile <dynamo/index>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
