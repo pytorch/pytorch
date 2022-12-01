@@ -3,12 +3,12 @@ import subprocess
 import sys
 
 
+os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+
 if 'BUILD_ENVIRONMENT' not in os.environ:
-    os.environ['CONDA_PARENT_DIR'] = os.getcwd()
-else:
-    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
 
-
+subprocess.run(['echo', 'active CONDA_PARENT_DIR: ' + os.environ['CONDA_PARENT_DIR']])
 # Be conservative here when rolling out the new AMI with conda. This will try
 # to install conda as before if it couldn't find the conda installation. This
 # can be removed eventually after we gain enough confidence in the AMI
