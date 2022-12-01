@@ -383,6 +383,9 @@ def multi_head_attention_forward(query: Tensor,
                                  ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
 
+def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ...
+
+
 ${imported_hints}
 
 ${dispatched_hints}
