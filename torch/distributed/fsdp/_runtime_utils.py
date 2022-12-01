@@ -99,11 +99,13 @@ def _lazy_init(
         if fsdp_module is root_module:
             continue
 
-        _validate_hybrid_shard_setup(state, fsdp_module)
-        # Share the allreduce state across FSDP units. This is not strictly necessary
-        # as each one already uses the same process group, but can slightly save memory
-        # since other FSDP units allreduce state can be garbage collected.
-        fsdp_module._inter_node_state = state._inter_node_state
+        if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            _validate_hybrid_shard_setup(state, fsdp_module)
+            # Share the allreduce state across FSDP units. This is not strictly necessary
+            # as each one already uses the same process group, but can slightly save memory
+            # since other FSDP units allreduce state can be garbage collected.
+            fsdp_module._inter_node_state = state._inter_node_state
+
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
         # training to run inference)
