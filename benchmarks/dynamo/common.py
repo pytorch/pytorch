@@ -413,6 +413,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
+    @contextlib.contextmanager
+    def maybe_mark_profile(*args, **kwargs):
+        prof: torch.profiler.profile = kwargs.pop("p", None)
+        mark = kwargs.pop("mark", None)
+        if prof:
+            with torch.profiler.record_function(mark):
+                yield
+        else:
+            yield
+
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
         for rep in range(args.repeat):
@@ -427,16 +437,19 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            timings[rep, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
-            )
+            with maybe_mark_profile(p=p, mark="expected"):
+                timings[rep, 0], expected_output = timed(
+                    model, model_iter_fn, inputs, return_result=True
+                )
 
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            timings[rep, 1], actual_output = timed(
-                model, frozen_model_iter_fn, inputs, return_result=True
-            )
+            with maybe_mark_profile(p=p, mark="actual"):
+                timings[rep, 1], actual_output = timed(
+                    model, frozen_model_iter_fn, inputs, return_result=True
+                )
+
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
 
