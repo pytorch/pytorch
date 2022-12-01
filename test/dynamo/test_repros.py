@@ -1947,6 +1947,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 100)
 
+    def test_avoid_dupe_specialization(self):
+        def f(x, y):
+            return (x + y) * 1
+
+        opt_f = torch._dynamo.optimize("aot_eager")(f)
+
+        for b in [True, False]:
+            x = torch.randn(4, requires_grad=b)
+            y = torch.randn(4, requires_grad=b)
+            self.assertEqual(f(x, x), opt_f(x, x))
+            self.assertEqual(f(x, y), opt_f(x, y))
+
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
         def inner(x):
