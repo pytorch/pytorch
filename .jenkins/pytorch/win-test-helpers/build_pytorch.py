@@ -43,6 +43,11 @@ if os.environ['DEBUG'] == '1':
 else:
     os.environ['BUILD_TYPE'] = 'release'
 
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
+else:
+    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
+
 
 os.environ['PATH'] = 'C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;' +\
     'C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files' +\
