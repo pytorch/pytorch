@@ -433,7 +433,11 @@ There are multiple quantization types in post training quantization (weight only
 FXPTQ API Example::
 
   import torch
-  from torch.ao.quantization import QConfigMapping
+  from torch.ao.quantization import (
+    get_default_qconfig_mapping,
+    get_default_qat_qconfig_mapping,
+    QConfigMapping,
+  )
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
@@ -460,7 +464,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qconfig_mapping("qnnpack")
   model_to_quantize.eval()
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -473,7 +477,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qat_qconfig_mapping("qnnpack")
   model_to_quantize.train()
   # prepare
   model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -1004,6 +1008,25 @@ if ``dtype`` is ``torch.quint8``, make sure to set a custom ``quant_min`` to be 
 if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be ``-64`` (``-128`` / ``2``) and ``quant_max`` to be ``63`` (``127`` / ``2``), we already set this correctly if
 you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
 ``x86`` or ``qnnpack`` backend
+
+Frequently Asked Questions
+--------------------------
+
+1. How can I do quantized inference on GPU?:
+
+   We don't have official GPU support yet, but this is an area of active development, you can find more information
+   `here <https://github.com/pytorch/pytorch/issues/87395>`_
+
+2. Where can I get ONNX support for my quantized model?:
+
+   You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
+   or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
+
+3. How can I use quantization with LSTM's?:
+
+   LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
+   Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782>`_
+   FX Graph Mode: `pytorch/test_quantize_fx.py TestQuantizeFx.test_static_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/fx/test_quantize_fx.py#L4116>`_
 
 Common Errors
 ---------------------------------------

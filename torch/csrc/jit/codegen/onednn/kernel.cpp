@@ -149,35 +149,42 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
 
     if (spec.reuses_input_tensor()) {
 #ifdef GRAPH_DEBUG_ENABLED
-      GRAPH_DEBUG("oneDNN Graph would perform inplace computation");
+      GRAPH_DEBUG("inplace computation - input tensor would be reused");
 #endif
       auto inputTensor = inputs[spec.get_input_tensor_index()];
-      auto dataType = spec.dtype();
-      if (C10_UNLIKELY(!useOpaqueLayout(i) && inputTensor.is_mkldnn())) {
-        // If the input tensor was between two partitions, it would've been
-        // wrapped with LlgaTensorImpl. But if it's being reused as the output
-        // tensor which is not between two partitions, then we'd have to re-wrap
-        // it with TensorImpl, as it'd be fed into a PyTorch op.
+      if (inputTensor.is_mkldnn()) {
+        auto dataType = spec.dtype();
+        if (C10_UNLIKELY(!useOpaqueLayout(i))) {
+          // If the input tensor was between two partitions, it would've been
+          // wrapped with LlgaTensorImpl. But if it's being reused as the output
+          // tensor, which is not between two partitions, then we'd have to
+          // re-wrap it with a sub-class of TensorImpl, as it'd be fed into a
+          // PyTorch op.
 #ifdef GRAPH_DEBUG_ENABLED
-        GRAPH_DEBUG("Rewrap tensor");
+          GRAPH_DEBUG("rewrap tensors");
 #endif
-        auto llgaImpl =
-            static_cast<LlgaTensorImpl*>(inputTensor.unsafeGetTensorImpl());
-        switch (dataType) {
-          case data_type::f32:
-          case data_type::bf16:
-            inputTensor = LlgaTensorImpl::llga_to_aten_tensor(llgaImpl);
-            break;
-          case data_type::s32:
-          default:
-            TORCH_CHECK(
-                false, "Invalid data type ", static_cast<size_t>(dataType));
+          auto llgaImpl =
+              static_cast<LlgaTensorImpl*>(inputTensor.unsafeGetTensorImpl());
+          switch (dataType) {
+            case data_type::f32:
+            case data_type::bf16:
+              inputTensor = LlgaTensorImpl::llga_to_aten_tensor(llgaImpl);
+              break;
+            case data_type::s32:
+            default:
+              TORCH_CHECK(
+                  false, "Invalid data type ", static_cast<size_t>(dataType));
+          }
         }
+        outputs.push_back(inputTensor);
+        runOutputs.push_back(
+            {spec.logical_tensor(),
+             Engine::getEngine(),
+             inputTensor.data_ptr()});
+        return std::make_tuple(runInputs, runOutputs);
       }
-      outputs.push_back(inputTensor);
-      runOutputs.push_back(
-          {spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr()});
-    } else if (useOpaqueLayout(i)) {
+    }
+    if (useOpaqueLayout(i)) {
       // Wrap tensors between partitions with LlgaTensorImpl wrapper, so that we
       // can bypass guard-check, as strides would be different than those
       // expected.

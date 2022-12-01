@@ -309,6 +309,7 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
   if (diff != 0) {
     auto deeper_scope = diff > 0 ? a : b;
     auto other_scope = diff > 0 ? b : a;
+    diff = std::abs(diff);
     while (diff > 0) {
       deeper_scope = deeper_scope->parent();
       diff--;

@@ -142,6 +142,28 @@ init_command = [
 ]
 
 [[linter]]
+code = 'MYPYNOFOLLOW'
+include_patterns = [
+    'torch/_dynamo/eval_frame.py',
+    'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/types.py',
+    'torch/_dynamo/output_graph.py',
+    'torch/_dynamo/optimizations/__init__.py',
+    'torch/_dynamo/optimizations/backends.py',
+    'torch/_dynamo/optimizations/training.py',
+    'torch/_C/_dynamo/**/*.py',
+]
+exclude_patterns = [
+]
+command = [
+    'python3',
+    'tools/linter/adapters/mypy_linter.py',
+    '--config=mypy-nofollow.ini',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'MYPYSTRICT'
 include_patterns = [
     '.github/**/*.py',
@@ -156,6 +178,7 @@ include_patterns = [
 exclude_patterns = [
     # (linbinyu) copied from internal repo
     'tools/code_analyzer/gen_operators_yaml.py',
+    'tools/dynamo/verify_dynamo.py',
     'tools/gen_vulkan_spv.py',
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
@@ -288,8 +311,10 @@ include_patterns=['**']
 exclude_patterns=[
     '**/contrib/**',
     'third_party/**',
+    '**/*.bat',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ps1',
     '**/*.ptl',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -334,6 +359,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/*.svg',
     '**/*Makefile',
+    '**/*Makefile_dashboard',
     '**/contrib/**',
     'third_party/**',
     '**/.gitattributes',
@@ -368,6 +394,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'aten/src/ATen/native/vulkan/glsl/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
@@ -412,6 +439,35 @@ command = [
         This #include directly includes pybind11 without also including \
         #include <torch/csrc/utils/pybind.h>;  this means some important \
         specializations may not be included.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'ERROR_PRONE_ISINSTANCE'
+include_patterns = [
+    'torch/_refs/**/*.py',
+    'torch/_prims/**/*.py',
+    'torch/_prims_common/**/*.py',
+    'torch/_decomp/**/*.py',
+    'torch/_meta_registrations.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]+(int|float)\)',
+    '--linter-name=ERROR_PRONE_ISINSTANCE',
+    '--error-name=error prone isinstance',
+    """--error-description=\
+        This line has an isinstance call that directly refers to \
+        int or float.  This is error-prone because you may also \
+        have wanted to allow SymInt or SymFloat in your test.  \
+        To suppress this lint, use an appropriate type alias defined \
+        in torch._prims_common; use IntLike/FloatLike when you would accept \
+        both regular and symbolic numbers, Dim for ints representing \
+        dimensions, or IntWithoutSymInt/FloatWithoutSymFloat if you really \
+        meant to exclude symbolic numbers.
     """,
     '--',
     '@{{PATHSFILE}}'

@@ -2,6 +2,13 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (1, 1, 1)
+ * WEIGHT_STORAGE = TEXTURE_2D
+ * BIAS_STORAGE = TEXTURE_2D
+ * Note that for DW kernel IC = 1 so the weight layout is really OC4, H, W, 4oc
+ */
+
 layout(std430) buffer;
 
 /*
@@ -13,8 +20,8 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION sampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -66,7 +73,7 @@ void main() {
   // reading the input
   const ivec2 kstart = (start - ipos) / uBlock.dilate;
 
-  vec4 sum = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
+  vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
   const int dil_y = uBlock.dilate.y;
   const int dil_x = uBlock.dilate.x;
   for (int y = start.y, ky = kstart.y; y < end.y; y += dil_y, ky++) {
@@ -75,7 +82,7 @@ void main() {
       // so that it fits on one row. Each filter was then stacked on top of each
       // other vertically.
       const int k_ind = kx + ky * uBlock.kernel_size.x;
-      const vec4 k_tex = texelFetch(uKernel, ivec3(k_ind, pos.z, 0), 0);
+      const vec4 k_tex = texelFetch(uKernel, ivec2(k_ind, pos.z), 0);
       const vec4 i_tex = texelFetch(uInput, ivec3(x, y, pos.z), 0);
       sum = fma(i_tex, k_tex, sum);
     }

@@ -112,6 +112,14 @@ void Context::setSDPUseFlash(bool e) {
   enabled_flashSDP = e;
 }
 
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
 bool Context::userEnabledMathSDP() const {
   return enabled_mathSDP;
 }
@@ -324,8 +332,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif

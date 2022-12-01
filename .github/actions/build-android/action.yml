@@ -73,4 +73,4 @@ runs:
         # Copy install binaries back
         mkdir -p "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
         docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
-        echo "::set-output name=container_id::${container_name}"
+        echo "container_id=${container_name}" >> "${GITHUB_OUTPUT}"

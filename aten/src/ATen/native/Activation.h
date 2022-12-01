@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/Exception.h>
+#include <c10/util/string_view.h>
 
 namespace c10 {
 class Scalar;

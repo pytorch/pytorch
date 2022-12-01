@@ -2,28 +2,58 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, NamedTuple, Sequence, Tuple, Union
+from typing import Callable, Dict, Sequence, Union
 
 import torch
-import torch._ops
 import torch.library
+from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._pytree import tree_map
 
-__all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
+__all__ = [
+    "decomposition_table",
+    "pre_autograd_decomposition_table",
+    "meta_table",
+    "register_decomposition",
+    "get_decompositions",
+]
+
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
+global_decomposition_table: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
+
+decomposition_table = global_decomposition_table["post_autograd"]
+pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
+meta_table = global_decomposition_table["meta"]
 
 
-meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+def _add_op_to_registry(registry, op, fn):
+    """
+    This is an internal API for adding an op to the decomposition table.
 
-# decompositions which have been disabled as meta kernel implementations,
-# usually due to mismatching strides, aliasing, or other inconsistent property
-_disabled_meta_decomps = set()
+    If op is OpOverload, it will be added to the registry directly.
+    If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
+    """
+    overloads = []
+    if isinstance(op, OpOverload):
+        overloads.append(op)
+    else:
+        assert isinstance(op, OpOverloadPacket)
+        for ol in op.overloads():
+            overloads.append(getattr(op, ol))
+
+    for op_overload in overloads:
+        if op_overload in registry:
+            raise RuntimeError(f"duplicate registrations for {op_overload}")
+
+        # TorchScript dumps a bunch of extra nonsense overloads
+        # which don't have corresponding dispatcher entries, we need
+        # to filter those out, e.g aten.add.float_int
+        if torch._C._dispatch_has_kernel(op_overload.name()):
+            registry[op_overload] = fn
 
 
-def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
+def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -40,10 +70,11 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     autograd) and not just backend tracing, where we then need to know if a
     decomposition can be used to simulate a transform.
 
-    By default, if the decomposition is for an operator that doesn't have
-    a Meta implementation, we will register it to the dispatcher.  Use
-    `disable_meta` to disable this behavior.
+    By default, we also will register it to the Meta key of dispatcher,
+    and replace the c++ Meta implementation if there is already one.
     """
+
+    assert type in {"post_autograd", "pre_autograd", "meta"}
 
     def decomposition_decorator(f: Callable) -> Callable:
         sig = inspect.signature(f)
@@ -90,72 +121,22 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
 
         nonlocal registry
         if registry is None:
-            registry = decomposition_table
+            registry = global_decomposition_table[type]
 
-        def add_op_to_table(aten_op):
-            overloads = []
-            if isinstance(aten_op, torch._ops.OpOverload):
-                overloads.append(aten_op)
-            else:
-                assert isinstance(aten_op, torch._ops.OpOverloadPacket)
-                for ol in aten_op.overloads():
-                    overloads.append(getattr(aten_op, ol))
-            for op_overload in overloads:
-                if op_overload in registry:
-                    raise RuntimeError(f"duplicate registrations for {op_overload}")
-                registry[op_overload] = fn
-                op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
-                # TODO: factor this logic into OpOverload or Library API
-                name = op_overload._schema.name
-                if op_overload._schema.overload_name:
-                    name += "." + op_overload._schema.overload_name
-
-                if disable_meta:
-                    global _disabled_meta_decomps
-                    _disabled_meta_decomps.add(op_overload)
-
-                if (
-                    not disable_meta
-                    # TorchScript dumps a bunch of extra nonsense overloads
-                    # which don't have corresponding dispatcher entries, we need
-                    # to filter those out
-                    and torch._C._dispatch_has_kernel(name)
-                    # Don't register a python meta kernel to any operator that has
-                    # should already work with meta tensors today.
-                    # We can check that by seeing if the "computed table" for the operator
-                    # has a registration to Meta;
-                    # either through a direct registration, or an indirect one through
-                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
-                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
-                        name, "Meta"
-                    )
-                ):
-                    if any(
-                        a.alias_info is not None and not a.alias_info.is_write
-                        for a in op_overload._schema.arguments
-                    ):
-                        raise RuntimeError(
-                            f"""
-Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
-We shouldn't do this, because the output will report as not having aliased storages.
-All view ops have meta kernels in C++ today, so we should use those instead.
-
-If you're registering an operator through the `@register_decomposition` decorator,
-Please set `disable_meta=True`.
-                        """
-                        )
-                    meta_lib.impl(op_overload, fn)
+        def register(op):
+            _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(add_op_to_table, aten_op)
+        tree_map(register, aten_op)
         return fn
 
     return decomposition_decorator
 
 
 def get_decompositions(
-    aten_ops: Sequence[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]]
-) -> Dict[torch._ops.OpOverload, Callable]:
+    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+    type: str = "post_autograd",
+) -> Dict[OpOverload, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
     operator overloads and overload packets passed as input.  Overload
@@ -167,16 +148,19 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
+    assert type in {"post_autograd", "pre_autograd", "meta"}
+
+    registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
-    for opo in decomposition_table:
+    for opo in registry:
         packets_to_overloads[opo.overloadpacket].append(opo)
     decompositions = {}
     for op in aten_ops:
-        if isinstance(op, torch._ops.OpOverloadPacket) and op in packets_to_overloads:
+        if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
-                decompositions[op_overload] = decomposition_table[op_overload]
-        elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
-            decompositions[op] = decomposition_table[op]
+                decompositions[op_overload] = registry[op_overload]
+        elif isinstance(op, OpOverload) and op in registry:
+            decompositions[op] = registry[op]
     return decompositions
 
 

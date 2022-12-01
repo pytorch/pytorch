@@ -34,10 +34,10 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_functionalization_type import (
-    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -48,6 +48,7 @@ from torchgen.model import (
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FRAGMENT_NAMESPACES,
     FunctionSchema,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
@@ -1151,7 +1152,9 @@ def compute_argument_yaml(
         "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
-        arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
+        arg["default"] = pythonify_default(
+            cpp.default_expr(a.default, a.type, symint=False)
+        )
     if a.name in kwarg_only_set:
         arg["kwarg_only"] = True
     if a.name in out_arg_set:
@@ -1638,8 +1641,15 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
+            torch_library_macro = (
+                "TORCH_LIBRARY_FRAGMENT"
+                if namespace in FRAGMENT_NAMESPACES
+                else "TORCH_LIBRARY"
+            )
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+{torch_library_macro}({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
@@ -2492,7 +2502,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
@@ -2508,7 +2522,14 @@ def gen_source_files(
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
