@@ -46,8 +46,16 @@ def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
         if state.sharding_strategy != fsdp_module.sharding_strategy:
             raise ValueError(
                 "When using hybrid sharding strategy, expect sharding strategies"
-                f"to be the same, but got {state.sharding_strategy} vs {fsdp_module.sharding_strategy}"
+                f" to be the same, but got {state.sharding_strategy} vs {fsdp_module.sharding_strategy}"
             )
+
+        # Ensure inter and intra-node process groups are the same
+        assert state.process_group == fsdp_module.process_group, (
+            f"For {state.sharding_strategy} intra-node process groups do not match"
+        )
+        assert state._inter_node_pg == fsdp_module._inter_node_pg, (
+            f"For {state.sharding_strategy}, inter-node process groups do not match"
+        )
 
 @no_type_check
 def _lazy_init(

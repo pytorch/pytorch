@@ -7,6 +7,7 @@ from collections import Counter
 import sys
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 from torch.distributed.distributed_c10d import _rank_not_in_group
@@ -14,7 +15,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -68,6 +69,13 @@ def patch_reduce_scatter(new_reduce_scatter):
             dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin1 = nn.Linear(10, 10)
+        self.lin2 = nn.Linear(10, 10)
+        self.lin3 = nn.Linear(10, 10)
+
 class TestFSDPHybridShard(FSDPTest):
     @property
     def world_size(self):
@@ -76,6 +84,67 @@ class TestFSDPHybridShard(FSDPTest):
     @property
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_raises_manual_wrap_hybrid_shard_when_none_policy(self):
+        model = MyModel().cuda()
+        err_ctx = self.assertRaisesRegex(
+            ValueError, "requires explicit specification of process group"
+        )
+
+        with err_ctx:
+            model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+
+        with err_ctx:
+            model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD_ZERO2)
+
+
+    @skip_if_lt_x_gpu(2)
+    def test_hybrid_shard_mismatch_in_modules_raises(self):
+        for sharding_strategy in [
+            ShardingStrategy.HYBRID_SHARD_ZERO2,
+            ShardingStrategy.HYBRID_SHARD
+        ]:
+            with self.subTest(sharding_strategy=sharding_strategy):
+                model = MyModel().cuda()
+                intra_pg = self.process_group
+                inter_pg = dist.new_group(ranks=[self.rank])
+                model.lin1 = FSDP(model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=sharding_strategy)
+                self.assertEqual(model.lin1.process_group, intra_pg)
+                self.assertEqual(model.lin1._inter_node_pg, inter_pg)
+                model = FSDP(model, process_group=intra_pg)
+                inp = torch.randn(4, 10)
+                # Errors during _lazy_init
+                with self.assertRaisesRegex(ValueError, "expect sharding strategies to be the same"):
+                    model(inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_hybrid_shard_pg_mismatch_raises(self):
+        model = MyModel().cuda()
+        intra_pg = self.process_group
+        inter_pg = dist.new_group(ranks=[self.rank])
+        # Mismatched process groups
+        model.lin1 = FSDP(model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+        model = FSDP(model, process_group=(inter_pg, intra_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+        # Errors during lazy_init
+        inp = torch.randn(4, 10)
+        with self.assertRaisesRegex(ValueError, "do not match"):
+            model(inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_invalid_pg_specification_raises(self):
+        pol = ModuleWrapPolicy({nn.Linear})
+        model = MyModel().cuda()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Expected process_group to be passed in"
+        ):
+            model = FSDP(
+                model,
+                auto_wrap_policy=pol,
+                process_group=self.process_group,
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_hybrid_shard_basic_setup(self):
@@ -110,6 +179,8 @@ class TestFSDPHybridShard(FSDPTest):
                 intra_node_pgs = set()
                 inter_node_pgs = set()
                 for mod in fsdp_model.fsdp_modules(fsdp_model):
+                    # process_group should be across the machine, which is just the
+                    # whole world here.
                     self.assertEqual(
                         dist.get_world_size(mod.process_group),
                         dist.get_world_size(self.process_group)
