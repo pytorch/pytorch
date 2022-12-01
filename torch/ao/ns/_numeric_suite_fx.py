@@ -753,7 +753,7 @@ def prepare_n_shadows_model(
     qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Dict[str, Any] = None,
+    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
     custom_tracer: Any = None,
 ) -> torch.nn.Module:
     """
@@ -873,7 +873,7 @@ def loggers_set_save_activations(
 def convert_n_shadows_model(
     model: GraphModule,
     custom_convert_fn: Optional[Callable] = None,
-    custom_convert_kwargs: Dict[str, Any] = None
+    custom_convert_kwargs: Optional[Dict[str, Any]] = None
 ) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`
