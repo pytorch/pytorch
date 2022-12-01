@@ -155,8 +155,9 @@ DYNAMO_SUPPORTED_COLLECTIVES = {
 
 DYNAMO_SUPPORTED_PROCESS_GROUPS = {
     torch.distributed.ProcessGroupGloo,
-    torch.distributed.ProcessGroupNCCL,
 }
+if hasattr(torch.distributed, "ProcessGroupNCCL"):
+    DYNAMO_SUPPORTED_PROCESS_GROUPS.add(torch.distributed.ProcessGroupNCCL)
 
 
 class DuplicateWarningChecker(object):
