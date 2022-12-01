@@ -47,7 +47,7 @@ Here are some basic DistributedTensor API examples that showcase:
 ```python
 import torch
 import torch.distributed as distributed
-from torch.distributed import DTensor, DeviceMesh, Shard, Replicate, distribute_module
+from torch.distributed._tensor import DTensor, DeviceMesh, Shard, Replicate, distribute_module
 
 # construct a device mesh with available devices (multi-host or single host)
 device_mesh = DeviceMesh(device_type="cuda", [0, 1, 2, 3])
