@@ -32,7 +32,7 @@ if 'REBUILD' not in os.environ:
                 pass
 
 
-            if 'BUILD_ENVIRONMENT'] not in os.environ:
+            if 'BUILD_ENVIRONMENT' not in os.environ:
 
                 subprocess.run(['curl', '--retry', '3', '-k',
                  'https://s3.amazonaws.com/ossci-windows/sccache.exe', '--output',
