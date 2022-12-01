@@ -134,7 +134,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # class attribute that handles operator placements propagation
     # rules, keyed by aten op name, value is propagation func
     _op_to_rules: Dict[
-        str, Callable[[op_dispatch.OpSchema], op_dispatch.OutputSharding]
+        str, Callable[["op_dispatch.OpSchema"], "op_dispatch.OutputSharding"]
     ] = {}
 
     # class attribute that handles custom registered ops, all handled
