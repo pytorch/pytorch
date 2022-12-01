@@ -2464,6 +2464,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
         self.checkDynamicQuantizedLinear(msq.shadow_wrapper_1_1.mod_0, torch.qint8)
         self.checkQuantizedLinear(msq.shadow_wrapper_1_2.mod_0)
+
     def test_custom_functions_and_tracer(self):
         class M(nn.Module):
             def __init__(self):
@@ -2479,9 +2480,13 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(2, 2),)
 
-        qconfig_mappings = QConfigMultiMapping().set_global([torch.quantization.default_qat_qconfig])
+        qconfig_mappings = QConfigMultiMapping().set_global(
+            [torch.quantization.default_qat_qconfig]
+        )
 
-        custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(["fc2"], [])
+        custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(
+            ["fc2"], []
+        )
 
         custom_prepare_fn = torch.ao.quantization.quantize_fx.prepare_qat_fx
 
@@ -2498,19 +2503,27 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         kwargs = {"to_print": "working"}
 
         msp = prepare_n_shadows_model(
-            m, example_inputs, qconfig_mappings, backend_config, custom_prepare_fn=custom_prepare_fn, custom_prepare_kwargs=None, custom_tracer=custom_tracer)
+            m,
+            example_inputs,
+            qconfig_mappings,
+            backend_config,
+            custom_prepare_fn=custom_prepare_fn,
+            custom_prepare_kwargs=None,
+            custom_tracer=custom_tracer,
+        )
 
         for _ in range(2):
             msp(*example_inputs)
 
-        msq = convert_n_shadows_model(msp, custom_convert_fn=custom_convert_fn, custom_convert_kwargs=kwargs)
+        msq = convert_n_shadows_model(
+            msp, custom_convert_fn=custom_convert_fn, custom_convert_kwargs=kwargs
+        )
         print(msq)
         loggers_set_enabled(msq, True)
         msq(*example_inputs)
 
         results = extract_results_n_shadows_model(msq)
         print_comparisons_n_shadows_model(results)
-
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
