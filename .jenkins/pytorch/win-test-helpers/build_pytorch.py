@@ -63,8 +63,8 @@ os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation
 
 
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
-subprocess.call(['python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
-subprocess.call(['python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
+subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
+subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
