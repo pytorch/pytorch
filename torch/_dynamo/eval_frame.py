@@ -300,7 +300,11 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
-        if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
+        if (
+            frame.f_lasti >= 0
+            or skipfiles.check(frame.f_code.co_filename)
+            or config.disable
+        ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
@@ -367,7 +371,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-class _NullDecorator(contextlib.nullcontext):
+class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
         assert callable(fn)
         return fn

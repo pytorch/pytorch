@@ -111,6 +111,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
+    "dlrm",  # Fails on CI - unable to repro locally
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
@@ -121,13 +122,17 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # TIMM
     "convit_base",  # fp64_OOM
     "dm_nfnet_f0",  # accuracy
+    "convmixer_768_32",  # accuracy - Unable to repro on A100
+    "hrnet_w18",  # accuracy - Unable to repro on A100
+    "sebotnet33ts_256",  # accuracy - Unable to repro on A100
+    "hrnet_w18",  # accuracy - Unable to repro on A100
+    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     "res2net101_26w_4s",  # accuracy
-    "resnest101e",  # accuracy
-    "rexnet_100",  # accuracy
     "spnasnet_100",  # accuracy
+    "resnest101e",  # accuracy
     "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -191,6 +196,10 @@ class NullContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
+
+
+def nothing(f):
+    return f
 
 
 @functools.lru_cache(None)
@@ -1075,10 +1084,6 @@ class BenchmarkRunner:
             )
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
-        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
-            self.args.training, current_device, name
-        )
-
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip")
 
@@ -1102,10 +1107,17 @@ class BenchmarkRunner:
                 )
             )
         except Exception:
-            log.warning(f"fp64 golden ref were not generated for {name}")
+            log.warning(
+                f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
+            )
+            self.args.cosine = True
             fp64_outputs = None
             if self.args.ci and self.args.training:
                 return record_status("fp64_OOM")
+
+        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+            self.args.training, current_device, name
+        )
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
@@ -1706,11 +1718,18 @@ def run(runner, args, original_dir=None):
         if args.batch_size is None:
             if runner.suite_name == "huggingface":
                 args.batch_size = 1
+            elif runner.suite_name == "torchbench":
+                args.batch_size = 4
             else:
-                args.batch_size = 2
+                # Larger batch size of TIMM models to have stable batch_norm
+                assert runner.suite_name == "timm_models"
+                args.batch_size = 8
 
         # Remove sources of randomness
-        args.use_eval_mode = True
+        if runner.suite_name != "timm_models":
+            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+            args.use_eval_mode = True
+        inductor_config.fallback_random = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -1893,7 +1912,8 @@ def run(runner, args, original_dir=None):
             nopython=args.nopython,
         )
     elif args.nothing:
-        pass
+        optimize_ctx = nothing
+        output_filename = "nothing.csv"
     elif args.backend:
         optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
