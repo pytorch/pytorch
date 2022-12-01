@@ -2489,8 +2489,8 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(
-      llvm::OptimizationLevel::O3);
+  llvm::ModulePassManager MPM =
+      PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
   llvm::FunctionPassManager FPM = PB.buildFunctionSimplificationPipeline(
       llvm::OptimizationLevel::O3, llvm::ThinOrFullLTOPhase::None);
 
