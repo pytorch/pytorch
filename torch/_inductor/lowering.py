@@ -2656,6 +2656,15 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
+    grad_output.decide_layout()
+    gO_stride = grad_output.get_stride()
+    x_stride = x.get_stride()
+    if x_stride[1] ==1 or gO_stride[1] == 1:
+        # don't codegen channels-last, it's very slow
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
+
     indices.realize_hint()
 
     *batch, height, width = x.get_size()

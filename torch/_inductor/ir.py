@@ -618,19 +618,20 @@ class Reduction(Loops):
         # try finding the full size producer
         # TODO this will fail for something like ((1, N) * (N, 1)).sum()
         # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
-        # TODO maybe go over all full size producers and pick the most common one?
         range_vars = [
             r
             for r in read_writes.range_vars
             if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
         ]
-        index = None
-        for md in sorted(read_writes.reads):
+        indices = []
+        for md in reversed(sorted(read_writes.reads)):
             if all([r in md.index.free_symbols for r in range_vars]):
-                index = md.index
-                break
-        if not index:
-            # TODO determine splits when all inputs are broadcasted
+                indices.append(md.index)
+                if md.name in V.graph.name_to_buffer:
+                    buf = V.graph.name_to_buffer[md.name]
+                    buf.decide_layout()
+        if len(indices) == 0: #not index:
+            # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
         for md in sorted(read_writes.writes):
             write_index = md.index
@@ -638,17 +639,20 @@ class Reduction(Loops):
         reduction_vars = [
             rv for rv in range_vars if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
         ]
-        strides = V.graph.sizevars.stride_hints(index, reduction_vars)
-        # if numel_hint == 64:
-        #     print("in split", reduction_numel_hint, numel_hint, read_writes, reduction_vars)
-        #     print("strides", index, strides)
-        #     print("reduction", r)
-        outer = all([s > 1 for s in strides])
-        if not outer:
+        num_outer = 0
+        num_inner = 0
+        for i in indices:
+            strides = V.graph.sizevars.stride_hints(i, reduction_vars)
+            outer = all([s > 1 for s in strides])
+            if outer:
+                num_outer += 1
+            else:
+                num_inner += 1
+        if num_inner > num_outer:
             return ReductionHint.INNER, inner_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
-        else:  # outer reduction
+        else:
             return ReductionHint.OUTER, outer_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
@@ -3806,13 +3810,6 @@ class StorageBox(MutableBox):
                 size=self.data.get_size(),
             ),
             data=self.data,
-        )
-        order = self.data.get_fill_order()
-        self.data.layout = FlexibleLayout(
-                device=self.data.get_device(),
-                dtype=self.data.get_dtype(),
-                size=self.data.get_size(),
-                stride_order=order
         )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
