@@ -29,6 +29,7 @@ import numpy as np
 import sympy
 
 import torch
+import torch.distributed
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
