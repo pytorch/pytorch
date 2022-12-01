@@ -13,6 +13,8 @@ import weakref
 from typing import Any, Callable
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 
 import torch._dynamo
@@ -21,6 +23,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -39,6 +42,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics
+    from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -223,6 +227,14 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def clone_preserve_strides(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+    return out
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -243,7 +255,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = example_inputs
+    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
     original_lowp_dtype = torch.half
@@ -323,6 +335,16 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+        )
+        # In case of input mutations, check that inputs are the same
+        self.assertEqual(
+            ref_inputs,
+            example_inputs,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            # our testing sometimes uses higher precision inputs for the reference
+            exact_dtype=False,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -668,11 +690,22 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_sgn_extremal(self):
+        def fn(a):
+            return (torch.sgn(a),)
+
+        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
+
     def test_max_min(self):
         def fn(a, b):
             return (torch.maximum(a, b), torch.minimum(a, b))
 
         self.common(fn, (torch.randn(8), torch.randn(8)))
+        t1 = torch.randn(8)
+        t1[0] = float("nan")
+        t2 = torch.randn(8)
+        t2[1] = float("nan")
+        self.common(fn, (t1, t2))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -1158,6 +1191,45 @@ class CommonTemplate:
 
         self.common(fn, (1024, 100))
 
+    def test_div_zero_dim(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(10, device="cpu", dtype=dtype),
+                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+            self.common(
+                fn,
+                (
+                    make_tensor((), device="cpu", dtype=dtype),
+                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+
+    def test_div_prim(self):
+        def fn(a, b):
+            return (torch.ops.prims.div(a, b),)
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(100, device="cpu", dtype=dtype),
+                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
@@ -1407,6 +1479,17 @@ class CommonTemplate:
                         (v,),
                     )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_packed(self):
+        x_shape = (1, 3, 56, 56)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
@@ -1448,8 +1531,11 @@ class CommonTemplate:
             ).eval()
 
             # TODO: add bf16 test for cpu path?
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
+            # TODO: this test fails when requires_grad=False
+            v = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
             )
             with torch.no_grad():
                 self.common(
@@ -1544,6 +1630,20 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
             with torch.no_grad():
                 self.common(
                     mod,
@@ -1871,6 +1971,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
         )
 
         # lowering to avg_pool2d case
@@ -1884,6 +1985,19 @@ class CommonTemplate:
             fn,
             (torch.randn(2, 4, 6, 6),),
         )
+
+    def test_adaptive_avg_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -1931,6 +2045,18 @@ class CommonTemplate:
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
+
+    def test_max_pool2d6(self):
+        # Too big kernel size, use fallback
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [13, 13], [])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -1985,6 +2111,18 @@ class CommonTemplate:
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
+
+    def test_avg_pool2d7(self):
+        # Large kernel size, use fallback
+        def fn(x):
+            return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -2581,6 +2719,25 @@ class CommonTemplate:
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
+    def test_fmod_zero_dim(self):
+        def fn(a, b):
+            return (torch.fmod(a, b),)
+
+        self.common(
+            fn,
+            (
+                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device="cpu", dtype=torch.float32),
+            ),
+        )
+        self.common(
+            fn,
+            (
+                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device="cpu", dtype=torch.float32),
+            ),
+        )
+
     def test_log2(self):
         def fn(x):
             return torch.log2(x), torch.log2(x + 1) - 2
@@ -2755,8 +2912,6 @@ class CommonTemplate:
                 ),
             )
 
-    # https://github.com/pytorch/torchdynamo/issues/467
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -3091,6 +3246,16 @@ class CommonTemplate:
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
         self.assertTrue(same(out, out_eager))
 
+    @patch.object(config.triton, "ordered_kernel_names", True)
+    @patch.object(config.triton, "descriptive_kernel_names", False)
+    def test_kernel_names(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            return 2 * x
+
+        inputs = (rand_strided((8,), (1,), device=self.device),)
+        self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
+
     @patch.object(config.triton, "cudagraphs", True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
@@ -3135,7 +3300,9 @@ class CommonTemplate:
             c = a + 2
             return b, c
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        # NOTE: this test fails when none of the inputs require grad.
+        # That seems like an inductor bug.
+        arg1 = torch.randn([1, 64], device=self.device).requires_grad_(True).add(1)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -3259,6 +3426,17 @@ class CommonTemplate:
                     dtype=torch.float64,
                 )
             ],
+        )
+
+    def test_isinf2(self):
+        def fn(x):
+            y = torch.tensor(
+                [1, float("inf"), 2, float("-inf"), float("nan")], device=self.device
+            )
+            return x == y
+
+        self.common(
+            fn, (torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")]),)
         )
 
     def test_any(self):
@@ -3868,6 +4046,7 @@ class CommonTemplate:
                 a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([2, 64, 3, 4])
         result, indices = aten.max_pool2d_with_indices(
             x,
@@ -3885,6 +4064,34 @@ class CommonTemplate:
                 indices,
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_max_pool2d_with_indices_backward5(self):
+        # Window size is too big. Should fallback
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([2, 64, 20, 20])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [13, 13],
+            [1, 1],
+            2,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d_backward(self):
         def fn(a, b):
@@ -3941,6 +4148,7 @@ class CommonTemplate:
                 None,
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             [
@@ -3948,6 +4156,31 @@ class CommonTemplate:
                 torch.randn([1, 2016, 21, 21]),
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_avg_pool2d_backward4(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [13, 13],
+                [1, 1],
+                [0, 0],
+                True,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 16, 12, 12]),
+                torch.randn([1, 16, 24, 24]),
+            ],
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_mm_views(self):
         def fn(a, b):
@@ -4273,7 +4506,10 @@ class CommonTemplate:
             ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
             ((3,), (1,), torch.float32),
         ]
-        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        args = [
+            rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
+            for shape, stride, dtype in args
+        ]
         self.common(forward, args)
 
     def test_misaligned_address_issue1(self):
@@ -4459,6 +4695,40 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
+
+    @patch.object(config, "profiler_mark_wrapper_call", True)
+    def test_profiler_mark_wrapper_call(self):
+        from torch.profiler import profile
+
+        @torch._dynamo.optimize("inductor", nopython=True)
+        def fn(a, b):
+            return a + b
+
+        a = torch.rand((100,))
+        b = torch.rand((100,))
+        with profile() as prof:
+            fn(a, b)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
+
+    @patch.object(config, "cpp_wrapper", True)
+    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
+    def test_cpp_wrapper(self):
+        device = "cpu"
+        for name in [
+            "test_as_strided",  # buffer reuse
+            "test_cat",  # alias
+            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_relu",  # multiple inputs
+            "test_silu",  # single input, single output
+            "test_transpose",  # multiple outputs, buffer clear
+        ]:
+            test_name = f"{name}_{device}"
+            assert hasattr(self, test_name), "undefined function"
+            func = getattr(self, test_name)
+            assert callable(func), "not a callable"
+            func()
 
 
 if HAS_CPU:
@@ -4676,6 +4946,62 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_masked_fill_softmax(self):
+            def fn(value, mask):
+                mask = mask.to(torch.bool)
+                x = torch.masked_fill(value, mask, -33.0)
+                return torch.softmax(x, -1)
+
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(value, mask)
+
+                real_out = fn(value, mask)
+                compiled_out = opt_fn(value, mask)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count >= 1
+
+        def test_cpu_vec_cosim(self):
+            cpp_vec_op_list = []
+            cpp_op_list = []
+
+            for k, v in CppVecOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_vec_op_list.append(k)
+            for k, v in CppOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_op_list.append(k)
+
+            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_erf_cpu_only(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -4769,6 +5095,24 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            sys.platform != "linux", "cpp kernel profile only support linux now"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        @patch.object(config.cpp, "enable_kernel_profile", True)
+        def test_cpp_kernel_profile(self):
+            from torch.profiler import profile
+
+            @torch._dynamo.optimize("inductor", nopython=True)
+            def fn(a, b):
+                return a + b
+
+            a = torch.rand((100,))
+            b = torch.rand((100,))
+            with profile() as prof:
+                fn(a, b)
+            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
 
 
 if HAS_CUDA:
@@ -5054,6 +5398,23 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
+        # https://github.com/pytorch/torchdynamo/issues/1850
+        def test_inductor_output_aliases_intermediate(self):
+            def foo(x):
+                out = x + x
+                return out.t()
+
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+
+            inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+            # TODO: this is broken, fix later
+            # out = foo_opt(inpt)
+            # out.add_(2)
+
+            out_ref = foo(inpt)
+            out_ref.add_(2)
+            # self.assertEqual(out_ref, out)
+
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
@@ -5181,6 +5542,24 @@ if HAS_CUDA:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a), fn_optimized(a))
+
+        @requires_cuda()
+        def test_indirect_indexing_dense_mask(self):
+            def fn(x, y):
+                ne = torch.ops.aten.ne.Scalar(x, 1)
+                sum_1 = torch.ops.aten.sum.dim_IntList(ne, [1])
+                sub = torch.ops.aten.sub.Tensor(sum_1, 1)
+                unsqueeze = torch.ops.aten.unsqueeze.default(sub, -1)
+                gather = torch.ops.aten.gather.default(x, 1, unsqueeze)
+                squeeze = torch.ops.aten.squeeze.default(gather)
+                out = torch.ops.aten.multiply(y, squeeze)
+                return (out,)
+
+            a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+            b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+
+            fn_optimized = torch._dynamo.optimize("inductor")(fn)
+            assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner

@@ -6019,6 +6019,9 @@ TEST_F(NVFuserTest, FusionVectorizeRepro1843_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionBroadcastPersistentReduction_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   // Simplified repro for
   // https://github.com/csarofeen/pytorch/issues/2094
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();

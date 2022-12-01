@@ -132,7 +132,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
-  OP_DECOMPOSE(layer_norm);
+  m.impl("layer_norm", native::layer_norm_symint);
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
@@ -253,7 +253,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
-  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
