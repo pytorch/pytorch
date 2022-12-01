@@ -2456,7 +2456,7 @@ void LLVMCodeGenImpl::visit(CondPtr v) {
 }
 
  // "New" PassManager needed to replace TM.adjustPassManager
-#if LLVM_VERSION_MAJOR >= 13
+#if LLVM_VERSION_MAJOR >= 15
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // Add internal analysis passes from the target machine.
   auto& TM = jit_->getTargetMachine();
@@ -2483,9 +2483,9 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
   llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(
-      llvm::PassBuilder::OptimizationLevel::O3);
+      llvm::OptimizationLevel::O3);
   llvm::FunctionPassManager FPM = PB.buildFunctionSimplificationPipeline(
-      llvm::PassBuilder::OptimizationLevel::O3, llvm::ThinOrFullLTOPhase::None);
+      llvm::OptimizationLevel::O3, llvm::ThinOrFullLTOPhase::None);
 
   FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
 
