@@ -111,6 +111,5 @@ void setAutogradFunctionExtensionEnabled(bool enabled) {
   kAutogradFunctionExtensionEnabled = enabled;
 }
 
-
 } // namespace autograd
 } // namespace torch
