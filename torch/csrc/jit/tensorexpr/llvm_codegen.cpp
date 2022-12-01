@@ -2456,7 +2456,7 @@ void LLVMCodeGenImpl::visit(CondPtr v) {
 }
 
  // "New" PassManager needed to replace TM.adjustPassManager
-#if LLVM_VERSION_MAJOR >= 12
+#if LLVM_VERSION_MAJOR >= 13
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // Add internal analysis passes from the target machine.
   auto& TM = jit_->getTargetMachine();
