@@ -401,6 +401,14 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"std::log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def signbit(x):
         return f"std::signbit({x})"
 

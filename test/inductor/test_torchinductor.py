@@ -2776,6 +2776,34 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_expm1(self):
+        def fn(x):
+            return torch.expm1(x), torch.expm1(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
+    def test_log1p(self):
+        def fn(x):
+            return torch.log1p(x), torch.log1p(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
     def test_flip(self):
         def fn(x):
             return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
