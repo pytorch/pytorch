@@ -47,15 +47,6 @@ import weakref
 
 import pickle
 
-@contextlib.contextmanager
-def enable_autograd_function_extension():
-    try:
-        prev_state = torch._C._is_autograd_function_extension_enabled()
-        torch._C._set_autograd_function_extension_enabled(True)
-        yield
-    finally:
-        torch._C._set_autograd_function_extension_enabled(prev_state)
-
 
 def graph_desc(fn):
     if fn is None:
@@ -71,6 +62,59 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def test_copy_slices_graph_task_updates(self):
+        def f1(x, y):
+            out = x.clone().view(-1)
+            out += y
+            return out
+
+        def f2(x, y):
+            out = x.clone().view(-1)
+            b = out * 2
+            out += y
+            return out + b
+
+        x = torch.rand(2, requires_grad=True)
+        y = torch.rand(2, requires_grad=True)
+
+        y_safe = torch._C._functions.DelayedError("Boom!", 1)(y)
+
+        for f in [f1, f2]:
+            # Ensure that the error Node works
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                out.sum().backward()
+
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                torch.autograd.grad(out.sum(), y)
+
+            # Ensure that if we don't ask for y, it doesn't crash
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), x)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), y_safe)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), (x, y_safe))
+
+        # Ensure that we don't run extra view Node
+        def f3(x, y):
+            out = x.clone().view(-1)
+
+            def hook(*args):
+                # This should never be called!
+                self.assertTrue(False)
+            out.register_hook(hook)
+
+            b = out + y
+            out += y
+            return out + b, b
+
+        out, b = f3(x, y_safe)
+        torch.autograd.grad(out.sum(), (b, y_safe))
+
 
     def test_grad_mode_class_decoration(self):
         # Decorating class is deprecated and should not be used
@@ -515,7 +559,7 @@ class TestAutograd(TestCase):
                 x, = ctx.saved_tensors
                 return gO * 2 * x
 
-        with enable_autograd_function_extension():
+        with torch.autograd.function._enable_autograd_function_extension():
             x = torch.randn([], requires_grad=True)
             y = MySquare.apply(x)
             gx, = torch.autograd.grad(y, x)
@@ -539,7 +583,7 @@ class TestAutograd(TestCase):
             def backward(ctx, gO, _):
                 return gO * ctx.two_x
 
-        with enable_autograd_function_extension():
+        with torch.autograd.function._enable_autograd_function_extension():
             x = torch.randn([], requires_grad=True)
             y, _ = MySquare.apply(x)
             gx, = torch.autograd.grad(y, x)
@@ -552,7 +596,7 @@ class TestAutograd(TestCase):
                 return x.reshape(shape) * scale_forward
 
             @staticmethod
-            def setup_context(ctx, outputs, x, shape, copy_forward, scale_backward):
+            def setup_context(ctx, outputs, x, shape, scale_forward, scale_backward):
                 ctx.scale_backward = scale_backward
                 ctx.x_shape = x.shape
 
@@ -581,7 +625,7 @@ class TestAutograd(TestCase):
             self.assertEqual(y_expected, y)
             self.assertEqual(gx_expected, gx)
 
-        with enable_autograd_function_extension():
+        with torch.autograd.function._enable_autograd_function_extension():
             test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
             test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
 
