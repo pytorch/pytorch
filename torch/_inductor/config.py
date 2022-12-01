@@ -234,18 +234,29 @@ class InductorConfigContext:
             return
         # Handle mode
         if type(arg) is str:
-            if arg == "default":
+
+            def default():
                 self.static_memory = False
-            elif arg == "reduce-overhead":
+
+            def reduce_overhead():
                 self.static_memory = True
-            elif arg == "max-autotune":
+
+            def max_autotune():
                 self.static_memory = False
                 self.matmul_padding = True
                 self.trition_convolution = "autotune"
                 self.trition_mm = "autotune"
                 self.matmul_padding = True
-            else:
-                raise RuntimeError(f"Unrecognized mode {arg}, expected ")
+
+            modes = {
+                x.__name__.replace("_", "-"): x
+                for x in [default, reduce_overhead, max_autotune]
+            }
+            if arg not in modes:
+                raise RuntimeError(
+                    f"Unrecognized mode {arg}, should be one of {', '.join(modes.keys())}"
+                )
+            modes[arg]()
             return
         # Handle passes
         for (name, val) in arg.items():
