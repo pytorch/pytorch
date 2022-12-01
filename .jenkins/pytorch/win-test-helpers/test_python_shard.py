@@ -20,7 +20,7 @@ def pushd(new_dir):
 
 try:
 
-    subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\setup_pytorch_env.py', shell=True)
+    subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 except Exception as e:
 
@@ -52,16 +52,16 @@ with pushd('test'):
 
 
     subprocess.run(['echo', 'Copying over test times file'])
-    subprocess.run(['copy', '/Y', str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +\
-     '\\.pytorch-test-times.json', str(os.environ['PROJECT_DIR_WIN'])])
+    subprocess.run(['copy', '/Y', str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
+        '\\.pytorch-test-times.json', str(os.environ['PROJECT_DIR_WIN'])])
 
 
     subprocess.run(['echo', 'Run nn tests'])
 
     try:
-        subprocess.run(['python', 'run_test.py', '--exclude-jit-executor',\
-        '--exclude-distributed-tests', '--shard', shard_number, str(os.environ['NUM_TEST_SHARDS']),\
-        '--verbose'])
+        subprocess.run(['python', 'run_test.py', '--exclude-jit-executor',
+            '--exclude-distributed-tests', '--shard', shard_number, str(os.environ['NUM_TEST_SHARDS']),
+                '--verbose'])
 
     except Exception as e:
 

@@ -16,8 +16,8 @@ def pushd(new_dir):
 
 subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
-subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--jobs',\
- '0', 'third_party/pybind11'])
+subprocess.run(['git', 'submodule', 'update', '--init', '--recursive', '--jobs',
+    '0', 'third_party/pybind11'])
 
 os.chdir('test\\custom_operator')
 
@@ -29,8 +29,8 @@ with pushd('build'):
     try:
         # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
         subprocess.run(['echo', 'Executing CMake for custom_operator test...'])
-        subprocess.run(['cmake', '-DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +\
-         '\\build\\torch', '-DCMAKE_BUILD_TYPE=Release', '-GNinja', '..'])
+        subprocess.run(['cmake', '-DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+            '\\build\\torch', '-DCMAKE_BUILD_TYPE=Release', '-GNinja', '..'])
 
         subprocess.run(['echo', 'Executing Ninja for custom_operator test...'])
         subprocess.run(['ninja', '-v'])
@@ -56,8 +56,8 @@ try:
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
-    os.environ['PATH']='C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
-     + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
+    os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
+        + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
     subprocess.run(['test_custom_ops.exe', 'model.pt'])
 

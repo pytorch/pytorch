@@ -42,8 +42,8 @@ subprocess.run(['echo', 'Test functorch'])
 try:
 
     with pushd('test'):
-        subprocess.run(['python', 'run_test.py', '--functorch', '--shard',\
-         str(os.environ['SHARD_NUMBER']), str(os.environ['NUM_TEST_SHARDS']), '--verbose'])
+        subprocess.run(['python', 'run_test.py', '--functorch', '--shard',
+            os.environ['SHARD_NUMBER'], os.environ['NUM_TEST_SHARDS'], '--verbose'])
 
 except Exception as e:
 

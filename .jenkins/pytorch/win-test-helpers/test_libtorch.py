@@ -1,5 +1,4 @@
 import os
-from os.path import exists
 import subprocess
 import sys
 
@@ -31,8 +30,8 @@ def libtorch_check(file_name, file_full_path):
 
     # Differentiating the test report directories is crucial for test time reporting.
     os.mkdir(os.environ['TEST_OUT_DIR'] + '\\' + file_name + '.exe')
-    subprocess.call(file_full_path + ' --gtest_output=xml:' +os.environ['TEST_OUT_DIR'] +\
-     '\\' + file_name + '.exe' + '\\' + file_name + '.xml', shell=True)
+    subprocess.call(file_full_path + ' --gtest_output=xml:' + os.environ['TEST_OUT_DIR'] +
+        '\\' + file_name + '.exe' + '\\' + file_name + '.xml', shell=True)
 
 
 # Skip LibTorch tests when building a GPU binary and testing on a CPU machine
@@ -46,14 +45,14 @@ subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\bin')
 os.environ['TMP_DIR_WIN'] = 'dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest'
-os.mkdir("dp0\..\..\..\test\test-reports\cpp-unittest")
-os.environ['PATH']='C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;' +\
- os.environ['TMP_DIR_WIN'] + '\\build\\torch\\lib;' + os.environ['PATH']
+os.mkdir("dp0\\..\\..\\..\\test\\test-reports\\cpp-unittest")
+os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;' +
+    os.environ['TMP_DIR_WIN'] + '\\build\\torch\\lib;' + os.environ['PATH']
 
 os.environ['TEST_API_OUT_DIR'] = os.environ['TEST_OUT_DIR'] + '\\test_api'
 os.mkdir(os.environ['TEST_API_OUT_DIR'])
-subprocess.run(['test_api.exe', '--gtest_filter="-IntegrationTest.MNIST*"',\
- '--gtest_output=xml:' + os.environ['TEST_API_OUT_DIR'] + '\\test_api.xml'])
+subprocess.run(['test_api.exe', '--gtest_filter="-IntegrationTest.MNIST*"',
+    '--gtest_output=xml:' + os.environ['TEST_API_OUT_DIR'] + '\\test_api.xml'])
 
 os.chdir(os.environ['TMP_DIR_WIN'] + '\\build\\torch\\test')
 

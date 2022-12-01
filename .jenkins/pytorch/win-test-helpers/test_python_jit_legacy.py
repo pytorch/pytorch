@@ -18,7 +18,7 @@ subprocess.call('python ' + os.environ['SCRIPT_HELPERS_DIR'] + "\\setup_pytorch_
 
 subprocess.run(['echo', 'Copying over test times file'])
 shutil.copy(str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) + "\\.pytorch-test-times.json",
-    str(os.environ['PROJECT_DIR_WIN']))
+    os.environ['PROJECT_DIR_WIN'])
 
 with pushd('test'):
     try:
