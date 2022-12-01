@@ -435,6 +435,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         # insert unwrapped version of self as the first argument
+        # TODO: This is wrong!  When you call the internal __torch_function__,
+        # you still get the wrapped version of self, and if you call functions
+        # inside __torch_function__, they should come back here.  If we unwrap
+        # the tensor immediately, that will not happen.
+        # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
         args.insert(0, self.tensor_variable)
         func_var = GetAttrVariable(self.tensor_variable, name)

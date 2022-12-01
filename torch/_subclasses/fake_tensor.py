@@ -203,7 +203,9 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, make_constant=False, shape_env=None):
+    def from_real_tensor(
+        self, fake_mode, t, make_constant=False, shape_env=None, ignore_subclass=False
+    ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -230,7 +232,12 @@ class FakeTensorConverter(object):
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
+        out = self.meta_converter(
+            t,
+            shape_env=shape_env,
+            callback=mk_fake_tensor,
+            ignore_subclass=ignore_subclass,
+        )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
@@ -257,8 +264,22 @@ class FakeTensorConverter(object):
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
     # You must have created the FakeTensorMode with allow_meta == True
-    def __call__(self, fake_mode, t, *, make_constant=False, shape_env=None):
-        return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
+    def __call__(
+        self,
+        fake_mode,
+        t,
+        *,
+        make_constant=False,
+        shape_env=None,
+        ignore_subclass=False,
+    ):
+        return self.from_real_tensor(
+            fake_mode,
+            t,
+            make_constant,
+            shape_env=shape_env,
+            ignore_subclass=ignore_subclass,
+        )
 
 
 op_implementations = []
@@ -986,10 +1007,14 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, static_shapes=False):
+    def from_tensor(self, tensor, static_shapes=False, ignore_subclass=False):
         if static_shapes:
-            return self.fake_tensor_converter(self, tensor)
-        return self.fake_tensor_converter(self, tensor, shape_env=self.shape_env)
+            return self.fake_tensor_converter(
+                self, tensor, ignore_subclass=ignore_subclass
+            )
+        return self.fake_tensor_converter(
+            self, tensor, shape_env=self.shape_env, ignore_subclass=ignore_subclass
+        )
 
 
 # NB: returns fake tensors
