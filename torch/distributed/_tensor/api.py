@@ -4,13 +4,9 @@ import warnings
 from typing import Callable, cast, Dict, Optional, Sequence
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 
-from torch.distributed._tensor.dispatch import (
-    operator_dispatch,
-    OpSchema,
-    OutputSharding,
-)
+import torch.distributed._tensor.dispatch as op_dispatch
+from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -137,7 +133,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     # class attribute that handles operator placements propagation
     # rules, keyed by aten op name, value is propagation func
-    _op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]] = {}
+    _op_to_rules: Dict[
+        str, Callable[[op_dispatch.OpSchema], op_dispatch.OutputSharding]
+    ] = {}
 
     # class attribute that handles custom registered ops, all handled
     # custom ops should appear in this table, and overriding the default
@@ -248,7 +246,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if kwargs is None:
             kwargs = {}
 
-        return operator_dispatch(
+        return op_dispatch.operator_dispatch(
             func,
             args,
             kwargs,
