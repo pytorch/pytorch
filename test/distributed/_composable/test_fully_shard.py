@@ -10,7 +10,6 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._runtime_utils import _root_pre_forward
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -244,16 +243,7 @@ class TestFSDPRuntime(FSDPTest):
                 (composable_module, composable_optim),
             ):
                 optim.zero_grad(set_to_none=True)
-                # TODO (awgu): Remove this after resolving the root pre-forward
-                # hook registration, currently blocked by kwarg support
-                if model is composable_module:
-                    args, kwargs = _root_pre_forward(
-                        fully_shard.state(composable_module), composable_module, *inp
-                    )
-                else:
-                    args = inp
-                    kwargs = {}
-                out = model(*args, **kwargs)
+                out = model(*inp)
                 loss = out.sum()
                 losses.append(loss)
                 loss.backward()
