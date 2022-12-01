@@ -15,15 +15,24 @@
 #include <llvm/Analysis/TargetTransformInfo.h>
 #pragma GCC diagnostic pop
 
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/MDBuilder.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/Pass.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Vectorize/LoopVectorize.h>
+#include <llvm/Transforms/Vectorize/SLPVectorizer.h>
 
 #if LLVM_VERSION_MAJOR >= 10
 #include <llvm/Support/CodeGen.h>
@@ -2446,6 +2455,54 @@ void LLVMCodeGenImpl::visit(CondPtr v) {
   irb_.SetInsertPoint(end_block);
 }
 
+ // "New" PassManager needed to replace TM.adjustPassManager
+#if LLVM_VERSION_MAJOR >= 12
+void LLVMCodeGenImpl::optimize(llvm::Module& M) {
+  // Add internal analysis passes from the target machine.
+  auto& TM = jit_->getTargetMachine();
+
+  // Create the analysis managers.
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
+
+  // Create the new pass manager builder.
+  // Take a look at the PassBuilder constructor parameters for more
+  // customization, e.g. specifying a TargetMachine or various debugging
+  // options.
+  llvm::PassBuilder PB(&TM);
+
+  TM.registerPassBuilderCallbacks(PB);
+
+  // Register all the basic analyses with the managers.
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(
+      llvm::PassBuilder::OptimizationLevel::O3);
+  llvm::FunctionPassManager FPM = PB.buildFunctionSimplificationPipeline(
+      llvm::PassBuilder::OptimizationLevel::O3, llvm::ThinOrFullLTOPhase::None);
+
+  FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
+
+  FPM.addPass(llvm::LoopVectorizePass());
+  FPM.addPass(llvm::SLPVectorizerPass());
+
+  FPM.addPass(llvm::DCEPass());
+  MPM.addPass(llvm::AlwaysInlinerPass());
+
+  MPM.run(M, MAM);
+  for (auto& FF : M) {
+    if (!FF.empty()) {
+      FPM.run(FF, FAM);
+    }
+  }
+}
+#else // "Old" PassManager
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
@@ -2472,6 +2529,7 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   }
   FPM.doFinalization();
 }
+#endif
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");
 
