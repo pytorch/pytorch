@@ -71,6 +71,7 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py'
 :: We just need to activate it here
 '''
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+subprocess.run(['echo', 'build CONDA_PARENT_DIR: ' + os.environ['CONDA_PARENT_DIR']])
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
