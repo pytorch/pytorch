@@ -5476,6 +5476,56 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
 
+    def test_match_pattern_with_multiple_args(self):
+        """ Test that we can match a pattern that has multiple arguments
+        Pattern:
+                           shape \
+        transpose (observed) -> reshape -> output (observed) ->
+
+        where `reshape` has two arguments
+        """
+
+        def _get_pattern_configs():
+            backend_pattern_configs = []
+            observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
+            weighted_op_quint8_dtype_config = DTypeConfig(
+                input_dtype=torch.quint8,
+                output_dtype=torch.quint8,
+                weight_dtype=torch.qint8,
+                bias_dtype=torch.float,
+            )
+            dtype_configs = [weighted_op_quint8_dtype_config]
+
+            def root_node_getter(node_pattern):
+                reshape, transpose, shape = node_pattern
+                return transpose
+
+            backend_pattern_configs.append(
+                BackendPatternConfig((torch.reshape, torch.transpose, MatchAllNode))
+                .set_observation_type(observation_type)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                ._set_root_node_getter(root_node_getter))
+            return backend_pattern_configs
+
+        backend_config = BackendConfig().set_backend_pattern_configs(_get_pattern_configs())
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.transpose(x, 0, 1)
+                x = torch.reshape(x, (-1,))
+                return x
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
+        node_occurrence = {
+            # one for input of the pattern and one for output of the pattern
+            ns.call_module(MinMaxObserver): 2
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
