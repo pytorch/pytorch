@@ -1171,12 +1171,21 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: This is analogous to ``torch.nn.utils.clip_grad_norm_`` but
-            handles the partitioning and multiple devices per rank under the
-            hood. The default torch util is not applicable here, because each
-            rank only has a partial view of all the grads in the model, so
-            calling it for FSDP models would lead to different scaling being
-            applied per subset of model parameters.
+        .. note:: If every FSDP instance uses ``NO_SHARD``, meaning that no
+            gradients are sharded across ranks, then you may directly use
+            :func:`torch.nn.utils.clip_grad_norm_`.
+
+        .. note:: If at least some FSDP instance uses a sharded strategy (i.e.
+            one other than ``NO_SHARD``), then you should use this method
+            instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
+            handles the fact that gradients are sharded across ranks.
+
+        .. note:: The total norm returned will have the "largest" dtype across
+            all parameters/gradients as defined by PyTorch's type promotion
+            semantics. For example, if *all* parameters/gradients use a low
+            precision dtype, then the returned dtype will be that low precision
+            dtype, but if there exists at least one parameter/gradient using
+            FP32, then the returned dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
@@ -1225,6 +1234,7 @@ class FullyShardedDataParallel(nn.Module):
                 nonsharded_params.add(param)
                 if param.grad is not None:
                     grads.append(param.grad)
+        # Compute local norms (forced to be in FP32)
         local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
             self.compute_device
         )
@@ -1253,8 +1263,14 @@ class FullyShardedDataParallel(nn.Module):
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device))
-        return total_norm
+            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+        # Use the "largest" dtype by type promotion semantics to use the same
+        # dtype as if we did not force local norm computation to be in FP32
+        total_norm_dtype = functools.reduce(
+            lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
+            [grad.dtype for grad in grads],
+        )
+        return total_norm.to(total_norm_dtype)
 
     @staticmethod
     def _warn_optim_input(optim_input):
@@ -1856,7 +1872,9 @@ def _get_grad_norm(
 ) -> torch.Tensor:
     """
     Returns the gradient norm of parameters ``param`` s, where the gradients
-    are viewed as a single vector.
+    are viewed as a single vector. The returned norm is in FP32 even if
+    parameters/gradients are in a low precision. This is because the downstream
+    use of this return value is a reduction across ranks.
     """
     params_with_grad = [param for param in params if param.grad is not None]
     if len(params_with_grad) == 0:
@@ -1879,7 +1897,6 @@ def _get_grad_norm(
         norm_type,
         dtype=torch.float32,
     )
-    grad_norm = grad_norm.to(grads[0].dtype)
     return grad_norm
 
 
