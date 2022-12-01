@@ -445,11 +445,11 @@ enum class DispatchKey : uint16_t {
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
 
-  // Note: The alias keyset for CompositeImplicitBatched is disjoint from all
+  // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from all
   // other alias keysets
   // and so precedence order doesn't matter
-  CompositeImplicitBatched, // registered at
-  // build/aten/src/ATen/RegisterCompositeImplicitBatched.cpp
+  FuncTorchBatchedDecomposition, // registered at
+  // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
   // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
   // disjoint from all other alias keysets
   CompositeImplicitAutogradNestedTensor, // registered at
