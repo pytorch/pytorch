@@ -196,7 +196,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
-          docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Get workflow job id
         id: get-job-id
