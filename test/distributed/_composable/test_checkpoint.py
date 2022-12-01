@@ -3,6 +3,8 @@
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
 )
 
@@ -42,7 +44,12 @@ class TestCheckpoint(TestCase):
 
         return num_functions
 
-    def _test_tensor_only(self, net: nn.Module, x: torch.Tensor) -> None:
+    def _test_tensor_only(
+        self,
+        net: nn.Module,
+        x: torch.Tensor,
+        use_reentrant: bool,
+    ) -> None:
         x1 = x.clone()
         x2 = x.clone()
         x1.requires_grad = True
@@ -57,26 +64,35 @@ class TestCheckpoint(TestCase):
         loss1.backward()
 
         # with checkpoint
-        checkpoint(net2.seq)
+        checkpoint(net2.seq, use_reentrant=use_reentrant)
         loss2 = net2(x2).sum()
         graph_size2 = self._get_graph_size(loss2)
         loss2.backward()
 
-        self.assertTrue(graph_size2 < graph_size1)
+        if use_reentrant:
+            self.assertTrue(graph_size2 < graph_size1)
+        else:
+            # TODO (@mrshenli): calculate activation size
+            pass
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-    def test_tensor_only_cpu(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_tensor_only_cpu(self, use_reentrant: bool):
         x = torch.randn(20, 100)
         net = ToyModel()
-        self._test_tensor_only(net, x)
+        self._test_tensor_only(net, x, use_reentrant)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_tensor_only_gpu(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_tensor_only_gpu(self, use_reentrant: bool):
         x = torch.randn(20, 100, device="cuda:0")
         net = ToyModel().to("cuda:0")
-        self._test_tensor_only(net, x)
+        self._test_tensor_only(net, x, use_reentrant)
+
+
+instantiate_parametrized_tests(TestCheckpoint)
 
 
 if __name__ == "__main__":
