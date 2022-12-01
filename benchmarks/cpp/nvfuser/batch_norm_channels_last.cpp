@@ -74,10 +74,6 @@ static void NvFuserScheduler_BatchNorm_nhwc(
     DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
-  const bool kTraining = true;
-  const float kMomentum = 0.1;
-  const float kEps = 1e-5;
-
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
       benchmark_state.range(2),

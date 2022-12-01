@@ -9,7 +9,8 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
+    parametrize, subtest
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -39,6 +40,17 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
+
+def all_sparse_layouts(test_name='layout', include_strided=False):
+    return parametrize(test_name, [
+        subtest(torch.strided, name='Strided'),
+        subtest(torch.sparse_coo, name='SparseCOO'),
+        subtest(torch.sparse_csr, name='SparseCSR'),
+        subtest(torch.sparse_csc, name='SparseCSC'),
+        subtest(torch.sparse_bsr, name='SparseBSR'),
+        subtest(torch.sparse_bsc, name='SparseBSC'),
+    ][(0 if include_strided else 1):])
+
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -412,9 +424,6 @@ class TestSparse(TestSparseBase):
                     self.assertEqual(d, result.to_dense())
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
-
-            sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3], dtype=value_type, device=device, coalesced=coalesced)
-            self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_bool(self, device, dtype):
@@ -2184,16 +2193,7 @@ class TestSparse(TestSparseBase):
             with self.assertRaisesRegex(RuntimeError, "log1p_ requires coalesced input"):
                 sparse_tensor.log1p_()
 
-        if not is_integral_dtype:
-            sparse_tensor.requires_grad_()
-            self.assertTrue(sparse_tensor.requires_grad)
-
-            # test autograd
-            x = sparse_tensor.clone()
-            y = sparse_tensor.log1p()
-            with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
-                y.backward(x)
-        else:
+        if is_integral_dtype:
             with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
                 sparse_tensor.requires_grad_()
 
@@ -3717,7 +3717,7 @@ class TestSparse(TestSparseBase):
             check(self, s, d)
             check_empty(shape, nnz, sub_shape, coalesced)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy is not availible")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy is not available")
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.bool))
     def test_sparse_spdiags(self, device, dtype):
@@ -4058,6 +4058,190 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
 
 
+class TestSparseAny(TestCase):
+
+    def test_generate_simple_inputs(self):
+        layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]
+
+        tested_combinations = set()
+        for tensors in zip(*map(self.generate_simple_inputs, layouts)):
+            for i, t in enumerate(tensors):
+                self.assertEqual(t.layout, layouts[i])
+
+                # all layouts must produce semantically the same tensors
+                self.assertEqual(t, tensors[0])
+
+                if t.layout is torch.strided:
+                    is_hybrid = None
+                else:
+                    is_hybrid = t.dense_dim() > 0
+                if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    is_batch = t.crow_indices().ndim > 1
+                elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                    is_batch = t.ccol_indices().ndim > 1
+                else:
+                    is_batch = None
+                if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    blocksize = t.values().shape[1:3]
+                    nontrivial_blocksize = 1 not in blocksize
+                else:
+                    nontrivial_blocksize = None
+                tested_combinations.add((t.layout, is_hybrid, is_batch, nontrivial_blocksize))
+
+        # Ensure that the inputs generation covers all layout,
+        # non-hybrid/hybrid, and non-batch/batch combinations:
+        for layout in layouts:
+            for is_hybrid in [False, True]:
+                if layout is torch.strided:
+                    is_hybrid = None
+                for is_batch in [False, True]:
+                    if layout in {torch.sparse_coo, torch.strided}:
+                        is_batch = None
+                    for nontrivial_blocksize in [False, True]:
+                        if layout not in {torch.sparse_bsr, torch.sparse_bsc}:
+                            nontrivial_blocksize = None
+                        key = (layout, is_hybrid, is_batch, nontrivial_blocksize)
+                        assert key in tested_combinations, key
+
+    @all_sparse_layouts('from_layout', include_strided=True)
+    @all_sparse_layouts('to_layout', include_strided=False)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_to_sparse(self, from_layout, to_layout, device, dtype):
+        """
+        This test tests conversion from any layout to any sparse layout.
+        """
+
+        for t in self.generate_simple_inputs(
+                from_layout, device=device, dtype=dtype,
+                enable_hybrid=(
+                    # TODO: to support conversion strided->hybrid
+                    # CSR/CSC/BSR/BSC, to_sparse() requires extra keyword
+                    # argument, either nof_batch_dims or
+                    # nof_dense_dims
+                    not (from_layout is torch.strided and to_layout in
+                         {torch.sparse_bsr, torch.sparse_bsc, torch.sparse_csr, torch.sparse_csc}))):
+
+            if to_layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                if from_layout == torch.sparse_bsr:
+                    batch_ndim = t.crow_indices().dim() - 1
+                    blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                elif from_layout == torch.sparse_bsc:
+                    batch_ndim = t.ccol_indices().dim() - 1
+                    blocksize = t.values().shape[batch_ndim + 1:batch_ndim + 3]
+                else:
+                    blocksize = (1, 1)
+            else:
+                blocksize = None
+
+            if from_layout is torch.strided:
+                is_batch = None
+                is_hybrid = None
+            else:
+                is_batch = t.dim() > (t.sparse_dim() + t.dense_dim())
+                is_hybrid = t.dense_dim() > 0
+
+            def explicit_to_sparse(x):
+                # Used to check that the explicit conversion methods
+                # are consistent with the `to_sparse(*, layout,
+                # blocksize)` method.
+                if to_layout is torch.sparse_coo:
+                    return x.to_sparse_coo()
+                elif to_layout is torch.sparse_csr:
+                    return x.to_sparse_csr()
+                elif to_layout is torch.sparse_csc:
+                    return x.to_sparse_csc()
+                elif to_layout is torch.sparse_bsr:
+                    return x.to_sparse_bsr(blocksize)
+                elif to_layout is torch.sparse_bsc:
+                    return x.to_sparse_bsc(blocksize)
+                else:
+                    assert 0  # unreachable
+
+            # TODO: The following exception cases all correspond to
+            # not implemented conversions
+            if from_layout is torch.sparse_coo and to_layout in {
+                    torch.sparse_bsr, torch.sparse_bsc} and t.sparse_dim() == 2 and is_hybrid:
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                    explicit_to_sparse(t)
+                continue
+            elif from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and (is_batch or is_hybrid):
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr is only possible for 2d inputs"):
+                    explicit_to_sparse(t)
+                continue
+            elif from_layout is torch.sparse_coo and to_layout in {
+                    torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and t.sparse_dim() != 2:
+                with self.assertRaisesRegex(
+                        RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(
+                        RuntimeError, "Only tensors with two sparse dimensions can be converted to the Sparse(Csr|Csc) layout"):
+                    explicit_to_sparse(t)
+                continue
+            elif from_layout in {torch.sparse_csr, torch.sparse_csc} and to_layout is torch.sparse_coo and is_batch:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(RuntimeError,
+                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
+                    explicit_to_sparse(t)
+                continue
+            elif from_layout in {torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "sparse_compressed_to_sparse expected SparseCsr or SparseCsc layout but got Sparse(Bsr|Bsc)"):
+                    explicit_to_sparse(t)
+                self.skipTest('NOT IMPL')
+            elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
+                                              (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
+                                              (torch.sparse_csc, torch.sparse_bsr), (torch.sparse_csc, torch.sparse_bsc),
+                                              (torch.sparse_csr, torch.sparse_bsc)}:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(SparseCsr[,]|)\s*Sparse(Csr|Bsr)"
+                        " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
+                    t.to_sparse(layout=to_layout, blocksize=blocksize)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(SparseCsr[,]|)\s*Sparse(Csr|Bsr)"
+                        " or Sparse(Csc|Bsc) layout but got Sparse(Csr|Csc|Bsr|Bsc)"):
+                    explicit_to_sparse(t)
+                self.skipTest('NOT IMPL')
+            else:
+                r = t.to_sparse(layout=to_layout, blocksize=blocksize)
+
+                self.assertEqual(r.layout, to_layout)
+
+                # to_sparse method uses unsafe construction of sparse
+                # tensors. Here we explicitly validate the results to
+                # make sure that the sparse tensors are consistent
+                # with the corresponding sparse tensor invariants.
+                if r.layout in {torch.sparse_csr, torch.sparse_bsr, torch.sparse_csc, torch.sparse_bsc}:
+                    if r.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        compressed_indices, plain_indices = r.crow_indices(), r.col_indices()
+                    else:
+                        compressed_indices, plain_indices = r.ccol_indices(), r.row_indices()
+                    torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, r.values(),
+                                                                  r.shape, r.layout)
+                elif r.layout is torch.sparse_coo:
+                    torch._validate_sparse_coo_tensor_args(r._indices(), r._values(), r.shape)
+                else:
+                    assert 0  # unreachable
+
+                # Finally, we'll test tensor equality:
+                self.assertEqual(r, t)
+
+                # Also, check consistency with explicit conversion methods:
+                r2 = explicit_to_sparse(t)
+                self.assertEqual(r2, r)
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
@@ -4066,6 +4250,8 @@ instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for=
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
+
+instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
 
 if __name__ == '__main__':
     run_tests()

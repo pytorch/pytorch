@@ -14,7 +14,11 @@ from torch.distributed.fsdp._common_utils import (
     _is_composable,
     TrainingState,
 )
-from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
+from torch.distributed.fsdp._utils import (
+    _apply_to_tensors,
+    _no_dispatch_record_stream,
+    p_assert,
+)
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -134,10 +138,6 @@ def _unshard(
     """
     if not handles:
         return
-    if state.limit_all_gathers:
-        event = state._free_event_queue.dequeue_if_needed()
-        if event:
-            event.synchronize()
     any_ran_pre_unshard = False
     with torch.cuda.stream(pre_unshard_stream):
         for handle in handles:
@@ -145,6 +145,10 @@ def _unshard(
             any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
+    if state.limit_all_gathers:
+        event = state._free_event_queue.dequeue_if_needed()
+        if event:
+            event.synchronize()
     with torch.cuda.stream(unshard_stream):
         for handle in handles:
             handle.unshard()
@@ -313,8 +317,8 @@ def _post_forward_reshard(
 def _root_pre_forward(
     state: _FSDPState,
     module: nn.Module,
-    *args,
-    **kwargs,
+    args,
+    kwargs,
 ):
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
@@ -478,9 +482,14 @@ def _post_backward_hook(
         "FullyShardedDataParallel._post_backward_hook"
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
+        # For multiple applications of reentrant AC across submodules sharing
+        # the same `FlatParameter`, the post-backward hook may run multiple
+        # times in one backward, in which case we permit the state to already
+        # be in `BACKWARD_POST`.
         p_assert(
-            handle._training_state == HandleTrainingState.BACKWARD_PRE,
-            f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
+            handle._training_state
+            in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
+            f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
         )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
@@ -533,8 +542,12 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                padded_unsharded_grad = F.pad(unsharded_grad, [0, numel_to_pad])
-                new_sharded_grad = torch.zeros_like(chunks[0])  # padded
+                padded_unsharded_grad = (
+                    F.pad(unsharded_grad, [0, numel_to_pad])
+                    if numel_to_pad > 0
+                    else unsharded_grad
+                )
+                new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
@@ -572,12 +585,16 @@ def _post_backward_hook(
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
-                sharded_grad.data.record_stream(torch.cuda.current_stream())
+                _no_dispatch_record_stream(
+                    sharded_grad.data, torch.cuda.current_stream()
+                )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
-            unsharded_grad_data.record_stream(state._streams["post_backward"])
+            _no_dispatch_record_stream(
+                unsharded_grad_data, state._streams["post_backward"]
+            )
 
             if handle._use_orig_params:
                 # Since the handle's `FlatParameter` completed its gradient
@@ -630,7 +647,7 @@ def _cast_grad_to_param_dtype(
         # caching allocator; for the sharded strategies, the gradient is
         # produced in the post-backward stream, so this `record_stream()`
         # should be a no-op
-        low_prec_grad_data.record_stream(torch.cuda.current_stream())
+        _no_dispatch_record_stream(low_prec_grad_data, torch.cuda.current_stream())
 
 
 def _check_comm_hook(
@@ -881,7 +898,9 @@ def _register_pre_forward_hooks(
             hook = functools.partial(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
-            state._pre_forward_handles.append(module.register_forward_pre_hook(hook))
+            state._pre_forward_handles.append(
+                module.register_forward_pre_hook(hook, prepend=True)
+            )
 
 
 @no_type_check
@@ -916,25 +935,27 @@ def _register_post_forward_hooks(
 
 
 @no_type_check
-def _register_root_pre_forward_hooks(
+def _register_root_pre_forward_hook(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ):
     """
-    # TODO (awgu): This requires kwarg support for hooks registered by
-    ``register_forward_pre_hook()``. ``_root_pre_forward()`` does not have the
-    supported hook signature right now.
+    Registers root pre-forward hook on ``module``, which should be the local
+    FSDP root.
+
+    NOTE: For the current composable FSDP design, we have each application of
+    ``fully_shard()`` to a module to indicate that that module is the local
+    FSDP root. We may remove this assumption in the future, in which case we
+    will need to register this root pre-forward hook on any candidate module
+    that may be the local FSDP root.
     """
     for forward_handle in state._root_pre_forward_handles:
         forward_handle.remove()
     state._root_pre_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._module_to_handles[module]
-        if module_param_handles:
-            hook = functools.partial(_root_pre_forward, state, module)
-            state._root_pre_forward_handles.append(
-                module.register_forward_pre_hook(hook)
-            )
+    hook = functools.partial(_root_pre_forward, state)
+    state._root_pre_forward_handles.append(
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
+    )
 
 
 @no_type_check
@@ -1101,28 +1122,23 @@ def _get_buffers_and_dtypes_for_computation(
 
 
 @no_type_check
-def _get_buffers_and_dtypes_for_checkpoint(
+def _get_buffer_dtypes(
     state: _FSDPState,
-    root_module: nn.Module,
-) -> Tuple[List[torch.Tensor], List[torch.dtype]]:
+    buffer_names: List[str],
+) -> List[torch.dtype]:
     """
-    Returns all buffers in the module tree rooted at ``root_module`` and a
-    corresponding list of the buffer dtypes for checkpointing. Each buffer
-    dtype is the original buffer dtype ignoring any buffer mixed precision.
+    Returns the original buffer types of the given buffer names.
     """
-    p_assert(state._is_root, "Expects the root to cast buffers")
-    buffers: List[torch.Tensor] = []
-    buffer_dtypes: List[Optional[torch.dtype]] = []
-    for buffer_name, buffer in root_module.named_buffers():
+    buffer_dtypes: List[torch.dtype] = []
+    for buffer_name in buffer_names:
         p_assert(
             buffer_name in state._buffer_name_to_orig_dtype,
             f"{buffer_name} is missing from pre-computed dict on rank "
             f"{state.rank}, which only has keys "
             f"{state._buffer_name_to_orig_dtype.keys()}",
         )
-        buffers.append(buffer)
         buffer_dtypes.append(state._buffer_name_to_orig_dtype[buffer_name])
-    return buffers, buffer_dtypes
+    return buffer_dtypes
 
 
 def _cast_buffers_to_dtype_and_device(

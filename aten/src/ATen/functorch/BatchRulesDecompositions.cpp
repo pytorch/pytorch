@@ -45,7 +45,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
   m.impl("adaptive_avg_pool2d", native::adaptive_avg_pool2d_symint);
-  OP_DECOMPOSE(adaptive_avg_pool3d);
+  m.impl("adaptive_avg_pool3d", native::adaptive_avg_pool3d_symint);
   OP_DECOMPOSE(adjoint);
   OP_DECOMPOSE(arccos);
   OP_DECOMPOSE(arccosh);
@@ -63,7 +63,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(bitwise_or, Scalar);
   OP_DECOMPOSE2(bitwise_xor, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
-  OP_DECOMPOSE(broadcast_to);
+  m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
   OP_DECOMPOSE(clip);
@@ -132,7 +132,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
-  OP_DECOMPOSE(layer_norm);
+  m.impl("layer_norm", native::layer_norm_symint);
   OP_DECOMPOSE2(ldexp, Tensor);
   OP_DECOMPOSE2(less_equal, Tensor );
   OP_DECOMPOSE2(less, Tensor );
@@ -184,7 +184,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
-  OP_DECOMPOSE2(repeat_interleave, self_int);
+  m.impl("repeat_interleave.self_int", native::repeat_interleave_symint);
   OP_DECOMPOSE2(repeat_interleave, self_Tensor);
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
@@ -253,7 +253,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
-  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);

@@ -876,7 +876,10 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
           autocast_dispatch_keyset -
-          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
+          DispatchKeySet(
+              {DispatchKey::Functionalize,
+               DispatchKey::PythonTLSSnapshot,
+               DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 

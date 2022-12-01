@@ -233,7 +233,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         >>> x = torch.randn([5])
         >>> def f(x, scale=4.):
-        >>>   return x * 4.
+        >>>   return x * scale
         >>>
         >>> (_, vjpfunc) = functorch.vjp(f, x)
         >>> vjps = vjpfunc(torch.ones_like(x))
@@ -1060,7 +1060,7 @@ def hessian(func, argnums=0):
         >>>   return x.sin().sum()
         >>>
         >>> x = torch.randn(5)
-        >>> hess = jacfwd(jacrev(f))(x)
+        >>> hess = hessian(f)(x)  # equivalent to jacfwd(jacrev(f))(x)
         >>> assert torch.allclose(hess, torch.diag(-x.sin()))
 
     """

@@ -218,6 +218,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.unsqueeze(a, 0)[:, 2:]
 
     @make_test
+    def test_range1(a):
+        return torch.tensor(range(a.size(0)))
+
+    @make_test
+    def test_range2(x, y):
+        r = x + y
+        for i in range(x.size(0) + 2):
+            r = r / y
+        return r
+
+    @make_test
     def test_unpack1(a):
         a, b = a[:5], a[5:]
         return a - b
@@ -325,9 +336,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_tensor_type(a, b):
+        m = a.to(torch.float16)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
+
+    @make_test
+    def test_T(x):
+        return torch.ones_like(x.T)
 
     @make_test
     def test_is_sparse(x):
