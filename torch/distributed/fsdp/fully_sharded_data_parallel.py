@@ -1375,12 +1375,6 @@ class FullyShardedDataParallel(nn.Module):
     def sharded_optim_state_dict(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
-        optim_input: Optional[
-            Union[
-                List[Dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
-        ] = None,
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
@@ -1397,27 +1391,14 @@ class FullyShardedDataParallel(nn.Module):
         FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
             model, False, False
         )
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input,
-            optim,
-        )
-        # TODO: The ultimate goal of the optimizer state APIs should be the same
-        # as state_dict/load_state_dict -- using one API to get optimizer states
-        # and one API to load optimizer states. ``state_dict_type`` will be used
-        # to decide which optimizer states should be returned.
-        # There are currently two APIs to load a full optimizer state. So the
-        # first step of the unification is to merge the two full optimizer state
-        # loading APIs.
-        # Task: https://github.com/pytorch/pytorch/issues/82232
         return _optim_state_dict(
             model=model,
             optim=optim,
-            optim_input=optim_input,
+            optim_input=None,
             rank0_only=False,
             shard_state=True,
             group=group,
-            using_optim_input=using_optim_input,
+            using_optim_input=False,
         )
 
     @staticmethod
@@ -1516,12 +1497,6 @@ class FullyShardedDataParallel(nn.Module):
     def flatten_sharded_optim_state_dict(
         sharded_optim_state_dict: Dict[str, Any],
         model: torch.nn.Module,
-        optim_input: Optional[
-            Union[
-                List[Dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
-        ] = None,
         optim: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, Any]:
         """
@@ -1543,11 +1518,6 @@ class FullyShardedDataParallel(nn.Module):
         FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
             model, True, True
         )
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input,
-            optim,
-        )
         # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
         # See the TODO in ``shard_full_optim_state_dict`` for the future
         # unification plan.
@@ -1560,8 +1530,8 @@ class FullyShardedDataParallel(nn.Module):
             flattened_osd,
             model,
             optim,
-            optim_input,
-            using_optim_input,
+            None,
+            False,
         )
 
     @staticmethod
