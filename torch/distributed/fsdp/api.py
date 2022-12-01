@@ -46,8 +46,15 @@ class ShardingStrategy(Enum):
       :class:`DistributedDataParallel` API. For gradients, this strategy
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
-    - ``HYBRID_SHARD``: foo
-    - ``HYBRID_SHARD_ZERO2``: foo
+    - ``HYBRID_SHARD``: Apply ``FULL_SHARD`` within a node, and data parallelism across
+        nodes. This results in reduced communication volume as expensive all-gathers and
+        reduce-scatters are only done within a node, and can be more performant for medium
+        sized models.
+    - ``HYBRID_SHARD_ZERO2``: Apply ``SHARD_GRAD_OP`` within a node, and data parallelism across
+        nodes. This results in reduced communication volume as expensive all-gathers and
+        reduce-scatters are only done within a node, and can be more performant for medium
+        sized models. Compared to ``HYBRID_SHARD``, users may wish to try this for even smaller
+        models that may not have to free full parameters after the forward pass.
     """
 
     FULL_SHARD = auto()

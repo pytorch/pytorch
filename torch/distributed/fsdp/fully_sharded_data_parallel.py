@@ -192,8 +192,11 @@ class FullyShardedDataParallel(nn.Module):
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
-        process_group (Optional[ProcessGroup]):
-            This is the process group used for collective communications.
+        process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
+            This is the process group used for collective communications and
+            the one over which the model is sharded. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD`` or ``ShardingStrategy.HYBRID_SHARD_ZERO2``, users can
+            pass in a tuple of process groups representing the sharding and data parallel groups.
         sharding_strategy (Optional[ShardingStrategy]):
             This configures the sharding strategy used by FSDP, which may trade
             off memory saving and communication overhead. See
