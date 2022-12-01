@@ -411,9 +411,6 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
 
-@register_decomposition([aten.expm1.default])
-def expm1(input):
-    return torch.exp(input) - 1
 
 @register_decomposition([aten.all.dim])
 def all_dim(input, dim, keeepdim=False):
@@ -454,11 +451,6 @@ def silu_(x):
 @register_decomposition(aten.masked_fill_)
 def masked_fill_(x, mask, value):
     return x.copy_(aten.masked_fill(x, mask, value))
-
-
-@register_decomposition([aten.log1p])
-def log1p(x):
-    return torch.log(x + 1)
 
 
 @register_decomposition([aten.baddbmm])
