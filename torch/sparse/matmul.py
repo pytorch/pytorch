@@ -16,7 +16,6 @@ def matmul(src, other, reduce):  # noqa: F811
 
 
 def matmul(src, other, reduce="sum"):  # noqa: F811
-    print('matmul')
     if isinstance(other, torch.Tensor):
         return spmm(src, other, reduce)
     elif isinstance(other, SparseTensor):
