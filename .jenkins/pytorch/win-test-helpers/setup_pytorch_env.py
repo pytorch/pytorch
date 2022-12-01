@@ -173,9 +173,9 @@ if 'BUILD_ENVIRONMENT' in os.environ:
     # Create a shortcut to restore pytorch environment
     subprocess.run(['echo', '@echo', 'off', '>>', str(os.environ['TMP_DIR_WIN']) +
         '/ci_scripts/pytorch_env_restore_helper.bat'])
-    subprocess.run(['echo', 'call', str(os.environ['TMP_DIR_WIN']) + '/ci_scripts/pytorch_env_restore.bat',
+    subprocess.run(['echo', 'call', '\"%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat\"',
         '>>', str(os.environ['TMP_DIR_WIN']) + '/ci_scripts/pytorch_env_restore_helper.bat'])
-    subprocess.run(['echo', 'cd', '/D', str(os.environ['CD']), '>>', str(os.environ['TMP_DIR_WIN']) +
+    subprocess.run(['echo', 'cd', '/D', '\"%CD%\"', '>>', str(os.environ['TMP_DIR_WIN']) +
         '/ci_scripts/pytorch_env_restore_helper.bat'])
 
     subprocess.run(['aws', 's3', 'cp', '"s3://ossci-windows/Restore PyTorch Environment.lnk"',
