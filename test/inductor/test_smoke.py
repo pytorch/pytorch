@@ -58,4 +58,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     if IS_LINUX and torch.cuda.is_available():
-        run_tests()
+        if torch.cuda.get_device_properties(0).major > 5:
+            run_tests()
