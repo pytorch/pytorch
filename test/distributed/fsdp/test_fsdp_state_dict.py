@@ -25,8 +25,8 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
-from torch.distributed.fsdp.wrap import enable_wrap, transformer_auto_wrap_policy, wrap
+from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
+from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -350,9 +350,8 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     def test_state_dict_with_shared_parameters(self, state_dict_type):
-        auto_wrap_policy = partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
         )
         model_creator = partial(
             TransformerWithSharedParams.init,
@@ -377,9 +376,8 @@ class TestFSDPStateDict(FSDPTest):
         """Tests saving a model checkpoint only on rank 0 and loading it only
         on rank 0 with ``sync_module_states=True`` to emulate the workflow to
         avoid redundant CPU memory usage."""
-        auto_wrap_policy = partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
         )
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
@@ -447,7 +445,7 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    @parametrize("use_orig_params", [False, True])
+    @parametrize("use_orig_params", [True, False])
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: StateDictType,

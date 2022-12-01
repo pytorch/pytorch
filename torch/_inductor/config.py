@@ -1,8 +1,18 @@
 import os
 import sys
+from functools import lru_cache
 
 # add some debug printouts
 debug = False
+
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
+# use cpp wrapper instead of python wrapper
+cpp_wrapper = False
 
 # dead code elimination
 dce = False
@@ -59,7 +69,30 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
+
+@lru_cache(1)
+def is_fbcode():
+    try:
+        import torch.fb  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+compile_threads = (
+    1
+    if sys.platform == "win32" or is_fbcode()
+    else min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+)
+
+# If kernel is fused, the name is generated from the origin node op names
+# for larger kernels limit this
+kernel_name_max_ops = 10
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
@@ -67,6 +100,15 @@ inductor_import = __name__.replace(".config", "")
 # How to import torchdynamo, either torchdynamo or torch.dynamo
 dynamo_import = inductor_import.replace("inductor", "dynamo")
 
+# Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+alignment_size = 4
+
+# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
+permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
+
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -88,7 +130,10 @@ class cpp:
         "g++-10",
         "clang++",
         "g++",
+        "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
 
 
 # config specific to codegen/triton.py
@@ -123,8 +168,8 @@ class triton:
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
-    # should we use natural codegen for where, needs newer triton version
-    simple_where = True
+    # should we put op names in kernel names
+    descriptive_kernel_names = True
 
 
 # create a directory containing lots of debug information

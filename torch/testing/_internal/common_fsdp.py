@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import sys
 from abc import ABC, abstractmethod
@@ -21,11 +20,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    transformer_auto_wrap_policy,
-    wrap,
-)
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
@@ -285,8 +280,8 @@ class TransformerWithSharedParams(FSDPTestModel):
             fsdp_init_mode (FSDPInitMode): If ``NO_FSDP``, then does not wrap
                 any modules with FSDP. If ``RECURSIVE``, then wraps with
                 top-level FSDP. By default, the top-level FSDP uses the
-                ``transformer_auto_wrap_policy()`` for encoder and decoder
-                layers, but a different auto wrap policy may be specified via
+                ``ModuleWrapPolicy`` for encoder and decoder layers, but a
+                different auto wrap policy may be specified via
                 ``fsdp_kwargs``.
             cuda_init_mode (CUDAInitMode): Determines model movement to CUDA.
             fsdp_kwargs (Optional[Dict[str, Any]]): Optional keyword arguments
@@ -302,14 +297,13 @@ class TransformerWithSharedParams(FSDPTestModel):
                 group, cuda_init_mode, add_bn, deterministic
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
-            # Default to the `transformer_auto_wrap_policy()`
+            # Default to the `ModuleWrapPolicy`
             if "auto_wrap_policy" not in fsdp_kwargs:
-                auto_wrap_policy = functools.partial(
-                    transformer_auto_wrap_policy,
-                    transformer_layer_cls={
+                auto_wrap_policy = ModuleWrapPolicy(
+                    {
                         TransformerEncoderLayer,
                         TransformerDecoderLayer,
-                    },
+                    }
                 )
             else:
                 auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")

@@ -9,12 +9,24 @@
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Factory.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <string.h>
 
 #include <c10/util/irange.h>
 
+/*
+ * TODO: rename this file to something like vulkan_experimental_test and move
+ * this under caffe2/fb/vulkan. This file should be used to test experimental
+ * features of the Vulkan backend. vulkan_api_test cannot serve this purpose
+ * because it cannot link against symbols in the ATen/native/vulkan folder.
+ */
+
 namespace {
 
-bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+bool checkRtol(
+    const at::Tensor& diff,
+    const std::vector<at::Tensor>& inputs,
+    const float tolerated_error = 0) {
   float maxValue = 0.0f;
 
   for (const auto& tensor : inputs) {
@@ -27,11 +39,11 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   constexpr float tolerance = 1e-5;
 #endif
 
-  return diff.abs().max().item<float>() <= (tolerance * maxValue);
+  return diff.abs().max().item<float>() <= (tolerance * maxValue + tolerated_error);
 }
 
-bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
-  return checkRtol(a - b, {a, b});
+bool almostEqual(const at::Tensor& a, const at::Tensor& b, const float tolerated_error = 0) {
+  return checkRtol(a - b, {a, b}, tolerated_error);
 }
 
 /* Unused function
@@ -93,6 +105,79 @@ inline std::vector<c10::IValue> callOpByName(
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
+
+} // namespace
+
+namespace {
+
+double rand01() {
+  return (double)rand() / (double)RAND_MAX;
+}
+
+int64_t rand_pos_int(const int max_val) {
+  return 1 + int64_t(rand01() * (max_val - 1));
+}
+
+at::Tensor produce_random_tensor(
+    const at::IntArrayRef tensor_shape,
+    const float a,
+    const float b,
+    const float c) {
+  return (a + b * at::rand({1}, at::device(at::kCPU).dtype(at::kFloat))) *
+         (at::rand(tensor_shape, at::device(at::kCPU).dtype(at::kFloat)) - c);
+}
+
+double produce_random_scale(const double scale_min, const double scale_max) {
+  return rand01() * (scale_max - scale_min) + scale_min;
+}
+
+int64_t produce_random_zero_point(const c10::ScalarType dtype) {
+  int64_t zero_point;
+  switch (dtype) {
+    case c10::ScalarType::QUInt8:
+      zero_point = int64_t(rand01() * 255);
+      break;
+    case c10::ScalarType::QInt8:
+      zero_point = int64_t(rand01() * 255) - 127;
+      break;
+    case c10::ScalarType::QInt32:
+      zero_point = int64_t(rand01() * 100000) - 200000;
+      break;
+    default:
+      TORCH_CHECK(
+        false, "Vulkan quantization currently not supported for dtype ", dtype
+      );
+  }
+  return zero_point;
+}
+
+std::tuple<double, int64_t> compute_quant_params(
+    const at::Tensor tensor,
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8) {
+  int zero_point_min;
+  int zero_point_max;
+  if (dtype == c10::ScalarType::QUInt8) {
+    zero_point_min = 0;
+    zero_point_max = 255;
+  } else if (dtype == c10::ScalarType::QInt8) {
+    zero_point_min = -128;
+    zero_point_max = 127;
+  } else {
+    TORCH_CHECK(false, "Computation of quant params only available for dtypes",
+                       "QUInt8 and QInt8");
+  }
+  const auto tensor_max = tensor.max().item<double>();
+  const auto tensor_min = tensor.min().item<double>();
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/tensor_min,
+      /*max=*/tensor_max,
+      /*qmin=*/zero_point_min,
+      /*qmax=*/zero_point_max,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/false);
+  return std::tuple<double, int64_t>(q_params.scale, q_params.zero_point);
 }
 
 } // namespace
@@ -161,6 +246,85 @@ at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
     auto output = at::empty(in_cpu.sizes(), q_options);
     at::native::vulkan::ops::copy_(output, vulkan);
     return output;
+  }
+}
+
+TEST_F(VulkanAPITest, uniform_buffer_copy) {
+  using namespace at::native::vulkan;
+
+  struct TestStruct{
+    int a;
+    int b;
+    int c;
+  };
+
+  TestStruct test_struct{4, 9, 10};
+
+  api::UniformParamsBuffer params(api::context(), test_struct);
+  api::UniformParamsBuffer params_copy = params;
+
+  api::MemoryMap copy_mapping(
+      params_copy.buffer(), api::MemoryAccessType::READ);
+
+  TestStruct* test_copy_p = copy_mapping.template data<TestStruct>();
+
+  ASSERT_TRUE(test_copy_p->a == test_struct.a);
+  ASSERT_TRUE(test_copy_p->b == test_struct.b);
+  ASSERT_TRUE(test_copy_p->c == test_struct.c);
+}
+
+TEST_F(VulkanAPITest, copy_to_buffer) {
+  using namespace at::native::vulkan;
+
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 3D
+    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 2D
+    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 1D
+    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
+    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+
+    ASSERT_TRUE(check_copy);
+  }
+}
+
+TEST_F(VulkanAPITest, copy_to_buffer_channels_last) {
+  using namespace at::native::vulkan;
+
+  at::TensorOptions options(at::kCPU);
+  options = options.dtype(at::kFloat);
+
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, options).to(at::MemoryFormat::ChannelsLast),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
+    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+
+    ASSERT_TRUE(check_copy);
   }
 }
 
@@ -266,6 +430,73 @@ TEST_F(VulkanAPITest, quantize_dequantize) {
   }
 
   ASSERT_TRUE(check_two);
+}
+
+void test_quantize_per_tensor_and_dequantize(
+    const at::IntArrayRef input_shape,
+    const double input_scale,
+    const int input_zero_point,
+    const float tolerance = 0) {
+  at::Tensor input = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  // quantize tensors
+  at::Tensor out_q_cpu = at::quantize_per_tensor(
+    input, input_scale, input_zero_point, c10::ScalarType::QUInt8);
+  at::Tensor out_q_vk = at::quantize_per_tensor(
+    input.vulkan(), input_scale, input_zero_point, c10::ScalarType::QUInt8);
+
+  // dequantize tensors
+  const auto out_cpu_deq = at::dequantize(out_q_cpu);
+  const auto out_vk_deq = at::dequantize(out_q_vk);
+
+  // check dequantized tensor are equal
+  const auto check = almostEqual(out_cpu_deq, out_vk_deq.cpu(), tolerance);
+
+  if (!check) {
+    std::cout
+      << "Quantize and Dequantize failed with input shape: " << input_shape
+      << " scale: " << input_scale << " and zero point: " << input_zero_point
+    << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+void test_quantize_per_tensor_and_dequantize_random() {
+  const double scale = 0.0001 + (double)rand() / (double)RAND_MAX;
+  const int zero_point = int((double)rand() / (double)RAND_MAX * 255);
+  const int n = 1 + int((double)rand() / (double)RAND_MAX * 30);
+  const int c = 1 + int((double)rand() / (double)RAND_MAX * 30);
+  const int h = 1 + int((double)rand() / (double)RAND_MAX * 100);
+  const int w = 1 + int((double)rand() / (double)RAND_MAX * 100);
+  // tolerated error = scale, to allow for precision differences after dividing
+  // by random scale, which could result on a difference of 1 unit in the
+  // quantized result.
+  test_quantize_per_tensor_and_dequantize({n, c, h, w}, scale, zero_point, scale);
+}
+
+TEST_F(VulkanAPITest, quantize_per_tensor_and_dequantize) {
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 1}, 0.13, 21);
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 4}, 0.3, 87);
+  test_quantize_per_tensor_and_dequantize({1, 1, 4, 1}, 0.2, 120);
+  test_quantize_per_tensor_and_dequantize({1, 1, 7, 7}, 0.3, 87);
+  test_quantize_per_tensor_and_dequantize({1, 1, 8, 8}, 0.1, 10);
+  test_quantize_per_tensor_and_dequantize({3, 5, 8, 8}, 0.04, 97);
+  test_quantize_per_tensor_and_dequantize({1, 1, 11, 17}, 0.07, 15);
+  test_quantize_per_tensor_and_dequantize({1, 1, 12, 17}, 0.1, 10);
+  test_quantize_per_tensor_and_dequantize({3, 5, 12, 17}, 0.1, 10);
+  test_quantize_per_tensor_and_dequantize({1, 1, 17, 12}, 0.1, 10);
+  test_quantize_per_tensor_and_dequantize({2, 4, 17, 12}, 0.1, 10);
+  test_quantize_per_tensor_and_dequantize({1, 1, 10, 14}, 0.0001, 101);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 14}, 0.009, 43);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 15}, 0.1, 19);
+  test_quantize_per_tensor_and_dequantize({4, 4, 9, 17}, 0.1, 19);
+  test_quantize_per_tensor_and_dequantize({3, 5, 25, 29}, 0.1, 19);
+  test_quantize_per_tensor_and_dequantize({4, 4, 25, 29}, 0.1, 19);
+  test_quantize_per_tensor_and_dequantize({11, 17, 25, 29}, 0.027, 89);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_quantize_per_tensor_and_dequantize_random();
+  }
 }
 
 TEST_F(VulkanAPITest, quantized_add) {

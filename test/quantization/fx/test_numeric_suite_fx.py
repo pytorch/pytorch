@@ -41,7 +41,7 @@ from torch.ao.quantization.quantization_mappings import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
-import torch.ao.quantization.fx.quantization_patterns as qp
+import torch.ao.quantization.fx.quantize_handler as qh
 from torch.ao.ns.fx.pattern_utils import (
     get_type_a_related_to_b,
 )
@@ -85,7 +85,7 @@ from torch.ao.ns._numeric_suite_fx import (
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -299,7 +299,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
+    for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 
@@ -669,21 +669,21 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 base_op = pattern
 
             qhandler_cls_all_ops_quantizeable = [
-                qp.CatQuantizeHandler,
-                qp.ConvReluQuantizeHandler,
-                qp.LinearReLUQuantizeHandler,
-                qp.BatchNormQuantizeHandler,
-                qp.EmbeddingQuantizeHandler,
-                qp.RNNDynamicQuantizeHandler,
+                qh.CatQuantizeHandler,
+                qh.ConvReluQuantizeHandler,
+                qh.LinearReLUQuantizeHandler,
+                qh.BatchNormQuantizeHandler,
+                qh.EmbeddingQuantizeHandler,
+                qh.RNNDynamicQuantizeHandler,
             ]
 
             qhandler_cls_quant_op_same_signature = [
-                qp.FixedQParamsOpQuantizeHandler,
-                qp.CopyNodeQuantizeHandler,
-                qp.GeneralTensorShapeOpQuantizeHandler,
+                qh.FixedQParamsOpQuantizeHandler,
+                qh.CopyNodeQuantizeHandler,
+                qh.GeneralTensorShapeOpQuantizeHandler,
             ]
 
-            if qhandler_cls == qp.BinaryOpQuantizeHandler:
+            if qhandler_cls == qh.BinaryOpQuantizeHandler:
                 # these ops do not have quantized equivalents
                 ops_to_skip = [
                     torch.bmm,
@@ -697,11 +697,11 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
-            elif qhandler_cls == qp.RNNDynamicQuantizeHandler:
+            elif qhandler_cls == qh.RNNDynamicQuantizeHandler:
                 # TODO(future PR): add support for all classes in
                 # RNNDynamicQuantizeHandler
                 pass
-            elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+            elif qhandler_cls == qh.DefaultNodeQuantizeHandler:
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -1606,23 +1606,23 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
             if (
                 qhandler_cls in (
-                    qp.BinaryOpQuantizeHandler,
-                    qp.RNNDynamicQuantizeHandler,
+                    qh.BinaryOpQuantizeHandler,
+                    qh.RNNDynamicQuantizeHandler,
                 )
             ):
                 # TODO(future PR): implement shadowing for binary ops
                 # TODO(future PR): implement shadowing for RNN ops
                 continue
-            elif qhandler_cls == qp.CatQuantizeHandler:
+            elif qhandler_cls == qh.CatQuantizeHandler:
                 self.assertTrue(
                     base_op in FUNS_IO_TYPE_FP32_OR_INT8,
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.ConvReluQuantizeHandler,
-                    qp.LinearReLUQuantizeHandler,
-                    qp.BatchNormQuantizeHandler,
-                    qp.DefaultNodeQuantizeHandler,
+                    qh.ConvReluQuantizeHandler,
+                    qh.LinearReLUQuantizeHandler,
+                    qh.BatchNormQuantizeHandler,
+                    qh.DefaultNodeQuantizeHandler,
                 )
             ):
                 self.assertTrue(
@@ -1630,9 +1630,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.FixedQParamsOpQuantizeHandler,
-                    qp.CopyNodeQuantizeHandler,
-                    qp.GeneralTensorShapeOpQuantizeHandler,
+                    qh.FixedQParamsOpQuantizeHandler,
+                    qh.CopyNodeQuantizeHandler,
+                    qh.GeneralTensorShapeOpQuantizeHandler,
                 )
             ):
                 if (
@@ -1650,7 +1650,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     # version, so it does not fit into the cases above.
                     (base_op is torch.nn.Softmax),
                     f"missing IO type handling for {base_op}")
-            elif qhandler_cls == qp.EmbeddingQuantizeHandler:
+            elif qhandler_cls == qh.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now
                 continue
             else:
