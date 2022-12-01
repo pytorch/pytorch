@@ -180,8 +180,8 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
 
 subprocess.call("python setup.py bdist_wheel", shell=True)
 subprocess.call("sccache --show-stats", shell=True)
-subprocess.call("python -c \"import os, glob; os.system(\'python -mpip install \'
-    + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"", shell=True)
+subprocess.call('python -c \"import os, glob; os.system(\'python -mpip install \'' +
+    ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
 
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
