@@ -99,10 +99,11 @@ from torch.ao.quantization.qconfig_mapping import (
     QConfigMapping,
 )
 
-from torch.ao.quantization.qconfig_mapping_utils import (
+from torch.ao.quantization.fx.qconfig_mapping_utils import (
     _get_object_type_qconfig,
     _get_module_name_qconfig,
     _get_module_name_regex_qconfig,
+    maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.pattern_utils import (
@@ -129,10 +130,6 @@ from torch.ao.quantization.fx.custom_config import (
     ConvertCustomConfig,
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
-)
-
-from torch.ao.quantization.fx.qconfig_mapping_utils import (
-    maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.utils import (
