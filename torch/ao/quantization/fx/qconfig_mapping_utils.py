@@ -33,8 +33,6 @@ from ..qconfig_mapping import (
 from ..quantization_mappings import (
     get_default_qat_module_mappings,
 )
-from ..qconfig import QConfigAny
-
 
 # TODO: revisit this list. Many helper methods shouldn't be public
 __all__ = [
