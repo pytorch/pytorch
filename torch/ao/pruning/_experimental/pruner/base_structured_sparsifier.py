@@ -233,7 +233,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
             mask = config.get(
                 "mask",
-                torch.ones(getattr(module, tensor_name).shape[0], dtype=torch.bool),
+                torch.ones(getattr(module, tensor_name).shape[0], dtype=torch.bool, device=self.model.device),
             )
             self.state[config["tensor_fqn"]]["mask"] = mask
             parametrize.register_parametrization(
