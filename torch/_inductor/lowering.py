@@ -3582,6 +3582,16 @@ register_lowering(
 )(erf)
 
 register_pointwise(
+    aten.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
     aten.log,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,

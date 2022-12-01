@@ -2702,6 +2702,24 @@ class CommonTemplate:
                 fn,
                 (torch.randn([64]).to(dtype=dtype),),
             )
+            self.common(
+                fn,
+                (torch.arange(-0.00001, 0.00001, 0.001).to(dtype=dtype),),
+            )
+
+    def test_log1p(self):
+        def fn(x):
+            return torch.log1p(x), torch.log1p(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-0.00001, 0.00001, 0.001).to(dtype=dtype),),
+            )
 
     def test_flip(self):
         def fn(x):
