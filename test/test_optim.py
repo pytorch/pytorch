@@ -1559,7 +1559,7 @@ class TestOptim(TestCase):
                 # assert that the parameters have not changed
                 self.assertEqual(original_param, param)
 
-
+    @skipIfTorchDynamo()
     def test_post_hook(self):
         def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
@@ -1581,7 +1581,7 @@ class TestOptim(TestCase):
         opt.step()
         self.assertEqual(data, 6)
 
-
+    @skipIfTorchDynamo()
     def test_pre_hook(self):
         def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
@@ -1603,6 +1603,7 @@ class TestOptim(TestCase):
         opt.step()
         self.assertEqual(data, 9)
 
+    @skipIfTorchDynamo()
     def test_pre_and_post_hook(self):
         def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
