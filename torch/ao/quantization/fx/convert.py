@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type, Callable
 from torch.ao.quantization.quant_type import QuantType
 import torch
 import copy
@@ -131,11 +131,13 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     # 1. extract the information from activation_post_process module for generating
     # the quantize and dequantize operator
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
+
+    is_dynamic = False
+    if hasattr(activation_post_process, "is_dynamic"):
+        is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
+
     if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
-            not hasattr(activation_post_process, 'compute_dtype'):
+            (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
 
@@ -144,10 +146,25 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         # 1. extract information for inserting q/dq node from activation_post_process
         node_type = "call_function"
         quantize_op : Optional[Callable] = None
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
-            raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_channel
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel
+            quant_min = activation_post_process.quant_min
+            quant_max = activation_post_process.quant_max
+            dtype_ = to_underlying_dtype(dtype)
+            qparams = {
+                "_scale_": scale,
+                "_zero_point_": zero_point,
+                "_axis_": ch_axis,
+                "_quant_min_": quant_min,
+                "_quant_max_": quant_max,
+                "_dtype_": dtype_
+            }
         else:
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
             scale = float(scale)
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
@@ -160,7 +177,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 "_quant_max_": quant_max,
                 "_dtype_": dtype_
             }
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
 
         # 2. replace activation_post_process node with quantize and dequantize
         with graph.inserting_before(node):
@@ -182,7 +198,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
             # use the same qparams from quantize op
             dq_inputs = [quantized_node] + quantize_op_inputs[1:]
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
@@ -190,8 +205,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             )
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
-    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
-        # TODO(future PR): switch compute_dtype to is_dynamic
+    elif is_dynamic:
 
         # uint8/int8/fp16 dynamic quantization
 
@@ -326,12 +340,13 @@ def _replace_observer_with_quantize_dequantize_node(
 
     # otherwise, we can convert the activation_post_process module call to quantize/dequantize node
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
+
+    is_dynamic = False
+    if hasattr(activation_post_process, "is_dynamic"):
+        is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
-            not hasattr(activation_post_process, "compute_dtype"):
+            (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
 
@@ -341,9 +356,9 @@ def _replace_observer_with_quantize_dequantize_node(
         # the quantize and dequantize operator
         node_type = "call_function"
         quantize_op : Optional[Callable] = None
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
-            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
@@ -373,8 +388,7 @@ def _replace_observer_with_quantize_dequantize_node(
             dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
-    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
-        # TODO(future PR): switch compute_dtype to is_dynamic
+    elif is_dynamic:
 
         # uint8/int8/fp16 dynamic quantization branch
 
@@ -383,7 +397,7 @@ def _replace_observer_with_quantize_dequantize_node(
         # TODO: get reduce range from observer
         # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
-        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
+        qparams = {"_dtype_": dtype, "_reduce_range_": reduce_range}
 
         with graph.inserting_before(node):
             input_node = node.args[0]
@@ -397,7 +411,7 @@ def _replace_observer_with_quantize_dequantize_node(
             graph.erase_node(node)
     elif dtype == torch.float16:
         node_type = "call_method"
-        quantize_op = "to"
+        quantize_op = "to"  # type: ignore[assignment]
         qparams = {"_dtype_": dtype}
         with graph.inserting_before(node):
             input_node = node.args[0]
@@ -430,12 +444,16 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Gr
 
 def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
-    return (dtype in [torch.quint8, torch.qint8, torch.qint32] and compute_dtype is None) or \
-        compute_dtype in [torch.quint8, torch.qint8, torch.float16] or \
+
+    is_dynamic = False
+    if hasattr(activation_post_process, "is_dynamic"):
+        is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
+
+    return (
+        (dtype in [torch.quint8, torch.qint8, torch.qint32] and (not is_dynamic)) or  # type: ignore[return-value]
+        is_dynamic or
         dtype == torch.float16
+    )
 
 def restore_state(
         observed: torch.nn.Module
