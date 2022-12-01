@@ -24,13 +24,11 @@ from ..qconfig import (
 from ..qconfig_mapping import (
     QConfigMapping,
 )
-from ..qconfig_mapping_utils import (
-    _get_flattened_qconfig_dict,
-    _update_qconfig_for_qat,
-)
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
     update_qconfig_for_fusion,
+    _get_flattened_qconfig_dict,
+    _update_qconfig_for_qat,
 )
 
 from .quantization_patterns import (
