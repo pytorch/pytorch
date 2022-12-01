@@ -355,8 +355,6 @@ class Pair(abc.ABC):
         """
         if id is None and hasattr(self, "id"):
             id = self.id
-        if id is None:
-            raise ErrorMeta(RuntimeError, "FIXME")
 
         raise ErrorMeta(type, msg, id=id)
 
