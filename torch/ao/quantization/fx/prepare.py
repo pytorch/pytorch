@@ -243,9 +243,6 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
     pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
 
-    # TODO: this only works for one input and one output patterns, need to generalize to multiple
-    # inputs/output
-    # root_node = _default_root_node_getter(matched_node_pattern)
     root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
     root_node = root_node_getter(matched_node_pattern)
     input_node = root_node
@@ -1276,9 +1273,6 @@ def insert_observers_for_model(
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
 
-                    # TODO: this only works for sequential fusion right now, extend it
-                    # it to automatically detect all input nodes based on the pattern
-                    # need to change find_matches function to return this information
                     pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
                     root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
                     root_node = root_node_getter(matched_node_pattern)

@@ -5484,6 +5484,8 @@ class TestQuantizeFx(QuantizationTestCase):
         Pattern:
                            shape \
         transpose (observed) -> reshape -> output (observed) ->
+
+        where `reshape` has two arguments
         """
 
         def _get_pattern_configs():
