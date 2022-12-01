@@ -109,7 +109,7 @@ class _Holder:
 def _pack(
     x: torch.Tensor,
     *,
-    weak_holder_list: List[ReferenceType[_Holder]],
+    weak_holder_list: List[ReferenceType],
 ) -> _Holder:
     res = _Holder()
     weak_holder_list.append(ref(res))
@@ -120,7 +120,7 @@ def _unpack(
     holder: _Holder,
     *,
     storage: WeakKeyDictionary,
-    weak_holder_list: List[ReferenceType[_Holder]],
+    weak_holder_list: List[ReferenceType],
     module: nn.Module,
     inputs: Tuple[Any],
 ) -> torch.Tensor:
@@ -213,7 +213,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
                 # stored in storage is deleted as soon as the corresponding
                 # SavedVariable data is cleared.
                 storage: WeakKeyDictionary = WeakKeyDictionary()
-                weak_holder_list: List[ReferenceType[_Holder]] = []
+                weak_holder_list: List[ReferenceType] = []
                 saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
                     partial(_pack, weak_holder_list=weak_holder_list),
                     partial(

@@ -14,7 +14,33 @@ from torch.distributed._composable import checkpoint
 
 import unittest
 from collections import deque
+from contextlib import ContextDecorator
 from copy import deepcopy
+
+
+class MemoryDelta(ContextDecorator):
+    def __init__(self, device: torch.device):
+        self.device: torch.device = device
+        self.active_memory_enter: int = 0
+        self.active_memory_exit: int = 0
+
+    def __enter__(self):
+        self.active_memory_enter = (
+            torch.cuda.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda"
+            else 0
+        )
+        return self
+
+    def __exit__(self, *exc):
+        self.active_memory_exit = (
+            torch.cuda.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda"
+            else 0
+        )
+
+    def delta(self) -> int:
+        return self.active_memory_exit - self.active_memory_enter
 
 
 class ToyModel(nn.Module):
@@ -59,21 +85,23 @@ class TestCheckpoint(TestCase):
         net2 = deepcopy(net)
 
         # no checkpoint
-        loss1 = net1(x1).sum()
+        with MemoryDelta(x.device) as mem1:
+            loss1 = net1(x1).sum()
         graph_size1 = self._get_graph_size(loss1)
         loss1.backward()
 
         # with checkpoint
         checkpoint(net2.seq, use_reentrant=use_reentrant)
-        loss2 = net2(x2).sum()
+        with MemoryDelta(x.device) as mem2:
+            loss2 = net2(x2).sum()
         graph_size2 = self._get_graph_size(loss2)
         loss2.backward()
 
         if use_reentrant:
             self.assertTrue(graph_size2 < graph_size1)
-        else:
-            # TODO (@mrshenli): calculate activation size
-            pass
+
+        if x.is_cuda:
+            self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
