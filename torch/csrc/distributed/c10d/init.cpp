@@ -1310,7 +1310,13 @@ Arguments:
 
           .def(
               "allgather_coalesced",
-              &::c10d::ProcessGroup::allgather_coalesced,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<std::vector<at::Tensor>>& output_lists,
+                 const std::vector<at::Tensor>& input_list,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::allgather_coalesced(
+                    self, output_lists, input_list, opts);
+              },
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1411,7 +1417,13 @@ Arguments:
 
           .def(
               "_reduce_scatter_base",
-              &::c10d::ProcessGroup::_reduce_scatter_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::ReduceScatterOptions& opts) {
+                return ::c10d::ops::_reduce_scatter_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -1527,7 +1539,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                return ::c10d::ops::monitored_barrier(self, opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,

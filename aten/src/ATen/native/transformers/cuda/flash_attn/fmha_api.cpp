@@ -26,6 +26,7 @@
  *
  ******************************************************************************/
 
+#include <tuple>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -115,7 +116,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     params.is_causal = is_causal;
 }
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -241,9 +242,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
     run_fmha_fprop(launch_params, /*configure=*/false);
 
-    std::vector<at::Tensor> result = {o, softmax_lse};
-    if (return_softmax) {result.push_back(s);}
-    return result;
+    return std::make_tuple(o, softmax_lse, s);
 }
 } // namespace fmha
 #endif
