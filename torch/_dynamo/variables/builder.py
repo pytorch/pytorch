@@ -714,10 +714,13 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
         else:
-            assert not isinstance(example_value, torch._subclasses.FakeTensor)
-            proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-            example_value = fake_wrapper(example_value)
+            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
+            # TODO(voz): Find all the callsites and burn this down.
+            # Flipping it to an assert fails dozens of tests.
+            if not isinstance(example_value, torch._subclasses.FakeTensor):
+                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+                example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
