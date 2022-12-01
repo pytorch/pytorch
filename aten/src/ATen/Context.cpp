@@ -295,24 +295,8 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  static auto _quantized_engine = []() {
-    at::QEngine qengine = at::kNoQEngine;
-#ifdef USE_PYTORCH_QNNPACK
-    qengine = at::kQNNPACK;
-#endif // USE_PYTORCH_QNNPACK
-
-#if AT_MKLDNN_ENABLED()
-    qengine = at::kONEDNN;
-#endif
-
-#ifdef USE_FBGEMM
-    if (fbgemm::fbgemmSupportedCPU()) {
-      qengine = at::kFBGEMM;
-    }
-#endif
-    return qengine;
-  }();
-  return quantized_engine.value_or(_quantized_engine);
+  // If wasn't explicitly set - take the last one available
+  return quantized_engine.value_or(supportedQEngines().back());
 }
 
 void Context::setQEngine(at::QEngine e) {
