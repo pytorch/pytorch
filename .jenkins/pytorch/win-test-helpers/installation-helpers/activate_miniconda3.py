@@ -3,8 +3,8 @@ import subprocess
 import sys
 
 
-if 'BUILD_ENVIRONMENT' not in os.environ and 'CD' in os.environ:
-    os.environ['CONDA_PARENT_DIR'] = os.environ['CD']
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    os.environ['CONDA_PARENT_DIR'] = os.getcwd()
 else:
     os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
 
@@ -15,7 +15,7 @@ else:
 
 install_fresh_conda = '1'
 
-if not os.path.exists(conda_parent_dir + '\\Miniconda3\\Scripts\\activate.bat'):
+if not os.path.exists(os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat'):
     os.environ['INSTALL_FRESH_CONDA'] = '1'
     install_fresh_conda = '1'
 else:
