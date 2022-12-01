@@ -75,7 +75,7 @@ if os.environ['USE_CUDA'] == '1':
     os.environ['USE_CUDA'] = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + os.environ['CUDA_VERSION']
 
     # version transformer, for example 10.1 to 10_1.
-    if not os.environ['CUDA_VERSION'].contains('.'):
+    if '.' not in os.environ['CUDA_VERSION']:
         subprocess.run(['echo', 'CUDA version ' + cuda_version +
             'format isn\'t correct, which doesn\'t contain \'.\''])
 
