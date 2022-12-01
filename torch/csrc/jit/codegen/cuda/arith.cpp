@@ -456,7 +456,7 @@ Val* unaryIsOp(UnaryOpType type, Val* v) {
 }
 
 TensorView* unaryIsOp(UnaryOpType type, TensorView* v) {
-  return unaryOp(type, v->asVal())->as<TensorView>();
+  return unaryIsOp(type, v->asVal())->as<TensorView>();
 }
 
 Val* unaryOp(UnaryOpType type, Val* v1, const TypePromotionConfig& config) {
