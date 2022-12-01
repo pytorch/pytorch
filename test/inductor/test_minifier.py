@@ -178,8 +178,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 
         test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code, True)
         proc, repro_dir = self._run_test_code(test_code)
-        print(proc.stdout)
-        print(proc.stderr)
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
 
