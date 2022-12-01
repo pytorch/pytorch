@@ -193,7 +193,12 @@ class QConfigMultiMapping:
         return self
 
     def __repr__(self):
-        return self.__class__.__name__+" ["+"".join(f"\n{qconfig_mapping.__repr__()}," for qconfig_mapping in self.qconfig_mappings_list) + "\n]"
+        return (
+            self.__class__.__name__ +
+            " [" +
+            "".join(f"\n{qconfig_mapping.__repr__()}," for qconfig_mapping in self.qconfig_mappings_list) +
+            "\n]"
+        )
 
     @classmethod
     def from_list_qconfig_mapping(
