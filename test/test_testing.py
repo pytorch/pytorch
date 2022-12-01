@@ -1408,6 +1408,20 @@ class TestAssertCloseQuantized(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
+class TestAssertNotClose(TestCase):
+    def test_not_close(self):
+        actual = torch.tensor(0)
+        expected = torch.tensor(1)
+
+        torch.testing.assert_not_close(actual, expected)
+
+    def test_close(self):
+        actual = torch.tensor(0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(AssertionError, "are close"):
+            torch.testing.assert_not_close(actual, expected)
+
 
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """

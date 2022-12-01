@@ -1542,6 +1542,60 @@ def assert_close(
         raise comparison_error_metas[0].to_error(msg)
 
 
+def assert_not_close(
+    actual: Any,
+    expected: Any,
+    *,
+    allow_subclasses: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
+    equal_nan: bool = False,
+    check_device: bool = True,
+    check_dtype: bool = True,
+    check_layout: bool = True,
+    check_stride: bool = False,
+    msg: Optional[str] = None,
+):
+    """Asserts that ``actual`` and ``expected`` are *not* close.
+
+    See :func:`assert_close` for the closeness definition as well as the description of the parameters.
+
+    Raises:
+        ValueError: If no :class:`torch.Tensor` can be constructed from an input.
+        ValueError: If only ``rtol`` or ``atol`` is specified.
+        AssertionError: If the inputs are close according to the definition in :func:`assert_close`.
+
+    .. seealso::
+
+        :func:`assert_close`
+    """
+    # Hide this function from `pytest`'s traceback
+    __tracebackhide__ = True
+
+    comparison_error_metas = are_equal(
+        actual,
+        expected,
+        pair_types=(
+            NonePair,
+            BooleanPair,
+            NumberPair,
+            TensorLikePair,
+        ),
+        allow_subclasses=allow_subclasses,
+        rtol=rtol,
+        atol=atol,
+        equal_nan=equal_nan,
+        check_device=check_device,
+        check_dtype=check_dtype,
+        check_layout=check_layout,
+        check_stride=check_stride,
+        msg=msg,
+    )
+
+    if not comparison_error_metas:
+        raise AssertionError(msg if isinstance(msg, str) else "Inputs are close!")
+
+
 def assert_allclose(
     actual: Any,
     expected: Any,
