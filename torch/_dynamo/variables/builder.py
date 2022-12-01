@@ -223,6 +223,10 @@ class VariableBuilder:
                 ).add_guards(guards)
                 for i, item in enumerate(value)
             ]
+
+            # include contained guards
+            guards.update(*[var.guards for var in output])
+
             result = self.list_type(value)(output, guards=guards)
             if istype(value, list):
                 return self.tx.output.side_effects.track_list(
@@ -237,6 +241,10 @@ class VariableBuilder:
                 )(tuple_iterator_getitem(value, i)).add_guards(guards)
                 for i in range(tuple_iterator_len(value))
             ]
+
+            # include contained guards
+            guards.update(*[var.guards for var in output])
+
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
@@ -247,6 +255,7 @@ class VariableBuilder:
                 )
                 for k in ("start", "stop", "step")
             ]
+
             if isinstance(value, slice):
                 return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
             else:
@@ -286,6 +295,9 @@ class VariableBuilder:
                     for k in value.keys()
                 ]
             )
+
+            # include contained guards
+            guards.update(*[var.guards for var in result.values()])
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
