@@ -22,7 +22,7 @@ if os.environ['USE_CUDA'] != "1":
     sys.exit(0)
 
 
-if not cuda_version.contains('.'):
+if '.' not in cuda_version:
 
     subprocess.run(['echo', 'CUDA version ' + cuda_version +
         'format isn\'t correct, which doesn\'t contain \'.\''])

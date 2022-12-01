@@ -31,4 +31,8 @@ if 'REBUILD' not in os.environ:
 
 
 os.environ['CMAKE_INCLUDE_PATH'] = tmp_win_dir + '\\mkl\\include'
-os.environ['LIB'] = tmp_win_dir + '\\mkl\\lib;' + os.environ['LIB']
+
+if 'LIB' in os.environ:
+    os.environ['LIB'] = tmp_win_dir + '\\mkl\\lib;' + os.environ['LIB']
+else:
+    os.environ['LIB'] = tmp_win_dir + '\\mkl\\lib'
