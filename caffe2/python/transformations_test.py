@@ -18,7 +18,7 @@
 
 
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
@@ -167,6 +167,7 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
+    @settings(deadline=None)
     def test_transformer_FuseConvBNNoConvBias(self, size, input_channels, seed, order, epsilon):
         workspace.ResetWorkspace()
         net = core.Net("net")
