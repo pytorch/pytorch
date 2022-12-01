@@ -49,10 +49,11 @@ class BaseStructuredSparsifier(BaseSparsifier):
             module = config["module"]
             tensor_name = config["tensor_name"]
             parametrization = config.get("parametrization", FakeStructuredSparsity)
+            tensor = getattr(module, tensor_name)
 
             mask = config.get(
                 "mask",
-                torch.ones(getattr(module, tensor_name).shape[0], dtype=torch.bool, device=self.model.device),
+                torch.ones(tensor.shape[0], dtype=torch.bool, device=tensor.device),
             )
             self.state[config["tensor_fqn"]]["mask"] = mask
             parametrize.register_parametrization(
