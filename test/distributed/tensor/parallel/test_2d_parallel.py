@@ -14,7 +14,7 @@ from torch.distributed._tensor import (
     DTensor as DT,
     Replicate,
 )
-from torch.distributed._tensor.parallel import (
+from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     parallelize_module,
 )
@@ -23,7 +23,7 @@ import torch.distributed.distributed_c10d as distributed_c10d
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.distributed._tensor.parallel.fsdp import is_available
+from torch.distributed.tensor.parallel.fsdp import is_available
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
