@@ -272,12 +272,10 @@ class DDPOptimizer:
                     new_args = []
                     assert fake_mode
                     for arg in args:
-                        if isinstance(arg, torch.Tensor) and not isinstance(
+                        assert isinstance(
                             arg, torch._subclasses.FakeTensor
-                        ):
-                            new_args.append(fake_mode.from_tensor(arg))
-                        else:
-                            new_args.append(arg)
+                        )
+                        new_args.append(arg)
 
                     log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
                     assert isinstance(args, tuple)
