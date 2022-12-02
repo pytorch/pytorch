@@ -77,10 +77,10 @@ class NumpyMul(torch.autograd.Function):
     def backward(ctx, grad_output):
         x, y = ctx.saved_tensors
         gx = None
-        if isinstance(x, torch.Tensor) and x.requires_grad:
+        if ctx.needs_input_grad[0]:
             gx = NumpyMul.apply(grad_output, y)
         gy = None
-        if isinstance(y, torch.Tensor) and y.requires_grad:
+        if ctx.needs_input_grad[1]:
             gy = NumpyMul.apply(grad_output, x)
         return gx, gy
 
@@ -178,16 +178,10 @@ class Select(torch.autograd.Function):
         return result, None
 
 
-def inplace_on_select_base(x):
-    y = x.clone()
-    y0 = Select.apply(x, 0)
-    y.sin_()
-    return y0
 
-
-def sample_inputs_inplace_on_select_base(opinfo, device, dtype, requires_grad, **kwargs):
+def sample_inputs_select(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    yield SampleInput(make_arg(3, 5), args=())
+    yield SampleInput(make_arg(3, 5), args=(2,))
 
 
 autograd_function_db = [
@@ -239,11 +233,11 @@ autograd_function_db = [
         gradcheck_wrapper=lambda y, ind: y,
     ),
     OpInfo(
-        'inplace_on_select_base_AutogradFunction',
-        op=inplace_on_select_base,
+        'SelectAutogradFunction',
+        op=Select.apply,
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=False,
-        sample_inputs_func=sample_inputs_inplace_on_select_base,
+        sample_inputs_func=sample_inputs_select,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
