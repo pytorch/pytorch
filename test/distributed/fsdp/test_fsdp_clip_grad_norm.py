@@ -240,6 +240,7 @@ class TestClipGradNorm(FSDPTest):
             ddp_optim.step()
             fsdp_optim.step()
 
+    @skip_if_lt_x_gpu(2)
     def test_low_precision_grads(self):
         """Tests ``clip_grad_norm_()`` when using low precision gradients."""
         self.run_subtests(
