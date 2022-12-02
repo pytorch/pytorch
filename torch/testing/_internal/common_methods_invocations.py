@@ -264,12 +264,14 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
 
 def sample_inputs_as_strided_partial_views(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    def make_arg():
+        base = make_tensor((20,), device=device, dtype=dtype)
+        return base[5:15].requires_grad_(requires_grad)
 
     # as_strided on offset, partial views
-    yield SampleInput(make_arg((20,))[5:15], (2, 2), (1, 2))
-    yield SampleInput(make_arg((20,))[5:15], (2, 2), (1, 2), storage_offset=0)
-    yield SampleInput(make_arg((20,))[5:15], (2, 2), (1, 2), storage_offset=10)
+    yield SampleInput(make_arg(), (2, 2), (1, 2))
+    yield SampleInput(make_arg(), (2, 2), (1, 2), storage_offset=0)
+    yield SampleInput(make_arg(), (2, 2), (1, 2), storage_offset=10)
 
 def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -10768,18 +10770,17 @@ op_db: List[OpInfo] = [
                # These fail because the test changes the input's in-memory layout
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD'),
-               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_gradgrad'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo',
                             'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                # Fail but are also flaky
