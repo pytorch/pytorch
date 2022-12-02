@@ -1093,7 +1093,11 @@ class FlatParamHandle:
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
                 if flat_param.grad.dtype != self._config.low_prec_param_dtype:
-                    self.flat_grad_to(self._config.low_prec_param_dtype)
+                    flat_param.grad.data = flat_param.grad.to(
+                        self._config.low_prec_param_dtype
+                    )
+                    if self._use_orig_params:
+                        self._use_sharded_grad_views()
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1723,21 +1727,6 @@ class FlatParamHandle:
                 self._use_sharded_views()
             else:
                 self._use_unsharded_views(as_params=True)
-
-    def flat_grad_to(self, *args, **kwargs):
-        """Wraps an in-place call to ``to()`` for ``self.flat_param.grad``."""
-        p_assert(
-            self.flat_param.grad is not None,
-            "Expects `flat_param.grad` to not be `None`",
-        )
-        assert self.flat_param.grad is not None  # mypy
-        self.flat_param.grad.data = self.flat_param.grad.to(*args, **kwargs)
-        if self._use_orig_params:
-            # Refresh the views because their storage may have changed
-            if self.is_sharded(self.flat_param.grad):
-                self._use_sharded_grad_views()
-            else:
-                self._use_unsharded_grad_views()
 
     def _get_modules(self) -> Set[nn.Module]:
         """Returns a :class:`set` of the modules whose parameters are included
