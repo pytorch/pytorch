@@ -9,7 +9,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
@@ -741,10 +740,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
   }
     auto attn_mask = attn_mask_;
     // Naive, composite implementation defined here.
-    const auto embed_size = query_.size(-1);
 
     // Scale q,k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    const double scaling_factor = ::sqrt(::sqrt(static_cast<double>(embed_size)));
+    const auto embed_size = SymFloat(query_.sym_size(-1));
+    const auto scaling_factor = embed_size.sqrt().sqrt();
     const auto query = query_ / scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
@@ -753,8 +752,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
 
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
-        const auto L = query.size(-2), S = key.size(-2);
-        attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
+        const auto L = query.sym_size(-2), S = key.sym_size(-2);
+        attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
     }
     if (attn_mask.has_value()) {
         TORCH_CHECK(!query.is_nested() && !key.is_nested(),
