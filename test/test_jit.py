@@ -744,7 +744,7 @@ class TestJit(JitTestCase):
     def test_matrix_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.mT == x.transpose(-2, -1)).all())
+            return torch.equal(x.mT, x.transpose(-2, -1))
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -752,7 +752,7 @@ class TestJit(JitTestCase):
     def test_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.T == x.t()).all())
+            return torch.equal(x.T, x.t())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -760,7 +760,7 @@ class TestJit(JitTestCase):
     def test_matrix_conj_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.mH == x.transpose(-2, -1).conj()).all())
+            return torch.equal(x.mH, x.transpose(-2, -1).conj())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -771,7 +771,7 @@ class TestJit(JitTestCase):
     def test_conj_transpose(self):
         @torch.jit.script
         def check(x):
-            return bool((x.H == x.t().conj()).all())
+            return torch.equal(x.H, x.t().conj())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))
@@ -1139,7 +1139,7 @@ class TestJit(JitTestCase):
             # type: (Tensor, Tensor) -> Tensor
             tmp1 = torch.mul(input1, input2)
             tmp2 = torch.abs(tmp1)
-            if (input1 == input2).all():
+            if torch.equal(input1, input2):
                 tmp2 = torch.acos(tmp2)
             else:
                 tmp2 = torch.atan(tmp2)
@@ -1694,7 +1694,7 @@ graph(%Ra, %Rb):
         t_node = g2.create("prim::TensorTest").t_("a", torch.ones([2, 2]))
         self.assertEqual(t_node.attributeNames(), ["a"])
         g2.appendNode(t_node)
-        self.assertEqual(torch.ones(2, 2), t_node.t("a"), rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(torch.ones(2, 2), t_node.t("a")))
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 

@@ -1475,7 +1475,7 @@ class TestTensorExprFuser(BaseTestClass):
                 scripted = torch.jit.script(test)
                 out = warmup_and_run_forward(scripted, x)
                 self.assertLastGraphAllFused()
-                torch.testing.assert_close(out, test(x), rtol=0, atol=0)
+                assert torch.equal(out, test(x))
 
     def test_simple_add(self):
         val = torch._C._jit_get_te_generate_block_code()

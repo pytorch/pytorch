@@ -2877,7 +2877,7 @@ torch.cuda.synchronize()
             # For example, lstm_cell returns a tuple and equal returns bool.
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
-                    return (first == second).all().item()
+                    return torch.equal(first, second)
                 elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
@@ -4693,13 +4693,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(x, cat))
 
         out = scatter_gather.gather(outputs, 0)  # test on GPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(x, cat))
 
         class TestNamedTupleInput_1(NamedTuple):
             a: torch.tensor
@@ -4719,13 +4719,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(x, cat))
 
         out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(x, cat))
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):

@@ -583,12 +583,12 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         x = torch.rand(3, 4)
         obs(x)
         scripted(x)
-        self.assertEqual(obs.get_tensor_value()[0], scripted.get_tensor_value()[0], rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
         buf = io.BytesIO()
         torch.jit.save(scripted, buf)
         buf.seek(0)
         loaded = torch.jit.load(buf)
-        self.assertEqual(obs.get_tensor_value()[0], loaded.get_tensor_value()[0], rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
 class TestHistogramObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -606,12 +606,12 @@ class TestHistogramObserver(QuantizationTestCase):
             x = torch.rand(3, 4)
             obs(x)
             scripted(x)
-            self.assertEqual(obs.histogram, scripted.histogram, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
             buf = io.BytesIO()
             torch.jit.save(scripted, buf)
             buf.seek(0)
             loaded = torch.jit.load(buf)
-            self.assertEqual(obs.histogram, scripted.histogram, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
