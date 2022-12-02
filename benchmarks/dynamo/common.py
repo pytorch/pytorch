@@ -1032,9 +1032,11 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
-    def optimizer_zero_grad(self):
+    def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
+        else:
+            mod.zero_grad(True)
 
     def optimizer_step(self):
         if self.optimizer is not None:

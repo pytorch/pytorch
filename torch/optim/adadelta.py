@@ -93,6 +93,32 @@ class Adadelta(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
 
+    def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError("Adadelta does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # Lazy state initialization
+            if len(state) == 0:
+                state["step"] = 0
+                state["square_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                state["acc_delta"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+
+            square_avgs.append(state["square_avg"])
+            acc_deltas.append(state["acc_delta"])
+
+            state["step"] += 1
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -121,30 +147,7 @@ class Adadelta(Optimizer):
                 group["differentiable"],
             )
 
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError("Adadelta does not support sparse gradients")
-                grads.append(p.grad)
-
-                state = self.state[p]
-
-                # Lazy state initialization
-                if len(state) == 0:
-                    state["step"] = 0
-                    state["square_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    state["acc_delta"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-
-                square_avgs.append(state["square_avg"])
-                acc_deltas.append(state["acc_delta"])
-
-                state["step"] += 1
+            self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
 
             adadelta(
                 params_with_grad,
