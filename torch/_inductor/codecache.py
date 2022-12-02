@@ -112,6 +112,9 @@ def cpp_compiler_search(search):
                 # according to https://anaconda.org/conda-forge/gxx/
                 if sys.platform != "linux":
                     continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
+                    continue
                 from filelock import FileLock
 
                 lock_dir = get_lock_dir()
