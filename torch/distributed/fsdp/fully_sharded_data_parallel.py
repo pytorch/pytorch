@@ -1183,9 +1183,9 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: The total norm returned will have the "largest" dtype across
             all parameters/gradients as defined by PyTorch's type promotion
             semantics. For example, if *all* parameters/gradients use a low
-            precision dtype, then the returned dtype will be that low precision
-            dtype, but if there exists at least one parameter/gradient using
-            FP32, then the returned dtype will be FP32.
+            precision dtype, then the returned norm's dtype will be that low
+            precision dtype, but if there exists at least one parameter/
+            gradient using FP32, then the returned norm's dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
