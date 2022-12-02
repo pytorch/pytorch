@@ -61,6 +61,16 @@ template <typename scalar_t> struct VectorizedType { using type = Vectorized<sca
 template <> struct VectorizedType<BFloat16> { using type = Vec2; };
 template <typename scalar_t> using VecType = typename VectorizedType<scalar_t>::type;
 
+// Helper for mixed data type parameter Vec::load
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr) {
+  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
+  using Vec = Vectorized<float>;
+  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
+}
+
 } // namespace
 
 namespace utils {
