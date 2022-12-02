@@ -4718,6 +4718,7 @@ class CommonTemplate:
         device = "cpu"
         for name in [
             "test_as_strided",  # buffer reuse
+            "test_bitwise",  # int32
             "test_bmm1",
             "test_bmm2",
             "test_cat",  # alias
@@ -4729,6 +4730,8 @@ class CommonTemplate:
             "test_reduction1",  # Reduction
             "test_relu",  # multiple inputs
             "test_silu",  # single input, single output
+            "test_sum_dtype",  # float64
+            "test_sum_int",  # bool, int64, int8, uint8
             "test_transpose",  # multiple outputs, buffer clear
         ]:
             test_name = f"{name}_{device}"
