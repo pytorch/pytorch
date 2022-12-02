@@ -31,7 +31,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         fp_linear_result = fp_linear(activation).data
 
-        self.assertTrue(torch.equal(apot_linear_result, fp_linear_result))
+        self.assertEqual(apot_linear_result, fp_linear_result, rtol=0, atol=0, exact_device=True)
 
     """
         Test linear_APoT_fn by comparing to uniform linear
@@ -59,7 +59,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         fp_linear_result = fp_linear(activation).data
 
-        self.assertTrue(torch.equal(apot_linear_result, fp_linear_result))
+        self.assertEqual(apot_linear_result, fp_linear_result, rtol=0, atol=0, exact_device=True)
 
 if __name__ == '__main__':
     unittest.main()

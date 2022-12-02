@@ -358,7 +358,7 @@ class TestTorchDeviceType(TestCase):
             s0.tolist()
 
         with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
