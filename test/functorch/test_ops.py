@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
 import torch
 from torch import Tensor
 import functools
@@ -517,11 +517,35 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
+
+        # ---- Non-Contiguous Failures ----
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # RuntimeError: query: last dimension must be contiguous
+        # NOTE: This passes on Windows!
+        decorate('nn.functional._scaled_dot_product_attention',
+                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # BUG
+        # AssertionError: Tensor-likes are not close!
+        xfail('as_strided'),
+        xfail('as_strided_scatter'),
+        xfail('_softmax_backward_data', device_type='cpu'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('matmul',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('svd_lowrank',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
@@ -539,14 +563,22 @@ class TestOperators(TestCase):
                 result = fn(*primals)
                 cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
+                noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
+                noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
+
                 out, vjp_fn = vjp(fn, *primals)
                 self.assertEqual(out, result)
                 result_vjps = vjp_fn(cotangents)
+
+                out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                self.assertEqual(out_noncontig, result)
+                noncontig_result_vjps = vjp_fn(noncontig_cotangents)
 
                 _, vjp_fn = ref_vjp(fn, *primals)
                 expected_vjps = vjp_fn(cotangents)
 
                 self.assertEqual(result_vjps, expected_vjps)
+                self.assertEqual(noncontig_result_vjps, expected_vjps)
 
         _test(op)
         for a_op in op.aliases:
