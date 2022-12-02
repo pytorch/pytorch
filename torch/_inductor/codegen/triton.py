@@ -231,6 +231,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"tl.libdevice.log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.libdevice.expm1({x})"
+
+    @staticmethod
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -503,11 +511,18 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache=None, reduction_hint=ReductionHint.DEFAULT):
+    def __init__(
+        self,
+        *groups,
+        mutations=None,
+        pid_cache=None,
+        reduction_hint=ReductionHint.DEFAULT,
+    ):
         if pid_cache is None:
             pid_cache = {}
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
+        self.mutations = mutations
         self.range_trees = []
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
@@ -1005,10 +1020,21 @@ class TritonKernel(Kernel):
             )
 
         argdefs, _, signature = self.args.python_argdefs()
+
+        mutated_args = set()
+        for mutation in self.mutations:
+            if mutation in self.args.input_buffers:
+                mutated_args.add(self.args.input_buffers[mutation])
+            if mutation in self.args.inplace_buffers:
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
+            if mutation in self.args.output_buffers:
+                mutated_args.add(self.args.output_buffers[mutation])
+
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
             "constants": {},
+            "mutated_arg_names": mutated_args,
         }
 
         for tree in self.range_trees:
@@ -1283,7 +1309,15 @@ class TritonScheduling:
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
             reduction_hint_val = ReductionHint.DEFAULT
-        with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
+
+        mutations = set()
+        for node in node_schedule:
+            if hasattr(node, "get_mutations"):
+                mutations.update(node.get_mutations())
+
+        with TritonKernel(
+            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
+        ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
@@ -1306,7 +1340,7 @@ class TritonScheduling:
                 if config.triton.descriptive_kernel_names
                 else ""
             )
-            kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
+            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
