@@ -34,7 +34,7 @@ static inline void fractional_max_pool_check_shape(
 
   TORCH_CHECK(
       input.scalar_type() == randomSamples.scalar_type(),
-      "Expect _random_samples to have the dtype as input");
+      "Expect _random_samples to have the same dtype as input");
 
   int64_t ndimension = randomSamples.ndimension();
   TORCH_CHECK(
@@ -67,8 +67,8 @@ static inline void fractional_max_pool_check_shape(
   }
 
   TORCH_CHECK(
-      N == input_batch,
-      "Expect _random_samples.size(0) equals to input batch size.");
+      N >= input_batch,
+      "Expect _random_samples.size(0) no less then input batch size.");
   TORCH_CHECK(
       C == input_channel,
       "Expect _random_samples.size(1) equals to input channel size.");
