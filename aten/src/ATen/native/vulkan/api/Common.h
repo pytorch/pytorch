@@ -6,18 +6,9 @@
 #include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
-
-#define CONCAT_LITERALS(a, b) #a #b
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderInfo {      \
-    CONCAT_LITERALS(vulkan., name), name##_glsl, \
-  }
-#else
 #include <ATen/native/vulkan/spv.h>
+
 #define VK_KERNEL(name) ::at::native::vulkan::name##_spv
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 /*
  * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an
