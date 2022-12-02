@@ -135,6 +135,7 @@ Scalar = Union[int, float, bool, complex]
 Input = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
 
 class _ExtraFields_TorchOp:
+    name: str
     sequence_number: int
     allow_tf32_cublas: bool
 

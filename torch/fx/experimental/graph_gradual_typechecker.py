@@ -184,7 +184,7 @@ def get_attr_inference_rule(n: Node, traced):
     if attr_name == "shape":
         n.type = Dyn
     else:
-        raise TypeError("Not yet implelemted")
+        raise TypeError("Not yet implemented")
 
     # TODO. We leave it like this till we add a type to represent tensor sizes
     return n.type
@@ -507,7 +507,7 @@ def flatten_check(tensor_type, start_dim, end_dim):
         new_type_list = lhs + mid + rhs
         return TensorType(tuple(new_type_list))
     else:
-        raise TypeError(f'Incompatable dimentions {start_dim}, {end_dim - 1} in type {tensor_type}')
+        raise TypeError(f'Incompatable dimensions {start_dim}, {end_dim - 1} in type {tensor_type}')
 
 @register_inference_rule(torch.flatten)
 def flatten_inference_rule(n: Node):

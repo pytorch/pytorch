@@ -894,7 +894,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         self_t = self_t.to(torch.double)
         dims = []
         for d in range(self_t.dim()):
-            if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
+            if (self_t.mean(d).unsqueeze(d).expand_as(self_t) == self_t).all():
                 dims.append(d)
                 self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
 
@@ -4942,8 +4942,8 @@ def rrelu(g: jit_utils.GraphContext, input, lower, upper, training, generator):
 
 @_onnx_symbolic("aten::bernoulli")
 @_beartype.beartype
-def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
-    if out is not None:
+def bernoulli(g: jit_utils.GraphContext, input, p=None, generator=None, out=None):
+    if out is not None and not symbolic_helper._is_none(out):
         symbolic_helper._unimplemented(
             "Bernoulli", "out parameter is not supported for bernoulli", input
         )
@@ -4960,14 +4960,15 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
             "Bernoulli", "input dtype not accessible", input
         )
 
-    p = g.op(
+    rands = g.op(
         "RandomUniformLike",
         input,
         high_f=1.0,
         low_f=0.0,
         dtype_i=dtype.onnx_type(),
     )
-    output = g.op("Less", p, input)
+    prob = p if p is not None and not symbolic_helper._is_none(p) else input
+    output = g.op("Less", rands, prob)
     return g.op("Cast", output, to_i=dtype.onnx_type())
 
 

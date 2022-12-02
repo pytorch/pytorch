@@ -1,7 +1,6 @@
 import contextlib
 import functools
 import itertools
-import sys
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -297,8 +296,9 @@ def constructors(fake_mode, func, *args, **kwargs):
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
     new_kwargs["device"] = torch.device("meta")
-    # Not in_kernel_invocation_manager as no fake tensor inputs
-    with no_dispatch():
+    # _like constructors have fake tensor inputs (maybe this causes the non-like
+    # to fail? hmmm)
+    with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
 
@@ -332,21 +332,6 @@ def resize_as_(fake_mode, func, *args, **kwargs):
 def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     # TODO: remove me
     return constructors(fake_mode, func, *args, **kwargs)
-
-
-# _to_copy fails when run with FakeTensors to cuda device
-# TODO: debug
-@register_op_impl(aten._to_copy.default)
-def to_copy(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    input_device = new_kwargs.pop("device", None)
-    out_device = input_device if input_device else new_kwargs["input"].device
-    with in_kernel_invocation_manager(fake_mode):
-        input = new_kwargs.pop("input").to("meta")
-        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
 # index.Tensor data-dependent in only some conditions
@@ -821,59 +806,39 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import decomposition_table
+        # If there's a Python meta, prefer that over the decomposition
+        from torch._decomp import meta_table as meta_table
 
-        with self:
-            # Decomposes CompositeImplicitAutograd ops
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+        if func not in meta_table and not self.cpp_meta_supports_symint(func):
+            from torch._decomp import decomposition_table
 
-        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
-            from torch._decomp import meta_table as meta_table
-
-            if func == aten.size.default:
-                sys.stderr.write(
-                    "Trying to call aten.size on a tensor with symbolic shapes. "
-                    "It's likely that this is from calling tensor.shape in C++"
+            # Prefer Python decompositions over C++ ones
+            if func in decomposition_table and (
+                has_symbolic_sizes
+                or (
+                    # TODO: Remove these exclusions, so that we can remove
+                    # this leg entirely
+                    torch_decomp_decompositions(func)
+                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
                 )
-                # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
-                return None
-
-            with self:
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
-                    return r
-                if func in decomposition_table:
+            ):
+                with self:
                     return decomposition_table[func](*args, **kwargs)
 
-        if (
-            func in decomposition_table
-            and torch_decomp_decompositions(func)
-            and all(not e.is_sparse for e in flat_arg_fake_tensors)
-        ):
             with self:
-                return decomposition_table[func](*args, **kwargs)
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and hasattr(func, "prim_meta_impl")
-        ):
+        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
-
-        if has_symbolic_sizes:
-            if not self.cpp_meta_supports_symint(func):
-                raise RuntimeError(
-                    f"{func} - couldn't find symbolic meta function/decomposition"
-                )
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
@@ -971,6 +936,8 @@ class FakeTensorMode(TorchDispatchMode):
             aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
+            aten.view_as_real.default,
+            aten.view_as_complex.default,
             aten.set_.source_Storage_storage_offset,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
@@ -1081,7 +1048,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C._TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args
@@ -1089,7 +1058,7 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            out = self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor, static_shapes=True)
             memo[id(tensor)] = out
             return out
         else:
