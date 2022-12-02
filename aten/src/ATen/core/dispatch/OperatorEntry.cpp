@@ -279,6 +279,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.4) Use kernel from DispatchKey::Autograd if available
+  //    (2.5) Use kernel from DispatchKey::FuncTorchBatchedDecomposition if available
   //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
@@ -331,6 +332,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // We have no intention to change the behavior of Undefined,
   // so this nested-tensor branch requires `dispatch_key != DispatchKey::Undefined`
   // to let the original CompositeImplicitAutograd handle Undefined
+  // See Note: [Disjoint AliasKeyset] The order for this alias key doesn't matter
   if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
     if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
       return {*nested_registration, "nested kernel"};
@@ -352,6 +354,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration, "autograd kernel"};
+    }
+  }
+
+  // 2.5. For batched backend keys, use kernel from DispatchKey::FuncTorchBatchedDecomposition if available
+  // See Note: [Disjoint AliasKeyset] The order for this alias key doesn't matter
+  if (isIncludedInAlias(dispatch_key, DispatchKey::FuncTorchBatchedDecomposition)) {
+    if (auto batched_registration = getKernelForDispatchKey(DispatchKey::FuncTorchBatchedDecomposition)) {
+      return {*batched_registration, "batched kernel"};
     }
   }
 
