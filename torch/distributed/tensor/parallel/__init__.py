@@ -1,23 +1,20 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.multihead_attention_tp import (
     TensorParallelMultiheadAttention,
 )
 
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
-    PairwiseParallel,
-    ParallelStyle,
-    RowwiseParallel,
     make_input_replicate_1d,
     make_input_shard_1d,
     make_input_shard_1d_dim_last,
     make_output_replicate_1d,
     make_output_shard_1d,
     make_output_tensor,
-)
-
-from torch.distributed.tensor.parallel.api import (
-    parallelize_module,
+    PairwiseParallel,
+    ParallelStyle,
+    RowwiseParallel,
 )
 
 __all__ = [
