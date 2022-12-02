@@ -253,6 +253,26 @@ class DDPOptimizer:
                 )
                 return wrapper
 
+            # Note:
+            #
+            # The way distributed works today around fake tensors can be somehwat confusing.
+            # Some of these codepaths are shared in both runtime, and compile time. The presence
+            # of a fake_mode, read off of fake tensor inputs, dictates how we will operate.
+            #
+            # A few things to keep in mind:
+            #
+            # 1) We invoke `compile_submod` with a real module. The output of that gets stored
+            # on the graph via `self.module.add_submodule(n.target, compiled_submod_real)`.
+            #
+            # 2) When running a call_module targeted node, if we have a fake_mode, we fakify the
+            # module we got from self.fetch_attr(n.target). Regardless of fake_mode, we then execute it.
+            #
+            # 3) Fake tensors should always be around during compile time.
+            #
+            # 4) Fake tensors should never be around at runtime.
+            #
+            # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
+            # to match what aot_autograd exepcts. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -275,12 +295,12 @@ class DDPOptimizer:
                     if n.op == "call_module":
                         real_mod = self.fetch_attr(n.target)
                         if fake_mode:
-                            fake_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
+                            curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
                         else:
-                            fake_submod = real_mod
-                            pass
+                            curr_submod = real_mod
+
                         log.debug(
-                            f"\n---{n.target} graph---\n" + str(fake_submod.graph)
+                            f"\n---{n.target} graph---\n" + str(curr_submod.graph)
                         )
                         compiled_submod_real = self.compile_submod(
                             real_mod, new_args, kwargs
@@ -288,7 +308,7 @@ class DDPOptimizer:
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod_real)
-                        return fake_submod(*new_args, **kwargs)
+                        return curr_submod(*new_args, **kwargs)
                     # then we execute the modified node using the usual logic
                     return getattr(self, n.op)(n.target, new_args, kwargs)
 

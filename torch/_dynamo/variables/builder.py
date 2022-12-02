@@ -112,7 +112,7 @@ class GraphArg:
 
     def __post_init__(self):
         if isinstance(self.example, torch.Tensor):
-            assert self.fake_tensor is not None and isinstance(
+            assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
@@ -556,7 +556,6 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            graph_arg = None
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
@@ -642,9 +641,7 @@ class VariableBuilder:
             if not is_constant_source(self.get_source()):
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
-                if isinstance(
-                    example_value, torch._subclasses.fake_tensor.FakeTensor
-                ):
+                if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
                     GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
@@ -706,11 +703,14 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     with preserve_rng_state():
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
-
         else:
-            proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-            example_value = fake_wrapper(example_value)
+            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
+            # TODO(voz): Find all the callsites and burn this down.
+            # Flipping it to an assert fails dozens of tests.
+            if not isinstance(example_value, torch._subclasses.FakeTensor):
+                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+                example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
