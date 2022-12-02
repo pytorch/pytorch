@@ -1424,7 +1424,7 @@ class CommonTemplate:
         )
 
     # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv  bn test")
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -1478,6 +1478,88 @@ class CommonTemplate:
                         mod,
                         (v,),
                     )
+
+    # For gpu path, there has a accurcy issue,
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
+    def test_conv_functional_bn_fuse(self):
+        # Define a BatchNorm using functional BN.
+        class BatchNorm(torch.nn.BatchNorm2d):
+            def __init__(
+                self,
+                num_features,
+                eps=1e-5,
+                momentum=0.1,
+                affine=True,
+                track_running_stats=True,
+                device=None,
+                dtype=None,
+            ):
+                factory_kwargs = {"device": device, "dtype": dtype}
+                super(BatchNorm, self).__init__(
+                    num_features,
+                    eps=eps,
+                    momentum=momentum,
+                    affine=affine,
+                    track_running_stats=track_running_stats,
+                    **factory_kwargs,
+                )
+
+            def forward(self, x):
+                if self.momentum is None:
+                    exponential_average_factor = 0.0
+                else:
+                    exponential_average_factor = self.momentum
+
+                if self.training and self.track_running_stats:
+                    # TODO: if statement only here to tell the jit to skip emitting this when it is None
+                    if self.num_batches_tracked is not None:  # type: ignore[has-type]
+                        self.num_batches_tracked = self.num_batches_tracked + 1  # type: ignore[has-type]
+                        if self.momentum is None:  # use cumulative moving average
+                            exponential_average_factor = 1.0 / float(
+                                self.num_batches_tracked
+                            )
+                        else:  # use exponential moving average
+                            exponential_average_factor = self.momentum
+                if self.training:
+                    bn_training = True
+                else:
+                    bn_training = (self.running_mean is None) and (
+                        self.running_var is None
+                    )
+                x = F.batch_norm(
+                    x,
+                    # If buffers are not to be tracked, ensure that they won't be updated
+                    self.running_mean
+                    if not self.training or self.track_running_stats
+                    else None,
+                    self.running_var
+                    if not self.training or self.track_running_stats
+                    else None,
+                    self.weight,
+                    self.bias,
+                    bn_training,
+                    exponential_average_factor,
+                    self.eps,
+                )
+                return x
+
+        v = torch.randn(1, 3, 556, 56, dtype=torch.float32)
+        mod = torch.nn.Sequential(
+            torch.nn.Conv2d(
+                3,
+                64,
+                kernel_size=3,
+                dilation=1,
+                groups=1,
+                bias=True,
+            ),
+            BatchNorm(64),
+        ).eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_packed(self):
@@ -2693,6 +2775,34 @@ class CommonTemplate:
             fn,
             (torch.randn([64]),),
         )
+
+    def test_expm1(self):
+        def fn(x):
+            return torch.expm1(x), torch.expm1(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
+    def test_log1p(self):
+        def fn(x):
+            return torch.log1p(x), torch.log1p(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
 
     def test_flip(self):
         def fn(x):

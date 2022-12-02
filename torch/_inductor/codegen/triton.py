@@ -231,6 +231,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"tl.libdevice.log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.libdevice.expm1({x})"
+
+    @staticmethod
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -1306,7 +1314,7 @@ class TritonScheduling:
                 if config.triton.descriptive_kernel_names
                 else ""
             )
-            kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
+            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
