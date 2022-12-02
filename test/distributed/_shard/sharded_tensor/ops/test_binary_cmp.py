@@ -132,7 +132,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
 
         spec, alt_spec = self.get_gpu_specs()
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
-        self.assertTrue(torch.equal(st1, st2))
+        self.assertEqual(st1, st2, rtol=0, atol=0, exact_device=True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

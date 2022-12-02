@@ -1082,31 +1082,31 @@ class TestNamedTensor(TestCase):
 
     def test_unflatten(self):
         # test args: tensor, int, namedshape
-        self.assertTrue(torch.equal(
-            torch.ones(4, names=('A',)).unflatten('A', (('A', 2), ('B', 2))),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(4, names=('A',)).unflatten('A', [('A', 2), ('B', 2)]),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(4, names=('A',)).unflatten('A', (['A', 2], ['B', 2])),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(2, 10, names=('A', 'B')).unflatten('B', (['B1', -1],)),
-            torch.ones(2, 10, names=('A', 'B1'))))
-        self.assertTrue(torch.equal(
-            torch.ones(2, 3 * 4 * 5 * 6, names=('A', 'B'))
-                 .unflatten('B', (['B1', 3], ['B2', 4], ['B3', -1], ['B4', 6])),
-            torch.ones(2, 3, 4, 5, 6, names=('A', 'B1', 'B2', 'B3', 'B4'))))
-        self.assertTrue(torch.equal(
-            torch.ones(2, 0, names=('A', 'B'))
-                 .unflatten('B', (['B1', 3], ['B2', -1], ['B3', 4])),
-            torch.ones(2, 3, 0, 4, names=('A', 'B1', 'B2', 'B3'))))
+        self.assertTrue(
+            (torch.ones(4, names=('A',)).unflatten('A', (('A', 2), ('B', 2))) ==
+             torch.ones(2, 2, names=('A', 'B'))).all())
+        self.assertTrue(
+            (torch.ones(4, names=('A',)).unflatten('A', [('A', 2), ('B', 2)]) ==
+             torch.ones(2, 2, names=('A', 'B'))).all())
+        self.assertTrue(
+            (torch.ones(4, names=('A',)).unflatten('A', (['A', 2], ['B', 2])) ==
+             torch.ones(2, 2, names=('A', 'B'))).all())
+        self.assertTrue(
+            (torch.ones(2, 10, names=('A', 'B')).unflatten('B', (['B1', -1],)) ==
+             torch.ones(2, 10, names=('A', 'B1'))).all())
+        self.assertTrue(
+            (torch.ones(2, 3 * 4 * 5 * 6, names=('A', 'B'))
+                  .unflatten('B', (['B1', 3], ['B2', 4], ['B3', -1], ['B4', 6])) ==
+             torch.ones(2, 3, 4, 5, 6, names=('A', 'B1', 'B2', 'B3', 'B4'))).all())
+        self.assertTrue(
+            (torch.ones(2, 0, names=('A', 'B'))
+                  .unflatten('B', (['B1', 3], ['B2', -1], ['B3', 4])) ==
+             torch.ones(2, 3, 0, 4, names=('A', 'B1', 'B2', 'B3'))).all())
 
         # test args: namedtensor, str, namedshape
-        self.assertTrue(torch.equal(
-            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))),
-            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+        self.assertTrue(
+            (torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))) ==
+             torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))).all())
 
         # test invalid args: namedtensor, str, sizes
         with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
