@@ -96,7 +96,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, "dynamo", repro_level, backend_code, fake_mode=False
+            run_code, "dynamo", repro_level, backend_code
         )
 
         self.assertIn(error_name, test_proc.stderr.decode("utf-8"))
@@ -147,9 +147,7 @@ class MinifierTests(MinifierTestBase):
         """
         )
 
-        test_code = self._gen_test_code(
-            run_code, "dynamo", repro_level, backend_code, False
-        )
+        test_code = self._gen_test_code(run_code, "dynamo", repro_level, backend_code)
         proc, repro_dir = self._run_test_code(test_code)
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
@@ -196,7 +194,7 @@ class MinifierTests(MinifierTestBase):
         repro_after = "dynamo"
         repro_level = 2
         test_code = self._gen_test_code(
-            run_code, repro_after, repro_level, RELU_CUSTOM_ERROR_BACKEND, False
+            run_code, repro_after, repro_level, RELU_CUSTOM_ERROR_BACKEND
         )
         _, repro_dir = self._run_test_code(test_code)
         launch_proc, _ = self._run_minifier_launcher("", repro_dir)
@@ -236,7 +234,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         (test_proc, _, repro_proc), (launch_code, _) = self._run_full_test(
-            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND, fake_mode=False
+            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND
         )
 
         tb1 = test_proc.stderr.decode("utf-8")
@@ -297,7 +295,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         (test_proc, _, repro_proc), (launch_code, repro_code) = self._run_full_test(
-            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND, fake_mode=False
+            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND
         )
 
         tb1 = test_proc.stderr.decode("utf-8")

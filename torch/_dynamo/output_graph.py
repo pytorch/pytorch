@@ -89,7 +89,7 @@ class FakeRootModule(torch.nn.Module):
 
 
 class WrapperBackend:
-    def __init__(self, backend, original_example_inputs):
+    def __init__(self, backend: CompilerFn, original_example_inputs):
         self.backend: CompilerFn = backend
         self.original_example_inputs = original_example_inputs
 
@@ -535,10 +535,10 @@ class OutputGraph(fx.Tracer):
 
             # We invoke the backend with real inputs if and only if
             # we are in doing accuracy evaluation in the minifier
-            is_top_level_minifiying = (
+            is_top_level_minifying = (
                 config.repro_after is not None and config.repro_level == 4
             )
-            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifiying:
+            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())

@@ -291,7 +291,7 @@ class DDPOptimizer:
                             curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
                         else:
                             curr_submod = real_mod
-                            pass
+
                         log.debug(
                             f"\n---{n.target} graph---\n" + str(curr_submod.graph)
                         )

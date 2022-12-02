@@ -112,7 +112,7 @@ class GraphArg:
 
     def __post_init__(self):
         if isinstance(self.example, torch.Tensor):
-            assert self.fake_tensor is not None and isinstance(
+            assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
@@ -565,7 +565,6 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            graph_arg = None
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
