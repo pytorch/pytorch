@@ -62,7 +62,11 @@ class GraphLowering(torch.fx.Interpreter):
         return size, stride
 
     def __init__(
-        self, gm: torch.fx.GraphModule, shape_env=None, num_static_inputs=None
+        self,
+        gm: torch.fx.GraphModule,
+        shape_env=None,
+        num_static_inputs=None,
+        graph_id=None,
     ):
         super().__init__(gm)
         if shape_env is None:
@@ -91,6 +95,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
+        self.graph_id = graph_id
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
