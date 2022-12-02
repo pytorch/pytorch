@@ -3,6 +3,8 @@
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
 )
 
@@ -12,7 +14,33 @@ from torch.distributed._composable import checkpoint
 
 import unittest
 from collections import deque
+from contextlib import ContextDecorator
 from copy import deepcopy
+
+
+class MemoryDelta(ContextDecorator):
+    def __init__(self, device: torch.device):
+        self.device: torch.device = device
+        self.active_memory_enter: int = 0
+        self.active_memory_exit: int = 0
+
+    def __enter__(self):
+        self.active_memory_enter = (
+            torch.cuda.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda"
+            else 0
+        )
+        return self
+
+    def __exit__(self, *exc):
+        self.active_memory_exit = (
+            torch.cuda.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda"
+            else 0
+        )
+
+    def delta(self) -> int:
+        return self.active_memory_exit - self.active_memory_enter
 
 
 class ToyModel(nn.Module):
@@ -42,7 +70,12 @@ class TestCheckpoint(TestCase):
 
         return num_functions
 
-    def _test_tensor_only(self, net: nn.Module, x: torch.Tensor) -> None:
+    def _test_tensor_only(
+        self,
+        net: nn.Module,
+        x: torch.Tensor,
+        use_reentrant: bool,
+    ) -> None:
         x1 = x.clone()
         x2 = x.clone()
         x1.requires_grad = True
@@ -52,31 +85,42 @@ class TestCheckpoint(TestCase):
         net2 = deepcopy(net)
 
         # no checkpoint
-        loss1 = net1(x1).sum()
+        with MemoryDelta(x.device) as mem1:
+            loss1 = net1(x1).sum()
         graph_size1 = self._get_graph_size(loss1)
         loss1.backward()
 
         # with checkpoint
-        checkpoint(net2.seq)
-        loss2 = net2(x2).sum()
+        checkpoint(net2.seq, use_reentrant=use_reentrant)
+        with MemoryDelta(x.device) as mem2:
+            loss2 = net2(x2).sum()
         graph_size2 = self._get_graph_size(loss2)
         loss2.backward()
 
-        self.assertTrue(graph_size2 < graph_size1)
+        if use_reentrant:
+            self.assertTrue(graph_size2 < graph_size1)
+
+        if x.is_cuda:
+            self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-    def test_tensor_only_cpu(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_tensor_only_cpu(self, use_reentrant: bool):
         x = torch.randn(20, 100)
         net = ToyModel()
-        self._test_tensor_only(net, x)
+        self._test_tensor_only(net, x, use_reentrant)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_tensor_only_gpu(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_tensor_only_gpu(self, use_reentrant: bool):
         x = torch.randn(20, 100, device="cuda:0")
         net = ToyModel().to("cuda:0")
-        self._test_tensor_only(net, x)
+        self._test_tensor_only(net, x, use_reentrant)
+
+
+instantiate_parametrized_tests(TestCheckpoint)
 
 
 if __name__ == "__main__":
