@@ -50,6 +50,9 @@ def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
             )
 
         # Ensure inter and intra-node process groups are the same
+        # TODO (rohan-varma) unclear whether these should be asserts or Exceptions
+        # as they can happen due to bug in FSDP process group setup or user passing in
+        # incorrect configuration.
         assert state.process_group == fsdp_module.process_group, (
             f"For {state.sharding_strategy} intra-node process groups do not match"
         )

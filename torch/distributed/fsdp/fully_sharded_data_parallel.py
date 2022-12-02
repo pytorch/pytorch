@@ -22,7 +22,6 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -47,7 +46,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
     HYBRID_SHARDING_STRATEGIES,
-    HybridShardProcessGroupType,
     ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (

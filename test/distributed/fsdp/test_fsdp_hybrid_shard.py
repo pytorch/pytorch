@@ -124,11 +124,15 @@ class TestFSDPHybridShard(FSDPTest):
         intra_pg = self.process_group
         inter_pg = dist.new_group(ranks=[self.rank])
         # Mismatched process groups
-        model.lin1 = FSDP(model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD)
-        model = FSDP(model, process_group=(inter_pg, intra_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD)
+        model.lin1 = FSDP(
+            model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+        )
+        model = FSDP(
+            model, process_group=(dist.new_group(), dist.new_group()), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+        )
         # Errors during lazy_init
         inp = torch.randn(4, 10)
-        with self.assertRaisesRegex(ValueError, "do not match"):
+        with self.assertRaisesRegex(AssertionError, "do not match"):
             model(inp)
 
     @skip_if_lt_x_gpu(2)
