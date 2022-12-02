@@ -116,6 +116,21 @@ Sparse (torch.sparse)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Andrew James (`amjames <https://github.com/amjames>`__)
 
+NestedTensor (torch.nested)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Driss Guessous (`disspg <https://github.com/drisspg>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+
+MaskedTensor (torch.masked)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) George Qi (`george-qi <https://github.com/george-qi>`__)
+
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -307,6 +322,7 @@ TorchAudio
 ~~~~~~~~~~
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 
 TorchRec
