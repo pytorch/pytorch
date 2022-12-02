@@ -16,7 +16,7 @@ namespace ops {
 
 namespace packing {
 
-static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
+static api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
   if (v_dst.is_quantized()) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
@@ -39,7 +39,7 @@ static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
   }
 }
 
-static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
+static api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
   if (v_src.is_quantized()) {
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
@@ -69,7 +69,7 @@ struct ToFromTextureParams final {
 
 void record_nchw_to_image_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
@@ -112,7 +112,7 @@ void record_nchw_to_image_op(
 
 void record_image_to_nchw_op(
     api::Context* const context,
-    api::ShaderSource& compute_shader,
+    api::ShaderInfo& compute_shader,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
@@ -408,7 +408,7 @@ void pack_buffer_to_vtensor(
     packing::record_nchw_to_buffer_op(
         context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
   } else {
-    api::ShaderSource compute_shader =
+    api::ShaderInfo compute_shader =
         packing::get_nchw_to_image_shader(v_self);
     packing::record_nchw_to_image_op(
         context,
@@ -436,7 +436,7 @@ void pack_vtensor_to_staging(
     packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {
-    api::ShaderSource compute_shader =
+    api::ShaderInfo compute_shader =
         packing::get_image_to_nchw_shader(v_self);
     packing::record_image_to_nchw_op(
         context,
