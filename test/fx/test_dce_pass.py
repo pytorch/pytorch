@@ -60,7 +60,7 @@ class TestDCE(TestCase):
         traced.recompile()
         # Make sure we run and get the same results before/after DCE.
         inputs = [torch.tensor([1.5])] * new_num_phs
-        self.assertTrue(torch.equal(m(*inputs), traced(*inputs)))
+        self.assertEqual(m(*inputs), traced(*inputs), rtol=0, atol=0, exact_device=True)
 
     def test_simple(self):
         """
@@ -176,7 +176,7 @@ class TestDCE(TestCase):
                 super().__init__()
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
-                torch._assert(torch.equal(a, a), "a must equal a")
+                torch._assert((a == a).all(), "a must equal a")
                 return a * 2
 
         # Note: Don't need to specify torch._assert as having side effects
