@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import sys
 
@@ -10,8 +12,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    instantiate_parametrized_tests,
-    parametrize,
     run_tests,
 )
 
@@ -49,9 +49,7 @@ class TestFSDPCheckpoint(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_simple(self, use_reentrant):
+    def _test_wrap_same_submodule(self, use_reentrant, grad_to_none):
         LR = 0.01
         device = torch.device("cuda")
 
@@ -62,6 +60,8 @@ class TestFSDPCheckpoint(FSDPTest):
 
         combo_model = copy.deepcopy(model)
         combo_optim = torch.optim.Adam(combo_model.parameters(), lr=LR)
+
+        # compose checkpoint and fully_shard
         combo_model.seq = checkpoint(
             combo_model.seq, use_reentrant=use_reentrant
         )
@@ -80,14 +80,21 @@ class TestFSDPCheckpoint(FSDPTest):
 
             combo_loss.backward()
             combo_optim.step()
-            combo_optim.zero_grad()
+            combo_optim.zero_grad(set_to_none=grad_to_none)
 
             local_loss.backward()
             local_optim.step()
-            local_optim.zero_grad()
+            local_optim.zero_grad(set_to_none=grad_to_none)
 
-
-instantiate_parametrized_tests(TestFSDPCheckpoint)
+    @skip_if_lt_x_gpu(2)
+    def test_wrap_same_submodule(self):
+        self.run_subtests(
+            {
+                "use_reentrant": [True, False],
+                "grad_to_none": [True, False],
+            },
+            self._test_wrap_same_submodule,
+        )
 
 
 if __name__ == "__main__":
