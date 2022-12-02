@@ -1,3 +1,4 @@
+#include <unordered_map>
 #ifdef USE_VULKAN_API
 
 #include <benchmark/benchmark.h>
@@ -10,7 +11,45 @@
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 
+#include <iostream>
+
 namespace {
+
+namespace vulkan_api = at::native::vulkan::api;
+void report_pep(const std::string& name, const uint64_t duration) {
+  std::stringstream buffer;
+  buffer << "PyTorchObserver {\"type\": \"";
+  buffer << name << "\",";
+  buffer << "\"unit\": \""
+         << "ns"
+         << "\","
+         << "\"metric\": \""
+         << "latency"
+         << "\",";
+  buffer << "\"value\": \"" << duration << "\"";
+  buffer << "}\n";
+  std::cout << buffer.str();
+}
+
+void report_aibench_res(vulkan_api::QueryPool& qpool) {
+  std::unordered_map<std::string, uint64_t> shader_runtimes;
+  uint64_t num_additions = 0;
+  auto result_aggregator =
+      [&shader_runtimes, &num_additions](const vulkan_api::ShaderDuration& s) {
+        if (shader_runtimes.count(s.kernel_name) == 0) {
+          shader_runtimes[s.kernel_name] = 0;
+        }
+        shader_runtimes[s.kernel_name] += s.execution_duration_ns;
+        num_additions += 1;
+      };
+  qpool.shader_log_for_each(result_aggregator);
+  uint64_t num_iters = num_additions / shader_runtimes.size();
+  for (const auto& i : shader_runtimes) {
+    const auto& name = i.first;
+    const auto& duration = i.second / num_iters;
+    report_pep(name, duration);
+  }
+}
 
 at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
   auto q_options = in_cpu.options();
@@ -606,6 +645,7 @@ static void conv2ddw_op_benchmark(benchmark::State& state) {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
   at::native::vulkan::api::context()->querypool().extract_results();
   at::native::vulkan::api::context()->querypool().print_results();
+  report_aibench_res(vulkan_api::context()->querypool());
   state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d_dw") / 1000000.0);
 #endif
 }
