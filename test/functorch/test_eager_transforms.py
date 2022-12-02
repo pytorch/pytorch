@@ -980,6 +980,56 @@ class TestGradTransform(TestCase):
         self.assertEqual(z, 2)
 
 
+class TestAutogradFunction(TestCase):
+    def test_set_materialize_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x, y
+
+            @staticmethod
+            def setup_context(ctx, outputs, x, y):
+                ctx.set_materialize_grads(False)
+
+            @staticmethod
+            def backward(ctx, gx, gy):
+                self.assertIsNotNone(gx)
+                self.assertIsNone(gy)
+                return gx, gy
+
+        def f(y, x):
+            x, y = A.apply(x, y)
+            return x ** 2
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(f)(y, x)
+        grad(grad(f))(y, x)
+
+    def test_needs_input_grads(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x, y):
+                return x * y
+
+            @staticmethod
+            def setup_context(ctx, outputs, x, y):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                self.assertTrue(ctx.needs_input_grad[0])
+                self.assertFalse(ctx.needs_input_grad[1])
+                return None, None
+
+        x = torch.tensor(2., device=device)
+        y = torch.tensor(3., device=device)
+        # grad differentiates w.r.t. arg 0 by default
+        grad(A.apply)(x, y)
+        grad(grad(A.apply))(x, y)
+
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -3734,6 +3784,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestFunctionalize,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunction,
     globals(),
     only_for=only_for,
 )
