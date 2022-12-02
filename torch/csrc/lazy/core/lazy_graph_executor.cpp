@@ -896,12 +896,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       std::move(tensors_data),
       std::move(cached_computation));
 
-  auto syncfn = [this, async, hash = coll->hash]() {
-    // For profiling lazy trace overhead
-    if (noop_execution_mode_) {
-      return;
-    }
-
+  auto syncfn = [async, hash = coll->hash]() {
     try {
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " ...";
