@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import warnings
 from random import randint
 
 import torch
@@ -2876,7 +2877,7 @@ torch.cuda.synchronize()
             # For example, lstm_cell returns a tuple and equal returns bool.
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
-                    return torch.equal(first, second)
+                    return (first == second).all().item()
                 elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
@@ -3290,6 +3291,18 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_warn_if_has_zero_nodes(self):
+        with warnings.catch_warnings(record=True) as caught:
+            g = torch.cuda.CUDAGraph()
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g.capture_begin()
+                g.capture_end()
+        self.assertTrue(any("The CUDA Graph is empty" in str(w.message) for w in caught))
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
@@ -4680,13 +4693,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         out = scatter_gather.gather(outputs, 0)  # test on GPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         class TestNamedTupleInput_1(NamedTuple):
             a: torch.tensor
@@ -4706,13 +4719,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
