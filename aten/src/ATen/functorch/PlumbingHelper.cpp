@@ -13,9 +13,11 @@ namespace at { namespace functorch {
 void vmap_check_escaped(optional<DynamicLayer> layer, const char* what) {
   TORCH_CHECK(
     layer.has_value(),
-    "your tensor may have escaped from vmap. This could also be an internal error (from ",
+    "Either your tensor may have escaped from inside a function being vmapped and this is a user error ",
+    "(see https://pytorch.org/functorch/stable/ux_limitations.html), "
+    "or there is an internal functorch error in `",
     what,
-    ") See https://pytorch.org/functorch/stable/ux_limitations.html"
+    "` Please file an issue if it looks like the latter"
   )
 }
 

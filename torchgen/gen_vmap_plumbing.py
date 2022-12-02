@@ -131,6 +131,7 @@ def accepts_at_least_one_tensor_input(schema: FunctionSchema) -> bool:
 def is_mutated_arg(argument: Argument) -> bool:
     return argument.annotation is not None and argument.annotation.is_write
 
+
 def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # Assumptions:
     # - only one argument is being modified in-place
@@ -166,7 +167,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  vmap_check_escaped(maybe_layer, "inplace");
+  vmap_check_escaped(maybe_layer, "gen_vmap_inplace_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
@@ -188,7 +189,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  vmap_check_escaped(maybe_layer, "no returns");
+  vmap_check_escaped(maybe_layer, "gen_vmap_plumbing_no_returns");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
@@ -231,7 +232,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  vmap_check_escaped(maybe_layer, "vmap plumbing");
+  vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}

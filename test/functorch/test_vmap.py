@@ -3929,17 +3929,19 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(3)
         vmap(f)(x)
 
-        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from vmap plumbing\).*"):
+        common_message = r"your tensor may have escaped from inside a function being vmapped.*{0}.*"
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing")):
             escaped.sin()
 
-        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from boxed_tensor_inputs_batch_rule\).*"):
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_tensor_inputs_batch_rule")):
             escaped.sin_()
 
-        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from inplace\).*"):
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_inplace_plumbing")):
             escaped.mul_(1)
 
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
-        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from no returns\).*"):
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
 
 class TestRandomness(TestCase):
