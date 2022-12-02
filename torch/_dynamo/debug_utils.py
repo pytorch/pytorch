@@ -762,6 +762,7 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
+
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
     Minifier uses this function to identify if the minified graph module fails
@@ -963,11 +964,14 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
 
         compiler_fn = compile_fx
     else:
-        assert compiler_name in BACKENDS, f"Unknown compiler name {compiler_name} provided."
+        assert (
+            compiler_name in BACKENDS
+        ), f"Unknown compiler name {compiler_name} provided."
         compiler_fn = BACKENDS[compiler_name]
 
     # (2) Compile the graph
     compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+
     def backend_accuracy_eval_fwd(*args):
         # Set the eval mode to remove randomness.
         gm.eval()
@@ -991,6 +995,6 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
             )
         else:
             log.error("Input graph does not fail accuracy testing")
-    
+
     # (3) Install an accuracy verifying callable
     return backend_accuracy_eval_fwd
