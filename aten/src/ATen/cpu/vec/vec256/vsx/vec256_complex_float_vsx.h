@@ -196,7 +196,7 @@ class Vectorized<ComplexFlt> {
           vec_vsx_ld(offset16, reinterpret_cast<const float*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {

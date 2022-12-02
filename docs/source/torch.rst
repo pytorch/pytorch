@@ -613,6 +613,14 @@ Utilities
     vmap
     _assert
 
+Optimizations
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    compile
+
 Operator Tags
 ------------------------------------
 .. autoclass:: Tag
