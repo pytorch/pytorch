@@ -390,6 +390,24 @@ $3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
 $4 = torch._ops.aten.select.int($3, 1, 1)
 $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
 
+    def test_optional_tensor_list(self) -> None:
+        def weird(xs):
+            print("woof")
+            return torch.empty(())
+
+        my_lib = Library("my_lib", "DEF")
+        my_lib.define("weird(Tensor?[] self) -> Tensor")
+        my_lib.impl("weird", weird, "CPU")
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(2, 2))
+            log_input("x", x)
+            torch.ops.my_lib.weird.default([None, x])
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])''')
+
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
@@ -1050,7 +1068,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                 return func(args, kwargs)
 
         x = torch.tensor(5.)
-        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+        with self.assertRaisesRegex(RuntimeError, "classmethod is not supported, please make it a plain method"):
             with A():
                 x + x
 

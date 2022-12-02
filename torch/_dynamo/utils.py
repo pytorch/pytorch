@@ -3,6 +3,7 @@ import contextlib
 import copy
 import cProfile
 import dataclasses
+import datetime
 import dis
 import functools
 import gc
@@ -18,16 +19,20 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict
 
 import numpy as np
+import sympy
 
 import torch
 from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._pytree import tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -83,7 +88,9 @@ def dynamo_timed(func):
             compilation_metrics[key] = []
         t0 = time.time()
         r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
+        latency = time.time() - t0
+        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+        compilation_metrics[key].append(latency)
         return r
 
     return time_wrapper
@@ -197,7 +204,7 @@ def format_bytecode(prefix, name, filename, line_no, code):
 
 
 def gen_record_file_name(exc, code):
-    return f"{config.replay_record_dir_name}/\
+    return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
@@ -271,6 +278,13 @@ def istype(obj, allowed_types):
     return type(obj) is allowed_types
 
 
+def is_typing(value):
+    if sys.version_info < (3, 9):
+        return isinstance(value, typing._GenericAlias)
+    else:
+        return isinstance(value, typing._SpecialGenericAlias)
+
+
 def is_numpy_int_type(value):
     return istype(
         value,
@@ -305,8 +319,7 @@ def istensor(obj):
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
-    if fake_tensors_available:
-        tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
+    tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
     return istype(obj, tensor_list)
 
 
@@ -385,7 +398,20 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+
+    def torch_clone(x):
+        y = torch.clone(x)
+        if x.is_leaf:
+            y.requires_grad_(x.requires_grad)
+        if x.is_leaf and x.grad is not None:
+            y.grad = clone_input(x.grad)
+        return y
+
     with torch.no_grad():
+        if x.device.type == "xla":
+            # Access data_ptr() for a xla tensor will cause crash
+            return torch_clone(x)
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -407,12 +433,7 @@ def clone_input(x):
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            y = torch.clone(x)
-            if x.is_leaf:
-                y.requires_grad_(x.requires_grad)
-            if x.is_leaf and x.grad is not None:
-                y.grad = clone_input(x.grad)
-            return y
+            return torch_clone(x)
         return result
 
 
@@ -581,7 +602,19 @@ def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return istype(
-        v, (types.CodeType, int, float, bool, str, bytes, type(None), slice, type(type))
+        v,
+        (
+            types.CodeType,
+            int,
+            float,
+            bool,
+            str,
+            bytes,
+            type(None),
+            slice,
+            type(type),
+            torch.device,
+        ),
     )
 
 
@@ -656,37 +689,86 @@ def rename_implicit(v):
     return v
 
 
-# FakeTensors were introduced after pytorch 1.12, so gate their use
-# to allow pytorch 1.12 to work
-fake_tensors_available = True
-try:
-    from torch._subclasses import (  # noqa: F401
-        FakeTensorMode,
-        UnsupportedFakeTensorException,
-    )
+from torch._subclasses import (  # noqa: F401
+    FakeTensorMode,
+    UnsupportedFakeTensorException,
+)
 
-    def wrap_fake_exception(fn):
-        try:
-            return fn()
-        except UnsupportedFakeTensorException as e:
-            from .exc import unimplemented
 
-            msg = f"Unsupported: {e.reason} with fake tensor propagation. Run with config.fake_tensor_propagation=False"
-            log.warning(msg)
-            raise unimplemented(msg)
+def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
+    fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
+    if tx is not None:
+        from torch._dynamo.guards import TensorReference
 
-    def wrap_to_fake_tensor(e, fake_mode):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: fake_mode.from_tensor(e))
-        else:
-            return e
+        def _record(tensor_ref):
+            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
+                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
+            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
-    def deepcopy_to_fake_tensor(obj, fake_mode):
-        with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
-            return wrap_fake_exception(lambda: copy.deepcopy(obj))
+        def _extract(symbol):
+            if isinstance(symbol, int):
+                return None
+            sym_expr = symbol.get_pyobj().expr
+            if not isinstance(sym_expr, sympy.Symbol):
+                return None
+            return sym_expr
 
-except ImportError:
-    fake_tensors_available = False
+        def _record_ref(e, index, symbol, kind):
+            sym_expr = _extract(symbol)
+            if sym_expr:
+                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                _record(tensor_ref)
+
+        for index, symbol in enumerate(fake_tensor.size()):
+            _record_ref(e, index, symbol, "size")
+
+        for index, symbol in enumerate(fake_tensor.stride()):
+            _record_ref(e, index, symbol, "stride")
+
+        offset = fake_tensor.storage_offset()
+        _record_ref(e, None, offset, "storage_offset")
+
+    return fake_tensor
+
+
+def wrap_fake_exception(fn):
+    try:
+        return fn()
+    except UnsupportedFakeTensorException as e:
+        from .exc import unimplemented
+
+        msg = f"Unsupported: {e.reason} with fake tensor propagation."
+        log.warning(msg)
+        raise unimplemented(msg)
+
+
+def wrap_to_fake_tensor(e, fake_mode):
+    if type(e) in (torch.Tensor, torch.nn.Parameter):
+        return wrap_fake_exception(
+            lambda: make_fake_tensor(
+                e, fake_mode, static_shapes=config.dynamic_shapes is False
+            )
+        )
+    else:
+        return e
+
+
+def wrap_to_fake_tensor_and_record(e, tx):
+    if type(e) in (torch.Tensor, torch.nn.Parameter):
+        static_shapes = config.dynamic_shapes is False
+        if type(e) is torch.nn.Parameter:
+            # Always static for params
+            static_shapes = True
+        return wrap_fake_exception(
+            lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
+        )
+    else:
+        return e
+
+
+def deepcopy_to_fake_tensor(obj, fake_mode):
+    with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
+        return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
 def rmse(ref, res):
@@ -741,7 +823,9 @@ def same(
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype != res.dtype:
+                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
@@ -758,10 +842,11 @@ def same(
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
-            res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
-            if res < 0.99:
-                log.warning(f"Similarity score={res.cpu().detach().item()}")
-            return res >= 0.99
+            score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
+            if score < 0.99:
+                breakpoint()
+                log.warning(f"Similarity score={score.cpu().detach().item()}")
+            return score >= 0.99
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
@@ -928,3 +1013,146 @@ class CompileProfiler:
             rpt += "No cache-limited recompilations detected.\n"
 
         return rpt
+
+
+# return same dir unless user changes config between calls
+@functools.lru_cache(None)
+def _get_debug_dir(root_dir):
+    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    return os.path.join(root_dir, dir_name)
+
+
+def get_debug_dir():
+    debug_root = config.debug_dir_root
+    return _get_debug_dir(debug_root)
+
+
+def get_fake_value(node, tx):
+    """
+    Run the computation represented by `node` using fake tensors and return the result.
+    """
+    from .exc import TorchRuntimeError, unimplemented, Unsupported
+
+    op = node.op
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
+    args = tree_map(fake_wrapper, args)
+    kwargs = tree_map(fake_wrapper, kwargs)
+
+    nnmodule = None
+    if op == "call_module":
+        nnmodule = tx.output.nn_modules[node.target]
+
+        if not is_lazy_module(nnmodule):
+            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    if op == "call_module" and is_lazy_module(nnmodule):
+        assert nnmodule is not None
+        # In the case of a lazy module, we want to run
+        # the pre-hooks which initialize it
+        nnmodule(*args, **kwargs)
+    try:
+        with tx.fake_mode, enable_python_dispatcher():
+            return wrap_fake_exception(
+                lambda: run_node(tx.output, node, args, kwargs, nnmodule)
+            )
+    except Unsupported:
+        raise
+    except RuntimeError as e:
+        cause = e
+        if e.__cause__ is not None:
+            cause = e.__cause__
+        if isinstance(
+            cause, torch._subclasses.fake_tensor.DataDependentOutputException
+        ):
+            if config.capture_scalar_outputs and node.target == "item":
+                return torch.zeros(size=(), dtype=args[0].dtype).item()
+            else:
+                unimplemented(f"data dependent operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
+        ):
+            unimplemented(f"dynamic shape operator: {cause.func}")
+        raise TorchRuntimeError() from e
+
+
+def run_node(output_graph, node, args, kwargs, nnmodule):
+    """
+    Runs a given node, with the given args and kwargs.
+
+    Behavior is dicatated by a node's op.
+
+    run_node is useful for extracting real values out of nodes.
+    See get_real_value for more info on common usage.
+
+    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The nnmodule arg is only used for 'call_module' ops
+
+    Nodes that are not call_function, call_method, call_module, or get_attr will
+    raise an AssertionError.
+    """
+    op = node.op
+    try:
+        if op == "call_function":
+            return node.target(*args, **kwargs)
+        elif op == "call_method":
+            return getattr(args[0], node.target)(*args[1:], **kwargs)
+        elif op == "call_module":
+            assert nnmodule is not None
+            return nnmodule(*args, **kwargs)
+        elif op == "get_attr":
+            return output_graph.get_submodule(node.target)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+        ) from e
+    raise AssertionError(op)
+
+
+def get_real_value(node, output_graph):
+    """
+    Run the actual computation represented by `node` and return the result.
+    This will execute any dependent nodes in the graph as well.
+    """
+    cache = output_graph.real_value_cache
+    if node in cache:
+        return cache[node]
+
+    op = node.op
+    args, kwargs = torch.fx.node.map_arg(
+        (node.args, node.kwargs),
+        lambda n: get_real_value(n, output_graph),
+    )
+
+    if op == "call_module":
+        nn_module = output_graph.nn_modules[node.target]
+        if not is_lazy_module(nn_module):
+            nn_module = copy.deepcopy(nn_module)
+        else:
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it
+            nn_module(*args, **kwargs)
+    else:
+        nn_module = None
+
+    try:
+        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        cache[node] = real_value
+    except RuntimeError as e:
+        raise TorchRuntimeError() from e
+    return real_value
+
+
+def assert_no_fake_params_or_buffers(gm):
+    for name, buffer in gm.named_buffers():
+        assert not isinstance(
+            buffer, torch._subclasses.FakeTensor
+        ), f"Unexpected fake buffer {name}"
+    for name, param in gm.named_parameters():
+        assert not isinstance(
+            param, torch._subclasses.FakeTensor
+        ), f"Unexpected fake param {name}"

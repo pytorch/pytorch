@@ -599,7 +599,7 @@ PyTorch provides two types of hooks for modules:
 * **Forward hooks** are called during the forward pass. They can be installed for a given module with
   :func:`~torch.nn.Module.register_forward_pre_hook` and :func:`~torch.nn.Module.register_forward_hook`.
   These hooks will be called respectively just before the forward function is called and just after it is called.
-  Alternatively, these hooks can be installed globally for all modules with the analagous
+  Alternatively, these hooks can be installed globally for all modules with the analogous
   :func:`~torch.nn.modules.module.register_module_forward_pre_hook` and
   :func:`~torch.nn.modules.module.register_module_forward_hook` functions.
 * **Backward hooks** are called during the backward pass. They can be installed with
@@ -724,14 +724,6 @@ Large deep learning models are often over-parametrized, resulting in high memory
 provides mechanisms for model pruning, which can help reduce memory usage while maintaining task accuracy. The
 `Pruning tutorial <https://pytorch.org/tutorials/intermediate/pruning_tutorial.html>`_ describes how to utilize
 the pruning techniques PyTorch provides or define custom pruning techniques as necessary.
-
-Deploying with TorchScript
-**************************
-
-When deploying a model for use in production, the overhead of Python can be unacceptable due to its poor
-performance characteristics. For cases like this,
-`TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ provides a way to load
-and run an optimized model program from outside of Python, such as within a C++ program.
 
 Parametrizations
 ****************

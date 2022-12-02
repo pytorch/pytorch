@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims
@@ -8,7 +8,13 @@ import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, TensorLikeType
+from torch._prims_common import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    Number,
+    NumberType,
+    TensorLike,
+    TensorLikeType,
+)
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch._refs import (
     _make_elementwise_binary_reference,
@@ -27,17 +33,19 @@ __all__ = [
     "i1e",
     "log_ndtr",
     "logit",
+    "log_softmax",
     "multigammaln",
     "ndtr",
     "ndtri",
+    "softmax",
     "spherical_bessel_j0",
+    "xlog1py",
     "zeta",
 ]
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_bessel_j0,
 )
 def bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j0(a)
@@ -45,7 +53,6 @@ def bessel_j0(a: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_bessel_j1,
 )
 def bessel_j1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j1(a)
@@ -80,21 +87,21 @@ expit = torch.sigmoid
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i0e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i0e(a)
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1(a)
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1e
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
@@ -132,6 +139,31 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
+@register_decomposition(torch.ops.aten.special_xlog1py)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+    utils.check(
+        isinstance(a, TensorLike) or isinstance(b, TensorLike),
+        lambda: 'Expected either argument a or b to be a Tensor"',
+    )
+
+    # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
+    if isinstance(a, TensorLike) and isinstance(b, Number):
+        b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(b, TensorLike) and isinstance(a, Number):
+        a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
+
+    # mypy: expected "Tensor"
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, refs.log1p(b)))
+    return torch.where(torch.isnan(b), float("nan"), rhs)
+
+
 @register_decomposition(torch.ops.aten.mvlgamma)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -167,16 +199,36 @@ def ndtri(a: TensorLikeType) -> TensorLikeType:
     return prims.ndtri(a)
 
 
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_spherical_bessel_j0,
 )
 def spherical_bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.spherical_bessel_j0(a)
 
 
-zeta = _make_elementwise_binary_reference(
-    prims.zeta,  # type: ignore[has-type]
+# TODO: add docstring
+@_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_zeta,
 )
+def zeta(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    return prims.zeta(a, b)

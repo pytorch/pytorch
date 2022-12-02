@@ -1,19 +1,27 @@
-#include <array>
-#include <cctype>
-#include <chrono>
-#include <cmath>
-#include <cstddef>
-#include <sstream>
-#include <string>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <vector>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
+#include <ATen/ops/fbgemm_linear_int8_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_int8_weight_native.h>
+#include <ATen/ops/fbgemm_linear_quantize_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
+#include <ATen/ops/fbgemm_pack_quantized_matrix_native.h>
+#endif
 
 #include <c10/util/irange.h>
 

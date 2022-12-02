@@ -15,14 +15,16 @@ import torch
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
-    dynamo_logging,
     free_symbol_startswith,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
+    sympy_symbol,
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -40,7 +42,16 @@ def signature_of(arg):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
-        return JITFunction._type_of(arg.dtype)
+        tye = JITFunction._type_of(arg.dtype)
+        if V.graph.is_unspec_arg(arg.buffer):
+            # had unwrapped 0d tensor as scalar
+            new_tye = tye.lstrip("*")
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
+        else:
+            return tye
     if isinstance(arg, SizeArg):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
@@ -99,6 +110,17 @@ def triton_constant(value):
     return repr(value)
 
 
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
@@ -114,15 +136,27 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
+        return f"tl.abs({x})"
+
+    @staticmethod
+    def libdevice_abs(x):
+        return f"tl.libdevice.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
+        return f"tl.exp({x})"
+
+    @staticmethod
+    def libdevice_exp(x):
+        return f"tl.libdevice.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
+        return f"tl.sqrt({x})"
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return f"tl.libdevice.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -130,35 +164,31 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.minimum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.maximum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
     def where(a, b, c):
-        if not config.triton.simple_where:
-            # wonkyness to work around https://github.com/openai/triton/issues/532
-            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-            a = ops.identity(a)
-            b = ops.identity(b)
-            c = ops.identity(c)
-            a = ops.identity(
-                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-            )
-            a = ops.identity(
-                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
     def cos(x):
-        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
+        return f"tl.cos({x})"
+
+    @staticmethod
+    def libdevice_cos(x):
+        return f"tl.libdevice.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
+        return f"tl.sin({x})"
+
+    @staticmethod
+    def libdevice_sin(x):
+        return f"tl.libdevice.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -175,6 +205,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def lgamma(x):
         return f"tl.libdevice.lgamma({x})"
+
+    @staticmethod
+    def erf(x):
+        return f"tl.libdevice.erf({x})"
 
     @staticmethod
     def logical_and(a, b):
@@ -197,13 +231,29 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"tl.libdevice.log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.libdevice.expm1({x})"
+
+    @staticmethod
+    def sigmoid(x):
+        return f"tl.sigmoid({x})"
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        return f"1/(1 + tl.libdevice.exp(-({x})))"
+
+    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
@@ -211,15 +261,19 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
+        return f"tl.log({x})"
+
+    @staticmethod
+    def libdevice_log(x):
+        return f"tl.libdevice.log({x})"
 
     @staticmethod
     def isinf(x):
-        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
+        return f"tl.libdevice.isinf({x})"
 
     @staticmethod
     def isnan(x):
-        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
+        return f"tl.libdevice.isnan({x})"
 
     @staticmethod
     def round(x):
@@ -328,10 +382,10 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
-                sympy.Symbol(f"{self.prefix}index"), divisor, length
+                sympy_symbol(f"{self.prefix}index"), divisor, length
             )
 
         if expr not in self.nodes:
@@ -444,7 +498,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name
 
     def symbol(self):
-        return sympy.Symbol(self.name)
+        return sympy_symbol(self.name)
 
     def __hash__(self):
         return hash(self.name)
@@ -457,11 +511,18 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache=None, reduction_hint=ReductionHint.DEFAULT):
+    def __init__(
+        self,
+        *groups,
+        mutations=None,
+        pid_cache=None,
+        reduction_hint=ReductionHint.DEFAULT,
+    ):
         if pid_cache is None:
             pid_cache = {}
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
+        self.mutations = mutations
         self.range_trees = []
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
@@ -687,11 +748,9 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or isinstance(
-            index, sympy.core.numbers.Integer
-        ):
+        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if isinstance(index, sympy.core.numbers.Integer):
+            if isinstance(index, sympy.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
@@ -700,6 +759,12 @@ class TritonKernel(Kernel):
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
         elif indirect_indexing:
+            # Use dense mask for indirect_indexing
+            # See https://github.com/pytorch/torchdynamo/issues/1654
+            # TODO - An optimization could be to hoist this load outside of
+            # reduction loop, if it is independent of rmask. Such example can be found in
+            # https://github.com/pytorch/torchdynamo/issues/1654
+            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             mask = dense_mask
 
         if self._load_mask:
@@ -712,7 +777,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
+            mask = ["None"]
+
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -760,9 +831,13 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
-            line += ".to(tl.float32)"
+
+        if V.graph.is_unspec_arg(name):
+            line = var
+        else:
+            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+                line += ".to(tl.float32)"
 
         if (
             self.inside_reduction
@@ -938,24 +1013,35 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
             )
 
         argdefs, _, signature = self.args.python_argdefs()
+
+        mutated_args = set()
+        for mutation in self.mutations:
+            if mutation in self.args.input_buffers:
+                mutated_args.add(self.args.input_buffers[mutation])
+            if mutation in self.args.inplace_buffers:
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
+            if mutation in self.args.output_buffers:
+                mutated_args.add(self.args.output_buffers[mutation])
+
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
-            "configs": [config_of(signature)],
             "constants": {},
+            "mutated_arg_names": mutated_args,
         }
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                triton_meta["signature"][len(argdefs)] = signature_of(
-                    SizeArg(f"{tree.prefix}numel", tree.numel)
-                )
+                sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+                signature.append(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -963,6 +1049,7 @@ class TritonKernel(Kernel):
                 #     tree.numel
                 # )
                 # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+        triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
@@ -978,15 +1065,22 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            self.codegen_static_numels(code)
+            if not config.dynamic_shapes:
+                self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -1032,6 +1126,10 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
@@ -1049,6 +1147,9 @@ class TritonKernel(Kernel):
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
 
 
 class TritonScheduling:
@@ -1177,7 +1278,7 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
+        log.log(logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
@@ -1208,7 +1309,15 @@ class TritonScheduling:
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
             reduction_hint_val = ReductionHint.DEFAULT
-        with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
+
+        mutations = set()
+        for node in node_schedule:
+            if hasattr(node, "get_mutations"):
+                mutations.update(node.get_mutations())
+
+        with TritonKernel(
+            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
+        ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
@@ -1226,9 +1335,14 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = wrapper.next_kernel_name()
+            fused_name = (
+                get_fused_kernel_name(node_schedule)
+                if config.triton.descriptive_kernel_names
+                else ""
+            )
+            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
-            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

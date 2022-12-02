@@ -1,14 +1,61 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/binary_cross_entropy_backward_native.h>
+#include <ATen/ops/binary_cross_entropy_native.h>
+#include <ATen/ops/binary_cross_entropy_with_logits_native.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/cosine_embedding_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/hinge_embedding_loss_native.h>
+#include <ATen/ops/huber_loss_backward.h>
+#include <ATen/ops/huber_loss_backward_native.h>
+#include <ATen/ops/huber_loss_native.h>
+#include <ATen/ops/kl_div_native.h>
+#include <ATen/ops/l1_loss_native.h>
+#include <ATen/ops/log.h>
+#include <ATen/ops/margin_ranking_loss_native.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/min.h>
+#include <ATen/ops/mse_loss_backward.h>
+#include <ATen/ops/mse_loss_backward_native.h>
+#include <ATen/ops/mse_loss_meta.h>
+#include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/pairwise_distance.h>
+#include <ATen/ops/poisson_nll_loss_native.h>
+#include <ATen/ops/smooth_l1_loss_backward.h>
+#include <ATen/ops/smooth_l1_loss_backward_native.h>
+#include <ATen/ops/smooth_l1_loss_meta.h>
+#include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/soft_margin_loss.h>
+#include <ATen/ops/soft_margin_loss_backward.h>
+#include <ATen/ops/soft_margin_loss_backward_native.h>
+#include <ATen/ops/soft_margin_loss_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/triplet_margin_loss_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/xlogy.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 constexpr float EPSILON = 1e-12;
 

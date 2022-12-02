@@ -117,10 +117,11 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
    public:
     WorkUCC(
         OpType opType,
+        uint64_t seq,
         const char* prof_title,
         const c10::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-        : Work(-1, opType, prof_title, inputs), logger_(logger) {}
+        : Work(-1, opType, prof_title, inputs), logger_(logger), seq_(seq) {}
     ~WorkUCC();
     void setException();
     void setAndThrowException();
@@ -135,9 +136,11 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     event_pool_t* ep = nullptr;
 #endif
     int sourceRank_;
+
    protected:
     std::shared_ptr<ProgressEntry> entry_;
     c10::intrusive_ptr<ProcessGroupUCCLogger> logger_;
+    uint64_t seq_;
 
    private:
     // The future returned by getFuture.
@@ -251,6 +254,18 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
       int srcRank,
       int tag) override;
 
+  // Counting for the sequential number of UCC collective_post call.
+  uint64_t seq_{0};
+
+  // Agrees on an initial sequence number for the whole group by having rank 0
+  // create it and broadcast it to other ranks using the store.
+  void setSequenceNumberForGroup() override;
+
+  // Retrieves the current sequence number for the whole group, which should be
+  // in sync. If the returned number is not consistent across the group, it
+  // may indicate that there is some sort of collective desynchronization.
+  uint64_t getSequenceNumberForGroup() override;
+
   static c10::intrusive_ptr<ProcessGroup> createProcessGroupUCC(
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
@@ -264,6 +279,7 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
   uint32_t comm_id;
   ucc_team_h team{nullptr};
   ucc_ee_h cuda_ee{nullptr};
+
 #ifdef USE_CUDA
   std::unique_ptr<at::cuda::CUDAStream> stream = nullptr;
   event_pool_t ep;

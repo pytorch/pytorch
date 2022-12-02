@@ -20,31 +20,37 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
-original_dir = abspath(os.getcwd())
 
-os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-for torchbench_dir in (
-    "./torchbenchmark",
-    "../torchbenchmark",
-    "../torchbench",
-    "../benchmark",
-    "../../torchbenchmark",
-    "../../torchbench",
-    "../../benchmark",
-):
+
+def setup_torchbench_cwd():
+    original_dir = abspath(os.getcwd())
+
+    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    for torchbench_dir in (
+        "./torchbenchmark",
+        "../torchbenchmark",
+        "../torchbench",
+        "../benchmark",
+        "../../torchbenchmark",
+        "../../torchbench",
+        "../../benchmark",
+    ):
+        if exists(torchbench_dir):
+            break
+
     if exists(torchbench_dir):
-        break
+        torchbench_dir = abspath(torchbench_dir)
+        os.chdir(torchbench_dir)
+        sys.path.append(torchbench_dir)
 
-if exists(torchbench_dir):
-    torchbench_dir = abspath(torchbench_dir)
-    os.chdir(torchbench_dir)
-    sys.path.append(torchbench_dir)
+    return original_dir
 
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
     "demucs": 4,
+    "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
@@ -113,8 +119,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_COSINE_TOLERACE = {
-    # https://github.com/pytorch/torchdynamo/issues/556
-    "resnet50_quantized_qat",
+    # Just keeping it here even though its empty, if we need this in future.
 }
 
 # non-deterministic output / cant check correctness
@@ -177,6 +182,12 @@ SKIP_ACCURACY_CHECK_MODELS = {
 }
 
 
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "hf_GPT2": 2,
+    "pytorch_unet": 2,
+}
+
+
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
@@ -212,7 +223,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
-        if self.args.dashboard:
+        if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
@@ -221,12 +232,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        part=None,
     ):
 
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+        try:
+            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+        except ModuleNotFoundError:
+            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -240,15 +255,30 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
+
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
+        extra_args = []
+        if part:
+            extra_args = ["--part", part]
         if is_training:
             benchmark = benchmark_cls(
-                test="train", device=device, jit=False, batch_size=batch_size
+                test="train",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
             )
         else:
             benchmark = benchmark_cls(
-                test="eval", device=device, jit=False, batch_size=batch_size
+                test="eval",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
             )
         if dynamic_shapes:
             if not hasattr(benchmark, "get_dynamic_shapes_module"):
@@ -306,9 +336,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         tolerance = 1e-4
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
-        if self.args.float16:
+        if self.args.float16 or self.args.amp:
             return 1e-3, cosine
         if is_training and current_device == "cuda":
+            tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:
                 cosine = True
             elif name in REQUIRE_HIGHER_TOLERANCE:
@@ -325,7 +356,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        mod.zero_grad(True)
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
@@ -338,6 +369,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 if __name__ == "__main__":
 
+    original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)

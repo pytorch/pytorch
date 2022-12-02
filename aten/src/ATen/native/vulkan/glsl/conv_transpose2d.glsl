@@ -2,6 +2,12 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (1, 1, 1)
+ * WEIGHT_STORAGE = TEXTURE_2D
+ * BIAS_STORAGE = TEXTURE_2D
+ */
+
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
@@ -15,8 +21,8 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION sampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -60,7 +66,7 @@ void main() {
       min(uBlock.in_extents.xy, ivec2(floor(ipos_f / stride)) + 1);
   ivec2 kstart = start;
 
-  vec4 sum = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
+  vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
 
   const int ic4 = uBlock.overlay_region.z;
 
@@ -78,10 +84,10 @@ void main() {
         const vec4 In = texelFetch(uInput, ivec3(x, y, z4), 0);
         const ivec4 kxs = kx + ivec4(0, 1, 2, 3);
 
-        sum = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, ky, 0), 0), sum);
-        sum = fma(In.yyyy, texelFetch(uKernel, ivec3(kxs.y, ky, 0), 0), sum);
-        sum = fma(In.zzzz, texelFetch(uKernel, ivec3(kxs.z, ky, 0), 0), sum);
-        sum = fma(In.wwww, texelFetch(uKernel, ivec3(kxs.w, ky, 0), 0), sum);
+        sum = fma(In.xxxx, texelFetch(uKernel, ivec2(kxs.x, ky), 0), sum);
+        sum = fma(In.yyyy, texelFetch(uKernel, ivec2(kxs.y, ky), 0), sum);
+        sum = fma(In.zzzz, texelFetch(uKernel, ivec2(kxs.z, ky), 0), sum);
+        sum = fma(In.wwww, texelFetch(uKernel, ivec2(kxs.w, ky), 0), sum);
       }
     }
   }

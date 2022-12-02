@@ -611,6 +611,16 @@ void record_function_with_scope_and_debug_handle(
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \
       at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
 
+// Bookend to the RECORD_FUNCTION macros.  Use this after the kernel
+// launch to let the profiler bind the outputs to the op that produced
+// them.  Note that guard is declared by RECORD_FUNCTION so this macro
+// needs to be called from the same scope as RECORD_FUNCTION
+#define RECORD_OUTPUTS(outputs)                                    \
+  if (guard.needsOutputs()) {                                      \
+    guard.setOutputs(                                              \
+        std::vector<c10::IValue>(outputs.begin(), outputs.end())); \
+  }
+
 /**
  * addThreadLocalCallback adds a thread local callback to run with
  * RecordFunction, returns handle to use with removeThreadLocalCallback

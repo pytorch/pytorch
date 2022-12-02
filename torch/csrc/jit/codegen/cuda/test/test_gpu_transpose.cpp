@@ -3,7 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
@@ -261,9 +262,11 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSinTransposeCos_CUDA) {
   testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
 }
 
-// t0->transpose--.
-//                 |
-// t1->transpose---add-->sin->t5
+/*
+ * t0->transpose--.
+ *                 \
+ * t1->transpose---add-->sin->t5
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -325,10 +328,12 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleOutput_CUDA) {
       &fusion, outputs, {input}, {tv_ref1, tv_ref2}, __LINE__, __FILE__);
 }
 
-// t0->transpose->sin->t3
-//   \_.-->cos->t5
-//   /
-// t1
+/*
+ * t0->transpose->sin->t3
+ *   \_.-->cos->t5
+ *   /
+ * t1
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -366,9 +371,11 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
       __FILE__);
 }
 
-//             .------>sin------>z
-// x->transpose->transpose->add->y
-//  \_______________________/
+/*
+ *             .------>sin------>z
+ * x->transpose->transpose->add->y
+ *  \_______________________/
+ */
 TEST_F(NVFuserTest, FusionScheduleTransposeMatchingSkipConnection_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -743,9 +750,7 @@ TEST_F(NVFuserTest, FusionManualScheduleTransposeComplexDAG1_CUDA) {
   }
 
   // inline
-  MaxRootDomainInfoSpanningTree entire_dag(tv9);
-  InlinePropagator inline_propagator(tv9, -1, ComputeAtMode::MostInlined);
-  entire_dag.traverse(&inline_propagator);
+  inlineMost();
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input0 = at::randn({512, 1024, 256}, options);
@@ -788,6 +793,61 @@ TEST_F(NVFuserTest, FusionViewNoTranspose_CUDA) {
 
   TORCH_CHECK(!hasAtLeastTwoValidGroups(&fusion));
 }
+
+TEST_F(NVFuserTest, FusionTransposeSelfMapping_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = transpose(tv0, 0, 1);
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  EXPECT_THAT(
+      [&]() { IterDomainGraph(fusion_ptr.get()); },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("Unsupported domain mapping detected")));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({5, 5}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  auto ref = t0.transpose(0, 1) + t0;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+#if 0
+// silent wrong result
+TEST_F(NVFuserTest, FusionTransposeViewSelfMapping_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = transpose(tv0, 0, 1);
+  auto tv2 = view(tv0, {2, 3}, {3, 2});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 3}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  auto ref = t0.transpose(0, 1) + t0.view({3, 2});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+#endif
 
 // t0------------.
 // t2->broadcast->sub->mul->relu->t6
@@ -930,6 +990,269 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize3_CUDA) {
   auto tv_ref = input.sin().transpose(4, 7).cos();
 
   testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+}
+
+// x->sin->transpose->cos->y
+TEST_F(NVFuserTest, FusionScheduleTranspose2DSmallInnerSize_CUDA) {
+  std::array<std::vector<int64_t>, 2> shapes{
+      std::vector<int64_t>{1024 * 1024 * 128, 2},
+      std::vector<int64_t>{2, 1024 * 1024 * 128}};
+  for (const auto& shape : shapes) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeContigTensor(2);
+    fusion.addInput(tv0);
+    auto tv1 = sin(tv0);
+    auto tv2 = transpose(tv1, 0, 1);
+    auto tv3 = cos(tv2);
+    fusion.addOutput(tv3);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor input = at::randn(shape, options);
+
+    auto lparams = scheduleTranspose(&fusion, {input});
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {input}, lparams);
+    auto outputs = fe.runFusion({input}, lparams);
+
+    auto tv_ref = input.sin().transpose(0, 1).cos();
+
+    testValidate(&fusion, outputs, {input}, {tv_ref}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{32, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{0, 32};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32}, DataType::Bool);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{8, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->merge(0);
+  tv1->split(0, 4);
+  tv1->split(0, 8);
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  // T1 [TIDx(32), 8, V(4)]
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv2->merge(0);
+  tv2->split(0, 4);
+  tv2->split(0, 32);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  // T2 [8, TIDx(32), 4]
+
+  tv3->merge(0);
+  tv3->split(0, 2);
+  tv3->split(0, 32);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  // T3 [16, TIDx(32), 2]
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect1{0, 8};
+    std::pair<int, int> expect2{8, 4};
+    std::pair<int, int> expect3{2, 0};
+    TORCH_CHECK(
+        info.second == expect1 || info.second == expect2 ||
+        info.second == expect3);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1024, 32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+  tv3->axis(2)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{32, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1024, 32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+  tv3->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{32, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1024, 8, 8});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+  tv3->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{0, 2};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1024, 8, 8});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 1, 2);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+  tv3->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  // no bank confliction
+  TORCH_CHECK(bank_conflict_info.empty());
 }
 
 } // namespace jit
