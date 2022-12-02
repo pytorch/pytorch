@@ -143,7 +143,6 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
         self.end_ptr: Optional[int] = None  # The index to stop child
-        self._done_reset: bool = False
         self._child_stop: List[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
@@ -155,7 +154,6 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             self._snapshot_state = _SnapshotState.Iterating
             for i in range(self.num_instances):
                 self._child_stop[i] = False
-            self._done_reset = True
         try:
             while not self._child_stop[instance_id]:
                 self.child_pointers[instance_id] += 1
@@ -169,10 +167,11 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 else:  # Retreive one element from main datapipe
                     self.leading_ptr = self.child_pointers[instance_id]
                     try:
-                        return_val = next(self._datapipe_iterator)
+                        return_val = next(self._datapipe_iterator)  # type: ignore[arg-type]
                         self.buffer.append(return_val)
                     except StopIteration:
                         self._child_stop[instance_id] = True
+                        self._datapipe_iterator = None
                         self.end_ptr = self.leading_ptr
                         continue
                 if self.child_pointers[instance_id] == self.slowest_ptr + 1:
@@ -185,12 +184,11 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                                       f"buffer size {self.buffer_size} is insufficient.")
                 yield return_val
         finally:
-            if not self._done_reset:
-                self._child_stop[instance_id] = True
-                # Cleanup _datapipe_iterator for the case that fork exits earlier
-                if all(self._child_stop):
-                    self._datapipe_iterator = None
-                    self._cleanup()
+            self._child_stop[instance_id] = True
+            # Cleanup _datapipe_iterator for the case that fork exits earlier
+            if all(self._child_stop):
+                self._datapipe_iterator = None
+                self._cleanup()
 
     def is_every_instance_exhausted(self) -> bool:
         return self.end_ptr is not None and all(self._child_stop)
@@ -206,7 +204,6 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.leading_ptr = 0
         self.end_ptr = None
         self._child_stop = [True for _ in range(self.num_instances)]
-        self._done_reset = False
 
     def __getstate__(self):
         state = (
@@ -235,13 +232,11 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.leading_ptr = 0
         self.end_ptr = None
         self._child_stop = [True for _ in range(self.num_instances)]
-        self._done_reset = False
 
     def _cleanup(self):
-        if self.buffer:
-            for d in self.buffer:
-                StreamWrapper.close_streams(d)
-            self.buffer.clear()
+        while self.buffer:
+            d = self.buffer.popleft()
+            StreamWrapper.close_streams(d)
 
     def __del__(self):
         self._cleanup()
