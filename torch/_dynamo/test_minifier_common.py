@@ -51,7 +51,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         proc = subprocess.run(
             ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
         )
-
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -100,13 +99,14 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         repro_proc = subprocess.run(
             ["python3", repro_file], capture_output=True, cwd=repro_dir
         )
-
         return repro_proc, repro_code
 
     # Template for testing code.
     # `run_code` is the code to run for the test case.
     # `patch_code` is the code to be patched in every generated file.
-    def _gen_test_code(self, run_code, repro_after, repro_level, patch_code):
+    def _gen_test_code(
+        self, run_code, repro_after, repro_level, patch_code, fake_tensor
+    ):
         return f"""\
 import torch
 import torch._dynamo
@@ -122,8 +122,10 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # 1. Run the problematic code (in a separate process since it could segfault)
     # 2. Run the generated minifier launcher script
     # 3. Run the generated repro script
-    def _run_full_test(self, run_code, repro_after, repro_level, patch_code):
-        test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
+    def _run_full_test(self, run_code, repro_after, repro_level, patch_code, fake_mode):
+        test_code = self._gen_test_code(
+            run_code, repro_after, repro_level, patch_code, fake_mode
+        )
         test_proc, repro_dir = self._run_test_code(test_code)
         self.assertIsNotNone(repro_dir)
         launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
