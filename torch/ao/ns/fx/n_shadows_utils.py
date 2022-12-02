@@ -577,12 +577,15 @@ def handle_subgraph_candidate(
                 custom_prepare_kwargs = {}
             for kwarg_name in ["example_inputs", "prepare_custom_config", "qconfig_mapping"]:
                 assert kwarg_name not in custom_prepare_kwargs, f"cannot specify {kwarg_name} in custom_prepare_kwargs"
-            custom_prepare_kwargs["example_inputs"] = example_inputs
-            custom_prepare_kwargs["prepare_custom_config"] = prepare_custom_config
-            custom_prepare_kwargs["qconfig_mapping"] = qconfig_mapping
+            prepare_kwargs: Dict[str, Any] = {
+                "example_inputs": example_inputs,
+                "prepare_custom_config": prepare_custom_config,
+                "qconfig_mapping": qconfig_mapping
+            }
+            prepare_kwargs.update(custom_prepare_kwargs)
             orig_mod_copy_wrapped = custom_prepare_fn(
                 orig_mod_copy_wrapped,
-                **custom_prepare_kwargs)
+                **prepare_kwargs)
 
         # attach the wrapper to the model
         attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
