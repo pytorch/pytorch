@@ -119,12 +119,12 @@ Sparse (torch.sparse)
 NestedTensor (torch.nested)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Driss Guessous (`disspg <https://github.com/drisspg>`__)
 -  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
--  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
--  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 
 MaskedTensor (torch.masked)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -323,6 +323,9 @@ TorchAudio
 ~~~~~~~~~~
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  Jeff Hwang (`hwangjeff <https://github.com/hwangjeff>`__)
+-  Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
+-  [...]
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 
