@@ -62,6 +62,59 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def test_copy_slices_graph_task_updates(self):
+        def f1(x, y):
+            out = x.clone().view(-1)
+            out += y
+            return out
+
+        def f2(x, y):
+            out = x.clone().view(-1)
+            b = out * 2
+            out += y
+            return out + b
+
+        x = torch.rand(2, requires_grad=True)
+        y = torch.rand(2, requires_grad=True)
+
+        y_safe = torch._C._functions.DelayedError("Boom!", 1)(y)
+
+        for f in [f1, f2]:
+            # Ensure that the error Node works
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                out.sum().backward()
+
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                torch.autograd.grad(out.sum(), y)
+
+            # Ensure that if we don't ask for y, it doesn't crash
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), x)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), y_safe)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), (x, y_safe))
+
+        # Ensure that we don't run extra view Node
+        def f3(x, y):
+            out = x.clone().view(-1)
+
+            def hook(*args):
+                # This should never be called!
+                self.assertTrue(False)
+            out.register_hook(hook)
+
+            b = out + y
+            out += y
+            return out + b, b
+
+        out, b = f3(x, y_safe)
+        torch.autograd.grad(out.sum(), (b, y_safe))
+
 
     def test_grad_mode_class_decoration(self):
         # Decorating class is deprecated and should not be used
@@ -3711,8 +3764,8 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         grad = torch.nested.as_nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
-        assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
-        assert torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]]))
+        torch.testing.assert_close(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]), rtol=0, atol=0)
+        torch.testing.assert_close(grad_shape, torch.tensor([[5, 10], [5, 10]]), rtol=0, atol=0)
 
     def test_nested_anomaly_detect_nan(self):
         size = 10
@@ -4095,20 +4148,32 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         check(fast_mode=True)
         check(fast_mode=False)
 
-    @unittest.expectedFailure
     def test_gradcheck_sparse_csr_input(self):
         def check(fast_mode):
             def fn(sparse_csr):
                 return torch.clone(sparse_csr).to_dense()
 
-            # Fails because gradcheck can't work with sparse csr inputs yet
             gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=True,
                       check_batched_grad=False, fast_mode=fast_mode)
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
                           check_batched_grad=False, fast_mode=fast_mode)
-        # check(fast_mode=True) # Segmentation fault
+        # check(fast_mode=True) # RuntimeError: sparse_mask_sparse_csr expects self to be 2D
+        check(fast_mode=False)
+
+    def test_gradcheck_sparse_csc_input(self):
+        def check(fast_mode):
+            def fn(sparse_csc):
+                return torch.clone(sparse_csc).to_dense()
+
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=False,
+                          check_batched_grad=False, fast_mode=fast_mode)
+        # check(fast_mode=True) # RuntimeError: Expected result Tensor to be of format CSR
         check(fast_mode=False)
 
     def test_gradcheck_nondeterministic(self):
