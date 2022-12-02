@@ -124,6 +124,7 @@ NestedTensor (torch.nested)
 -  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 
 MaskedTensor (torch.masked)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
