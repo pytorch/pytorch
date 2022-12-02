@@ -3932,7 +3932,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from vmap plumbing\).*"):
             escaped.sin()
 
-        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from boxed inputs\).*"):
+        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from boxed_tensor_inputs_batch_rule\).*"):
             escaped.sin_()
 
         with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from inplace\).*"):

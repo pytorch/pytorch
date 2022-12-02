@@ -131,15 +131,6 @@ def accepts_at_least_one_tensor_input(schema: FunctionSchema) -> bool:
 def is_mutated_arg(argument: Argument) -> bool:
     return argument.annotation is not None and argument.annotation.is_write
 
-
-def gen_check_escaped(check: str, what: str) -> str:
-    return f"""TORCH_CHECK(
-{check},
-"your tensor may have escaped from vmap. This could also be an internal error (from {what}) ",
-"See https://pytorch.org/functorch/stable/ux_limitations.html"
-  );"""
-
-
 def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # Assumptions:
     # - only one argument is being modified in-place
@@ -169,14 +160,13 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
     bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
-    check_escaped = gen_check_escaped("maybe_layer.has_value()", "inplace")
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-{textwrap.indent(check_escaped, "  ")}
+  vmap_check_escaped(maybe_layer, "inplace");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
@@ -192,14 +182,13 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
     bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
-    check_escaped = gen_check_escaped("maybe_layer.has_value()", "no returns")
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-{textwrap.indent(check_escaped, "  ")}
+  vmap_check_escaped(maybe_layer, "no returns");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
@@ -237,13 +226,12 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> Optional[str]:
     bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
 
     wrapped_returns = gen_returns(returns, cur_level_var, results_var)
-    check_escaped = gen_check_escaped("maybe_layer.has_value()", "vmap plumbing")
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-{textwrap.indent(check_escaped, "  ")}
+  vmap_check_escaped(maybe_layer, "vmap plumbing");
   int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
