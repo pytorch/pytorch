@@ -754,6 +754,10 @@ class TorchPatcher:
                 opt._cuda_graph_capture_health_check
             )
             opt.zero_grad = disable(opt.zero_grad)
+
+            if hasattr(opt, "_init_group"):
+                opt._init_group = disable(opt._init_group)
+
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook

@@ -90,6 +90,42 @@ class Rprop(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
 
+    def _init_group(self, group, params, grads, prevs, step_sizes):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params.append(p)
+            grad = p.grad
+            if grad.is_sparse:
+                raise RuntimeError("Rprop does not support sparse gradients")
+
+            grads.append(grad)
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = 0
+                state["prev"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                if p.dtype.is_complex:
+                    # Complex Number should be as if they are two independent real numbers.
+                    # Hence the step_size shouldn't be zero for imaginary part.
+                    state["step_size"] = (
+                        grad.new()
+                        .resize_as_(grad)
+                        .fill_(complex(group["lr"], group["lr"]))
+                    )
+                else:
+                    state["step_size"] = (
+                        grad.new().resize_as_(grad).fill_(group["lr"])
+                    )
+
+            prevs.append(state["prev"])
+            step_sizes.append(state["step_size"])
+
+            state["step"] += 1
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -113,40 +149,7 @@ class Rprop(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
 
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                params.append(p)
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError("Rprop does not support sparse gradients")
-
-                grads.append(grad)
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state["step"] = 0
-                    state["prev"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
-                    if p.dtype.is_complex:
-                        # Complex Number should be as if they are two independent real numbers.
-                        # Hence the step_size shouldn't be zero for imaginary part.
-                        state["step_size"] = (
-                            grad.new()
-                            .resize_as_(grad)
-                            .fill_(complex(group["lr"], group["lr"]))
-                        )
-                    else:
-                        state["step_size"] = (
-                            grad.new().resize_as_(grad).fill_(group["lr"])
-                        )
-
-                prevs.append(state["prev"])
-                step_sizes.append(state["step_size"])
-
-                state["step"] += 1
+            self._init_group(group, params, grads, prevs, step_sizes)
 
             rprop(
                 params,

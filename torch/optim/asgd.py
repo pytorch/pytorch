@@ -86,6 +86,29 @@ class ASGD(Optimizer):
             for s in state_values:
                 s["mu"] = torch.tensor(float(s["mu"]))
 
+    def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
+        for p in group["params"]:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError("ASGD does not support sparse gradients")
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # State initialization
+                if len(state) == 0:
+                    state["step"] = torch.tensor(0.0)
+                    state["eta"] = torch.tensor(group["lr"])
+                    state["mu"] = torch.tensor(1.0)
+                    state["ax"] = torch.zeros_like(
+                        p, memory_format=torch.preserve_format
+                    )
+
+                mus.append(state["mu"])
+                axs.append(state["ax"])
+                etas.append(state["eta"])
+                state_steps.append(state["step"])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -107,27 +130,7 @@ class ASGD(Optimizer):
             etas = []
             state_steps = []
 
-            for p in group["params"]:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError("ASGD does not support sparse gradients")
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-                    # State initialization
-                    if len(state) == 0:
-                        state["step"] = torch.tensor(0.0)
-                        state["eta"] = torch.tensor(group["lr"])
-                        state["mu"] = torch.tensor(1.0)
-                        state["ax"] = torch.zeros_like(
-                            p, memory_format=torch.preserve_format
-                        )
-
-                    mus.append(state["mu"])
-                    axs.append(state["ax"])
-                    etas.append(state["eta"])
-                    state_steps.append(state["step"])
+            self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
 
             asgd(
                 params_with_grad,
