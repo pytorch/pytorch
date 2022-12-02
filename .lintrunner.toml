@@ -148,6 +148,7 @@ include_patterns = [
     'torch/_dynamo/convert_frame.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/output_graph.py',
+    'torch/_dynamo/guards.py',
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
@@ -779,6 +780,7 @@ include_patterns = [
     'torchgen/**/*.py',
     'functorch/functorch/_src/aot_autograd.py',
     'functorch/functorch/_src/compilers.py',
+    'torch/testing/*.py',
 ]
 command = [
     'python3',

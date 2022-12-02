@@ -1,8 +1,12 @@
 import os
 import sys
+from functools import lru_cache
 
 # add some debug printouts
 debug = False
+
+# use cpp wrapper instead of python wrapper
+cpp_wrapper = False
 
 # dead code elimination
 dce = False
@@ -59,15 +63,25 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+
+@lru_cache(1)
+def is_fbcode():
+    try:
+        import torch.fb  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 compile_threads = (
-    min(
+    1
+    if sys.platform == "win32" or is_fbcode()
+    else min(
         32,
         len(os.sched_getaffinity(0))
         if hasattr(os, "sched_getaffinity")
         else os.cpu_count(),
     )
-    if sys.platform != "win32"
-    else 1
 )
 
 # If kernel is fused, the name is generated from the origin node op names
@@ -87,6 +101,8 @@ alignment_size = 4
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:
