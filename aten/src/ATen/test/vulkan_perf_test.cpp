@@ -536,10 +536,10 @@ static void conv2ddw_op_benchmark(benchmark::State& state) {
   const auto batches_in = safe_downcast<uint32_t>(state.range(0));
   const auto height_in = safe_downcast<uint32_t>(state.range(2));
   const auto width_in = safe_downcast<uint32_t>(state.range(3));
-  constexpr int64_t groups = 7;
-  constexpr std::array<int64_t, 2u> stride{2, 3};
-  constexpr std::array<int64_t, 2u> padding{0, 4};
-  constexpr std::array<int64_t, 2u> dilation{3, 1};
+  constexpr int64_t groups = 32;
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
 
   struct {
     uint32_t batches;
@@ -571,7 +571,7 @@ static void conv2ddw_op_benchmark(benchmark::State& state) {
           height,
       };
     }
-  } weights{groups, 1, 17, 7};
+  } weights{groups, 1, 3, 3};
 
   const auto input_cpu =
       at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
@@ -1053,7 +1053,7 @@ BENCHMARK(conv2ddw_op_benchmark)
     ->UseManualTime()
     ->Threads(1)
     ->Iterations(10)
-    ->Args({1, 7, 137, 199});
+    ->Args({1, 32, 256, 256});
 BENCHMARK(conv2ddw_op_q_benchmark)
     ->Apply(CommonBenchmarkSettings)
     ->UseManualTime()
