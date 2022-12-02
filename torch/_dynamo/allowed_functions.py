@@ -109,6 +109,7 @@ def _disallowed_function_ids():
         torch.set_autocast_gpu_dtype,
         torch.autograd.profiler.profile,
         warnings.warn,
+        torch._C.default_generator.manual_seed,
         torch._C._dynamo.eval_frame.unsupported,
     ]
     # extract all dtypes from torch

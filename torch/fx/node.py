@@ -24,6 +24,7 @@ Argument = Optional[Union[
     List[Any],  # actually Argument
     Dict[str, Any],  # actually Argument
     slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
     'Node',
     BaseArgumentTypes
 ]]
@@ -43,6 +44,14 @@ def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
     for guess in [torch, torch.nn.functional]:
         if getattr(guess, name, None) is orig_method:
             return guess.__name__
+    # For modules under _C directory.
+    for guess in [torch._C.default_generator]:
+        # TODO (we don't actually care about the result of this op in the graph yet)
+        # so it is safe to have a placeholder for the node.target
+        # The reason we seperate out this from the above loop is because torch._C objects
+        # don't have __name__ attribute.
+        if getattr(guess, name, None) == orig_method:
+            return str(guess)
     raise RuntimeError(f'cannot find module for {orig_method}')
 
 # Borrowed from CPython typing module
