@@ -10,6 +10,15 @@
 
 namespace at { namespace functorch {
 
+void vmap_check_escaped(optional<DynamicLayer> layer, const char* what) {
+  TORCH_CHECK(
+    layer.has_value(),
+    "your tensor may have escaped from vmap. This could also be an internal error (from ",
+    what,
+    ") See https://pytorch.org/functorch/stable/ux_limitations.html"
+  )
+}
+
 Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
