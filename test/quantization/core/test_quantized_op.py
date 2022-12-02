@@ -2244,7 +2244,7 @@ class TestQuantizedOps(TestCase):
             XQ = torch.quantize_per_tensor(X, scale=0.2, zero_point=0, dtype=torch.quint8)
             YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
             MQ = XQ.mean((2, 3), keepdim=keep)
-            self.assertTrue(torch.equal(MQ, YQ))
+            self.assertEqual(MQ, YQ, rtol=0, atol=0, exact_device=True)
 
     @override_qengines
     def test_std(self):
@@ -3171,7 +3171,7 @@ class TestDynamicQuantizedOps(TestCase):
         w_packed_fp16 = torch.ops.quantized.linear_prepack_fp16(w, bias)
         w_unpacked_fp16 = torch.ops.quantized.linear_unpack_fp16(w_packed_fp16)
         w_fp16 = w.to(torch.float16).to(torch.float32)
-        self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
+        self.assertEqual(w_fp16, w_unpacked_fp16[0], rtol=0, atol=0, exact_device=True)
 
     @skipIfNoFBGEMM
     def test_qlinear_dynamic_fp16(self):
@@ -5453,6 +5453,35 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs,
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
+
+    def test_conv_reorder_issue_onednn(self):
+        """ Ensure reorder failure issue in conv is fixed for onednn backend.
+            Onednn backend used to encounter reorder failure
+            when running conv with dynamic input shapes.
+            Solved by https://github.com/pytorch/pytorch/pull/86876
+        """
+        if 'onednn' not in supported_qengines:
+            return
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 128, 512
+            kh, kw = 1, 1
+            ih, iw = 28, 28
+            bias = None
+            strides, paddings, dilates, groups = (1, 1), (0, 0), (1, 1), 1
+            w = torch.randn((oc, ic, kh, kw))
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            w_packed = torch.ops.quantized.conv2d_prepack(
+                qw, bias, strides, paddings, dilates, groups
+            )
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            ih, iw = 5, 4
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            # The following should pass when input shape is changed
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
