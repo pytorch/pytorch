@@ -52,5 +52,5 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     stats = get_sccache_stats(args.workflow_run_id, args.workflow_run_attempt)
-    print("@@@Stats: " + stats)
+    print("@@@Stats: " + str(stats))
     upload_to_rockset("sccache_stats", stats)
