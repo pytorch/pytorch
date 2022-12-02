@@ -1082,9 +1082,9 @@ class Scheduler:
         else:
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
-                if device_props.major < 6:
+                if device_props.major < 7:
                     raise RuntimeError(
-                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                     )
                 else:
                     raise RuntimeError(
