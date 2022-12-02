@@ -713,6 +713,24 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
                 self.assertTrue(is_match(modules, n, pattern))
 
+    def test_pattern_match_constant(self):
+        """ test matching constant
+        """
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x, _ = torch.ops.aten.max_pool2d_with_indices.default(x)
+                return x
+
+        pattern = (operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0)
+        m = torch.fx.symbolic_trace(M())
+        # eliminate the code that get the second output of maxpool, so that the pattern
+        # can be matched
+        m.graph.eliminate_dead_code()
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == operator.getitem:
+                self.assertTrue(is_match(modules, n, pattern))
+
     def test_fused_module_qat_swap(self):
         class Tmp(torch.nn.Module):
             def __init__(self):
