@@ -161,6 +161,7 @@ class TorchVariable(VariableTracker):
             torch._assert,
             torch.device,
             torch.finfo,
+            torch.get_default_dtype,
             torch.iinfo,
             torch.is_floating_point,
             torch.cuda.is_available,
