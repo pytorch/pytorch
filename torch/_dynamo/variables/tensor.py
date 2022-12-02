@@ -171,18 +171,14 @@ class TensorVariable(VariableTracker):
         return result
 
     def unpack_var_sequence(self, tx, idxes=None):
+        from .builder import wrap_fx_proxy
         if idxes is None:
             if self.size:
                 idxes = range(self.size[0])
             else:
                 return super(TensorVariable, self).unpack_var_sequence(tx)
         options = VariableTracker.propagate(self)
-        return [
-            variables.BuiltinVariable(operator.getitem, **options).call_function(
-                tx, [self, variables.ConstantVariable(i)], {}
-            )
-            for i in idxes
-        ]
+        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def call_method(
         self,
@@ -357,7 +353,7 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 )
-                **options,
+                ** options,
             )
 
 

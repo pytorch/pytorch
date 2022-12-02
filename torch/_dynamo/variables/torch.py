@@ -374,7 +374,6 @@ class TorchVariable(VariableTracker):
                     "call_method",
                     "numel",
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )

@@ -335,7 +335,6 @@ class BuiltinVariable(VariableTracker):
                     fn_,
                     (args[0].as_proxy(),),
                     {},
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -395,7 +394,6 @@ class BuiltinVariable(VariableTracker):
                         "call_function",
                         self.fn,
                         *proxy_args_kwargs([a, b], {}),
-                        current_tx=tx,
                     ),
                     **VariableTracker.propagate(self, [a, b]),
                 )

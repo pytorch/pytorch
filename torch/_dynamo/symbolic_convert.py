@@ -208,7 +208,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 "call_function",
                 torch._assert,
                 *proxy_args_kwargs((value, error_msg), {}),
-                current_tx=self,
             )
             self.jump(inst)
             return
@@ -1180,7 +1179,9 @@ class InstructionTranslatorBase(object):
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
-            val = seq.obj.unpack_var_sequence(self, idxes=range(inst.argval))
+            proxy = getattr(seq.obj.as_proxy(), seq.name)
+            options = VariableTracker.propagate(self)
+            val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval

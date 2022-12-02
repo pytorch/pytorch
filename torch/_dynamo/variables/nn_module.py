@@ -468,7 +468,6 @@ class NNModuleVariable(VariableTracker):
                     name,
                     args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
-                    current_tx=tx,
                 ),
                 **options,
             )
