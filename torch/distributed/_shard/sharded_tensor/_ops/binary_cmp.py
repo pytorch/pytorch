@@ -17,7 +17,7 @@ def _communicate_result(result, pg):
 
     expected_result = torch.ones(1, device=torch.device(torch.cuda.current_device())) * dist.get_world_size(pg)
 
-    return torch.equal(result_tensor, expected_result)
+    return (result_tensor == expected_result).all().item()
 
 def binary_cmp(cmp_fun, types, args, kwargs=None, process_group=None):
     if len(args) != 2:
