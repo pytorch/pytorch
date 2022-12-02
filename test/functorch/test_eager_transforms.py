@@ -35,10 +35,11 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
+from functorch._src.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
+from torch.autograd.forward_ad import _enable_fwd_grad
 
 torch._C._set_autograd_function_extension_enabled(True)
 
@@ -2121,7 +2122,7 @@ class TestJvp(TestCase):
             enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
 
-            with enable_fwd_grad():
+            with _enable_fwd_grad():
                 enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertTrue(enabled)
 
@@ -2133,13 +2134,13 @@ class TestJvp(TestCase):
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad(False):
+        with _enable_fwd_grad(False):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with _enable_fwd_grad(False):
                 shift = x ** 2
             return x ** 2 - shift
 
@@ -2152,13 +2153,13 @@ class TestJvp(TestCase):
 
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with _enable_fwd_grad(False):
                 shift = x ** 2
             return x ** 2 - shift
 
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad():
+        with _enable_fwd_grad():
             _, y = jvp(f, (x,), (t,))
 
         self.assertEqual(y, 2 * x)

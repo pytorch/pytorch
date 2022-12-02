@@ -8,9 +8,11 @@ from torch._C._functorch import (
     CInterpreter,
     CGradInterpreterPtr,
     CVmapInterpreterPtr,
+    CJvpInterpreterPtr,
     pop_dynamic_layer_stack,
     push_dynamic_layer_stack,
 )
+from torch.autograd.forward_ad import _enable_fwd_grad
 
 """
 This file contains the functorch integration with PyDispatcher.
@@ -122,12 +124,43 @@ class GradInterpreter(FuncTorchInterpreter):
         return self._cptr.prevGradMode()
 
 
+class JvpInterpreter(FuncTorchInterpreter):
+    def __init__(self, cdata: CInterpreter):
+        assert cdata.key() == TransformType.Jvp
+        # See NOTE: [Interpreter cdata vs cptr]
+        self._cdata = cdata
+        self._cptr = CJvpInterpreterPtr(cdata)
+
+    def lift(self, args, kwargs):
+        args, kwargs = pytree.tree_map_only(torch.Tensor, self._cptr.lift, [args, kwargs])
+        return args, kwargs
+
+    def process(self, op, args, kwargs):
+        kernel = op.functorch_table[TransformType.Jvp]
+        args, kwargs = self.lift(args, kwargs)
+        return kernel(self, *args, **kwargs)
+
+    # Jvp has custom lower because of the no_fwd_grad interaction
+    # See NOTE [grad and vjp interaction with no_grad] for related info.
+    # This logic is mirrored from C++ JvpInterpreterPtr::sendToNextInterpreter
+    def lower(self):
+        prev_fwd_grad_mode = self.prev_fwd_grad_mode()
+        if not self.prev_fwd_grad_mode:
+            return contextlib.nested(_enable_fwd_grad(False), super().lower())
+        return super().lower()
+
+    def prev_fwd_grad_mode(self):
+        return self._cptr.prevFwdGradMode()
+
+
 def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     key = cinterpreter.key()
     if key == TransformType.Grad:
         return GradInterpreter(cinterpreter)
     if key == TransformType.Vmap:
         return VmapInterpreter(cinterpreter)
+    if key == TransformType.Jvp:
+        return JvpInterpreter(cinterpreter)
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 

@@ -34,6 +34,7 @@ class NumpyCube(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, outputs, input):
         ctx.save_for_backward(input, outputs[1])
+        ctx.save_for_forward(input, outputs[1])
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
@@ -44,6 +45,11 @@ class NumpyCube(torch.autograd.Function):
     def vmap(info, in_dims, input):
         result = NumpyCube.apply(input)
         return result, (in_dims[0], in_dims[0])
+
+    @staticmethod
+    def jvp(ctx, input_tangent):
+        input, dinput = ctx.saved_tensors
+        return NumpyMul.apply(input_tangent, dinput), 6 * NumpyMul.apply(input_tangent, input)
 
 def sample_inputs_numpy_cube(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -77,6 +83,7 @@ class NumpyMul(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, outputs, x, y):
         ctx.save_for_backward(x, y)
+        ctx.save_for_forward(x, y)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -98,6 +105,11 @@ class NumpyMul(torch.autograd.Function):
         result = result.movedim(-1, 0)
         return result, 0
 
+    @staticmethod
+    def jvp(ctx, x_tangent, y_tangent):
+        x, y = ctx.saved_tensors
+        return x_tangent * y + y_tangent * x
+
 def sample_inputs_numpy_mul(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     # Broadcasting
@@ -115,6 +127,7 @@ class NumpyExp_(torch.autograd.Function):
     def setup_context(ctx, outputs, x):
         ctx.mark_dirty(x)
         ctx.save_for_backward(outputs)
+        ctx.save_for_forward(outputs)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -125,6 +138,13 @@ class NumpyExp_(torch.autograd.Function):
     def vmap(info, in_dims, x):
         NumpyExp_.apply(x)
         return x, in_dims[0]
+
+    @staticmethod
+    def jvp(ctx, x_tangent):
+        # Doesn't call numpy operations because I didn't want to write NumpyMul_
+        output, = ctx.saved_tensors
+        x_tangent.mul_(output)
+        return x_tangent
 
 class NumpySort(torch.autograd.Function):
     @staticmethod
@@ -145,6 +165,7 @@ class NumpySort(torch.autograd.Function):
         _, ind, ind_inv = outputs
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
+        ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
 
     @staticmethod
@@ -159,6 +180,11 @@ class NumpySort(torch.autograd.Function):
         # wrap dim
         dim = dim if dim >= 0 else dim + x.dim() - 1
         return NumpySort.apply(x, dim + 1), (0, 0, 0)
+
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        ind, ind_inv = ctx.saved_tensors
+        return NumpyTake.apply(x_tangent, ind, ind_inv, ctx.dim), None, None
 
 def sample_inputs_numpy_sort(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -176,6 +202,7 @@ class NumpyTake(torch.autograd.Function):
     @staticmethod
     def setup_context(ctx, outputs, x, ind, ind_inv, dim):
         ctx.save_for_backward(ind, ind_inv)
+        ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
 
     @staticmethod
@@ -203,6 +230,13 @@ class NumpyTake(torch.autograd.Function):
 
         return NumpyTake.apply(x, ind, ind_inv, dim + 1), 0
 
+    @staticmethod
+    def jvp(ctx, x_tangent, ind_tangent, ind_inv_tangent, _):
+        assert ind_tangent is None
+        assert ind_inv_tangent is None
+        ind, ind_inv = ctx.saved_tensors
+        return NumpyTake.apply(x_tangent, ind, ind_inv, ctx.dim)
+
 class Select(torch.autograd.Function):
     @staticmethod
     def forward(x, idx):
@@ -225,6 +259,10 @@ class Select(torch.autograd.Function):
         x = x.movedim(x_bdim, 1)
         return Select.apply(x, idx), 0
 
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        return Select.apply(x_tangent, ctx.idx)
+
 
 def sample_inputs_select(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -235,27 +273,27 @@ autograd_function_db = [
     OpInfo(
         'NumpyCubeAutogradFunction',
         op=NumpyCube.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
-    OpInfo(
-        'NumpyExpAutogradFunction',
-        op=lambda x: NumpyExp_.apply(x.clone()),
-        inplace_variant=NumpyExp_.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
-        sample_inputs_func=sample_inputs_numpy_cube,
-        dtypes=all_types_and(torch.bool, torch.half),
-        supports_out=False,
-    ),
+    # OpInfo(
+    #     'NumpyExpAutogradFunction',
+    #     op=lambda x: NumpyExp_.apply(x.clone()),
+    #     inplace_variant=NumpyExp_.apply,
+    #     supports_forward_ad=True,
+    #     supports_fwgrad_bwgrad=True,
+    #     sample_inputs_func=sample_inputs_numpy_cube,
+    #     dtypes=all_types_and(torch.bool, torch.half),
+    #     supports_out=False,
+    # ),
     OpInfo(
         'NumpyMulAutogradFunction',
         op=NumpyMul.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_mul,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
@@ -282,8 +320,8 @@ autograd_function_db = [
     OpInfo(
         'SelectAutogradFunction',
         op=Select.apply,
-        supports_forward_ad=False,
-        supports_fwgrad_bwgrad=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_select,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,

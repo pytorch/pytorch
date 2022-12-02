@@ -13,6 +13,7 @@ from functorch._src.vmap import (
     _broadcast_to_and_flatten,
     _create_batched_inputs,
 )
+from torch.autograd.forward_ad import _enable_fwd_grad
 from typing import NamedTuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
@@ -80,6 +81,7 @@ custom_function_call = CustomFunctionPyOperator()
 # To "set up the autograd graph", we generate a _SingleLevelFunction
 # and apply it.
 @custom_function_call.py_impl(TransformType.Grad)
+@custom_function_call.py_impl(TransformType.Jvp)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
     maybe_interpreter = interpreter
     level = maybe_interpreter.level()
@@ -94,25 +96,36 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
                 torch.Tensor,
                 lambda x: _unwrap_for_grad(x, level),
                 operands)
-            with torch.enable_grad(), maybe_interpreter.lower():
+            # Both enable_grad() and _enable_fwd_grad() are necessary no matter
+            # the transform. _SingleLevelFunction will turn off both fwd and bwd
+            # gradient computation and we need to turn it back on here.
+            with torch.enable_grad(), _enable_fwd_grad(), maybe_interpreter.lower():
                 output = custom_function_call(autograd_function, *unwrapped_operands)
 
             # autograd.Function's ctx.mark_dirty expect a returned input
             # to have the same object identity as the input.
             # Mode-only functorch will greatly simplify this logic.
-            return wrap_outputs_maintaining_identity(
+            results = wrap_outputs_maintaining_identity(
                 output,
                 unwrapped_operands,
                 operands,
                 level)
+            return results
 
         @staticmethod
         def setup_context(ctx, outputs, *operands):
             return autograd_function.setup_context(ctx, outputs, *operands)
 
+        # backward is only used if the transform is TransformType.Grad
         @staticmethod
         def backward(ctx, *grads):
             result = autograd_function.backward(ctx, *grads)
+            return result
+
+        # jvp is only used if the transform is TransformType.Jvp
+        @staticmethod
+        def jvp(ctx, *tangents):
+            result = autograd_function.jvp(ctx, *tangents)
             return result
 
     with enable_autograd_function():
@@ -264,11 +277,6 @@ def preserve_object_identity(outputs, inputs, unwrapped_outputs, unwrapped_input
         result.append(output)
 
     return pytree.tree_unflatten(result, spec)
-
-
-@custom_function_call.py_impl(TransformType.Jvp)
-def custom_function_call_jvp(interpreter, autograd_function, *operands):
-    raise RuntimeError("NYI: jvp rule for custom_function_call")
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)

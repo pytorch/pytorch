@@ -1,3 +1,4 @@
+import contextlib
 import torch
 import os
 import sys
@@ -181,3 +182,16 @@ class dual_level(_DecoratorContextManager):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         exit_dual_level()
+
+
+# Private API: do not use. If you want to disable forward-ad computation in part of your
+# program, please use the public Tensor.detach() API.
+# Please open an issue if you have a use case for this context manager.
+@contextlib.contextmanager
+def _enable_fwd_grad(enabled=True):
+    prev_state = torch._C._functorch.get_fwd_grad_enabled()
+    torch._C._functorch.set_fwd_grad_enabled(enabled)
+    try:
+        yield
+    finally:
+        torch._C._functorch.set_fwd_grad_enabled(prev_state)
