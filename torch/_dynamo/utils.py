@@ -1180,5 +1180,5 @@ def fake_mode_from_tensors(inputs: List[Any]):
             if fake_mode is None:
                 fake_mode = flat_input.fake_mode
             else:
-                assert fake_mode == flat_input.fake_mode
+                assert fake_mode is flat_input.fake_mode
     return fake_mode

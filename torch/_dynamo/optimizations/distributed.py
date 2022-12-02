@@ -252,6 +252,20 @@ class DDPOptimizer:
                 )
                 return wrapper
 
+            # Note:
+            #
+            # The way distributed works today we fakify the module for compile time,
+            # but we keep it as a real module for runtime.
+            #
+            # In order to do so:
+            # - For the runtime, we need to *install* a real compiled submod
+            # on the graph via `self.module.add_submodule(n.target, compiled_submod_real)`.
+            #
+            # - For the compile time, we produce a curr_submod and execute it right away;
+            # curr_submod can be real, or fake, depending on the presence of a fake_mode.
+            #
+            # Part of the reason for this comes from the fact that AOTAutograd takes a real module,
+            # but fake tensors as input. See the note [Fake Modules and AOTAutograd] on aot_autograd.py
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -274,12 +288,12 @@ class DDPOptimizer:
                     if n.op == "call_module":
                         real_mod = self.fetch_attr(n.target)
                         if fake_mode:
-                            fake_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
+                            curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
                         else:
-                            fake_submod = real_mod
+                            curr_submod = real_mod
                             pass
                         log.debug(
-                            f"\n---{n.target} graph---\n" + str(fake_submod.graph)
+                            f"\n---{n.target} graph---\n" + str(curr_submod.graph)
                         )
                         compiled_submod_real = self.compile_submod(
                             real_mod, new_args, kwargs
@@ -287,7 +301,7 @@ class DDPOptimizer:
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod_real)
-                        return fake_submod(*new_args, **kwargs)
+                        return curr_submod(*new_args, **kwargs)
                     # then we execute the modified node using the usual logic
                     return getattr(self, n.op)(n.target, new_args, kwargs)
 

@@ -134,11 +134,13 @@ class ShapeProp(torch.fx.Interpreter):
     def run_node(self, n : Node) -> Any:
         try:
             if self.fake_module is not None:
-                # Hacky little swap lol
+                # Hacky swap. Alternatively, we could do this with overriding
+                # call_module and get_attr.
                 self.module = self.fake_module
-
-            result = super().run_node(n)
-            self.module = self.real_module
+            try:
+                result = super().run_node(n)
+            finally:
+                self.module = self.real_module
         except Exception:
             traceback.print_exc()
             raise RuntimeError(
