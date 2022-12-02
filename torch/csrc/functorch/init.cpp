@@ -388,12 +388,26 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
+static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
+    const Tensor& tensor,
+    int64_t level) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (!batched) {
+    return std::make_tuple(tensor, nullopt);
+  }
+  if (batched->level() == level) {
+    return std::make_tuple(batched->value(), batched->bdim());
+  }
+  return std::make_tuple(tensor, nullopt);
+}
+
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
 
   m.def("_add_batch_dim", &_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &_remove_batch_dim, "remove batch dim");
+  m.def("_unwrap_batched", &unwrapBatched);
   m.def(
       "_wrap_functional_tensor",
       &_wrap_functional_tensor,
