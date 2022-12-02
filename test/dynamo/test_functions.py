@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import operator
+import unittest
 from typing import Any
 from unittest.mock import patch
 
@@ -339,6 +340,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_tensor_type(a, b):
         m = a.to(torch.float16)
         return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type2(a, b):
+        m = a.to("cuda")
+        return m + b.type(m.type())
 
     @make_test
     def test_ndim(x):
