@@ -9677,6 +9677,11 @@ select(input, dim, index) -> Tensor
 Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
+.. note:: If :attr:`input` is a sparse tensor and returning a view of
+          the tensor is not possible, a RuntimeError exception is
+          raised. In this is the case, consider using
+          :func:`torch.select_copy` function.
+
 Args:
     {input}
     dim (int): the dimension to slice
