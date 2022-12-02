@@ -42,7 +42,9 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, **kwargs)
 
 
-def run_model_test_with_fx_to_onnx_exporter(test_suite: _TestONNXRuntime, *args, **kwargs):
+def run_model_test_with_fx_to_onnx_exporter(
+    test_suite: _TestONNXRuntime, *args, **kwargs
+):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
