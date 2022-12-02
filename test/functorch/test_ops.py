@@ -1464,7 +1464,7 @@ class TestOperators(TestCase):
         # place, were not batched.
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail('native_dropout_backward',)
+        xfail('native_dropout_backward'),
         xfail('nn.functional.prelu'),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))

@@ -17584,13 +17584,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
-<<<<<<< HEAD
-=======
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
         supports_nvfuser=False,
->>>>>>> ee56e662e2... Fix prelu ref when a.ndim < 2
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
