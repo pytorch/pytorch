@@ -30,6 +30,11 @@ from torch.distributed.fsdp.flat_param import (
 )
 from torch.distributed.utils import _to_kwargs
 
+RESHARD_AFTER_FORWARD_STRATEGIES = {
+    HandleShardingStrategy.FULL_SHARD,
+    HandleShardingStrategy.HYBRID_SHARD,
+}
+
 @no_type_check
 def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
     """
@@ -344,14 +349,10 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
 
-    reshard_after_forward_strategies = {
-        HandleShardingStrategy.FULL_SHARD,
-        HandleShardingStrategy.HYBRID_SHARD,
-    }
 
     free_unsharded_flat_params = [
         not state._is_root
-        and handle._config.sharding_strategy in reshard_after_forward_strategies
+        and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
         for handle in handles
     ]
     _reshard(state, handles, free_unsharded_flat_params)
@@ -668,10 +669,7 @@ def _should_free_in_backward(
     # For NO_SHARD we don't need to free full parameters, for Zero-2 strategies, we skip
     # freeing in backward. Note that this also applies for HYBRID_SHARD_ZERO2.
     return free_unsharded or (
-        handle._config.sharding_strategy in {
-            HandleShardingStrategy.FULL_SHARD,
-            HandleShardingStrategy.HYBRID_SHARD,
-        }
+        handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
 
 
