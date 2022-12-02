@@ -842,10 +842,11 @@ def same(
                 # early exit that handles zero/nan better
                 # cosine_similarity(zeros(10), zeros(10), dim=0) is 0
                 return True
-            res = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
-            if res < 0.99:
-                log.warning(f"Similarity score={res.cpu().detach().item()}")
-            return res >= 0.99
+            score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
+            if score < 0.99:
+                breakpoint()
+                log.warning(f"Similarity score={score.cpu().detach().item()}")
+            return score >= 0.99
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
