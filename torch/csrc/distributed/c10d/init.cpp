@@ -620,6 +620,11 @@ This class does not support ``__members__`` property.)");
             return self == other.op_;
           })
       .def(
+          "__eq__",
+          // note(crcrpar): this could be a fallback path and resolve
+          // pytorch/pytorch#89591
+          [](const ::c10d::ReduceOp& self, py::object) { return false; })
+      .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
             return static_cast<uint8_t>(self.op_);
