@@ -763,5 +763,47 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
 
+
+class IgnoredModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l(x)
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.ignored = IgnoredModule()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.ignored(self.l1(x)))
+
+
+class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+    @property
+    def world_size(self):
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_mixed_precision_with_ignored_module(self):
+        model = Model().cuda()
+        float16 = MixedPrecision(param_dtype=torch.float16)
+        model = FSDP(
+            model,
+            ignored_modules=[model.ignored],
+            mixed_precision=float16,
+        )
+
+        x = torch.ones(2, 100, device=torch.cuda.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+            model(x).sum().backward()
+
+
 if __name__ == "__main__":
     run_tests()
