@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import inspect
 import unittest
 
@@ -9,9 +10,23 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
+
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
+
+
+# Include optimizer code for tracing
+optim_filenames = set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+
+
+optim_filenames |= {torch.optim._functional.__file__}
 
 
 def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
@@ -38,10 +53,23 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     return test_fn
 
 
+@contextlib.contextmanager
+def enable_optimizer_tracing():
+    try:
+        old = set(torch._dynamo.skipfiles.FILENAME_ALLOWLIST)
+
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.update(optim_filenames)
+        yield
+    finally:
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.clear()
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.update(old)
+
+
 class OptimizerTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
         # needed until pytorch assertion is changed to enable Adam
         # to be called with capturable=True
         cls._exit_stack.enter_context(
@@ -49,11 +77,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "capture_scalar_outputs", True
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config, "fake_tensor_propagation", False
-            )
-        )
+        cls._exit_stack.enter_context(enable_optimizer_tracing())
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)
     # lgbfs has data-dependent control and internally iterates
@@ -62,8 +86,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # test_lbfgs = make_test(
     #    torch.optim.LBFGS, exp_frame_cnt=3, closure=lambda: model(input).sum()
     # )
-    # RAdam has data-dependent control which breaks the graph
-    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=1)
+
+    # RAdam and Adagrad have data-dependent control which breaks the graph;
+    # furthermore, the break is inside a for loop, so we bail on the frame
+    # entirely.  This is basically an xfail; if the frame count goes up
+    # you done good
+    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=0)
+    test_adagrad = make_test(torch.optim.Adagrad, exp_frame_cnt=0)
 
     # ASGD has a small optimization that avoids averaging
     # This will fully capture the graph once that optimization is removed
@@ -79,7 +108,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
-exclude = set(["SGD", "Optimizer", "SparseAdam", "LBFGS", "RAdam", "ASGD"])
+exclude = set(["SGD", "Optimizer", "SparseAdam", "LBFGS", "RAdam", "Adagrad", "ASGD"])
 optimizers = [
     opt
     for opt in torch.optim.__dict__.values()
@@ -94,6 +123,10 @@ for opt in optimizers:
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(enable_optimizer_tracing())
 
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
