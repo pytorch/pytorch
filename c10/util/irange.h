@@ -19,6 +19,7 @@ template <
     typename std::enable_if<std::is_integral<I>::value, int>::type = 0>
 struct integer_iterator {
   explicit integer_iterator(I value) : value(value) {}
+
   I operator*() const {
     return value;
   }
