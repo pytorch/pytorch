@@ -283,29 +283,29 @@ at::Tensor& PackedLinearWeight::apply_relu_out(
   return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
-at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant(
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq(
   at::Tensor input,
   double input_scale,
   int64_t input_zero_point) {
-  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq_skip_quant is quantized; "
-  "Expected input tensor in PackedLinearWeight::apply_fused_qdq_skip_quant to be full precision.");
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_with_input_q_dq_qweight_dq is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_with_input_q_dq_qweight_dq to be full precision.");
 
-  return apply_fused_qdq_skip_quant_impl<false>(input, input_scale, input_zero_point);
+  return apply_with_input_q_dq_qweight_dq_impl<false>(input, input_scale, input_zero_point);
 }
 
-at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant_relu(
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_relu(
   at::Tensor input,
   double input_scale,
   int64_t input_zero_point) {
-  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_fused_qdq_skip_quant is quantized; "
-  "Expected input tensor in PackedLinearWeight::apply_fused_qdq_skip_quant to be full precision.");
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_with_input_q_dq_qweight_dq is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_with_input_q_dq_qweight_dq to be full precision.");
 
-  return apply_fused_qdq_skip_quant_impl<true>(input, input_scale, input_zero_point);
+  return apply_with_input_q_dq_qweight_dq_impl<true>(input, input_scale, input_zero_point);
 }
 
 
 template <bool ReluFused>
-at::Tensor PackedLinearWeight::apply_fused_qdq_skip_quant_impl(
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_impl(
     const at::Tensor& input,
     double input_scale,
     int64_t input_zero_point) {
@@ -904,10 +904,10 @@ class QLinearInt8FusedQDQ final {
       int64_t input_zero_point,
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     if (ReluFused) {
-      return packed_weight->apply_fused_qdq_skip_quant_relu(
+      return packed_weight->apply_with_input_q_dq_qweight_dq_relu(
           std::move(input), input_scale, input_zero_point);
     } else {
-      return packed_weight->apply_fused_qdq_skip_quant(
+      return packed_weight->apply_with_input_q_dq_qweight_dq(
           std::move(input), input_scale, input_zero_point);
     }
   }
@@ -923,8 +923,8 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_fused_qdq_skip_quant"), TORCH_FN(QLinearInt8FusedQDQ<false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_fused_qdq_skip_quant_relu"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq"), TORCH_FN(QLinearInt8FusedQDQ<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_relu"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
 }
 
 } // namespace
