@@ -533,8 +533,32 @@ class OutputGraph(fx.Tracer):
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
 
-            # We invoke the backend with real inputs if and only if
-            # we are in doing accuracy evaluation in the minifier
+            # NOTE: [Real Tensors in Accuracy Evaluation]
+            #
+            # Today, tensors are passed to backends as fake at compile time. See the .fake_example_inputs()
+            # call to compiler_fn below. At runtime, backends use real tensors.
+            #
+            # This should be a strong invariant we hold across all backends,
+            # and generally, it is. However, for accuracy evaluation, we need real tensors at compile time,
+            # for now, due to the unfortunate setup described below.
+            #
+            # Due to the nature of how we invoke comparison as a backend in two different ways:
+            #
+            # (1) Less bad, but still worth rewriting, WrapperBackend above, which takes
+            # real inputs for its ctor. see the config.verify_correctnes above.
+            #
+            # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
+            # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
+            # by the fact that the minifier will spawn new processes during minification. As such, we have
+            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
+            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
+            #
+            # The longer term PoR is to:
+            # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
+            # correctness and accuracy logic, so as not to have two different ways of doing the same thing.
+            #
+            # (B) Refactor minifier accuracy backend to do its comparison fully at runtime, so as not to need to
+            # pass real tensors to it at compile time.
             is_top_level_minifying = (
                 config.repro_after is not None and config.repro_level == 4
             )

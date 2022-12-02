@@ -254,18 +254,24 @@ class DDPOptimizer:
 
             # Note:
             #
-            # The way distributed works today we fakify the module for compile time,
-            # but we keep it as a real module for runtime.
+            # The way distributed works today around fake tensors can be somehwat confusing.
+            # Some of these codepaths are shared in both runtime, and compile time. The presence
+            # of a fake_mode, read off of fake tensor inputs, dictates how we will operate.
             #
-            # In order to do so:
-            # - For the runtime, we need to *install* a real compiled submod
+            # A few things to keep in mind:
+            #
+            # 1) We invoke `compile_submod` with a real module. The output of that gets stored
             # on the graph via `self.module.add_submodule(n.target, compiled_submod_real)`.
             #
-            # - For the compile time, we produce a curr_submod and execute it right away;
-            # curr_submod can be real, or fake, depending on the presence of a fake_mode.
+            # 2) When running a call_module targeted node, if we have a fake_mode, we fakify the
+            # module we got from self.fetch_attr(n.target). Regardless of fake_mode, we then execute it.
             #
-            # Part of the reason for this comes from the fact that AOTAutograd takes a real module,
-            # but fake tensors as input. See the note [Fake Modules and AOTAutograd] on aot_autograd.py
+            # 3) Fake tensors should always be around during compile time.
+            #
+            # 4) Fake tensors should never be around at runtime.
+            #
+            # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
+            # to match what aot_autograd exepcts. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)

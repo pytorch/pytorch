@@ -762,6 +762,7 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
+# Please see NOTE: [Real Tensors in Accuracy Evaluation]
 MINIFIER_SPAWNED = False
 
 
