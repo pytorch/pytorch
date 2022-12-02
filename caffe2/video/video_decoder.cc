@@ -606,7 +606,7 @@ void VideoDecoder::decodeLoop(
               unique_ptr<DecodedFrame> frame = make_unique<DecodedFrame>();
               frame->width_ = outWidth;
               frame->height_ = outHeight;
-              frame->data_ = move(buffer);
+              frame->data_ = std::move(buffer);
               frame->size_ = size;
               frame->index_ = frameIndex;
               frame->outputFrameIndex_ = outputFrameIndex;
@@ -735,10 +735,10 @@ bool DecodeMultipleClipsFromVideo(
   }
 
   for (auto& frame : callback.frames) {
-    sampledFrames.push_back(move(frame));
+    sampledFrames.push_back(std::move(frame));
   }
   for (auto& audio_sample : callback.audio_samples) {
-    sampledAudio.push_back(move(audio_sample));
+    sampledAudio.push_back(std::move(audio_sample));
   }
 
   for (int i = 0; i < buffer_rgb.size(); i++) {
