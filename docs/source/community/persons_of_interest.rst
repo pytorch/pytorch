@@ -121,7 +121,7 @@ NestedTensor (torch.nested)
 
 -  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
--  Driss Guessous (`disspg <https://github.com/drisspg>`__)
+-  Driss Guessous (`drisspg <https://github.com/drisspg>`__)
 -  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
