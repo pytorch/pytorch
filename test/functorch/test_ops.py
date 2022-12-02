@@ -344,7 +344,7 @@ aliasing_ops_list_return = {
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
@@ -514,7 +514,7 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
 
@@ -588,7 +588,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
@@ -1684,7 +1684,7 @@ class TestOperators(TestCase):
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         xfail('linalg.eig'),  # all close?
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
