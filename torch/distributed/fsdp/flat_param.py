@@ -1726,6 +1726,11 @@ class FlatParamHandle:
 
     def flat_grad_to(self, *args, **kwargs):
         """Wraps an in-place call to ``to()`` for ``self.flat_param.grad``."""
+        p_assert(
+            self.flat_param.grad is not None,
+            "Expects `flat_param.grad` to not be `None`",
+        )
+        assert self.flat_param.grad is not None  # mypy
         self.flat_param.grad.data = self.flat_param.grad.to(*args, **kwargs)
         if self._use_orig_params:
             # Refresh the views because their storage may have changed
