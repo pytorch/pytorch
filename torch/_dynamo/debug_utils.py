@@ -569,7 +569,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
                 " Skipping this graph."
             )
         )
-        return True
+        raise
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
@@ -762,10 +762,6 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
-# Please see NOTE: [Real Tensors in Accuracy Evaluation]
-MINIFIER_SPAWNED = False
-
-
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
     Minifier uses this function to identify if the minified graph module fails
@@ -835,7 +831,6 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
-torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = BACKENDS["{minifier_backend}"]
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
@@ -962,33 +957,40 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
 
     from torch._dynamo.optimizations.backends import BACKENDS
 
+    # (1) Get the backend
     if compiler_name == "inductor":
         from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:
+        assert compiler_name in BACKENDS, f"Unknown compiler name {compiler_name} provided."
         compiler_fn = BACKENDS[compiler_name]
 
-    # Set the eval mode to remove randomness.
-    gm.eval()
+    # (2) Compile the graph
+    compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    def backend_accuracy_eval_fwd(*args):
+        # Set the eval mode to remove randomness.
+        gm.eval()
 
-    # Check Accuracy
-    if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-        log.warning("Accuracy failed for the TorchDyanmo produced graph")
-        dump_state_fn = functools.partial(
-            dump_backend_state, compiler_name=compiler_name, check_accuracy=True
-        )
-        fails_fn = functools.partial(
-            backend_accuracy_fails,
-            compiler_fn=compiler_fn,
-        )
-        dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
-    else:
-        log.error("Input graph does not fail accuracy testing")
-    return gm
+        def module_fails_accuracy(gm, args):
+            return not same_two_models(gm, compiled_gm, args)
+
+        # (4) Check Accuracy
+        if not same_two_models(gm, compiled_gm, args):
+            log.warning("Accuracy failed for the TorchDyanmo produced graph")
+            dump_state_fn = functools.partial(
+                dump_backend_state, compiler_name=compiler_name, check_accuracy=True
+            )
+
+            dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), args)
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=module_fails_accuracy,
+                dump_state=dump_state_fn,
+            )
+        else:
+            log.error("Input graph does not fail accuracy testing")
+    
+    # (3) Install an accuracy verifying callable
+    return backend_accuracy_eval_fwd

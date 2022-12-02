@@ -549,9 +549,7 @@ class OutputGraph(fx.Tracer):
             #
             # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
             # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
-            # by the fact that the minifier will spawn new processes during minification. As such, we have
-            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
-            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
+            # by the fact that the minifier will spawn new processes during minification.
             #
             # The longer term PoR is to:
             # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
@@ -562,7 +560,7 @@ class OutputGraph(fx.Tracer):
             is_top_level_minifying = (
                 config.repro_after is not None and config.repro_level == 4
             )
-            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
+            if is_top_level_minifying:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
