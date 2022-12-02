@@ -112,7 +112,7 @@ class HandleConfig:
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: bool = False
+    keep_low_precision_grads: bool
 
 
 class FlatParameter(nn.Parameter):
@@ -373,8 +373,8 @@ class FlatParamHandle:
         prefixed_param_names: List[str] = []
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
-        params_to_flatten: List[nn.Parameter] = []
-        shared_params: List[nn.Parameter] = []
+        params_to_flatten: List[Union[torch.Tensor, nn.Parameter]] = []
+        shared_params: List[Union[torch.Tensor, nn.Parameter]] = []
         param_extensions: List[Any] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
@@ -436,6 +436,16 @@ class FlatParamHandle:
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
+        # For `use_orig_params=True`, ensure that the logical parameters are
+        # `nn.Parameter`s (and not plain `torch.Tensor`)
+
+        def convert_to_params(
+            tensors: List[Union[torch.Tensor, nn.Parameter]]
+        ) -> List[nn.Parameter]:
+            return [
+                t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors
+            ]
+
         self.flat_param._init_metadata(
             param_infos,
             numels,
@@ -443,8 +453,8 @@ class FlatParamHandle:
             prefixed_param_names,
             shared_param_infos,
             param_extensions,
-            params_to_flatten if use_orig_params else None,
-            shared_params if use_orig_params else None,
+            convert_to_params(params_to_flatten) if use_orig_params else None,
+            convert_to_params(shared_params) if use_orig_params else None,
         )
 
     @staticmethod
@@ -1307,7 +1317,10 @@ class FlatParamHandle:
                         assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
-                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                if (
+                    self._use_orig_params
+                    and self._training_state == HandleTrainingState.FORWARD
+                ):
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
@@ -1339,7 +1352,10 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
-                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                if (
+                    self._use_orig_params
+                    and self._training_state == HandleTrainingState.FORWARD
+                ):
                     module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:

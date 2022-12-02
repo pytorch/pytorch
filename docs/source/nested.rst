@@ -116,7 +116,7 @@ If all dimensions are regular, the NestedTensor is intended to be semantically i
 torch.Size([2, 20, 128])
 >>> torch.stack([a, a]).size()
 torch.Size([2, 20, 128])
->>> torch.equal(torch.stack(nt.unbind()), torch.stack([a, a]))
+>>> (torch.stack(nt.unbind()) == torch.stack([a, a])).all().item()
 True
 
 In the future we might make it easier to detect this condition and convert seamlessly.
@@ -201,7 +201,7 @@ NestedTensor and any constraints they have.
    Supports addition of a scalar to a nested tensor."
    :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
    Supports multiplication of a nested tensor by a scalar."
-   :func:`torch.select`; "Supports selecting along ``dim=0`` only (analogously ``nt[i]``)."
+   :func:`torch.select`; "Supports selecting along all dimensions."
    :func:`torch.clone`; "Behavior is the same as on regular tensors."
    :func:`torch.detach`; "Behavior is the same as on regular tensors."
    :func:`torch.unbind`; "Supports unbinding along ``dim=0`` only."

@@ -13,7 +13,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from .torchbench import setup_torchbench_cwd
@@ -25,9 +25,11 @@ from transformers.models.t5.modeling_t5 import T5Block
 
 
 def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
+    os.environ["MASTER_PORT"] = os.getenv("MASTER_PORT", "12355")
+    os.environ["RANK"] = os.getenv("RANK", "0")
+    os.environ["WORLD_SIZE"] = os.getenv("WORLD_SIZE", "1")
+    dist.init_process_group("nccl")
 
 
 def cleanup():
@@ -138,10 +140,7 @@ def apply_fsdp(args, model, use_checkpointing=False, use_wrap_policy=True):
         "toy_model" if model.__class__ is ToyModel else args.torchbench_model
     ]
     if use_wrap_policy:
-        # transformer policy is really a generic policy that wraps modules of specified classes
-        wrap_policy = functools.partial(
-            transformer_auto_wrap_policy, transformer_layer_cls=blocks
-        )
+        wrap_policy = ModuleWrapPolicy(blocks)
 
     model = FSDP(model, auto_wrap_policy=wrap_policy, use_orig_params=True)
     if use_checkpointing:

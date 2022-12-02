@@ -1325,6 +1325,17 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, x, y, z)
             self.assertLastGraphAllFused()
 
+    def test_sin_pow(self):
+        def test(x):
+            return torch.sin(torch.pow(x, 0))
+
+        for data_type, shape in itertools.product(self.dtypes, [[3], [5], [10]]):
+            x = torch.rand(shape, dtype=data_type)
+            scripted = torch.jit.script(test)
+            out = warmup_and_run_forward(scripted, x)
+            self.assertLastGraphAllFused()
+            self.assertEqual(out, test(x))
+
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1464,7 +1475,7 @@ class TestTensorExprFuser(BaseTestClass):
                 scripted = torch.jit.script(test)
                 out = warmup_and_run_forward(scripted, x)
                 self.assertLastGraphAllFused()
-                assert torch.equal(out, test(x))
+                torch.testing.assert_close(out, test(x), rtol=0, atol=0)
 
     def test_simple_add(self):
         val = torch._C._jit_get_te_generate_block_code()
