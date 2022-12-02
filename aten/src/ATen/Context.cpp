@@ -296,7 +296,7 @@ bool Context::hasLAPACK() {
 
 at::QEngine Context::qEngine() const {
   static auto _quantized_engine = []() {
-    at::QEngine qengine = at::kNoEngine;
+    at::QEngine qengine = at::kNoQEngine;
 #if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
     qengine = at::kQNNPACK;
 #endif
