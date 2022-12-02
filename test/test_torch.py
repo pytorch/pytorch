@@ -3914,7 +3914,6 @@ else:
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
-    @unittest.skipIf(is_cuda_sm86, "OOMs on sm86 configuration")
     @skipIfRocm
     @onlyCUDA
     @largeTensorTest('32GB', device='cpu')
