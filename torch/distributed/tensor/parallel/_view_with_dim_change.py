@@ -3,8 +3,8 @@ from typing import Tuple, Union
 
 import torch
 from torch.distributed._tensor import DTensor as DT
-from torch.distributed._tensor.placement_types import Shard
 from torch.distributed._tensor.ops.utils import prod
+from torch.distributed._tensor.placement_types import Shard
 
 
 def _view_with_sharding_dim_change(
