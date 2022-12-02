@@ -956,9 +956,7 @@ std::shared_ptr<ReductionParams> getPersistentHeuristics(
 }
 
 // fusion is the input IR that will be modified by this function
-void schedulePersistentKernel(
-    Fusion* fusion,
-    const ReductionParams& rparams) {
+void schedulePersistentKernel(Fusion* fusion, const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("schedulePersistentKernel");
 
   FusionGuard fg(fusion);

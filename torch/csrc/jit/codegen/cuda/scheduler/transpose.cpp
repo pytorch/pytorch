@@ -251,13 +251,15 @@ void maybeBuildVirtualInnerDims(
   // merge inner_most1 and inner_most2 left until we are done or we can no
   // longer do so
   int64_t dim = inner_most1 - 1;
-  while (dim >= 0 && dim != inner_most2 && merged_size1 < (int64_t)params.tile_size1) {
+  while (dim >= 0 && dim != inner_most2 &&
+         merged_size1 < (int64_t)params.tile_size1) {
     params.dims_merged_with_1.push_back(dim);
     merged_size1 *= shape_in_ref1[dim];
     dim--;
   }
   dim = inner_most2 - 1;
-  while (dim >= 0 && dim != inner_most1 && merged_size2 < (int64_t)params.tile_size2) {
+  while (dim >= 0 && dim != inner_most1 &&
+         merged_size2 < (int64_t)params.tile_size2) {
     params.dims_merged_with_2.push_back(dim);
     merged_size2 *= shape_in_ref1[dim];
     dim--;

@@ -1942,7 +1942,8 @@ void orderTiledConcreteIdAsRoot(TensorView* tv) {
 
   // Validate that we have processed all inner ids or broadcast/reduction
   //  ids we have registered.
-  TORCH_INTERNAL_ASSERT(current_pos == (int)ndims, "Inconsistent ordering logic");
+  TORCH_INTERNAL_ASSERT(
+      current_pos == (int)ndims, "Inconsistent ordering logic");
 
   // Apply the new order:
   tv->reorder(reorder_map_old_to_new);

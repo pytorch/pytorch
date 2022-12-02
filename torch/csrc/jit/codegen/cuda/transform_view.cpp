@@ -548,7 +548,8 @@ class AnalyzeViewTransformation {
       // view. Insert broadcast and increment new_view. Size 1 dimensions in
       // new_view that don't match up with runtime size 1's in original view are
       // assumed to be broadcast (not a split from a runtime domain).
-      if (new_view_index < (int64_t)new_view_.size() && new_view_[new_view_index] == 1) {
+      if (new_view_index < (int64_t)new_view_.size() &&
+          new_view_[new_view_index] == 1) {
         broadcast_transforms_.push_back(
             std::make_shared<BroadcastTransform>(new_view_index));
         ++new_view_index;

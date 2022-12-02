@@ -921,7 +921,8 @@ void scheduler_utils::matmul_utils::canonicalizeMmaTvOrdering(TensorView* tv) {
 
   // Validate that all of the root ids are covered by
   //  the inserted categories.
-  TORCH_INTERNAL_ASSERT(current_pos == (int)ndims, "Id not completely categorized");
+  TORCH_INTERNAL_ASSERT(
+      current_pos == (int)ndims, "Id not completely categorized");
 
   // Apply the new ordering
   tv->reorder(order_map);

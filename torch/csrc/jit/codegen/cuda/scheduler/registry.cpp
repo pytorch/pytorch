@@ -646,8 +646,8 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
   //  innermost dimension size for the word size of vectorizaiton
   size_t vector_size = 1;
   size_t next_vector_size = 2;
-  while (next_vector_size <= max_vector_size && next_vector_size <= (size_t)numel &&
-         numel % next_vector_size == 0) {
+  while (next_vector_size <= max_vector_size &&
+         next_vector_size <= (size_t)numel && numel % next_vector_size == 0) {
     vector_size = next_vector_size;
     next_vector_size *= 2;
   }

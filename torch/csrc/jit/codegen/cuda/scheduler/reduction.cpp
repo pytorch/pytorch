@@ -584,7 +584,8 @@ std::shared_ptr<ReductionParams> outerReductionHeuristic(
     if (target_blocks > device_multiprocessor_count &&
         target_threads_in_block >
             ceilDiv(device_max_threads_per_multiprocessor, (int64_t)16) &&
-        target_unroll < int64_t(vectorize_factor) && available_parallelism() > 1) {
+        target_unroll < int64_t(vectorize_factor) &&
+        available_parallelism() > 1) {
       target_unroll *= 2;
     }
   }
@@ -668,7 +669,8 @@ std::shared_ptr<ReductionParams> outerReductionHeuristic(
     iter_unroll_factor = std::min(iter_unroll_factor, iDimAvail());
     iter_unroll_factor = std::min(iter_unroll_factor, target_unroll);
     iter_unroll_factor = scheduler_utils::lastPow2(iter_unroll_factor);
-    if (vectorize_factor > 1 && iter_unroll_factor <= (int64_t)vectorize_factor) {
+    if (vectorize_factor > 1 &&
+        iter_unroll_factor <= (int64_t)vectorize_factor) {
       iter_unroll_factor =
           std::min(iter_unroll_factor, (int64_t)vectorize_factor);
       vectorize = true;

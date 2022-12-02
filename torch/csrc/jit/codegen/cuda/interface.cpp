@@ -30,16 +30,17 @@ namespace cuda {
 class LoadingNvfuserLibrary {
  public:
   LoadingNvfuserLibrary() {
-    static std::once_flag load_nvfuser_lib_flag;
-    std::call_once(load_nvfuser_lib_flag, [&] {
+    static c10::once_flag load_nvfuser_lib_flag;
+    c10::call_once(load_nvfuser_lib_flag, [&] {
       std::string library_name;
-      if (const char *path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
+      if (const char* path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
         library_name = path;
       }
       library_name += "libnvfuser_codegen.so";
       try {
-        nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
-      } catch (const c10::DynamicLibraryError &e) {
+        nvfuserLib_ =
+            std::make_shared<at::DynamicLibrary>(library_name.c_str());
+      } catch (const c10::DynamicLibraryError& e) {
         TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
       }
     });

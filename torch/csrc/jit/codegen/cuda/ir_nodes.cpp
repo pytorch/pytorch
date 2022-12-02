@@ -2564,7 +2564,9 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
       "Invalid start_dim ",
       start_dim);
   TORCH_CHECK(
-      end_dim >= 0 && end_dim < int64_t(inp_domain.size()), "Invalid end_dim ", end_dim);
+      end_dim >= 0 && end_dim < int64_t(inp_domain.size()),
+      "Invalid end_dim ",
+      end_dim);
   TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
 
   std::vector<IterDomain*> new_root_domain;

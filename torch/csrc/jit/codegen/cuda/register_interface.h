@@ -1,12 +1,12 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 
 #include <c10/macros/Export.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 /*
  * This file contains APIs for cuda fuser;
@@ -25,7 +25,8 @@ TORCH_CUDA_CU_API bool complyWith(
     const at::Tensor& tensor,
     const c10::TensorTypePtr& guard_tensor_type);
 
-struct TORCH_CUDA_CU_API NVFuserPassManager : public PassManager<NVFuserPassManager> {
+struct TORCH_CUDA_CU_API NVFuserPassManager
+    : public PassManager<NVFuserPassManager> {
   static bool registerPass(bool enabled) {
     bool old_value = PassManager::isRegistered();
     if (enabled) {

@@ -912,14 +912,16 @@ def configure_extension_build():
     extensions.append(C_flatbuffer)
 
     if cmake_cache_vars['BUILD_NVFUSER']:
-        extensions.append(Extension("torch._C_nvfuser",
-                          libraries=['nvfuser_python'],
-                          sources=["torch/csrc/jit/codegen/cuda/python_frontend/python_bindings_stub.c"],
-                          language='c',
-                          extra_compile_args=main_compile_args + extra_compile_args,
-                          include_dirs=[],
-                          library_dirs=library_dirs,
-                          extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib')),
+        extensions.append(
+            Extension(
+                "torch._C_nvfuser",
+                libraries=['nvfuser_python'],
+                sources=["torch/csrc/jit/codegen/cuda/python_frontend/python_bindings_stub.c"],
+                language='c',
+                extra_compile_args=main_compile_args + extra_compile_args,
+                include_dirs=[],
+                library_dirs=library_dirs,
+                extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib')),
         )
 
     # These extensions are built by cmake and copied manually in build_extensions()

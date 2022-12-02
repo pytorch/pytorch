@@ -1,17 +1,17 @@
-#include <torch/csrc/jit/codegen/cuda/register_interface.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/register_interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/TensorShape.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
-#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 /*
  * Registers function pointers in interface.h
@@ -424,8 +424,9 @@ RegisterOperators view_guard({
             std::vector<int64_t> view_sizes_int_vec = tensor_sizes.vec();
             std::vector<int64_t> previous_constraints =
                 tensor_constraints.vec();
-            auto new_constraints = torch::jit::fuser::cuda::analyzeViewConstraint(
-                 tensor_sizes_int_vec, view_sizes_int_vec);
+            auto new_constraints =
+                torch::jit::fuser::cuda::analyzeViewConstraint(
+                    tensor_sizes_int_vec, view_sizes_int_vec);
             bool guard_status =
                 (new_constraints.conglomerateString() == previous_constraints);
             push(stack, IValue(guard_status));
