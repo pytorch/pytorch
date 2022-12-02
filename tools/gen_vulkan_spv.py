@@ -212,19 +212,22 @@ def genGLSLFromGLSLT(src_dir_path, tmp_dir_path):
     for glslt in templateSrcPaths:
         generator.generate(glslt, tmp_dir_path)  # type: ignore[no-untyped-call]
 
-def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
-    print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
-        hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
+def genCppH(hFilePath, cppFilePath, srcDirPaths, glslcPath, tmpDirPath, env):
+    print("hFilePath:{} cppFilePath:{} srcDirPaths:{} glslcPath:{} tmpDirPath:{}".format(
+        hFilePath, cppFilePath, srcDirPaths, glslcPath, tmpDirPath))
 
-    vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
     templateSrcPaths = []
-    for f in vexs:
-        if len(f) > 1:
-            templateSrcPaths.append(f)
-            templateSrcPaths.sort()
 
-    # Now add glsl files that are generated from templates
-    genGLSLFromGLSLT(srcDirPath, tmpDirPath)
+    for srcDirPath in srcDirPaths:
+        vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
+        for f in vexs:
+            if len(f) > 1:
+                templateSrcPaths.append(f)
+                templateSrcPaths.sort()
+
+        # Now add glsl files that are generated from templates
+        genGLSLFromGLSLT(srcDirPath, tmpDirPath)
+
     vexs = glob.glob(os.path.join(tmpDirPath, '**', '*.glsl'), recursive=True)
     for f in vexs:
         if len(f) > 1:
@@ -251,9 +254,8 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
             glslcPath, "-fshader-stage=compute",
             srcPath, "-o", spvPath,
             "--target-env=vulkan1.0",
-            "-I", srcDirPath,
             "-Werror"
-        ]
+        ] + [arg for srcDirPath in srcDirPaths for arg in ["-I", srcDirPath]]
 
         print("\nglslc cmd:", cmd)
 
@@ -353,9 +355,11 @@ def main(argv):
     parser = argparse.ArgumentParser(description='')
     parser.add_argument(
         '-i',
-        '--glsl-path',
-        help='',
-        default='.')
+        '--glsl-paths',
+        nargs='+',
+        help='List of paths to look for GLSL source files, separated by spaces. Ex: --glsl-paths "path1 path2 path3"',
+        default=['.'],
+    )
     parser.add_argument(
         '-c',
         '--glslc-path',
@@ -390,7 +394,7 @@ def main(argv):
     genCppH(
         hFilePath=options.output_path + "/spv.h",
         cppFilePath=options.output_path + "/spv.cpp",
-        srcDirPath=options.glsl_path,
+        srcDirPaths=options.glsl_paths,
         glslcPath=options.glslc_path,
         tmpDirPath=options.tmp_dir_path,
         env=env)
