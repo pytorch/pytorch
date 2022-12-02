@@ -2041,6 +2041,31 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_mapping_repr(self):
         self.assertTrue(isinstance(get_default_qconfig_mapping().__repr__(), str))
 
+    def test_default_qconfig_mapping_override_global(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        my_qconfig = QConfig(activation=MinMaxObserver, weight=default_weight_observer)
+        qconfig_mapping = get_default_qconfig_mapping()
+        # Override global qconfig
+        old_global_qconfig = qconfig_mapping.global_qconfig
+        qconfig_mapping.set_global(my_qconfig)
+        # Verify the correct qconfig was used
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        self.assertTrue(isinstance(old_global_qconfig.activation(), HistogramObserver))
+        self.assertTrue(isinstance(my_qconfig.activation(), MinMaxObserver))
+        self.assertTrue(hasattr(m, "activation_post_process_0"))
+        self.assertTrue(hasattr(m, "activation_post_process_1"))
+        self.assertTrue(isinstance(m.activation_post_process_0, MinMaxObserver))
+        self.assertTrue(isinstance(m.activation_post_process_1, MinMaxObserver))
+
     # Dummy classes for PrepareCustomConfig testing
 
     class _DummyStandaloneModule:
