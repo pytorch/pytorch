@@ -1749,7 +1749,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
-        self.assertTrue(torch.equal(sample.data, vec.data[:5]))
+        self.assertEqual(sample.data, vec.data[:5], rtol=0, atol=0, exact_device=True)
 
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
@@ -5119,9 +5119,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Forward random tensor
         _ = bn(torch.rand(input_size))
         # Ensure none of the buffers has been updated
-        self.assertTrue(torch.equal(num_batches, bn.num_batches_tracked))
-        self.assertTrue(torch.equal(running_mean, bn.running_mean))
-        self.assertTrue(torch.equal(running_var, bn.running_var))
+        self.assertEqual(num_batches, bn.num_batches_tracked, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(running_mean, bn.running_mean, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(running_var, bn.running_var, rtol=0, atol=0, exact_device=True)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_batchnorm_nhwc_cuda(self):
@@ -5133,7 +5133,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp2 = inp1.contiguous(memory_format=torch.channels_last)
             out1 = model(inp1)
             out2 = model(inp2)
-            self.assertTrue(torch.equal(out1, out2))
+            self.assertEqual(out1, out2, rtol=0, atol=0, exact_device=True)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -7672,6 +7672,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+        for elementwise_affine in [True, False]:
+            # layer norm input shape is normalized to m x n, cpu vectorized on n,
+            # so make sure n exceeds vector length
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            m2 = deepcopy(m).to(device, torch.float)
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -8085,6 +8096,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
+
+        if self.device_type == 'cpu':
+            self._test_LayerNorm_cpu_mixed_dtype(device)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
