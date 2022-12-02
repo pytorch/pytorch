@@ -141,20 +141,23 @@ void round_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void round_decimals_kernel_cuda(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.dtype(), "round_cuda",
       [&]() {
         bool neg_flag = false;
-        scalar_t ten_pow_decimals;
         if (decimals < 0) {
           decimals = -decimals;
           neg_flag = true;
         }
-        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        using compute_t = std::conditional<std::is_integral<scalar_t>::value, float, scalar_t>::type;
+        auto ten_pow_decimals = static_cast<compute_t>(std::pow(10, decimals));
         gpu_kernel(iter, [ten_pow_decimals, neg_flag]GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+          auto a_ = static_cast<compute_t>(a);
+          auto result = neg_flag
+              ? std::nearbyint(a_ / ten_pow_decimals) * ten_pow_decimals
+              : std::nearbyint(a_ * ten_pow_decimals) / ten_pow_decimals;
+          return static_cast<scalar_t>(result);
         });
       });
 }

@@ -558,18 +558,21 @@ static void erfcx_kernel(TensorIteratorBase& iter){
 }
 
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND(
       ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
         bool neg_flag = false;
-        scalar_t ten_pow_decimals;
         if (decimals < 0) {
           decimals = -decimals;
           neg_flag = true;
         }
-        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        using compute_t = std::conditional<std::is_integral<scalar_t>::value, float, scalar_t>::type;
+        auto ten_pow_decimals = static_cast<compute_t>(std::pow(10, decimals));
         cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
-          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+          auto a_ = static_cast<compute_t>(a);
+          auto result = neg_flag
+              ? std::nearbyint(a_ / ten_pow_decimals) * ten_pow_decimals
+              : std::nearbyint(a_ * ten_pow_decimals) / ten_pow_decimals;
+          return static_cast<scalar_t>(result);
         });
       });
 }

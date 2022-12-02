@@ -379,6 +379,11 @@ TORCH_IMPL_FUNC(round_decimals_out)
   if (decimals != 0) {
     round_decimals_stub(device_type(), *this, decimals);
   } else {
+    // fast-path for `decimals == 0` and integral input.
+    if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/false)) {
+      result.copy_(self);
+      return;
+    }
     round_stub(device_type(), *this);
   }
 }
