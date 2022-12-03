@@ -5,7 +5,7 @@ import os
 import logging
 import pandas as pd
 
-from functorch._src.benchmark_utils import compute_utilization
+from torch._functorch.benchmark_utils import compute_utilization
 
 # process the chrome traces output by the pytorch profiler
 # require the json input file's name to be in format {model_name}_chrome_trace_*.json

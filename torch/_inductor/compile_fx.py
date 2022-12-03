@@ -6,10 +6,10 @@ import sys
 from typing import List
 
 import functorch
-from functorch._src.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
+from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
 from . import config, metrics, overrides
@@ -393,7 +393,7 @@ def compile_fx(
     with overrides.patch_functions():
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
             fw_compiler=fw_compiler,

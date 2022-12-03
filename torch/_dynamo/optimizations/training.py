@@ -6,8 +6,6 @@ from functools import partial
 from importlib import import_module
 from typing import Set
 
-from functorch._src.compilers import debug_nop
-
 from functorch.compile import (
     aot_module_simplified,
     min_cut_rematerialization_partition,
@@ -16,6 +14,8 @@ from functorch.compile import (
 )
 
 import torch
+
+from torch._functorch.compilers import debug_nop
 from torch.fx import GraphModule
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
