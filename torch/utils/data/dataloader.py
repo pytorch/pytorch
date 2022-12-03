@@ -175,7 +175,9 @@ class DataLoader(Generic[T_co]):
             `base_seed` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
-            2 * num_workers batches prefetched across all workers. (default: ``2``)
+            2 * num_workers batches prefetched across all workers. (default value depends
+            on the set value for num_workers. If value of num_workers=0 default is ``None``.
+            Otherwise if value of num_workers>0 default is ``2``).
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
