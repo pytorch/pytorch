@@ -299,7 +299,7 @@ def _multi_tensor_asgd(
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = etas[i]
+    eta = etas[0]
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
