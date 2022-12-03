@@ -321,7 +321,9 @@ def catch_errors_wrapper(callback):
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
                     hijacked_callback = convert_frame.convert_frame(
-                        ddp_optimizer.compile_fn, guard_export_fn=None
+                        ddp_optimizer.compile_fn,
+                        guard_export_fn=None,
+                        guard_fail_fn=None,
                     )
                     return hijacked_callback(frame, cache_size)
 
@@ -382,6 +384,7 @@ def optimize(
     *,
     nopython=False,
     guard_export_fn=None,
+    guard_fail_fn=None,
     disable=False,
     dynamic=False,
 ):
@@ -432,10 +435,15 @@ def optimize(
 
     if nopython:
         return optimize_assert(
-            backend, guard_export_fn=guard_export_fn, dynamic=dynamic
+            backend,
+            guard_export_fn=guard_export_fn,
+            guard_fail_fn=guard_fail_fn,
+            dynamic=dynamic,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
+        convert_frame.convert_frame(
+            backend, guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn
+        ),
         backend_ctx_ctor,
         dynamic=dynamic,
     )
@@ -669,7 +677,9 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=False):
+def optimize_assert(
+    backend, *, guard_export_fn=None, guard_fail_fn=None, export=False, dynamic=False
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -679,7 +689,9 @@ def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=Fals
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        convert_frame.convert_frame_assert(
+            backend, guard_export_fn, guard_fail_fn=guard_fail_fn, export=export
+        ),
         backend_ctx_ctor,
         dynamic=dynamic,
     )

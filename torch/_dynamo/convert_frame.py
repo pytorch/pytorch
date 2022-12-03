@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import Callable, cast, Dict, List, Optional, Set
+from typing import Callable, cast, Dict, List, Optional, Set, Tuple
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -267,6 +267,7 @@ def exception_handler(e, code, frame=None):
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     guard_export_fn=None,
+    guard_fail_fn=None,
     one_graph: bool = True,
     export: bool = False,
 ):
@@ -345,6 +346,7 @@ def convert_frame_assert(
             one_graph,
             export,
             guard_export_fn,
+            guard_fail_fn,
             frame,
         )
 
@@ -361,6 +363,7 @@ def _compile(
     one_graph: bool,
     export: bool,
     guard_export_fn: Optional[Callable[[Set[Guard]], None]] = None,
+    guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
@@ -433,7 +436,9 @@ def _compile(
         assert output is not None
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(output, output.guards, locals, globals)
+        check_fn = CheckFunctionManager(
+            output, output.guards, locals, globals, guard_fail_fn
+        )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
         guard_str = "GUARDS:\n"
@@ -458,9 +463,11 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None):
+def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None, guard_fail_fn=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
+    inner_convert = convert_frame_assert(
+        compiler_fn, guard_export_fn, guard_fail_fn, one_graph=False
+    )
 
     def _convert_frame(frame: types.FrameType, cache_size: int):
         counters["frames"]["total"] += 1
@@ -502,6 +509,7 @@ def replay(filename):
             one_graph=False,
             export=False,
             guard_export_fn=None,
+            guard_fail_fn=None,
             frame=None,
         )
     except Exception:
