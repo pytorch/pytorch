@@ -330,5 +330,5 @@ def _multi_tensor_adamax(
         torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
     bias_corrections = [1 - beta1 ** step for step in state_steps]
-    clr = torch.tensor([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
+    clr = torch.stack([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)

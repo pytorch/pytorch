@@ -347,7 +347,7 @@ def _multi_tensor_radam(
     exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
     bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
     denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
-    step_size = torch.tensor([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
+    step_size = torch.stack([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
 
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
 

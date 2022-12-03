@@ -472,7 +472,7 @@ def _multi_tensor_adamw(
         bias_correction1 = [1 - beta1 ** step for step in state_steps]
         bias_correction2 = [1 - beta2 ** step for step in state_steps]
 
-        step_size = torch.tensor([(lr / bc) * -1 for bc in bias_correction1])
+        step_size = torch.stack([(lr / bc) * -1 for bc in bias_correction1])
 
         bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 

@@ -92,10 +92,10 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # furthermore, the break is inside a for loop, so we bail on the frame
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
-    test_nadam = make_test(torch.optim.NAdam, exp_graph_count=0)
     test_radam = make_test(torch.optim.RAdam, exp_graph_count=0)
     test_adagrad = make_test(torch.optim.Adagrad, exp_graph_count=0)
 
+    test_nadam = make_test(torch.optim.NAdam)
     # ASGD has a small optimization that avoids averaging
     # This will fully capture the graph once that optimization is removed
     # test_asgd = make_test(torch.optim.ASGD, exp_graph_count=0)

@@ -252,21 +252,14 @@ def _single_tensor_nadam(params: List[Tensor],
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(bias_correction2).sqrt()
-        if differentiable:
-            denom = denom.add(eps)
-            # Make autograd track the operations
-            # by updating the grad and exp_avg directly and not using the
-            # scalar "value" argument of addcdiv.
-            grad = grad * (-lr * (1. - mu) / (1. - mu_product))
-            exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
-            value_grad = 1.0
-            value_exp_avg = 1.0
-            param.addcdiv_(grad, denom, value=1.0)
-            param.addcdiv_(exp_avg, denom, value=1.0)
-        else:
-            denom.add_(eps)
-            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
-            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
+        denom = denom.add(eps)
+        # Make autograd track the operations
+        # by updating the grad and exp_avg directly and not using the
+        # scalar "value" argument of addcdiv.
+        grad = grad * (-lr * (1. - mu) / (1. - mu_product))
+        exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
+        param.addcdiv_(grad, denom)
+        param.addcdiv_(exp_avg, denom)
 
 
 def _multi_tensor_nadam(params: List[Tensor],
@@ -316,9 +309,9 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size_grads = torch.tensor([(lr * (1. - mu) / (1. - mu_product)) * -1
+    step_size_grads = torch.stack([(lr * (1. - mu) / (1. - mu_product)) * -1
                                     for mu_product, mu in zip(mu_products, mus)])
-    step_size_expavg = torch.tensor([(lr * mu_next / (1. - mu_product * mu_next)) * -1
+    step_size_expavg = torch.stack([(lr * mu_next / (1. - mu_product * mu_next)) * -1
                                      for mu_product, mu_next in zip(mu_products, mu_nexts)])
 
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)

@@ -423,7 +423,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = math.sqrt(bias_correction2)
+            bias_correction2_sqrt = bias_correction2.sqrt()
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -528,7 +528,7 @@ def _multi_tensor_adam(params: List[Tensor],
         bias_correction1 = [1 - beta1 ** step for step in state_steps]
         bias_correction2 = [1 - beta2 ** step for step in state_steps]
 
-        step_size = torch.tensor([(lr / bc) * -1 for bc in bias_correction1])
+        step_size = torch.stack([(lr / bc) * -1 for bc in bias_correction1])
 
         bias_correction2_sqrt = [torch.sqrt(bc) for bc in bias_correction2]
 

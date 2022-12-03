@@ -253,7 +253,7 @@ def _single_tensor_asgd(
         else:
             ax.copy_(param)
 
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step_t), alpha))
+        new_eta = torch.stack(lr / math.pow((1 + lambd * lr * step_t), alpha))
         eta.copy_(new_eta)
         new_mu = 1 / max(1, step_t - t0)
         mu.copy_(new_mu)
@@ -300,7 +300,7 @@ def _multi_tensor_asgd(
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = etas[0]
+    eta = etas[i]
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
@@ -315,7 +315,7 @@ def _multi_tensor_asgd(
 
     # update eta and mu
     for i in range(len(mus)):
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * state_steps[i]), alpha))
+        new_eta = torch.stack(lr / math.pow((1 + lambd * lr * state_steps[i]), alpha))
         etas[i].copy_(new_eta)
         new_mu = 1 / max(1, state_steps[i] - t0)
         mus[i].copy_(new_mu)
