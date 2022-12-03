@@ -3565,7 +3565,7 @@ class TestQuantizedLinear(TestCase):
             else:
                 qlinear = torch.ops.quantized.linear
             if use_multi_dim_input:
-                batch_size *= 3  # Test the multi-dim inpunt tensor
+                batch_size *= 3  # Test the multi-dim input tensor
             X_scale = 1.5
             X_zp = 5
             X_value_min = -128 if dtype == torch.qint8 else 0
@@ -3709,7 +3709,7 @@ class TestQuantizedLinear(TestCase):
             else:
                 qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq
             if use_multi_dim_input:
-                batch_size *= 3  # Test the multi-dim inpunt tensor
+                batch_size *= 3  # Test the multi-dim input tensor
             X_scale = 1.5
             X_zp = 5
             X_value_min = -128 if dtype == torch.qint8 else 0
