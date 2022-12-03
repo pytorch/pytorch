@@ -319,8 +319,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     def get_numactl_cmd():
         numactl = ""
         if device == "cpu" and platform.system() == "Linux" and is_numactl_available():
-            with subprocess.Popen("lscpu | grep Core | awk '{print $4}'", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
-                cores = int(str(p.stdout.readlines()[0], 'utf-8').strip())
+            cores = int(subprocess.getstatusoutput("lscpu | grep Core | awk '{print $4}'")[1].strip())
             if args.physcpubind is None:
                 args.physcpubind = "0-{}".format(cores-1)
             if args.membind is None:
@@ -410,7 +409,10 @@ def build_summary(args):
             out_io.write(f"{name} Absent\n")
 
     def env_var(name):
-        out_io.write(f"{name} = {os.environ[name]}\n")
+        if name in os.environ:
+            out_io.write(f"{name} = {os.environ[name]}\n")
+        else:
+            out_io.write(f"{name} = {None}\n")
 
     out_io.write("\n")
     out_io.write("### Run name ###\n")
@@ -440,14 +442,15 @@ def build_summary(args):
     env_var("CUDA_HOME")
     env_var("USE_LLVM")
 
-    out_io.write("\n")
-    out_io.write("### GPU details ###\n")
-    out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
-    out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
-    out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
-    out_io.write(
-        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
-    )
+    if "cuda" in args.devices:
+        out_io.write("\n")
+        out_io.write("### GPU details ###\n")
+        out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+        out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+        out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+        out_io.write(
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+        )
 
     title = "## Build Summary"
     comment = generate_dropdown_comment(title, out_io.getvalue())
@@ -724,21 +727,38 @@ class ParsePerformanceLogs(Parser):
         return str_io.getvalue()
 
     def generate_executive_summary(self):
-        description = (
-            "We evaluate different backends "
-            "across three benchmark suites - torchbench, huggingface and timm. We run "
-            "these experiments on A100 GPUs. Each experiment runs one iteration of forward "
-            "and backward pass. For accuracy, we check the numerical correctness of forward "
-            "pass outputs and gradients by comparing with native pytorch. We measure speedup "
-            "by normalizing against the performance of native pytorch. We report mean "
-            "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
-            "Caveats\n"
-            "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
-            "reduce peak memory footprint.\n"
-            "2) Experiments do not cover dynamic shapes.\n"
-            "3) Experimental setup does not have optimizer.\n\n"
-        )
-
+        if "cuda" in self.devices:
+            description = (
+                "We evaluate different backends "
+                "across three benchmark suites - torchbench, huggingface and timm. We run "
+                "these experiments on A100 GPUs. Each experiment runs one iteration of forward "
+                "and backward pass. For accuracy, we check the numerical correctness of forward "
+                "pass outputs and gradients by comparing with native pytorch. We measure speedup "
+                "by normalizing against the performance of native pytorch. We report mean "
+                "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
+                "Caveats\n"
+                "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
+                "reduce peak memory footprint.\n"
+                "2) Experiments do not cover dynamic shapes.\n"
+                "3) Experimental setup does not have optimizer.\n\n"
+            )
+        else:
+            get_machine_cmd = "lscpu| grep 'Model name' | awk -F':' '{print $2}'"
+            machine = subprocess.getstatusoutput(get_machine_cmd)[1].strip()
+            description = (
+                "We evaluate different backends "
+                "across three benchmark suites - torchbench, huggingface and timm. We run "
+                "these experiments on " + machine + ". Each experiment runs one iteration of forward "
+                "pass. For accuracy, we check the numerical correctness of forward "
+                "pass outputs by comparing with native pytorch. We measure speedup "
+                "by normalizing against the performance of native pytorch. We report mean "
+                "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
+                "Caveats\n"
+                "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
+                "reduce peak memory footprint.\n"
+                "2) Experiments do not cover dynamic shapes.\n"
+                "3) Experimental setup does not have optimizer.\n\n"
+            )
         comment = generate_dropdown_comment("", description)
         str_io = io.StringIO()
         str_io.write("\n")
