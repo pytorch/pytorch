@@ -16,8 +16,9 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_graph_observer,
 )
-from torch.autograd import kineto_available, ProfilerActivity
+from torch.autograd import _kineto_step, kineto_available, ProfilerActivity
 from torch.profiler import _memory_profiler
+from torch.optim.optimizer import register_optimizer_step_post_hook
 
 
 __all__ = [
@@ -42,6 +43,13 @@ def supported_activities():
     but not in the JSON trace.
     """
     return torch.autograd._supported_activities()
+
+
+def optimizer_post_hook(optimizer, args, kwargs):
+    _kineto_step()
+
+if os.getenv["USE_KINETO_DAEMON"]:
+    handle = register_optimizer_step_post_hook(optimizer_post_hook)
 
 
 class _KinetoProfile(object):
