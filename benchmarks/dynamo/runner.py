@@ -53,7 +53,7 @@ import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
-
+import platform
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
 
@@ -264,6 +264,16 @@ def parse_args():
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
     )
+    parser.add_argument("--batch_size", type=int, default=None, help="batch size for benchmarking")
+    parser.add_argument(
+        "--threads", "-t", type=int, default=None, help="number of threads to use for eager"
+    )
+    numactl_group = parser.add_argument_group("Numactl Parameters")
+    numactl_group.add_argument(
+        "--physcpubind", "-C", type=str, default=None, help="Only execute process on cpus."
+    )
+    numactl_group.add_argument(
+        "--membind", "-m", type=int, default=0, help="Only allocate memory from nodes.")
     args = parser.parse_args()
     return args
 
@@ -299,6 +309,25 @@ def generate_csv_name(args, dtype, suite, device, compiler, testing):
 
 
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
+    def is_numactl_available():
+        numactl_available = False
+        cmd = ["numactl", "-C", "0", "-m", "0", "ls"]
+        r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL)
+        if r.returncode == 0:
+            numactl_available = True
+        return numactl_available
+    def get_numactl_cmd():
+        numactl = ""
+        if device == "cpu" and platform.system() == "Linux" and is_numactl_available():
+            with subprocess.Popen("lscpu | grep Core | awk '{print $4}'", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
+                cores = int(str(p.stdout.readlines()[0], 'utf-8').strip())
+            if args.physcpubind is None:
+                args.physcpubind = "0-{}".format(cores-1)
+            if args.membind is None:
+                args.membind = 0
+            numactl = "numactl -C {} --membind={}".format(args.physcpubind, args.membind)
+        return numactl
+
     mode = get_mode(args)
     with open("run.sh", "w") as runfile:
         lines = []
@@ -319,7 +348,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
                     cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
+                    numactl = get_numactl_cmd()
+                    cmd = f"{numactl} {cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
 
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
@@ -336,6 +366,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         "inductor_no_cudagraphs",
                     ):
                         cmd = f"{cmd} --cold_start_latency"
+
+                    if args.batch_size is not None:
+                        cmd = f"{cmd} --batch_size {args.batch_size}"
+
+                    if args.threads is not None:
+                        cmd = f"{cmd} --threads {args.threads}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
