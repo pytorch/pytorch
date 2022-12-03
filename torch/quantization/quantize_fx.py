@@ -11,6 +11,8 @@ from torch.ao.quantization.quantize_fx import (
     _check_is_graph_module,
     _swap_ff_with_fxff,
     _fuse_fx,
+    Scope,
+    ScopeContextManager,
     QuantizationTracer,
     _prepare_fx,
     _prepare_standalone_module_fx,
