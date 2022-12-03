@@ -1810,9 +1810,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1886,10 +1886,9 @@ class TestQuantizedOps(TestCase):
                     devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
                     for device in devices:
                         qX_hat = op(qX.to(device=device), output_size=output_size)
-                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                        self.assertEqualIgnoreType(
+                        self.assertEqual(
                             X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat), exact_dtype=False)
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
                             msg=error_message.format(name + '.scale', scale,
@@ -1961,9 +1960,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -2108,10 +2107,10 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={} X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={} X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref),
+                             exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -2163,10 +2162,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={}, X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={}, X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref), exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
