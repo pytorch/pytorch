@@ -135,6 +135,12 @@ def _init_core_state(
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
     if state.world_size == 1:
+        if sharding_strategy != ShardingStrategy.NO_SHARD:
+            warnings.warn(
+                "FSDP is switching to use `NO_SHARD` instead of "
+                f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
+                "the world size is 1."
+            )
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
