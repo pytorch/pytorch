@@ -1,8 +1,23 @@
+"""
+Where should I add a new type? `types_base.py` vs `types.py`
+
+This file defines data model classes for torchgen typing system, as well as some base types such as int32_t.
+
+`types.py` defines ATen Tensor type and some c10 types, along with signatures that use these types.
+
+The difference between these two files, is `types_base.py` should be implementation-agnostic, meaning it shouldn't
+contain any type definition that is tight to a specific C++ library (e.g., ATen), so that it cacn be easily reused
+if we want to generate code for another C++ library.
+
+Add new types to `types.py` if these types are ATen/c10 related.
+Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
+"""
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
 from torchgen.api.types_base import (
     ArgName,
+    ArrayCType,
     BaseCppType,
     BaseCType,
     Binding,
@@ -20,6 +35,8 @@ from torchgen.api.types_base import (
     NamedCType,
     shortT,
     SpecialArgName,
+    TupleCType,
+    VectorCType,
     voidT,
 )
 from torchgen.model import (
@@ -163,52 +180,6 @@ class ArrayRefCType(CType):
 
     def remove_const_ref(self) -> "CType":
         return ArrayRefCType(self.elem.remove_const_ref())
-
-
-@dataclass(frozen=True)
-class VectorCType(CType):
-    elem: "CType"
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f"::std::vector<{self.elem.cpp_type()}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f"::std::vector<{self.elem.cpp_type_registration_declarations()}>"
-
-    def remove_const_ref(self) -> "CType":
-        return VectorCType(self.elem.remove_const_ref())
-
-
-@dataclass(frozen=True)
-class ArrayCType(CType):
-    elem: "CType"
-    size: int
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f"::std::array<{self.elem.cpp_type()},{self.size}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f"::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>"
-
-    def remove_const_ref(self) -> "CType":
-        return ArrayCType(self.elem.remove_const_ref(), self.size)
-
-
-@dataclass(frozen=True)
-class TupleCType(CType):
-    elems: List["CType"]
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
-
-    def remove_const_ref(self) -> "CType":
-        return TupleCType([e.remove_const_ref() for e in self.elems])
 
 
 @dataclass(frozen=True)

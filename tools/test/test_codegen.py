@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Dict, List
 
 import torchgen.model
-
+from torchgen import dest
 import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
@@ -356,6 +356,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                     self.op_2_native_function,
                 ],
                 backend_indices=self.backend_indices,
+                native_function_decl_gen=dest.compute_native_function_declaration,
             )
 
     def test_native_function_declaration_1_op_1_ns_valid(self) -> None:
@@ -365,6 +366,7 @@ class TestGenNativeFunctionDeclaration(unittest.TestCase):
                 self.op_1_native_function,
             ],
             backend_indices=self.backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         target = """
 namespace at {

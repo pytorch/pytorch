@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Set
 
 from torchgen.api.types_base import (
     ArgName,
+    ArrayCType,
     BaseCppType,
     BaseCType,
     Binding,
@@ -20,6 +21,8 @@ from torchgen.api.types_base import (
     NamedCType,
     shortT,
     SpecialArgName,
+    TupleCType,
+    VectorCType,
     voidT,
 )
 from torchgen.model import BaseTy, FunctionSchema, NativeFunction
@@ -79,52 +82,6 @@ class ArrayRefCType(CType):
 
 
 @dataclass(frozen=True)
-class TupleCType(CType):
-    elems: List["CType"]
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
-
-    def remove_const_ref(self) -> "CType":
-        return TupleCType([e.remove_const_ref() for e in self.elems])
-
-
-@dataclass(frozen=True)
-class VectorCType(CType):
-    elem: "CType"
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f"::std::vector<{self.elem.cpp_type()}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f"::std::vector<{self.elem.cpp_type_registration_declarations()}>"
-
-    def remove_const_ref(self) -> "CType":
-        return VectorCType(self.elem.remove_const_ref())
-
-
-@dataclass(frozen=True)
-class ArrayCType(CType):
-    elem: "CType"
-    size: int
-
-    def cpp_type(self, *, strip_ref: bool = False) -> str:
-        # Do not pass `strip_ref` recursively.
-        return f"::std::array<{self.elem.cpp_type()},{self.size}>"
-
-    def cpp_type_registration_declarations(self) -> str:
-        return f"::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>"
-
-    def remove_const_ref(self) -> "CType":
-        return ArrayCType(self.elem.remove_const_ref(), self.size)
-
-
-@dataclass(frozen=True)
 class CppSignature:
     """
     This signature is merely a CppSignature with Executorch types. The inline definition
@@ -179,39 +136,4 @@ class CppSignature:
         )
 
 
-@dataclass(frozen=True)
-class NativeSignature:
-    """
-    This signature is for NativeFunctions.h and its call site UnboxingFunctions.cpp.
-    """
-
-    # The schema this signature is derived from
-    func: FunctionSchema
-
-    prefix: str = ""
-
-    def name(self) -> str:
-        return self.prefix + native.name(self.func)
-
-    def decl(self, name: Optional[str] = None) -> str:
-        args_str = ", ".join(a.decl() for a in self.arguments())
-        if name is None:
-            name = self.name()
-        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
-
-    def defn(self, name: Optional[str] = None) -> str:
-        args_str = ", ".join(a.defn() for a in self.arguments())
-        if name is None:
-            name = self.name()
-        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
-
-    def ptr_type(self) -> str:
-        # don't include defaults in type signature!
-        args_str = ", ".join(a.defn() for a in self.arguments())
-        return f"{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})"
-
-    def arguments(self) -> List[Binding]:
-        return native.arguments(self.func)
-
-
-from torchgen.executorch.api import cpp, native
+from torchgen.executorch.api import cpp
