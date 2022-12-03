@@ -5607,20 +5607,22 @@ class TestNLLLoss(TestCase):
 
     # Test argsort
     def test_argsort(self):
-        def helper(stable, dim, descending):
-            argsort_mps_result = torch.argsort(stable, dim, descending).to("mps")
-            argsort_cpu_result = torch.argsort(stable, dim, descending).to("cpu")
+        def helper(input, stable, dim, descending):
+            argsort_mps_result = torch.argsort(input, stable, dim, descending).to("mps")
+            argsort_cpu_result = torch.argsort(input, stable, dim, descending).to("cpu")
 
             self.assertEqual(argsort_mps_result, argsort_cpu_result)
 
-        helper(True, 0, True)
-        helper(True, 0, False)
-        helper(False, 0, True)
-        helper(False, 0, False)
-        helper(True, 1, True)
-        helper(True, 1, False)
-        helper(False, 1, True)
-        helper(False, 1, False)
+        mps_tensor = torch.randn((2, 3), device='mps', dtype=torch.float, requires_grad=True)
+
+        helper(mps_tensor, True, 0, True)
+        helper(mps_tensor, True, 0, False)
+        helper(mps_tensor, False, 0, True)
+        helper(mps_tensor, False, 0, False)
+        helper(mps_tensor, True, 1, True)
+        helper(mps_tensor, True, 1, False)
+        helper(mps_tensor, False, 1, True)
+        helper(mps_tensor, False, 1, False)
 
     # Test diag
     def test_diag(self):
