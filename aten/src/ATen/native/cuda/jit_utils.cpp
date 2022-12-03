@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
 #include <c10/util/Optional.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -894,6 +893,8 @@ void codegenOutputQuery(
     max_dev_version = CUDAVersion(7, 5);
   } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CUDAVersion(8, 0);
+  } else if (nvrtc_major == 11 && nvrtc_minor < 8) {
+    max_dev_version = CUDAVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
@@ -927,7 +928,7 @@ void __inline__ initializeCudaContext() {
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+        *(c10::cuda::getFreeMutex()));
     cudaFree(nullptr);
   }
 }

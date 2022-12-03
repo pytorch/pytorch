@@ -12,7 +12,7 @@ template<int kRows, int kRowsPerMma, int kWarpCountM>
 struct Smem_tile_softmax_lse {
 
     static constexpr int kMmaM = (kRows / kWarpCountM) / kRowsPerMma;
-    static_assert(kMmaM * kRowsPerMma * kWarpCountM == kRows);
+    static_assert(kMmaM * kRowsPerMma * kWarpCountM == kRows, "");
     // static_assert(kWarpCountM == 1);
     // Otherwise we might need to check warp_idx / kWarpCountM == 0 instead of just warp_idx == 0
 

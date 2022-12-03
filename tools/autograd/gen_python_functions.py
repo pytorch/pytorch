@@ -124,6 +124,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_local_scalar_dense",
     "to",
     "_to_copy",
+    "_reshape_copy",
     "copy_sparse_to_sparse_",
     "copy_",
     "numpy_T",
@@ -1160,6 +1161,11 @@ def sort_overloads(
             # Prioritize IntArrayRef overload over SymIntArrayRef
             str(t1) == "SymInt[]"
             and str(t2) == "int[]"
+            or
+            # Make sure both in, SymInt are sorted consistently w.r.t. Tensor since Tensor can be implicitly
+            # converted to either int or SymInt.  Prioritize the Tensor overload since it otherwise gets shadowed.
+            (str(t1) == "SymInt" or str(t1) == "int")
+            and str(t2) == "Tensor"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:

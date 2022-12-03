@@ -6,7 +6,6 @@ Be very judicious when adding any new global variables. Do not create new global
 variables unless they are absolutely necessary.
 """
 import os
-from typing import Optional
 
 import torch._C._onnx as _C_onnx
 
@@ -28,13 +27,15 @@ class _InternalGlobals:
         self._in_onnx_export: bool = False
         # Whether the user's model is training during export
         self.export_training: bool = False
-        self.operator_export_type: Optional[_C_onnx.OperatorExportTypes] = None
+        self.operator_export_type: _C_onnx.OperatorExportTypes = (
+            _C_onnx.OperatorExportTypes.ONNX
+        )
         self.onnx_shape_inference: bool = True
 
         # Internal feature flags
-        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "ERRORS":
+        if os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "WARNINGS":
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.ERRORS
+                _exporter_states.RuntimeTypeCheckState.WARNINGS
             )
         elif os.getenv("TORCH_ONNX_EXPERIMENTAL_RUNTIME_TYPE_CHECK") == "DISABLED":
             self.runtime_type_check_state = (
@@ -42,7 +43,7 @@ class _InternalGlobals:
             )
         else:
             self.runtime_type_check_state = (
-                _exporter_states.RuntimeTypeCheckState.WARNINGS
+                _exporter_states.RuntimeTypeCheckState.ERRORS
             )
 
     @property

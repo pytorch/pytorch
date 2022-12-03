@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -86,6 +86,13 @@ inline int parseEnvVarInt(const char* envVarName) {
     return val;
   }
   return C10D_ENV_NOT_SET;
+}
+
+inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
+    int val = parseEnvVarInt(envVarName);
+    if (val == C10D_ENV_NOT_SET)
+      return defaultVal;
+    return val;
 }
 
 inline bool parseEnvVarFlag(const char* envVarName) {

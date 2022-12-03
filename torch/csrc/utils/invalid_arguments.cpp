@@ -82,7 +82,9 @@ struct SequenceType : public Type {
       return false;
     auto num_elements = PySequence_Length(object);
     for (const auto i : c10::irange(num_elements)) {
-      if (!type->is_matching(PySequence_GetItem(object, i)))
+      if (!type->is_matching(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(object, i))
+                  .ptr()))
         return false;
     }
     return true;
@@ -272,7 +274,34 @@ std::string _formattedArgDesc(
       result += red;
     if (is_kwarg)
       result += option.arguments[i].name + "=";
-    result += py_typename(arg);
+    bool is_tuple = PyTuple_Check(arg);
+    if (is_tuple || PyList_Check(arg)) {
+      result += py_typename(arg) + " of ";
+      auto num_elements = PySequence_Length(arg);
+      if (is_tuple) {
+        result += "(";
+      } else {
+        result += "[";
+      }
+      for (const auto i : c10::irange(num_elements)) {
+        if (i != 0) {
+          result += ", ";
+        }
+        result += py_typename(
+            py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i))
+                .ptr());
+      }
+      if (is_tuple) {
+        if (num_elements == 1) {
+          result += ",";
+        }
+        result += ")";
+      } else {
+        result += "]";
+      }
+    } else {
+      result += py_typename(arg);
+    }
     if (is_matching)
       result += reset_green;
     else

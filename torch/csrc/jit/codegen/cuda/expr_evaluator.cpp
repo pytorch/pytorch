@@ -54,13 +54,23 @@ void ExpressionEvaluator::bind(Val* value, const IntOrDouble& concrete_value) {
   TORCH_CHECK(
       value->definition() == nullptr,
       "Tried to bind to a value that is computed in the fusion IR");
-  known_values_[value] = concrete_value;
+  if (value->isA<NamedScalar>()) {
+    known_named_scalars_[value->as<NamedScalar>()->name()] = concrete_value;
+  } else {
+    known_values_[value] = concrete_value;
+  }
+}
+
+void ExpressionEvaluator::bind(
+    const std::string& name,
+    const IntOrDouble& concrete_value) {
+  known_named_scalars_[name] = concrete_value;
 }
 
 c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(Val* value) {
-  if (evaluator_precomputed_integers_ != nullptr) {
+  if (evaluator_precomputed_values_ != nullptr) {
     return toOptionalIntOrDouble(
-        evaluator_precomputed_integers_->getMaybeValueFor(value));
+        evaluator_precomputed_values_->getMaybeValueFor(value));
   } else {
     auto maybe_concrete_value = getValue(value);
     if (!maybe_concrete_value.has_value()) {
@@ -88,7 +98,7 @@ void ExpressionEvaluator::print() const {
 c10::optional<IntOrDouble> ExpressionEvaluator::getValue(Val* value) {
   TORCH_INTERNAL_ASSERT(
       value->isAnInt() || value->isADouble(),
-      "Expression Evaluation does not support values other than integers at this time.");
+      "Expression Evaluation does not support values other than integers/doubles at this time.");
 
   if (value->getValType().value() == ValType::Scalar) {
     if (value->isAnInt() && value->as<Int>()->value().has_value()) {
@@ -99,17 +109,28 @@ c10::optional<IntOrDouble> ExpressionEvaluator::getValue(Val* value) {
     }
   }
 
-  const auto it = known_values_.find(value);
-  return it != known_values_.end() ? c10::optional<IntOrDouble>(it->second)
-                                   : c10::nullopt;
+  if (value->isA<NamedScalar>()) {
+    const auto it = known_named_scalars_.find(value->as<NamedScalar>()->name());
+    return it != known_named_scalars_.end()
+        ? c10::optional<IntOrDouble>(it->second)
+        : c10::nullopt;
+  } else {
+    const auto it = known_values_.find(value);
+    return it != known_values_.end() ? c10::optional<IntOrDouble>(it->second)
+                                     : c10::nullopt;
+  }
 }
 
 void ExpressionEvaluator::handle(UnaryOp* uop) {
+  using namespace IntOrDouble_functions;
   const auto in = evaluate(uop->in());
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
       case UnaryOpType::Neg:
         known_values_[uop->out()] = -*in;
+        break;
+      case UnaryOpType::Set:
+        known_values_[uop->out()] = *in;
         break;
       case UnaryOpType::Cast:
         if (uop->out()->getDataType() == DataType::Int) {
@@ -117,11 +138,18 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
         } else if (uop->out()->getDataType() == DataType::Double) {
           known_values_[uop->out()] = in->cast<double>();
         } else {
-          TORCH_INTERNAL_ASSERT(false);
+          TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
         }
         break;
+      case UnaryOpType::Abs:
+        known_values_[uop->out()] = abs(*in);
+        break;
       default:
-        TORCH_CHECK(!"Unexpected operator type");
+        TORCH_CHECK(
+            !"Unexpected operator type ",
+            uop->getUnaryOpType(),
+            " in ",
+            uop->toString());
     }
   }
 }

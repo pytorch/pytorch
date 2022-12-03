@@ -1,23 +1,47 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
 #include <c10/util/math_compat.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/Utils.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/cpu/Loops.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_dirichlet_grad_native.h>
+#include <ATen/ops/_sample_dirichlet_native.h>
+#include <ATen/ops/_standard_gamma_grad_native.h>
+#include <ATen/ops/_standard_gamma_native.h>
+#include <ATen/ops/argmax.h>
+#include <ATen/ops/bernoulli_native.h>
+#include <ATen/ops/binomial_native.h>
+#include <ATen/ops/cauchy_native.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/exponential_native.h>
+#include <ATen/ops/geometric_native.h>
+#include <ATen/ops/log_normal_native.h>
+#include <ATen/ops/multinomial_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/poisson_native.h>
+#include <ATen/ops/random_native.h>
+#include <ATen/ops/topk.h>
+#include <ATen/ops/uniform_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <type_traits>
 #include <functional>
@@ -581,14 +605,14 @@ Tensor& multinomial_out(const Tensor& self,
     return result;
   }
 
-  // Fast-path for no replacement.
+  // Fast-path for no replacement or if only one sample is drawn.
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   // Half is not supported on CPU.
   TORCH_CHECK(
       !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
       "multinomial is not implemented for half on CPU");
-  if (!with_replacement) {
+  if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(

@@ -21,10 +21,18 @@ class TORCH_API LazyGraphExecutor {
     bool read_only = false;
   };
 
+  // Register a lazy graph executor instance that can be retrieved using Get()
+  static void Register(LazyGraphExecutor*);
   static LazyGraphExecutor* Get();
 
-  void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
-  void UnregisterTensor(LazyTensor::Data* data);
+  virtual ~LazyGraphExecutor() = default;
+
+  // Override these methods to perform custom tensor registration and
+  // unregistration Note: It is vital that the parent implementations are also
+  // called
+  //       in order for the tensors to show up in the live tensor list
+  virtual void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
+  virtual void UnregisterTensor(LazyTensor::Data* data);
 
   // Seed for random generator
   Value GetRngSeed(const BackendDevice& device);
@@ -110,12 +118,6 @@ class TORCH_API LazyGraphExecutor {
       const Shape& shape,
       const BackendDevice& device);
 
-  // Configure the executor treat compile/execute API calls as no-ops
-  // for use when profiling lazy trace overheads
-  void SetNoOpExecutionMode(bool enable_noop) {
-    noop_execution_mode_ = enable_noop;
-  }
-
   struct CachedComputation {
     explicit CachedComputation(ComputationPtr computation)
         : computation(std::move(computation)) {}
@@ -150,7 +152,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   struct PostOrderData {
-    std::vector<Node*> post_order;
+    std::vector<const Node*> post_order;
     Util::EmissionMap emission_map;
     std::vector<BackendDataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;
@@ -180,6 +182,8 @@ class TORCH_API LazyGraphExecutor {
     ComputationCache::TypePtr cached_computation;
     std::vector<BackendDataPtr> tensors_data;
   };
+
+  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensorPtr>& tensors,
@@ -212,11 +216,6 @@ class TORCH_API LazyGraphExecutor {
       PostOrderData* po_data);
 
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
-
-  void BuildInputOutputAliases(
-      const std::vector<LazyTensorPtr>& tensors,
-      c10::ArrayRef<size_t> indices,
-      LoweringContext* lowering_ctx);
 
   std::shared_ptr<Async> SyncTensorsGraphInternal(
       std::vector<LazyTensorPtr>* tensors,
@@ -251,8 +250,6 @@ class TORCH_API LazyGraphExecutor {
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices,
       c10::ArrayRef<BackendDataPtr> tensors_data);
-
-  bool noop_execution_mode_ = false;
 };
 
 } // namespace lazy

@@ -256,7 +256,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         )
 
 
-def checkpoint_sequential(functions, segments, input, **kwargs):
+def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
     Sequential models execute a list of modules/functions in order
@@ -290,6 +290,14 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
+        use_reentrant(bool, optional): Use checkpointing
+            implementation that requires re-entrant autograd.
+            If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
+            implementation that does not require re-entrant autograd. This
+            allows ``checkpoint`` to support additional functionality, such as
+            working as expected with ``torch.autograd.grad`` and support for
+            keyword arguments input into the checkpointed function.
+            Default: ``True``
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
@@ -319,8 +327,12 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     end = -1
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
-        input = checkpoint(run_function(start, end, functions), input,
-                           preserve_rng_state=preserve)
+        input = checkpoint(
+            run_function(start, end, functions),
+            input,
+            use_reentrant=use_reentrant,
+            preserve_rng_state=preserve
+        )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
 def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):

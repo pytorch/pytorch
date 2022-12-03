@@ -11,7 +11,7 @@ For the person to be a maintainer, a person needs to:
 
 To add a qualified person to the maintainers' list, please create
 a PR that adds a person to the `persons of interests <https://pytorch.org/docs/master/community/persons_of_interest.html>`__ page and
-`merge_rules <https://github.com/pytorch/pytorch/blob/master/.github/merge_rules.json>`__ files. Current maintainers will cast their votes of
+`merge_rules <https://github.com/pytorch/pytorch/blob/master/.github/merge_rules.yaml>`__ files. Current maintainers will cast their votes of
 support. Decision criteria for approving the PR:
 * Not earlier than two business days passed before merging (ensure the majority of the contributors have seen it)
 * PR has the correct label (`module: ci`)

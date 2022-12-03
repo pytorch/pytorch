@@ -64,61 +64,6 @@ def _fuse_fx(
         graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
 
-class Scope(object):
-    """ Scope object that records the module path and the module type
-    of a module. Scope is used to track the information of the module
-    that contains a Node in a Graph of GraphModule. For example::
-
-        class Sub(torch.nn.Module):
-            def forward(self, x):
-                # This will be a call_method Node in GraphModule,
-                # scope for this would be (module_path="sub", module_type=Sub)
-                return x.transpose(1, 2)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                self.sub = Sub()
-
-            def forward(self, x):
-                # This will be a call_method Node as well,
-                # scope for this would be (module_path="", None)
-                x = x.transpose(1, 2)
-                x = self.sub(x)
-                return x
-
-    """
-
-    def __init__(self, module_path: str, module_type: Any):
-        super().__init__()
-        self.module_path = module_path
-        self.module_type = module_type
-
-
-class ScopeContextManager(object):
-    """ A context manager to track the Scope of Node during symbolic tracing.
-    When entering a forward function of a Module, we'll update the scope information of
-    the current module, and when we exit, we'll restore the previous scope information.
-    """
-
-    def __init__(
-        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
-    ):
-        super().__init__()
-        self.prev_module_type = scope.module_type
-        self.prev_module_path = scope.module_path
-        self.scope = scope
-        self.scope.module_path = current_module_path
-        self.scope.module_type = type(current_module)
-
-    def __enter__(self):
-        return
-
-    def __exit__(self, *args):
-        self.scope.module_path = self.prev_module_path
-        self.scope.module_type = self.prev_module_type
-        return
-
-
 def _prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
@@ -291,7 +236,7 @@ def prepare_fx(
       * `_equalization_config`: config for specifying how to perform equalization on the model
 
       * `backend_config` (BackendConfig): config that specifies how operators are quantized
-         in a backend, this includes how the operaetors are observed,
+         in a backend, this includes how the operators are observed,
          supported fusion patterns, how quantize/dequantize ops are
          inserted, supported dtypes etc. See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
 
@@ -489,7 +434,7 @@ def prepare_qat_fx(
         qconfig_mapping = get_default_qat_qconfig("fbgemm")
 
         # We can customize qconfig_mapping in different ways, please take a look at
-        # the doctring for :func:`~torch.ao.quantization.prepare_fx` for different ways
+        # the docstring for :func:`~torch.ao.quantization.prepare_fx` for different ways
         # to configure this
 
         # example_inputs is a tuple of inputs, that is used to infer the type of the
@@ -530,6 +475,7 @@ def _convert_fx(
     _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+    is_decomposed: bool = False,
 ) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -552,6 +498,7 @@ def _convert_fx(
         _remove_qconfig_flag=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
+        is_decomposed=is_decomposed,
     )
 
     preserved_attributes = convert_custom_config.preserved_attributes
@@ -674,6 +621,59 @@ def convert_to_reference_fx(
         _remove_qconfig=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
+    )
+
+def _convert_to_reference_decomposed_fx(
+    graph_module: GraphModule,
+    convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
+    _remove_qconfig: bool = True,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+) -> torch.nn.Module:
+    r""" Convert a calibrated or trained model to a reference quantized model, with
+    decomposed representation for quantized Tensor
+    see https://github.com/pytorch/rfcs/blob/master/RFC-0019-Extending-PyTorch-Quantization-to-Custom-Backends.md for more details,
+    reference quantzied model is a standard representation of a quantized model provided
+    by FX Graph Mode Quantization, it can be further lowered to run on the target
+    hardware, like accelerators
+
+    Note: this is not public API
+
+    Args:
+        * `graph_module` (GraphModule): A prepared and calibrated/trained model (GraphModule)
+
+        * `convert_custom_config` (ConvertCustomConfig): custom configurations for convert function.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
+
+        * `_remove_qconfig` (bool): Option to remove the qconfig attributes in the model after convert.
+
+        * `qconfig_mapping` (QConfigMapping): config for specifying how to convert a model for quantization.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
+
+         * `backend_config` (BackendConfig): A configuration for the backend which describes how
+            operators should be quantized in the backend. See
+            :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
+
+    Return:
+        A reference quantized model (GraphModule) with operators working with decomposed quantized Tensor
+
+    Example::
+
+        # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
+        # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
+        # e.g. backend_config = get_default_backend_config("fbgemm")
+        reference_quantized_model = _convert_to_reference_decomposed_fx(prepared_model)
+
+    """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_to_reference_decomposed_fx")
+    return _convert_fx(
+        graph_module,
+        is_reference=True,
+        convert_custom_config=convert_custom_config,
+        _remove_qconfig=_remove_qconfig,
+        qconfig_mapping=qconfig_mapping,
+        backend_config=backend_config,
+        is_decomposed=True,
     )
 
 

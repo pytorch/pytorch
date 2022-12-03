@@ -294,6 +294,14 @@ class TORCH_API TensorBase {
     return impl_->numel() * impl_->itemsize();
   }
 
+  c10::SymInt sym_nbytes() const {
+    TORCH_CHECK(layout () != at::kSparse,
+                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                "equivalent dense tensor, multiply numel() by element_size()");
+    return impl_->sym_numel() * impl_->itemsize();
+  }
+
   int64_t numel() const {
     return impl_->numel();
   }
@@ -569,6 +577,10 @@ class TORCH_API TensorBase {
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    TORCH_CHECK(
+        impl_->numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
     return generic_packed_accessor<T,N,PtrTraits,int32_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
@@ -930,4 +942,34 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
     return c10::MaybeOwned<TensorBase>::owned(__dispatch_contiguous(memory_format));
   }
 }
+
+namespace symint {
+
+template <typename T>
+using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+template <typename T>
+using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef sizes(const TensorBase& t) { return t.sizes(); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymInt size(const TensorBase& t, int64_t dim) { return t.sym_size(dim); }
+template <typename T, typename = enable_if_int<T>>
+int64_t size(const TensorBase& t, int64_t dim) { return t.size(dim); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef strides(const TensorBase& t) { return t.sym_strides(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef strides(const TensorBase& t) { return t.strides(); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymInt numel(const TensorBase& t) { return t.sym_numel(); }
+template <typename T, typename = enable_if_int<T>>
+int64_t numel(const TensorBase& t) { return t.numel(); }
+
+} // namespace symint
+
 } // namespace at

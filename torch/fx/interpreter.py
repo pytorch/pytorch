@@ -57,7 +57,7 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The module to be executed
@@ -126,7 +126,16 @@ class Interpreter:
                 # values for a subset of the program.
                 continue
 
-            self.env[node] = self.run_node(node)
+            try:
+                self.env[node] = self.run_node(node)
+            except Exception as e:
+                msg = f"While executing {node.format_node()}"
+                msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
+                msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                e.args = (msg,) + e.args[1:]
+                if isinstance(e, KeyError):
+                    raise RuntimeError(*e.args) from e
+                raise
 
             if self.garbage_collect_values:
                 for to_delete in self.user_to_last_uses.get(node, []):
@@ -303,7 +312,7 @@ class Interpreter:
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
         Args:
-            target (str): The fully-qualfiied name of the attribute to fetch
+            target (str): The fully-qualified name of the attribute to fetch
 
         Return:
             Any: The value of the attribute.
@@ -386,7 +395,7 @@ class Transformer(Interpreter):
 
             transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
-            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+            torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.

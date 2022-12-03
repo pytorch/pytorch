@@ -1,61 +1,11 @@
-import torch
+import torch._C
 from contextlib import contextmanager
+import unittest.mock
+import torch
+import torch.utils._pytree as pytree
+import itertools
 
 __all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
-
-DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
-
-def has_key(op, k):
-    return (
-        torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), k)
-        or k in op.py_kernels
-    )
-
-is_included_in_alias = torch._C._dispatch_is_included_in_alias
-
-# Equivalent to computeDispatchTableEntryWithDebug
-# TODO: memoize this or something
-def resolve_key(op: torch._ops.PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
-    # 1. (Direct) operator registration
-    if has_key(op, k):
-        return k
-    # 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available
-    cand = DispatchKey.CompositeExplicitAutogradNonFunctional
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
-        return cand
-    # 2.2 Use CompositeExplicitAutograd kernel if available
-    cand = DispatchKey.CompositeExplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
-        return cand
-    has_backend_kernel = (
-        torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k))
-        or has_key(op, DispatchKey.CompositeExplicitAutograd)
-    )
-    # 2.3. Use CompositeImplicitAutograd kernel if available
-    cand = DispatchKey.CompositeImplicitAutogradNestedTensor
-    if (
-        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))  # type: ignore[attr-defined]
-            and has_key(op, cand) and not has_backend_kernel):
-        return cand
-    cand = DispatchKey.CompositeImplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(op, cand):
-        if (
-            k == DispatchKey.AutogradOther
-            and torch._C._dispatch_has_kernel_for_any_dispatch_key(op.name(), torch._C._dispatch_autogradother_backends)  # type: ignore[attr-defined] # noqa: B950
-        ):
-            raise RuntimeError("ambiguous autogradother kernel")
-        elif not has_backend_kernel:
-            return cand
-    # 2.4. For autograd backend keys, use kernel from DispatchKey::Autograd if available
-    cand = DispatchKey.Autograd
-    if is_included_in_alias(k, cand) and has_key(op, cand):
-        return cand
-    # Backend fallback
-    if torch._C._dispatch_has_backend_fallback(k):
-        # The dispatch key itself will implicitly route to backend fallback.
-        # This is probably not great for the pure Python implementation.
-        return k
-    raise RuntimeError("could not find kernel")
 
 @contextmanager
 def no_python_dispatcher():
@@ -73,16 +23,120 @@ def enable_python_dispatcher():
     finally:
         del g
 
-# The Python dispatcher
-def python_dispatcher(op, ks, args, kwargs):
-    """
-    with no_python_dispatcher():
-        print(op, ks, args, kwargs)
-    """
-    k = resolve_key(op, ks.highestPriorityTypeId())
-    source = f'torch.ops.{op}.dispatch(k, *args, **kwargs)'
-    filename = f'{op}[{torch._C._dispatch_key_name(k)}]'
-    compiled = compile(source, filename, 'eval')  # TODO: maybe cache?
-    return eval(compiled, {'torch': torch, 'k': k, 'args': args, 'kwargs': kwargs})
+CROSSREF_FUNCTIONALIZE = False
 
-torch._C._set_python_dispatcher(python_dispatcher)
+def all_known_overloads():
+    for ns in torch.ops:
+        packets = getattr(torch.ops, ns)
+        for op_name in packets:
+            packet = getattr(packets, op_name)
+            for overload in packet:
+                yield getattr(packet, overload)
+
+@contextmanager
+def suspend_functionalization():
+    f_tls = torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.Functionalize)
+    f_rv = torch._C._functionalization_reapply_views_tls()
+    if f_tls:
+        torch._disable_functionalization()
+    try:
+        yield
+    finally:
+        if f_tls:
+            torch._enable_functionalization(reapply_views=f_rv)
+
+def check_tensor_metadata_matches(nv, rv, desc):
+    assert callable(desc)
+    assert nv.size() == rv.size(), f"{desc()}: sizes {nv.size()} != {rv.size()}"
+    assert nv.dtype == rv.dtype, f"{desc()}: dtype {nv.dtype} != {rv.dtype}"
+    same_strides, idx = torch._prims_common.check_significant_strides(nv, rv, only_cuda=False)
+    assert same_strides, f"{desc()}: strides {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+
+def check_metadata_matches(n, r, desc):
+    assert callable(desc)
+    n_vals, n_spec = pytree.tree_flatten(n)
+    r_vals, r_spec = pytree.tree_flatten(r)
+    # TODO: test the specs match; empirically  sometimes we have a tuple
+    # on one side and a list on the other
+    assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"
+    for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
+        if not isinstance(rv, torch.Tensor):
+            continue
+        check_tensor_metadata_matches(nv, rv, lambda: f"{desc()} output {i}")
+
+class Lit:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s
+
+def _fmt(a: object) -> object:
+    if isinstance(a, torch.Tensor):
+        return Lit(f"torch.empty_strided({tuple(a.size())}, {a.stride()}, dtype={a.dtype})")
+    else:
+        return a
+
+def make_crossref_functionalize(op, final_key):
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    # This case is pretty weird, suppress it for now
+    if op == torch.ops.aten.lift_fresh.default:
+        return final_key
+
+    def handler(*args, **kwargs):
+        fake_mode = FakeTensorMode()
+
+        def fakeify_defun(t):
+            if isinstance(t, torch.Tensor):
+                if torch._is_functional_tensor(t):
+                    r = torch._from_functional_tensor(t)
+                    # NB: This assumes that the inner tensor sizes/strides match
+                    # the outer tensor sizes/strides.  This doesn't necessarily have to
+                    # be the case, see discussion at
+                    # https://github.com/pytorch/pytorch/pull/87610/files/401ddeda1d769bedc88a12de332c7357b60e51a4#r1007264456
+                    assert t.size() == r.size()
+                    assert t.stride() == r.stride()
+                else:
+                    r = t
+                # TODO: suppress guards
+                return fake_mode.from_tensor(r)
+            return t
+
+        def maybe_detach(t):
+            if isinstance(t, torch.Tensor):
+                return t.detach()
+            else:
+                return t
+
+        with suspend_functionalization():
+            f_args, f_kwargs = pytree.tree_map(fakeify_defun, (args, kwargs))
+            orig_f_args, orig_f_kwargs = pytree.tree_map(maybe_detach, (f_args, f_kwargs))
+            with fake_mode:
+                f_r = op(*f_args, **f_kwargs)
+        r = op._op_dk(final_key, *args, **kwargs)
+
+        def desc():
+            fmt_args = ", ".join(
+                itertools.chain(
+                    (repr(pytree.tree_map(_fmt, a)) for a in orig_f_args),
+                    (f"{k}={pytree.tree_map(_fmt, v)}" for k, v in orig_f_kwargs.items()),
+                )
+            )
+            return f"{op}({fmt_args})"
+        check_metadata_matches(f_r, r, desc)
+        return r
+    return handler
+
+# NB: enabling this is slow, don't do it in a hot loop.  This is purely
+# for debugging purposes.
+@contextmanager
+def enable_crossref_functionalize():
+    for op in all_known_overloads():
+        op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
+    try:
+        with enable_python_dispatcher(), unittest.mock.patch(
+                'torch._dispatch.python.CROSSREF_FUNCTIONALIZE', True):
+            yield
+    finally:
+        for op in all_known_overloads():
+            op._uncache_dispatch(torch._C.DispatchKey.Functionalize)

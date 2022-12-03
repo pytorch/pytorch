@@ -55,7 +55,7 @@ NOTE: currently Android simulator test does not generate on-the-fly models. Only
 ## Diagnose failed test
 If the simulator test is falling, that means the current change will potentially break a production model. So be careful. The detailed error message can be found in test log. If the change has to be made, make sure it doesn't break existing production models, and update the failed test model as appropriate (see the next section).
 
-You can also run these tests locally, please see the insturction in android and ios folder. Remember to generate on-the-fly test models if you want to test it locally (but don't commit these models with _temp suffix).
+You can also run these tests locally, please see the instruction in android and ios folder. Remember to generate on-the-fly test models if you want to test it locally (but don't commit these models with _temp suffix).
 ```
 python test/mobile/model_test/gen_test_model.py ios-test
 ```

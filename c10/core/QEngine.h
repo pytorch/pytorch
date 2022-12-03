@@ -16,12 +16,14 @@ enum class QEngine : uint8_t {
   FBGEMM = 1,
   QNNPACK = 2,
   ONEDNN = 3,
+  X86 = 4,
 };
 
 constexpr auto kNoQEngine = QEngine::NoQEngine;
 constexpr auto kFBGEMM = QEngine::FBGEMM;
 constexpr auto kQNNPACK = QEngine::QNNPACK;
 constexpr auto kONEDNN = QEngine::ONEDNN;
+constexpr auto kX86 = QEngine::X86;
 
 inline std::string toString(QEngine qengine) {
   switch (qengine) {
@@ -33,6 +35,8 @@ inline std::string toString(QEngine qengine) {
       return "QNNPACK";
     case kONEDNN:
       return "ONEDNN";
+    case kX86:
+      return "X86";
     default:
       TORCH_CHECK(
           false, "Unrecognized Quantized Engine: ", static_cast<int>(qengine));

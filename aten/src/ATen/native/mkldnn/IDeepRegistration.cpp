@@ -1,5 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <c10/core/Allocator.h>
 
 #if AT_MKLDNN_ENABLED()
 

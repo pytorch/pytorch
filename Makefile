@@ -31,3 +31,7 @@ lint:
 
 quicklint:
 	lintrunner
+
+triton:
+	$(PIP) uninstall -y triton
+	$(PIP) install -U "git+https://github.com/openai/triton@$(shell cat .github/ci_commit_pins/triton.txt)#subdirectory=python"

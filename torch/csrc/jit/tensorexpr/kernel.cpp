@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -28,7 +29,7 @@ namespace tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
-      "This error occured in the fuser. You can turn off the fuser with "
+      "This error occurred in the fuser. You can turn off the fuser with "
       "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
@@ -233,6 +234,20 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
 }
 
+size_t get_conv_groups_index(const torch::jit::Node* node) {
+  switch (node->kind()) {
+    case aten::conv2d:
+      return 6;
+    case aten::_convolution:
+      return 8;
+    default:
+      TORCH_CHECK(
+          false,
+          "mkldnnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
+          node->kind());
+  }
+}
+
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
 // - Constant strides/padding/dilation/groups
@@ -246,7 +261,8 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
-  auto const& groups = toIValue(node->input(6));
+  size_t groups_index = get_conv_groups_index(node);
+  auto const& groups = toIValue(node->input(groups_index));
 
   // Everything should be statically known.
   if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
@@ -278,7 +294,8 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
-  auto const& groups = toIValue(node->input(6));
+  size_t groups_index = get_conv_groups_index(node);
+  auto const& groups = toIValue(node->input(groups_index));
 
   // Everything should be statically known (bias could be NoneType =
   // prim::Constant()).
@@ -312,6 +329,37 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
       groups->toInt());
 #endif
   return false;
+}
+
+bool isConv2d(const Node* node) {
+  if (node->kind() != aten::_convolution) {
+    return false;
+  }
+
+  auto const& stride = toIValue(node->input(3));
+  auto const& pad = toIValue(node->input(4));
+  auto const& dilation = toIValue(node->input(5));
+  auto const& transposed = toIValue(node->input(6));
+  auto const& output_padding = toIValue(node->input(7));
+
+  if (!stride || !pad || !dilation || !transposed || !output_padding) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  if (stride.value().toIntList().size() != 2 ||
+      pad.value().toIntList().size() != 2 ||
+      dilation.value().toIntList().size() != 2 ||
+      output_padding.value().toIntList().size() != 2) {
+    GRAPH_DEBUG("Conv not 2d");
+    return false;
+  }
+
+  if (transposed.value().toBool()) {
+    GRAPH_DEBUG("transposed Conv");
+    return false;
+  }
+  return true;
 }
 
 // The fuser currently only supports matmul of 2D x 2D matrices
@@ -622,29 +670,40 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // indices where none would be needed, which would significantly complicate
 // vectorization.
 void fuseAllLoops(StmtPtr st) {
-  if (auto block = to<tensorexpr::Block>(st)) {
-    std::vector<ForPtr> loopsToFuse;
-    for (auto stmt : *block) {
-      auto loop = to<For>(stmt);
-      if (!loop) {
-        // Block contains something that's not a loop.  Quit.
-        return;
-      }
-      loopsToFuse.push_back(loop);
+  auto block = to<tensorexpr::Block>(st);
+  if (block == nullptr) {
+    return;
+  }
+
+  std::vector<std::vector<ForPtr>> all_outer_loops;
+  std::vector<ForPtr> outer_loops;
+  for (const auto& stmt : *block) {
+    auto loop = to<For>(stmt);
+    auto hasReduction = NodeFinder<ReduceOp>::find(stmt).size() != 0;
+    if (!loop || hasReduction) {
+      all_outer_loops.push_back(outer_loops);
+      outer_loops.clear();
+    } else {
+      outer_loops.push_back(loop);
     }
-    if (loopsToFuse.empty()) {
-      return;
+  }
+  all_outer_loops.push_back(outer_loops);
+
+  for (const auto& outer_loops : all_outer_loops) {
+    if (outer_loops.empty()) {
+      continue;
     }
-    // TODO: Support fusing some of the loops in a block.
-    // Currently, we only fuse all the loops in a block, which is restrictive.
-    if (!loopBoundsAllEqual(loopsToFuse)) {
-      return;
+
+    if (!loopBoundsAllEqual(outer_loops)) {
+      continue;
     }
+
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr fusedLoop;
-    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
-      return;
+    if (!LoopNest::fuseLoops(outer_loops, &fusedLoop)) {
+      continue;
     }
+
     fuseAllLoops(fusedLoop->body());
   }
 }
@@ -781,7 +840,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (backendType == kLLVMCodeGen) {
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
-    parallelizeOuterLoops(l, bufOutputs_);
+    parallelizeOuterLoops(l, bufsToBeParallelized_);
     GRAPH_DEBUG("after parallelize", *l.root_stmt());
   }
 
@@ -1606,6 +1665,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   deduceMemoryLayoutPolicy();
 
   // Fuse Conv with Eltwise Op
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph_);
   FuseConvWithEltwise(graph_);
 
   // Optimize the concatenation
@@ -1648,6 +1708,20 @@ void TensorExprKernel::compile() {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           Tensor t = computeValue(output);
+
+          // If there are for-loops before ExternalCall as follows,
+          //   stmt1: for:
+          //   stmt2    for:
+          //   stmt3: ExternalCall
+          // the for-loops would not be parallelized. So we mark the
+          // buf args of ExternalCall as to be parallelized to make sure
+          // its previous loop still could be parallelized.
+          if (to<ExternalCall>(t.stmt())) {
+            auto _external_call = to<ExternalCall>(t.stmt());
+            for (const auto& _buf : _external_call->buf_args()) {
+              bufsToBeParallelized_.insert(_buf);
+            }
+          }
 
           if (output->type()->cast<TensorType>()) {
             // Value is tensor
@@ -1702,6 +1776,7 @@ void TensorExprKernel::compile() {
     if (!output->type()->cast<TensorType>()) {
       // Scalar outputs are represented as 0-dim buffers.
       bufOutputs_.insert(bufs_.at(output));
+      bufsToBeParallelized_.insert(bufs_.at(output));
       bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
       tensorOutputTensorOptions_.emplace_back(
           c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
@@ -1752,6 +1827,7 @@ void TensorExprKernel::compile() {
     }
 
     bufOutputs_.insert(bufs_.at(output));
+    bufsToBeParallelized_.insert(bufs_.at(output));
     bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));

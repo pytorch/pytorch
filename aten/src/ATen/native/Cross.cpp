@@ -1,10 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/Resize.h>
-#include <ATen/ExpandUtils.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Cross.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/Resize.h>
+
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cross_native.h>
+#include <ATen/ops/linalg_cross.h>
+#include <ATen/ops/linalg_cross_native.h>
+#endif
 
 namespace at {
 namespace meta {

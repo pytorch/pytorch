@@ -23,7 +23,7 @@ from .backend_config import BackendConfig, DTypeConfig
 # these will diverge. In particular, for FBGEMM, we will restrict the activation quantized
 # values to within [0, 127].
 
-fbgemm_weighted_op_int8_dtype_config = DTypeConfig(
+fbgemm_weighted_op_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.quint8,
     weight_dtype=torch.qint8,
@@ -79,15 +79,15 @@ def get_fbgemm_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch's native FBGEMM backend.
     """
-    conv_dtype_configs = [fbgemm_weighted_op_int8_dtype_config]
+    conv_dtype_configs = [fbgemm_weighted_op_quint8_dtype_config]
     linear_dtype_configs = [
-        fbgemm_weighted_op_int8_dtype_config,
+        fbgemm_weighted_op_quint8_dtype_config,
         fbgemm_default_dynamic_int8_dtype_config,
         fbgemm_default_dynamic_float16_dtype_config,
     ]
-    binary_op_dtype_configs = [fbgemm_weighted_op_int8_dtype_config]
+    binary_op_dtype_configs = [fbgemm_default_op_quint8_dtype_config]
     default_op_dtype_configs = [fbgemm_default_op_quint8_dtype_config]
-    fixed_qparams_op_dtype_configs = [fbgemm_weighted_op_int8_dtype_config]
+    fixed_qparams_op_dtype_configs = [fbgemm_default_op_quint8_dtype_config]
     share_qparams_op_dtype_configs = [fbgemm_default_op_quint8_dtype_config]
     rnn_op_dtype_configs = [
         fbgemm_default_dynamic_int8_dtype_config,

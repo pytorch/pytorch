@@ -95,7 +95,7 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
  *         ]
  *     ]"
  *
- * @param compilation_unit Jit compilcation unit to look up function schema.
+ * @param compilation_unit Jit compilation unit to look up function schema.
  * @param type_ptr A type pointer and it can be possibly any type.
  * @param default_type_str The default string representation. The string can
  * either from type_ptr->str(), type_ptr->annotation_str(), or
@@ -424,8 +424,11 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+// TODO: remove mobileInterfaceCallExport as it is no longer needed.
+// This function was introduced to guard the usage of `InterfaceCall` and
+// now the support for `InterfaceCall` should be mature enough.
 auto& mobileInterfaceCallExport() {
-  static std::atomic<bool> flag{false};
+  static std::atomic<bool> flag{true};
   return flag;
 }
 

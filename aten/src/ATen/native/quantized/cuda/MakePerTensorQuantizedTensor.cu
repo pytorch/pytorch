@@ -1,6 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/native/TensorIterator.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/_make_per_channel_quantized_tensor_native.h>
+#include <ATen/ops/_make_per_tensor_quantized_tensor_native.h>
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace native {

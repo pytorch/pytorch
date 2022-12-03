@@ -1,6 +1,7 @@
 from typing import Dict, List, NoReturn, Sequence, Union
 
 from torchgen.api.types import (
+    ArrayRefCType,
     BaseCType,
     Binding,
     boolT,
@@ -9,7 +10,6 @@ from torchgen.api.types import (
     Expr,
     intArrayRefT,
     iOptTensorListRefT,
-    iTensorListRefT,
     layoutT,
     ListCType,
     longT,
@@ -20,6 +20,7 @@ from torchgen.api.types import (
     OptionalCType,
     optionalIntArrayRefT,
     optionalScalarRefT,
+    optionalSymIntArrayRefT,
     optionalTensorRefT,
     scalar_t,
     scalarT,
@@ -27,7 +28,6 @@ from torchgen.api.types import (
     SpecialArgName,
     symIntArrayRefT,
     SymIntT,
-    tensorListT,
     tensorOptionsT,
     tensorT,
     VectorCType,
@@ -184,12 +184,6 @@ def translate(
                 NamedCType(t.name, BaseCType(opmath_t))
             ] = f"static_cast<opmath_t>({b.expr})"
 
-        # [Note: ITensorListRef]
-        if t.type == BaseCType(tensorListT):
-            ctx[
-                NamedCType(t.name, BaseCType(iTensorListRefT))
-            ] = f"at::ITensorListRef({b.expr})"
-
         # [Note: IOptTensorListRef]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
             ctx[
@@ -256,6 +250,12 @@ Check this module for more information.
                 return solve(NamedCType(goal.name, goal.type.elem), direct=direct)
             except UnsatError:
                 pass
+
+        # TODO: These are referentially equal, shouldn't have to do this;
+        # ensuring we don't use type synonym IntArrayRef in codegen would
+        # help
+        if goal.type == ArrayRefCType(BaseCType(longT)):
+            return solve(NamedCType(goal.name, BaseCType(intArrayRefT)), direct=direct)
 
         if direct:
             unsat(goal)
@@ -339,7 +339,7 @@ Check this module for more information.
         elif goal.type == BaseCType(symIntArrayRefT):
             try:
                 r = direct_solve(NamedCType(goal.name, BaseCType(intArrayRefT)))
-                return f"c10::fromIntArrayRef({r})"
+                return f"c10::fromIntArrayRefSlow({r})"
             except UnsatError:
                 return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(SymIntT):
@@ -358,7 +358,20 @@ Check this module for more information.
             )
             return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
-            return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
+            try:
+                return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
+            except UnsatError:
+                argname = direct_solve(
+                    NamedCType(goal.name, BaseCType(optionalSymIntArrayRefT))
+                )
+                return f"{argname}.has_value() ? c10::make_optional(c10::asIntArrayRefSlow(*{argname})) : c10::nullopt"
+        elif goal.type == BaseCType(optionalSymIntArrayRefT):
+            # TODO: You might also want to solve this from longSymVec_ctype or
+            # an optional version of it
+            argname = direct_solve(
+                NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
+            )
+            return f"{argname}.has_value() ? c10::make_optional(c10::fromIntArrayRefSlow(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):
