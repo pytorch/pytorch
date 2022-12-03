@@ -1527,10 +1527,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res2, 9)
 
     def test_const_dict_variable_python_type(self):
-        from torch._dynamo.variables import ConstDictVariable
+        from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": 10, "b": 20}
-        d2 = collections.OrderedDict([("x", 12), ("y", 22)])
+        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d2 = collections.OrderedDict(
+            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+        )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
@@ -2334,7 +2336,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f_onnx(input_two_dims), 8)
 
     def test_cond(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(x):
             return x.sin()
@@ -2352,7 +2354,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
     def test_cond_nested(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn_nested(x):
             return x * 10
@@ -2397,7 +2399,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(cc.frame_count, 2)
 
     def test_cond_export(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn_nested(x):
             return x * 10
@@ -2442,7 +2444,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )  # * -1 then add x
 
     def test_cond_export_single_arg(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(x):
             return x
@@ -2957,19 +2959,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_get_device_index(self):
-        def fn(x):
-            x = x + 1
-            a = torch._utils._get_device_index(x.device)
-            b = torch._utils._get_device_index(1)
-            return a, b
+    def test_disable_flag(self):
 
-        x = torch.rand(4, device="cuda")
-        ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        with patch.dict(os.environ, {"TORCH_COMPILE_DISABLE": "1"}):
+
+            def fn(x, y):
+                x = x + 1
+                y = y + 1
+
+            opt_fn = torch._dynamo.optimize(cnt)
+
+        self.assertEqual(cnt.frame_count, 0)
 
 
 class CustomFunc1(torch.autograd.Function):
