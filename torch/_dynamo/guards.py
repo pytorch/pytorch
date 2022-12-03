@@ -865,7 +865,7 @@ def guard_fail_hook(
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
-    for index, part in enumerate(guard_fn.verbose_code_parts):
+    for part in guard_fn.verbose_code_parts:
         fail_reason = eval(part, guard_fn.global_scope, scope)
         # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
         # is updated to return a string explaining the failure.
