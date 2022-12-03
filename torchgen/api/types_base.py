@@ -1,5 +1,5 @@
 """
-`types_base.py` vs `types.py`
+Where should I add a new type? `types_base.py` vs `types.py`
 
 This file defines data model classes for torchgen typing system, as well as some base types such as int32_t.
 
@@ -9,12 +9,13 @@ The difference between these two files, is `types_base.py` should be implementat
 contain any type definition that is tight to a specific C++ library (e.g., ATen), so that it cacn be easily reused
 if we want to generate code for another C++ library.
 
-For all ATen related types, please refer to or modify `types.py`.
+Add new types to `types.py` if these types are ATen/c10 related.
+Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 """
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 
@@ -95,6 +96,52 @@ class ConstRefCType(CType):
 
     def remove_const_ref(self) -> "CType":
         return self.elem.remove_const_ref()
+
+
+@dataclass(frozen=True)
+class VectorCType(CType):
+    elem: "CType"
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f"::std::vector<{self.elem.cpp_type()}>"
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f"::std::vector<{self.elem.cpp_type_registration_declarations()}>"
+
+    def remove_const_ref(self) -> "CType":
+        return VectorCType(self.elem.remove_const_ref())
+
+
+@dataclass(frozen=True)
+class ArrayCType(CType):
+    elem: "CType"
+    size: int
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f"::std::array<{self.elem.cpp_type()},{self.size}>"
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f"::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>"
+
+    def remove_const_ref(self) -> "CType":
+        return ArrayCType(self.elem.remove_const_ref(), self.size)
+
+
+@dataclass(frozen=True)
+class TupleCType(CType):
+    elems: List["CType"]
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
+        return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
+
+    def remove_const_ref(self) -> "CType":
+        return TupleCType([e.remove_const_ref() for e in self.elems])
 
 
 @dataclass(frozen=True)
