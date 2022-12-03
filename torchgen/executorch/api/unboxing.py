@@ -70,7 +70,7 @@ class Unboxing:
         self, t: Type, arg_name: str, *, mutable: bool = False
     ) -> Tuple[str, CType, List[str], List[str]]:
         ctype = self.argument_type_gen(
-            t=t, mutable=mutable, binds=arg_name, symint=False
+            t=t, mutable=mutable, binds=arg_name
         ).type
 
         if isinstance(t, BaseType):

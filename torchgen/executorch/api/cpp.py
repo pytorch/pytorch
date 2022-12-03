@@ -43,7 +43,9 @@ from torchgen.model import (
 from torchgen.utils import assert_never
 
 # This file describes the translation of JIT schema to the public C++
-# API, which is what people use when they call functions like at::add.
+# API, which is what people use when they call functions like at::add,
+# as well as native function API, which is the signature of kernels.
+# Notice that in Executorch CppSignature is the same as NativeSignature.
 #
 # Prominent characteristics of the C++ API:
 #
@@ -51,7 +53,9 @@ from torchgen.utils import assert_never
 #     a single C++ type TensorOptions  (the native functions API
 #     also has this, but tensor options is really most relevant
 #     for the C++ API; it makes calling kwarg factory functions
-#     pleasant)
+#     pleasant). Executorch doesn't have TensorOptions support,
+#     we keep the logic here to be compatible with torchgen.api.
+#     types.CppSignature, so that we can do stuff like ATen mode.
 #
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)

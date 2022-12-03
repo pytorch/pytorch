@@ -1,25 +1,24 @@
 import argparse
 import os
 import pathlib
+from collections import defaultdict
 from dataclasses import dataclass
 from io import TextIOWrapper
-from typing import Dict, List, Literal, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import yaml
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 from torchgen import dest
 from torchgen.api import cpp as aten_cpp
-from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.context import method_with_native_function, with_native_function_and_index
-from torchgen.executorch.api import cpp as et_cpp, unboxing
-from torchgen.executorch.api.types import CppSignature, NativeSignature
-from torchgen.executorch.api.unboxing import Unboxing
+from torchgen.executorch.api import cpp as et_cpp
 from torchgen.executorch.api.custom_ops import gen_custom_ops
+from torchgen.executorch.api.types import CppSignature
+from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
     get_custom_build_selector,
-    get_grouped_native_functions,
     get_native_function_declarations,
     LineLoader,
     parse_native_yaml,
@@ -28,14 +27,19 @@ from torchgen.gen import (
 from torchgen.model import (
     BackendIndex,
     DispatchKey,
-    is_generic_dispatch_key,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
     Variant,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import context, FileManager, make_file_manager, mapMaybe, Target
+from torchgen.utils import (
+    context,
+    FileManager,
+    make_file_manager,
+    mapMaybe,
+    NamespaceHelper,
+)
 
 
 def static_dispatch(
@@ -61,10 +65,9 @@ def static_dispatch(
     if len(backends) == 1:
         backend_metadata = backends[0].get_kernel(f)
         if backend_metadata:
-            native_sig = NativeSignature(func=f.func)
-            exprs = translate(sig.arguments(), native_sig.arguments())
             comma = ", "
-            static_block = f"return {backend_metadata.cpp_namespace}::{backend_metadata.kernel}({comma.join(e.expr for e in exprs)});"
+            # Here we are assuming there's no difference between CppSignature and NativeSignature for Executorch.
+            static_block = f"return ::{backend_metadata.cpp_namespace}::{backend_metadata.kernel}({comma.join(a.name for a in sig.arguments())});"
     else:
         static_block = f'ET_ASSERT_UNREACHABLE_MSG("The number of native function(s) binding to {f.func.name} is {len(backends)}.");'
     return f"""
@@ -113,14 +116,9 @@ TORCH_API inline {sig.decl()} {{
             )
 
 
-# Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
+# Generates RegisterCodegenUnboxedKernels.cpp.
 @dataclass(frozen=True)
-class ComputeUnboxingFunctions:
-    # pyre-fixme[31]: Expression `Target.DECLARATION` is not a literal value.
-    # pyre-fixme[31]: Expression `Target.DEFINITION` is not a literal value.
-    # pyre-fixme[11]: Annotation `Target` is not defined as a type.
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
-
+class ComputeCodegenUnboxedKernels:
     selector: SelectiveBuilder
 
     use_aten_lib: bool
@@ -129,93 +127,55 @@ class ComputeUnboxingFunctions:
     def __call__(self, f: NativeFunction) -> str:
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return ""
-
-        # pyre-fixme[16]: `Enum` has no attribute `DECLARATION`.
-        if self.target is Target.DECLARATION:
-            # Note [The ATen Codegen Unboxing API]
-            # Similar to the ATen Operators API, ATen Codegen Unboxing API lives in the at::unboxing namespace, and
-            # will be used by codegen unboxing wrappers (CodegenUnboxingWrappers.cpp).
-            # The Wrappers will be registered into torch::jit::OperatorRegistry using RegisterOperators API.
-            #
-            # Important characteristics about the Codegen Unboxing API:
-            # (1) It follows the OperatorRegistry API.
-            #     This is kind of necessary to avoid overhead.
-            #     For example: if it followed the C++ API, then all of the faithful C++ factory functions
-            #     would need to wrap their arguments into TensorOptions only to unwrap them again.
-            # (2) Under the hood it calls C++ API.
-            return f"""
-// {f.namespace}::{f.func}
-void {f.func.name.unambiguous_name()}(EValue** stack);
-"""
+        if self.use_aten_lib:
+            sig = CppSignatureGroup.from_native_function(
+                f, method=False, fallback_binding=f.manual_cpp_binding
+            ).most_faithful_signature()
+            argument_type_gen = aten_cpp.argumenttype_type
+            return_type_gen = aten_cpp.returns_type
         else:
-            if self.use_aten_lib:
-                sig = CppSignatureGroup.from_native_function(
-                    f, method=False, fallback_binding=f.manual_cpp_binding
-                ).most_faithful_signature()
-                argument_type_gen = aten_cpp.argumenttype_type
-                return_type_gen = aten_cpp.returns_type
+            sig = CppSignature.from_native_function(f)
+            argument_type_gen = et_cpp.argumenttype_type
+            return_type_gen = et_cpp.returns_type
+        # parse arguments into C++ code
+        binding_list, code_list = Unboxing(
+            argument_type_gen=argument_type_gen
+        ).convert_arguments(sig.arguments())
+
+        # for each C++ argument, generate the conversion code
+        code_connector = "\n\t"
+        arg_connector = ", "
+
+        args_str = f"{arg_connector.join(e.name for e in binding_list)}"
+
+        if len(f.func.returns) == 0:
+            if len(f.func.arguments.out) == 0:
+                raise Exception(
+                    f"Can't handle native function {f.func} with no returns and no out yet."
+                )
+            out = f.func.arguments.out[0]
+            return_assignment = f"""stack[{len(binding_list)}] = &{out.name};"""
+            ret_prefix = ""
+        else:
+            if len(f.func.arguments.out) == 0:
+                return_assignment = (
+                    f"""*stack[{len(binding_list)}] = EValue(result_);"""
+                )
+                ret_prefix = return_type_gen(f.func.returns).cpp_type() + " result_ = "
             else:
-                sig = CppSignature.from_native_function(f)
-                argument_type_gen = et_cpp.argumenttype_type
-                return_type_gen = et_cpp.returns_type
-            # parse arguments into C++ code
-            binding_list, code_list = Unboxing(
-                argument_type_gen=argument_type_gen
-            ).convert_arguments(sig.arguments())
-
-            # for each C++ argument, generate the conversion code
-            code_connector = "\n\t"
-            arg_connector = ", "
-
-            args_str = f"{arg_connector.join(e.name for e in binding_list)}"
-
-            if len(f.func.returns) == 0:
-                if len(f.func.arguments.out) == 0:
-                    raise Exception(
-                        f"Can't handle native function {f.func} with no returns and no out yet."
-                    )
-                out = f.func.arguments.out[0]
-                return_assignment = f"""stack[{len(binding_list)}] = &{out.name};"""
+                return_assignment = ""
                 ret_prefix = ""
-            else:
-                if len(f.func.arguments.out) == 0:
-                    return_assignment = (
-                        f"""*stack[{len(binding_list)}] = EValue(result_);"""
-                    )
-                    ret_prefix = (
-                        return_type_gen(f.func.returns).cpp_type() + " result_ = "
-                    )
-                else:
-                    return_assignment = ""
-                    ret_prefix = ""
-            return f"""
-// {f.namespace}::{f.func}
-void {f.func.name.unambiguous_name()}(EValue** stack) {{
-    {code_connector.join(code_list)}
 
-    EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-    {ret_prefix}torch::executor::{sig.name()}({args_str});
-
-    {return_assignment}
-}}
-"""
-
-
-# Generates RegisterCodegenUnboxedKernels.cpp.
-@dataclass(frozen=True)
-class ComputeCodegenUnboxedKernels:
-    selector: SelectiveBuilder
-
-    @method_with_native_function
-    def __call__(self, f: NativeFunction) -> str:
-        if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
-            return ""
-        # We unconditionally generate function wrappers,
         return f"""
 Operator(
     "{f.namespace}::{f.func.name}",
     [](EValue** stack) {{
-        unboxing::{unboxing.name(f)}(stack);
+        {code_connector.join(code_list)}
+
+        EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
+        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({args_str});
+
+        {return_assignment}
     }}
 ),
 """
@@ -232,23 +192,11 @@ def gen_unboxing(
         return fn.root_name
 
     cpu_fm.write_sharded(
-        "UnboxingFunctions.cpp",
-        native_functions,
-        key_fn=key_func,
-        env_callable=lambda fn: {
-            # pyre-fixme[19]: Expected 0 positional arguments.
-            # pyre-fixme[16]: `Enum` has no attribute `DEFINITION`.
-            "definitions": [ComputeUnboxingFunctions(Target.DEFINITION, selector, use_aten_lib)(fn)],
-        },
-        num_shards=1,
-        sharded_keys={"definitions"},
-    )
-    cpu_fm.write_sharded(
         "RegisterCodegenUnboxedKernels.cpp",
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {
-            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)],
+            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector, use_aten_lib)(fn)],
         },
         num_shards=1,
         sharded_keys={"unboxed_ops"},
@@ -260,7 +208,7 @@ def compute_native_function_declaration(
     g: Union[NativeFunctionsGroup, NativeFunction], backend_index: BackendIndex
 ) -> List[str]:
     assert isinstance(g, NativeFunction)
-    sig = NativeSignature(func=g.func)
+    sig = CppSignature.from_native_function(f=g)
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
@@ -268,35 +216,71 @@ def compute_native_function_declaration(
     return [f"{prefix} {sig.decl(name=metadata.kernel)};"]
 
 
-def gen_aggregated_headers(
+def gen_functions_declarations(
     *,
     native_functions: Sequence[NativeFunction],
-    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    static_dispatch_idx: List[BackendIndex],
+    selector: SelectiveBuilder,
+    use_aten_lib: bool,
+) -> str:
+    """
+    Generates namespace separated C++ function API inline declaration/definitions.
+    Native functions are grouped by namespaces and the generated code is wrapped inside
+    namespace blocks.
+
+    E.g., for `custom_1::foo.out` in yaml file we will generate a C++ API as a symbol
+    in `torch::executor::custom_1::foo_out`. This way we avoid symbol conflict when
+    the other `custom_2::foo.out` is available.
+    """
+    ns_grouped_functions = defaultdict(list)
+    for native_function in native_functions:
+        ns_grouped_functions[native_function.namespace].append(native_function)
+    functions_declarations = ""
+    newline = "\n"
+    for namespace in ns_grouped_functions:
+        ns_helper = NamespaceHelper(
+            namespace_str=namespace,
+            entity_name="",
+            max_level=3,
+        )
+        declarations = list(
+            mapMaybe(
+                ComputeFunction(
+                    static_dispatch_backend_indices=static_dispatch_idx,
+                    selector=selector,
+                    use_aten_lib=use_aten_lib,
+                ),
+                ns_grouped_functions[namespace],
+            )
+        )
+        functions_declarations += f"""
+{ns_helper.prologue}
+{newline.join(declarations)}
+{ns_helper.epilogue}
+        """
+    return functions_declarations
+
+
+def gen_headers(
+    *,
+    native_functions: Sequence[NativeFunction],
     static_dispatch_idx: List[BackendIndex],
     selector: SelectiveBuilder,
     backend_indices: Dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
-    functions_keys: Set[DispatchKey],
-    dispatch_keys: Sequence[DispatchKey],
-    rocm: bool,
     use_aten_lib: bool,
 ) -> None:
-
     cpu_fm.write(
         "Functions.h",
         lambda: {
             "static_dispatch_extra_headers": "#include <ATen/Functions.h>"
             if use_aten_lib
             else '#include "NativeFunctions.h"',
-            "Functions_declarations": list(
-                mapMaybe(
-                    ComputeFunction(
-                        static_dispatch_backend_indices=static_dispatch_idx,
-                        selector=selector,
-                        use_aten_lib=use_aten_lib,
-                    ),
-                    native_functions,
-                )
+            "Functions_declarations": gen_functions_declarations(
+                native_functions=native_functions,
+                static_dispatch_idx=static_dispatch_idx,
+                selector=selector,
+                use_aten_lib=use_aten_lib,
             ),
         },
     )
@@ -313,93 +297,6 @@ def gen_aggregated_headers(
             ),
         },
     )
-    cpu_fm.write(
-        "UnboxingFunctions.h",
-        lambda: {
-            "declarations": list(
-                mapMaybe(
-                    # pyre-fixme[19]: Expected 1 positional arguments.
-                    # pyre-fixme[16]: `Enum` has no attribute `DECLARATION`.
-                    ComputeUnboxingFunctions(
-                        Target.DECLARATION, selector, use_aten_lib
-                    ),
-                    native_functions,
-                )
-            ),
-        },
-    )
-
-
-def gen_headers(
-    *,
-    native_functions: Sequence[NativeFunction],
-    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-    static_dispatch_idx: List[BackendIndex],
-    selector: SelectiveBuilder,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-    core_fm: FileManager,
-    cpu_fm: FileManager,
-    ops_fm: FileManager,
-    dispatch_keys: Sequence[DispatchKey],
-    functions_keys: Set[DispatchKey],
-    rocm: bool,
-    per_operator_headers: bool,
-    use_aten_lib: bool,
-) -> None:
-    if per_operator_headers:
-        raise RuntimeError("Not supported")
-    else:
-        gen_aggregated_headers(
-            native_functions=native_functions,
-            grouped_native_functions=grouped_native_functions,
-            static_dispatch_idx=static_dispatch_idx,
-            selector=selector,
-            backend_indices=backend_indices,
-            cpu_fm=cpu_fm,
-            dispatch_keys=dispatch_keys,
-            functions_keys=functions_keys,
-            rocm=rocm,
-            use_aten_lib=use_aten_lib,
-        )
-
-    def gen_aten_interned_strings() -> Dict[str, str]:
-        attrs = set()  # All function argument names
-        names = set()  # All ATen function names
-        for func in native_functions:
-            names.add(str(func.func.name.name))
-            # Some operators don't have a functional variant but we still create a
-            # symbol without the underscore
-            names.add(func.func.name.name.base)
-
-            for arg in func.func.schema_order_arguments():
-                attrs.add(arg.name)
-
-        # These are keywords in C++, so aren't valid symbol names
-        # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= {
-            "and",
-            "and_eq",
-            "bitand",
-            "bitor",
-            "compl",
-            "not",
-            "not_eq",
-            "or",
-            "or_eq",
-            "xor",
-            "xor_eq",
-        }
-
-        return {
-            "aten_symbols": " \\\n".join(
-                [f"_(aten, {name})" for name in sorted(names)]
-            ),
-            "attr_symbols": " \\\n".join(
-                [f"_(attr, {name})" for name in sorted(attrs)]
-            ),
-        }
-
-    core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
 
 def translate_native_yaml(
@@ -507,6 +404,7 @@ def parse_yaml_files(
              present. If not present, None.
     """
     import tempfile
+
     gen_native_fns = use_aten_lib and native_yaml_path
     with tempfile.TemporaryDirectory() as tmpdirname:
         # If native_yaml_path doesn't exist, point to an empty file.
@@ -599,12 +497,6 @@ def main() -> None:
         help="generate static dispatch code for the specific backend (if set)",
     )
     parser.add_argument(
-        "--backend_whitelist",
-        nargs="*",
-        help="filter dispatch backend by the whitelist (if set), "
-        "e.g.: CPU CUDA QuantizedCPU ...",
-    )
-    parser.add_argument(
         "--op_registration_whitelist",
         nargs="*",
         help="filter op registrations by the whitelist (if set); "
@@ -620,11 +512,6 @@ def main() -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
-        "--skip_dispatcher_op_registration",
-        action="store_true",
-        help="Avoid registering operators into the dispatcher.",
-    )
-    parser.add_argument(
         "--tags-path",
         help="Path to tags.yaml. Required by yaml parsing in codegen system.",
     )
@@ -634,20 +521,9 @@ def main() -> None:
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
     )
     parser.add_argument(
-        "--per-operator-headers",
-        action="store_true",
-        help="generate separate headers per operator in ATen/ops",
-    )
-    parser.add_argument(
         "--use_aten_lib",
         action="store_true",
         help="a boolean flag to indicate whether we use ATen kernels or not, in the future this flag will be per operator",
-    )
-    parser.add_argument(
-        "--force_schema_registration",
-        action="store_true",
-        help="force it to generate schema-only registrations for all ops, including"
-        "those that are not listed on --op_registration_whitelist",
     )
     parser.add_argument(
         "--generate",
@@ -674,70 +550,22 @@ def main() -> None:
         custom_ops_parsed_yaml.native_functions if custom_ops_parsed_yaml else None
     )
 
-    ops_install_dir = f"{options.install_dir}/ops"
-    pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
-    core_install_dir = f"{options.install_dir}/core"
-    pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
-
-    core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
-    ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-    grouped_native_functions = get_grouped_native_functions(native_functions)
-
-    from torchgen.model import dispatch_keys
-
-    if options.backend_whitelist:
-        dispatch_keys = [
-            k
-            for k in dispatch_keys
-            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-        ]
-    functions_keys = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeImplicitAutogradNestedTensor,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
-        DispatchKey.Meta,
-    }
 
     selector = get_custom_build_selector(
         options.op_registration_whitelist,
         options.op_selection_yaml_path,
     )
 
-    static_dispatch_idx: List[BackendIndex] = []
-    if options.static_dispatch_backend:
-        static_dispatch_idx = [
-            backend_indices[DispatchKey.parse(key)]
-            for key in options.static_dispatch_backend
-        ]
-        static_dispatch_idx = list(
-            filter(
-                lambda i: i.dispatch_key != DispatchKey.Undefined, static_dispatch_idx
-            )
-        )
-
-        for key in options.static_dispatch_backend:
-            dp_key = DispatchKey.parse(key)
-            if dp_key not in functions_keys:
-                functions_keys.add(dp_key)
+    static_dispatch_idx: List[BackendIndex] = [backend_indices[DispatchKey.CPU]]
 
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
-            grouped_native_functions=grouped_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
-            core_fm=core_fm,
             cpu_fm=cpu_fm,
-            ops_fm=ops_fm,
-            dispatch_keys=dispatch_keys,
-            functions_keys=functions_keys,
-            rocm=options.rocm,
-            per_operator_headers=options.per_operator_headers,
             use_aten_lib=options.use_aten_lib,
         )
 
@@ -754,8 +582,6 @@ def main() -> None:
                 selector=selector,
                 backend_indices=backend_indices,
                 cpu_fm=cpu_fm,
-                functions_keys=functions_keys,
-                dispatch_keys=dispatch_keys,
                 rocm=options.rocm,
             )
 
@@ -766,8 +592,6 @@ def main() -> None:
 
         for fm, prefix in [
             (cpu_fm, ""),
-            (core_fm, "core_"),
-            (ops_fm, "ops_"),
         ]:
             varname = prefix + depfile_stem
             path = depfile_path.parent / (prefix + depfile_name)
