@@ -9,9 +9,6 @@ import torch._dynamo.test_case
 import torch.utils._pytree as pytree
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
     is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs)
@@ -285,11 +282,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
 
+    # Note: Dynamo recompilation guarding invalid grad
+    #
+    # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
+    # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
+    # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
+    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # 
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs 
+    # is because dynamo sends fake tensors down to aot_autograd.
     @patch("functorch._src.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -297,10 +300,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         y = torch.randn(3, 3, requires_grad=True)
         z = torch.randn(3, 3, requires_grad=False)
-
-        fake_x = fake_mode.from_tensor(x)
-        fake_y = fake_mode.from_tensor(y)
-        fake_z = fake_mode.from_tensor(z)
 
         def _outs_and_grads(fn, graph_inps, inps):
             outs = fn(*graph_inps)
@@ -321,19 +320,29 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        fxy = torch._dynamo.optimize(cc)(F())
+        failure_reason = None
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0][0]
+
+        fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare(F(), fxy, (x, y))
         compare(F(), fxy, (x, z))
-
+        self.assertEqual(failure_reason, "tensor 'y' requires_grad mismatch. expected requires_grad=1")
+        
+        # Reset failure reason
+        failure_reason = None
+        
         self.assertEqual(cc.frame_count, 2)
 
         torch._dynamo.reset()  # for new backend
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        fxz = torch._dynamo.optimize(cc)(F())
+        fxz = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare(F(), fxz, (x, z))
         compare(F(), fxz, (x, z))
         self.assertEqual(cc.frame_count, 1)
+        self.assertTrue(failure_reason is None)
 
 
 if __name__ == "__main__":

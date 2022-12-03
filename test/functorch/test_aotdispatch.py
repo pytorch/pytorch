@@ -1070,6 +1070,7 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
     @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("functorch._src.config.debug_assert", True)
     def test_invalid_requires_grad_fake(self, counter):
