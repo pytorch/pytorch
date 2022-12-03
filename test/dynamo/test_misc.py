@@ -2973,6 +2973,35 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_guard_failure_fn(self):
+        def fn(x, y, k):
+            x = x + 1
+            y = y + 1
+            return x * y * k
+
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([1.0, 1.0])
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        x2 = torch.tensor([0.5, 0.5, 1.0])
+        y2 = torch.tensor([0.5, 0.5, 0.5])
+
+        opt_fn(x, y, 3)
+        opt_fn(x2, y2, 5)
+
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0][0], "k == 3")
+        self.assertTrue("dynamo/test_misc.py" in guard_failure[1].co_filename)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
