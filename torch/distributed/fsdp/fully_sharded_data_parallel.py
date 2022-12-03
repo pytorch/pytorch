@@ -32,7 +32,6 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
-    HandleTrainingState,
     TrainingState,
 )
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
@@ -54,9 +53,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _post_forward_reshard,
     _pre_forward,
     _pre_forward_unshard,
-    _reshard,
     _root_pre_forward,
-    _should_free_in_backward,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -938,135 +935,6 @@ class FullyShardedDataParallel(nn.Module):
                 # be multiple in the case of nested FSDP modules
                 param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
-
-    @torch.no_grad()
-    def _wait_for_post_backward(self) -> None:
-        """Wait for post-backward to finish. Only called on root instance."""
-        assert self._is_root, "_wait_for_post_backward can only be called on root."
-        # Root's training state might be backward_pre or backward_post depending on
-        # if root parameter's post backward hook was called. The post-backward hook
-        # may not have been called if gradient was not computed for this param/FSDP
-        # module.
-
-        if self._sync_gradients:
-            torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
-            if self.cpu_offload.offload_params:
-                # We need to wait for the non-blocking GPU ->
-                # CPU grad transfers to finish. We need to do this for GPU -> CPU
-                # copies because when grad is on CPU, it won't wait for any CUDA
-                # stream to finish GPU -> CPU copies unless we explicitly block the
-                # host-side with synchronize().
-                torch.cuda.current_stream().synchronize()
-        self._exec_order_data.next_iter()
-
-        # A backward pass is done, clean up below.
-        def _catch_all_reshard(fsdp_module: FullyShardedDataParallel) -> None:
-            """
-            Reshards full parameters that may have not been resharded in
-            post_backward_hook. This can happen when an FSDP module's output
-            is used in forward so its pre-backward fires unsharding the param,
-            but post-backward does not fire since the output was not ultimately
-            used in loss computation so FSDP parameter did not get a gradient.
-            """
-            # Note that we wrap resharding logic in a try-catch as a defensive
-            # approach, as if an error is thrown, we are in the backwards pass,
-            # and autograd would not print out much useful info about the actual
-            # error hit.
-            try:
-                free_unsharded_flat_params: List[bool] = []
-                handles_to_reshard: List[FlatParamHandle] = []
-                for handle in fsdp_module._handles:
-                    # TODO: This already-resharded check is brittle:
-                    # https://github.com/pytorch/pytorch/issues/83956
-                    already_resharded = (
-                        handle.flat_param.data_ptr()
-                        == handle.flat_param._local_shard.data_ptr()
-                    )
-                    if already_resharded:
-                        continue
-                    free_unsharded_flat_params.append(
-                        _should_free_in_backward(fsdp_module, handle)
-                    )
-                    handles_to_reshard.append(handle)
-                _reshard(self, handles_to_reshard, free_unsharded_flat_params)
-            except Exception as e:
-                p_assert(
-                    False,
-                    f"Got exception while resharding module {fsdp_module}: {str(e)}",
-                    raise_assertion_error=False,
-                )
-                raise e
-
-        def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
-            """Helper used below on all fsdp modules."""
-            for handle in fsdp_module._handles:
-                p = handle.flat_param
-                if p.requires_grad:
-                    if hasattr(p, "_post_backward_hook_state"):
-                        p_assert(
-                            len(p._post_backward_hook_state) == 2,  # type: ignore[attr-defined]
-                            "p._post_backward_hook_state fields are not valid.",
-                        )
-                        p._post_backward_hook_state[1].remove()  # type: ignore[attr-defined]
-                        delattr(p, "_post_backward_hook_state")
-                    if not self._sync_gradients:
-                        # Preserve the gradient accumulation state if not
-                        # synchronizing gradients: `p.grad` remains the
-                        # unsharded gradient accumulated from prior `no_sync()`
-                        # iterations, and `p._saved_grad_shard` remains the
-                        # sharded gradient from the last synchronized iteration
-                        continue
-                    handle.prepare_gradient_for_optim()
-                    p_assert(
-                        hasattr(p, "_post_backward_called"),
-                        "Expected flag _post_backward_called to be set on param.",
-                    )
-                    # Reset _post_backward_called in preparation for the next iteration.
-                    p._post_backward_called = False
-
-        # Update root and nested FSDP's hooks and flags.
-        for m in self.fsdp_modules(self):  # includes self
-            _catch_all_reshard(m)
-            _finalize_params(m)
-            m._ran_pre_backward_hook.clear()
-            m.training_state = TrainingState.IDLE
-            for handle in m._handles:
-                handle._training_state = HandleTrainingState.IDLE
-            m._handles_prefetched.clear()
-            if m._is_root:
-                # reset this flag for cases like "one forward pass + multiple backward passes"
-                self._post_backward_callback_queued = False
-
-        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
-            self._param_exec_order_policy_second_iter_init()
-
-    def _param_exec_order_policy_second_iter_init(self) -> None:
-        self._param_exec_order_prep_stage = False
-        # Let the parameters in self._fsdp_params_exec_order ordered based on
-        # the execution order in the forward pass.
-        self._fsdp_params_exec_order.reverse()
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                assert hasattr(
-                    m, "_param_exec_order_policy"
-                ), "Non-root FSDP modules should also have _param_exec_order_policy attribute"
-                assert hasattr(
-                    m, "_param_exec_order_prep_stage"
-                ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
-                m._param_exec_order_prep_stage = False
-        # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
-        # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
-        # and will be used to schedule the parameters (rebuild_full_params and reshard).
-        # TODO (linjianma): Remove all internal FSDP wraps from the root FSDP module.
-        # TODO (linjianma): Based on self._fsdp_params_exec_order, get the information
-        # needed to patch the forward() function of each key in the fsdp_wrap_map. The rules are as follows:
-        # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
-        # will be used in the forward, and reshard all parameters that are currently full and will not be
-        # used in the next forward()
-        # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
-        # all parameters that will be used next.
-        # TODO (linjianma): Patch the forward of each model in the keys
-        # of fsdp_wrap_map based on the information above.
 
     def _assert_state(self, state: Union[TrainingState, List[TrainingState]]) -> None:
         """Assert we are in the given state."""
