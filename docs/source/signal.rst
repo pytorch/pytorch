@@ -1,3 +1,4 @@
+
 .. role:: hidden
     :class: hidden-section
 
@@ -28,3 +29,4 @@ torch.signal.windows
     hamming
     hann
     kaiser
+    nuttall

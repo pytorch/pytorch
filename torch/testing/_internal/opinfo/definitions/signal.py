@@ -824,4 +824,57 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
+    make_signal_windows_opinfo(
+        name="signal.windows.nuttall",
+        ref=reference_signal_window(scipy.signal.windows.nuttall)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+        ),
+    ),
 ]

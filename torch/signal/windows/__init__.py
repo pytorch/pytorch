@@ -9,6 +9,7 @@ from .windows import (
     hamming,
     hann,
     kaiser,
+    nuttall,
 )
 
 
@@ -23,4 +24,5 @@ __all__ = [
     'hamming',
     'hann',
     'kaiser',
+    'nuttall',
 ]
