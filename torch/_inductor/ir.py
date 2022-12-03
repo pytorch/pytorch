@@ -2347,8 +2347,13 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
-        binded_args = signature(kernel).bind(*args, **kwargs).arguments
-        args_flat, args_spec = pytree.tree_flatten(binded_args)
+        # Define a wrapper so that the type signature always contains args and
+        # kwargs, which get accessed in unflatten_args.
+        def generic_kernel(*args, **kwargs):
+            return kernel(*args, **kwargs)
+
+        bound_args = signature(generic_kernel).bind(*args, **kwargs).arguments
+        args_flat, args_spec = pytree.tree_flatten(bound_args)
 
         is_arg_tensor = []
         tensor_args = []
