@@ -32,6 +32,7 @@ def export_to_onnx(
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
     opset_version: int = GLOBALS.export_onnx_opset_version,
+    **torch_onnx_export_kwargs,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
 
@@ -44,6 +45,7 @@ def export_to_onnx(
         mocks: list of mocks to use during export
         operator_export_type: export type as described by `torch.onnx.export(...operator_export_type,...)`
         opset_version: ONNX opset version as described by `torch.onnx.export(...opset_version,...)`
+        torch_onnx_export_kwargs: extra torch.onnx.export kwargs arguments
     Returns:
         A valid ONNX model (`onnx.ModelProto`)
     """
@@ -60,6 +62,7 @@ def export_to_onnx(
             f,
             operator_export_type=operator_export_type,
             opset_version=opset_version,
+            **torch_onnx_export_kwargs,
         )
 
     # Validate ONNX graph before returning it
@@ -776,6 +779,91 @@ class TestONNXExport(common_utils.TestCase):
         torch.onnx.export(
             model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
         )
+
+    @common_utils.skipIfNoCaffe2
+    def test_caffe2_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(torch.nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.linalg.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        f = io.BytesIO()
+        torch.onnx.export(
+            ModelWithAtenNotONNXOp(),
+            (x, y),
+            f,
+            do_constant_folding=False,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            # support for linalg.qr was added in later op set versions.
+            opset_version=9,
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertAtenOp(onnx_model, "linalg_qr")
+
+    @common_utils.skipIfNoCaffe2
+    def test_caffe2_onnx_aten(self):
+        class ModelWithAtenFmod(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y)
+
+        x = torch.randn(3, 4, dtype=torch.float32)
+        y = torch.randn(3, 4, dtype=torch.float32)
+        f = io.BytesIO()
+        torch.onnx.export(
+            ModelWithAtenFmod(),
+            (x, y),
+            f,
+            do_constant_folding=False,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN,
+            opset_version=10,  # or higher
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        assert onnx_model.graph.node[0].op_type == "Mod"
+
+    @common_utils.skipIfCaffe2
+    def test_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(torch.nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.linalg.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        f = io.BytesIO()
+        torch.onnx.export(
+            ModelWithAtenNotONNXOp(),
+            (x, y),
+            f,
+            do_constant_folding=False,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            # support for linalg.qr was added in later op set versions.
+            opset_version=9,
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertAtenOp(onnx_model, "linalg_qr")
+
+    @common_utils.skipIfCaffe2
+    def test_onnx_aten(self):
+        class ModelWithAtenFmod(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y)
+
+        x = torch.randn(3, 4, dtype=torch.float32)
+        y = torch.randn(3, 4, dtype=torch.float32)
+        f = io.BytesIO()
+        torch.onnx.export(
+            ModelWithAtenFmod(),
+            (x, y),
+            f,
+            do_constant_folding=False,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN,
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertAtenOp(onnx_model, "fmod", "Tensor")
 
 
 if __name__ == "__main__":
