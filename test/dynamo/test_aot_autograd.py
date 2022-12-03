@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo"]
 import functools
+from unittest.mock import patch
 
 import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.utils._pytree as pytree
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
@@ -280,6 +284,56 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn = torch._dynamo.optimize(compiler_fn)(optimized_mod)
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
+
+    @patch("functorch._src.config.debug_assert", True)
+    def test_requires_grad_fake_via_dynamo_recompiles(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        fake_x = fake_mode.from_tensor(x)
+        fake_y = fake_mode.from_tensor(y)
+        fake_z = fake_mode.from_tensor(z)
+
+        def _outs_and_grads(fn, graph_inps, inps):
+            outs = fn(*graph_inps)
+            for out in pytree.tree_flatten(outs)[0]:
+                if isinstance(out, torch.Tensor) and out.requires_grad:
+                    out.sum().backward(retain_graph=True)
+            grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+            for inp in pytree.tree_flatten(inps)[0]:
+                inp.grad = None
+            return outs, grads
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        fxy = torch._dynamo.optimize(cc)(F())
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        self.assertEqual(cc.frame_count, 2)
+
+        torch._dynamo.reset()  # for new backend
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        fxz = torch._dynamo.optimize(cc)(F())
+        compare(F(), fxz, (x, z))
+        compare(F(), fxz, (x, z))
+        self.assertEqual(cc.frame_count, 1)
 
 
 if __name__ == "__main__":
