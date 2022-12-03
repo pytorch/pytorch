@@ -557,6 +557,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   template <typename ModuleType, typename... ArgumentTypes>
   friend struct AnyModuleHolder;
 
+  friend class SequentialImpl;
+
   /// Pretty prints the given `Module` into the `ostream`.
   TORCH_API friend std::ostream& operator<<(
       std::ostream& stream,
