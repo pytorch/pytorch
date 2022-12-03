@@ -1,5 +1,4 @@
 from collections import defaultdict
-import math
 from typing import cast, List, Optional, Dict, Tuple
 
 import torch
