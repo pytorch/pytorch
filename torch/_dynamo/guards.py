@@ -876,7 +876,6 @@ def guard_fail_hook(
             reasons.append(part)
             break
     try:
-        breakpoint()
         guard_fn.guard_fail_fn((reasons, orig_code_map[code]))
     except Exception as e:
         log.error(
