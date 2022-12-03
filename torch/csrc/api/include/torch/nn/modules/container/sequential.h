@@ -95,9 +95,28 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
+  ///
+  /// constructors
+  ///
+
   SequentialImpl() = default;
 
-  /// Constructs the `Sequential` from a variadic list of modules.
+  /*
+   *  Constructs `Sequential` from a variadic list of modules. Arguments are 
+   *  registered as submodules of `Sequential` with names corresponding to 
+   *  order of insertion, e.g. `Linear`, `ReLU`, and `BatchNorm1d` have names
+   *  `0`, `1`, and `2` respectively below:
+   *  ```
+   *  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm1d(3));
+   *  ```
+   *  Arguments' RTTI names aren't used since submodules are added to the member
+   *  variable `OrderedDict children_`, which will runtime error with duplicate
+   *  keys (will occur if you have two arguments of the same type).
+   *
+   *  A variadic template is used to support the passing arguments by any type 
+   *  supported by the `push_back()` methods, e.g. `AnyModule`, 
+   *  `std::shared_ptr<ModuleType>`. Parameters expanded by private `push_back()`.
+   */
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {
     modules_.reserve(sizeof...(Modules));
