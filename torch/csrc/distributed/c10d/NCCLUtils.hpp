@@ -12,6 +12,13 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 14)
+#define ENABLE_NCCL_FAULT_TOLERANCE
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_FAULT_TOLERANCE
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -118,8 +125,16 @@ class NCCLComm {
       int rank,
       ncclUniqueId commId) {
     auto comm = std::make_shared<NCCLComm>();
+#if defined(ENABLE_NCCL_FAULT_TOLERANCE)
+    // TODO(crcrpar): Accept & reflect `blocking`.
+    // Currently this call is no different from the one below.
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    C10D_NCCL_CHECK(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
+#else
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank), c10::nullopt);
+#endif
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     return comm;

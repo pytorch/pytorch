@@ -357,8 +357,16 @@ ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
   using namespace torch::cuda::nccl::detail;
   ncclComm_t comm;
   ncclUniqueId id = comm_id;
+#if defined(ENABLE_NCCL_FAULT_TOLERANCE)
+  // TODO(crcrpar): Accept & reflect `blocking`.
+  // Currently this call is no different from the one below.
+  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+  NCCL_CHECK(ncclCommInitRankConfig(
+      &(comm->ncclComm_), numRanks, commId, rank, &config));
+#else
   NCCL_CHECK(ncclCommInitRank(
       to_nccl_comm(&comm), nranks, *(to_nccl_unique_id(&id)), rank));
+#endif
   return comm;
 #else
   return nullptr;

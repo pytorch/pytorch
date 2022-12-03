@@ -18,6 +18,15 @@
 #define HAS_NCCL_BF16_DATATYPE 0
 #endif
 
+#if !defined(USE_ROCM)
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 14)
+#define ENABLE_NCCL_FAULT_TOLERANCE
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_FAULT_TOLERANCE
+#endif
+#endif
+
 namespace torch {
 namespace cuda {
 namespace nccl {
