@@ -515,14 +515,7 @@ namespace c10_internal {
 template <typename T>
 C10_HOST_DEVICE constexpr thrust::complex<T>
 cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10020)
-  // This is to circumvent a CUDA compilation bug. See
-  // https://github.com/pytorch/pytorch/pull/38941 . When the bug is fixed, we
-  // should do static_cast directly.
-  return thrust::complex<T>(x.real(), x.imag());
-#else
   return static_cast<thrust::complex<T>>(x);
-#endif
 }
 } // namespace c10_internal
 #endif
