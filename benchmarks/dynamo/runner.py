@@ -329,7 +329,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         return numactl
 
     mode = get_mode(args)
-    with open("run.sh", "w") as runfile:
+    suites_str = '_'.join(suites)
+    devices_str = '_'.join(devices)
+    dtypes_str = '_'.join(dtypes)
+    compilers_str = '_'.join(compilers)
+    generated_file="run_{}_{}_{}_{}_{}.sh".format(mode, devices_str, dtypes_str, suites_str, compilers_str)
+    with open(generated_file, "w") as runfile:
         lines = []
 
         lines.append("# Setup the output directory")
@@ -375,6 +380,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
+    return generated_file
 
 
 def generate_dropdown_comment(title, body):
@@ -1350,20 +1356,21 @@ if __name__ == "__main__":
     args.suites = suites
 
     if args.print_run_commands:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        print(f"Running commands are generated in file {generated_file}. Please run (bash {generated_file}).")
     elif args.visualize_logs:
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(args, dtypes, suites, devices, compilers, output_dir)
         # generate memoized archive name now so that the date is reflective
         # of when the run started
         get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
-            os.system("bash run.sh")
+            os.system(f"bash {generated_file}")
         except Exception as e:
             print(
-                "Running commands failed. Please run manually (bash run.sh) and inspect the errors."
+                f"Running commands failed. Please run manually (bash {generated_file}) and inspect the errors."
             )
             raise e
         if not args.log_operator_inputs:
