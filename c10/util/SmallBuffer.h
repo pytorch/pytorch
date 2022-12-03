@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/util/C++17.h>
+#include <type_traits>
 
 /** Helper class for allocating temporary fixed size arrays with SBO.
  *
@@ -15,7 +15,9 @@ namespace c10 {
 
 template <typename T, size_t N>
 class SmallBuffer {
-  static_assert(c10::is_pod_v<T>, "SmallBuffer is intended for POD types");
+  static_assert(
+      std::is_trivial<T>::value,
+      "SmallBuffer is intended for POD types");
 
   T storage_[N];
   size_t size_;

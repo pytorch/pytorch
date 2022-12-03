@@ -12,7 +12,7 @@ template <typename Params>
 struct ParamsHash {
   // Params must be a POD because we read out its memory
   // contents as char* when hashing
-  static_assert(c10::is_pod_v<Params>, "Params is not POD");
+  static_assert(std::is_standard_layout<Params>::value, "Params is not POD");
 
   size_t operator()(const Params& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
@@ -29,7 +29,7 @@ template <typename Params>
 struct ParamsEqual {
   // Params must be a POD because we read out its memory
   // contents as char* when comparing
-  static_assert(c10::is_pod_v<Params>, "Params is not POD");
+  static_assert(std::is_standard_layout<Params>::value, "Params is not POD");
 
   bool operator()(const Params& a, const Params& b) const {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&a);

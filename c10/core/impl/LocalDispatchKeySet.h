@@ -2,7 +2,6 @@
 
 #include <c10/core/DispatchKeySet.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Flags.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
@@ -53,7 +52,7 @@ struct C10_API PODLocalDispatchKeySet {
   }
 };
 static_assert(
-    c10::is_pod_v<PODLocalDispatchKeySet>,
+    std::is_trivial<PODLocalDispatchKeySet>::value,
     "PODLocalDispatchKeySet must be a POD type.");
 
 struct C10_API LocalDispatchKeySet {
