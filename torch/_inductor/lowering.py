@@ -17,6 +17,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_float, sym_floor
 
 from . import config, ir, overrides
 from .cuda_properties import current_device
@@ -3659,6 +3660,16 @@ def sym_size(a, dim):
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
+
+
+@register_lowering(sym_float)
+def sym_float(a):
+    return a
+
+
+@register_lowering(sym_floor)
+def sym_floor(a):
+    return a
 
 
 @register_lowering(operator.mul)

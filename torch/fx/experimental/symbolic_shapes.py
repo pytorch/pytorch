@@ -27,7 +27,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
-    "sym_sqrt",
+    "sym_sqrt", "sym_floor"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -112,10 +112,10 @@ def sym_sqrt(a):
         return a.__sym_sqrt__()
     return math.sqrt(a)
 
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
+# Drop in replacement for math.floor/ceil.
 def sym_floor(a):
+    if hasattr(a, '__sym_floor__'):
+        return a.__sym_floor__()
     return math.floor(a)  # type: ignore[type]
 
 def sym_ceil(a):
@@ -279,6 +279,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
+    'sym_floor': lambda a: sympy.floor(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -288,6 +289,7 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
+    'sym_floor',
     'ceil',
     'floor',
     'neg',
@@ -296,10 +298,10 @@ unary_magic_methods = {
 
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_floor"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
-always_int_magic_methods = {"ceil", "floor"}
+always_int_magic_methods = {"ceil", "floor", "sym_floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
