@@ -95,6 +95,15 @@ c10::intrusive_ptr<Work> _allgather_base_(
   return process_group->_allgather_base(output_tensor, input_tensor);
 }
 
+c10::intrusive_ptr<Work> allgather_coalesced_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
@@ -172,6 +181,17 @@ c10::intrusive_ptr<Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
+void monitored_barrier_(
+    at::Tensor /* unused */,
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout,
+    bool wait_all_ranks) {
+  process_group->monitoredBarrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
+      wait_all_ranks);
+}
+
 c10::intrusive_ptr<Work> send(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -221,6 +241,10 @@ TORCH_LIBRARY(c10d, m) {
       "_allgather_base_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, _allgather_base_));
   m.def(
+      "allgather_coalesced_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, allgather_coalesced_));
+  m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
@@ -242,6 +266,10 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
+  m.def(
+      "monitored_barrier_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, monitored_barrier_));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
@@ -343,6 +371,21 @@ c10::intrusive_ptr<Work> _allgather_base(
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
   return op.call(output_tensor, input_tensor, process_group);
+}
+
+c10::intrusive_ptr<Work> allgather_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const AllgatherOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::allgather_coalesced_", "")
+                       .typed<c10::intrusive_ptr<Work>(
+                           const std::vector<std::vector<at::Tensor>>&,
+                           const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+  return op.call(output_lists, input_list, process_group);
 }
 
 c10::intrusive_ptr<Work> reduce_scatter(
@@ -467,6 +510,28 @@ c10::intrusive_ptr<Work> alltoall(
                            int64_t)>();
   return op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count());
+}
+
+void monitored_barrier(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const BarrierOptions& opts,
+    bool wait_all_ranks) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::monitored_barrier_", "")
+                       .typed<void(
+                           at::Tensor,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           const std::vector<int64_t>&,
+                           int64_t,
+                           bool)>();
+  // Default to using cpu implementation, monitored barrier is only for GLOO
+  at::Tensor tensor = at::empty({0}, at::TensorOptions().device(at::kCPU));
+  op.call(
+      tensor,
+      process_group,
+      opts.device_ids,
+      opts.timeout.count(),
+      wait_all_ranks);
 }
 
 c10::intrusive_ptr<Work> barrier(
