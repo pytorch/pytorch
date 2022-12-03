@@ -152,13 +152,37 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_relu_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"));
-  // Corresponding pattern:
+  // Corresponding pattern (the ops with `*` are part of the pattern that
+  // represents the computation of quantized::linear_with_input_q_dq_qweight_dq):
   // input -> q* -> dq* -> linear* ->
   //         qweight -> dq* /
+  //
+  // After fusion:
+  // input -> quantized::linear_with_input_q_dq_qweight_dq* ->
+  //         qweight /
+  //
+  // Additional Note: the weight is packed as well
+  // Params:
+  //    X: float32 Tensor, will be quantized to quint8 in the op
+  //    W_prepack: packed qint8 quantized weight and bias
+  // Returns:
+  //    Y: float32 Tensor
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_with_input_q_dq_qweight_dq(Tensor X, float X_scale, int X_zero_point, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"));
-  // Corresponding pattern:
+  // Corresponding pattern (the ops with `*` are part of the pattern that
+  // represents the computation of quantized::linear_with_input_q_dq_qweight_dq_relu):
   // input -> q* -> dq* -> linear* -> relu* ->
   //         qweight -> dq* /
+  //
+  // After fusion:
+  // input -> quantized::linear_with_input_q_dq_qweight_dq_relu* ->
+  //         qweight /
+  //
+  // Additional Note: the weight is packed as well
+  // Params:
+  //    X: float32 Tensor, will be quantized to quint8 in the op
+  //    W_prepack: packed qint8 quantized weight and bias
+  // Returns:
+  //    Y: float32 Tensor
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_with_input_q_dq_qweight_dq_relu(Tensor X, float X_scale, int X_zero_point, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack"));
