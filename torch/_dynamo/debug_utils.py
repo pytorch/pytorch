@@ -569,7 +569,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
                 " Skipping this graph."
             )
         )
-        raise
+        return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
