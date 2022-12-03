@@ -670,8 +670,6 @@ def _sync_module_params_and_buffers(
     """
     _check_params_for_sync_module_states(params)
     module_states: List[torch.Tensor] = []
-    # TODO (awgu): When exposing the original parameters, we need to also
-    # use this attribute to prevent re-synchronizing parameters.
     for buffer in module.buffers():
         # Avoid re-synchronizing buffers in case of nested wrapping
         if not getattr(buffer, FSDP_SYNCED, False):

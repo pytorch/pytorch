@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     HandleTrainingState,
     TrainingState,
 )
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
     _get_default_comm_hook,
@@ -56,7 +57,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _reshard,
     _root_pre_forward,
     _should_free_in_backward,
-    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -96,6 +96,7 @@ from ._unshard_param_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
+from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -317,7 +318,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[ProcessGroup] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -332,37 +333,8 @@ class FullyShardedDataParallel(nn.Module):
         super().__init__()
         _init_ignored_module_states(self, module, ignored_modules)
 
-        # Add module annotations for Dynamo support
-        for submodule in module.modules():
-            if submodule not in self._ignored_modules:
-                """[note: Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-
-                Dynamo doesn't get to see this instance (FullyShardedDataParallel) during tracing, since
-                it skips tracing all the torch.distributed.fsdp code.
-                 - Why? Running the FSDP code eagerly avoids lots of issues trying to trace complex hooks, and also
-                   gets us graph-breaks on FSDP module boundaries which we want anyway for comm ops.
-                 - However, we _also_ want dynamo to treat the wrapped module inside FSDP 'unspecially' (*),
-                   and we need a way to indicate to dynamo which modules are wrapped by FSDP.
-
-                (*) UnspecializedNNModules in dynamo are traced-through without any assumptions, and with thorough
-                guards.  NNModules otherwise are 'specialized', meaning there is less overhead due to assuming
-                their code is well-behaved.
-
-                One particular issue with specialized NNModules for FSDP is that the
-                views created for orig_params are captured into the compiled graph on the first iteration, and while
-                they are always going to point to the correct flatparameter and give correct results, their order
-                of creation influences the order of backward execution, preventing overlap of comm and computation
-                during backward.  We need to _use_ the new parameter views created on each forward iteration, in
-                order for backward to interleave hooks with compute per layer.  UnspecializedNNModule lets us achieve
-                this by capturing the module code more 'functionally' and passing parameters in as inputs each time.
-                """
-                submodule._is_fsdp_managed_module = True
-
-                # Dynamo only supports FSDP with use_orig_params=True.
-                # This is hacky, but I could not think of another way to add an assertion to dynamo
-                # for this, since Dynamo skips all the FSDP code frames and thus can't inspect the
-                # FSDP module directly
-                submodule._fsdp_use_orig_params = use_orig_params
+        # Add module annotations for Dynamo support (see function for details)
+        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
 
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
@@ -1172,12 +1144,21 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: This is analogous to ``torch.nn.utils.clip_grad_norm_`` but
-            handles the partitioning and multiple devices per rank under the
-            hood. The default torch util is not applicable here, because each
-            rank only has a partial view of all the grads in the model, so
-            calling it for FSDP models would lead to different scaling being
-            applied per subset of model parameters.
+        .. note:: If every FSDP instance uses ``NO_SHARD``, meaning that no
+            gradients are sharded across ranks, then you may directly use
+            :func:`torch.nn.utils.clip_grad_norm_`.
+
+        .. note:: If at least some FSDP instance uses a sharded strategy (i.e.
+            one other than ``NO_SHARD``), then you should use this method
+            instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
+            handles the fact that gradients are sharded across ranks.
+
+        .. note:: The total norm returned will have the "largest" dtype across
+            all parameters/gradients as defined by PyTorch's type promotion
+            semantics. For example, if *all* parameters/gradients use a low
+            precision dtype, then the returned norm's dtype will be that low
+            precision dtype, but if there exists at least one parameter/
+            gradient using FP32, then the returned norm's dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
@@ -1188,11 +1169,6 @@ class FullyShardedDataParallel(nn.Module):
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
         self._assert_state(TrainingState.IDLE)
-        _wait_for_computation_stream(
-            torch.cuda.current_stream(),
-            self._streams["unshard"],
-            self._streams["pre_unshard"],
-        )
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
@@ -1209,6 +1185,7 @@ class FullyShardedDataParallel(nn.Module):
         norm_type = float(norm_type)
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
+        grads: List[torch.Tensor] = []
         for handle in FullyShardedDataParallel._fsdp_handles(self):
             target_set = (
                 sharded_params if handle.uses_sharded_strategy else nonsharded_params
@@ -1216,14 +1193,21 @@ class FullyShardedDataParallel(nn.Module):
             if handle._use_orig_params:
                 for param in handle.flat_param._params:
                     target_set.add(param)
+                    if param.grad is not None:
+                        grads.append(param.grad)
             else:
                 target_set.add(handle.flat_param)
+                if handle.flat_param.grad is not None:
+                    grads.append(handle.flat_param.grad)
         for param in self.parameters():
             not_fsdp_managed = (
                 param not in sharded_params and param not in nonsharded_params
             )
             if not_fsdp_managed:
                 nonsharded_params.add(param)
+                if param.grad is not None:
+                    grads.append(param.grad)
+        # Compute local norms (forced to be in FP32)
         local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
             self.compute_device
         )
@@ -1246,17 +1230,20 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
-        clip_coef = torch.tensor(
-            max_norm, dtype=total_norm.dtype, device=total_norm.device
-        ) / (total_norm + 1e-6)
+        clip_coef = max_norm / (total_norm + 1e-6)
         # Multiplying by the clamped coefficient is meaningless when it is
         # equal to 1, but it avoids the host-device sync that would result from
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-        grads = [param.grad for param in self.parameters() if param.grad is not None]
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device))
-        return total_norm
+            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+        # Use the "largest" dtype by type promotion semantics to use the same
+        # dtype as if we did not force local norm computation to be in FP32
+        total_norm_dtype = functools.reduce(
+            lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
+            [grad.dtype for grad in grads],
+        )
+        return total_norm.to(total_norm_dtype)
 
     @staticmethod
     def _warn_optim_input(optim_input):
@@ -1858,7 +1845,9 @@ def _get_grad_norm(
 ) -> torch.Tensor:
     """
     Returns the gradient norm of parameters ``param`` s, where the gradients
-    are viewed as a single vector.
+    are viewed as a single vector. The returned norm is in FP32 even if
+    parameters/gradients are in a low precision. This is because the downstream
+    use of this return value is a reduction across ranks.
     """
     params_with_grad = [param for param in params if param.grad is not None]
     if len(params_with_grad) == 0:
@@ -1881,7 +1870,6 @@ def _get_grad_norm(
         norm_type,
         dtype=torch.float32,
     )
-    grad_norm = grad_norm.to(grads[0].dtype)
     return grad_norm
 
 
