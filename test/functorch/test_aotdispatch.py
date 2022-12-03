@@ -1070,8 +1070,45 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
-    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
-    @patch("torch._functorch.config.debug_assert", True)
+    # See Note: Dynamo recompilation guarding invalid grad for why this test exists
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_requires_grad_fake(self, counter):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        fake_x = fake_mode.from_tensor(x)
+        fake_y = fake_mode.from_tensor(y)
+        fake_z = fake_mode.from_tensor(z)
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        fxy = aot_module_simplified(F(), (fake_x, fake_y), nop)
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        fxz = aot_module_simplified(F(), (fake_x, fake_z), nop)
+        compare(F(), fxz, (x, z))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
     def test_invalid_requires_grad(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):

@@ -1,13 +1,14 @@
 # Owner(s): ["module: dynamo"]
 import functools
+from unittest.mock import patch
 
 import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.utils._pytree as pytree
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
-
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
     is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs)
@@ -280,6 +281,68 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn = torch._dynamo.optimize(compiler_fn)(optimized_mod)
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
+
+    # Note: Dynamo recompilation guarding invalid grad
+    #
+    # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
+    # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
+    # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
+    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # 
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs 
+    # is because dynamo sends fake tensors down to aot_autograd.
+    @patch("functorch._src.config.debug_assert", True)
+    def test_requires_grad_fake_via_dynamo_recompiles(self):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        def _outs_and_grads(fn, graph_inps, inps):
+            outs = fn(*graph_inps)
+            for out in pytree.tree_flatten(outs)[0]:
+                if isinstance(out, torch.Tensor) and out.requires_grad:
+                    out.sum().backward(retain_graph=True)
+            grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+            for inp in pytree.tree_flatten(inps)[0]:
+                inp.grad = None
+            return outs, grads
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        failure_reason = None
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0][0]
+
+        fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+        self.assertEqual(failure_reason, "tensor 'y' requires_grad mismatch. expected requires_grad=1")
+        
+        # Reset failure reason
+        failure_reason = None
+        
+        self.assertEqual(cc.frame_count, 2)
+
+        torch._dynamo.reset()  # for new backend
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        fxz = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        compare(F(), fxz, (x, z))
+        compare(F(), fxz, (x, z))
+        self.assertEqual(cc.frame_count, 1)
+        self.assertTrue(failure_reason is None)
 
 
 if __name__ == "__main__":
