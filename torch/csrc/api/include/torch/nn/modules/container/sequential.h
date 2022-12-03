@@ -101,7 +101,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {
     modules_.reserve(sizeof...(Modules));
-    push_back(std::forward<Modules>(modules)...);
+    push_back(0, std::forward<Modules>(modules)...);
   }
 
   /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
@@ -130,8 +130,16 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   std::shared_ptr<Module> clone(
       const optional<Device>& device = nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
-    for (const auto& module : modules_) {
-      clone->push_back(module.clone(device));
+    // Get the _registered_ names of submodules of this `Sequential`
+    //
+    // We don't want to use `modules_[i].ptr->name()` since this can return
+    // just the type name via RTTI. Since an `OrderedDict` cannot have duplicate
+    // key values, this will result in a runtime error if we have two submodules
+    // of the same type, e.g.: 
+    // `Sequential sequential(Linear(3, 4), ReLU(), Linear(4, 1), ReLU())`
+    std::vector<std::string> registered_names = children_.keys();
+    for (std::size_t i = 0; i < modules_.size(); ++i) {
+      clone->push_back(registered_names[i], modules_[i].clone(device));
     }
     return clone;
   }
@@ -340,32 +348,39 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   }
 
  private:
-  /// Takes a First *and* Second parameter, to avoid ambiguity when a parameter
-  /// pack has only one type, in which case the template would be preferred,
-  /// even if the other `push_back` functions are better fits (e.g. `unique_ptr`
-  /// -> `shared_ptr` overload).
-  /// NOTE: We explicitly avoid matching this template with
-  /// `push_back(std::string("name"), module)` or `push_back("name", module)`,
-  /// since they should be handled by their respective `push_back` functions.
+  /*
+   *  Recursively expands the parameters in Sequential's variadic constructor to
+   *  populate `modules_` one parameter at a time. Consistent with existing
+   *  behavior, modules are given zero-indexed labels in order of insertion.
+   *
+   *  @requires: At least two parameters in the variadic template. The base case
+   *  of 1 parameter is addressed below. Oberve that the case of 0 parameters 
+   *  __is not needed__ since the default constructor would be called.
+   *
+   *  @param idx: Label given to the next parameter to unpack
+   *  @param first: Current parameter to process
+   *  @param second: Rest of the parameter pack to recursively process
+   *  @param rest: Rest of the parameter pack to recursively process
+   *
+   */
   template <
       typename First,
       typename Second,
-      typename... Rest,
-      typename = torch::disable_if_t<
-          std::is_same<First, std::string>::value ||
-          // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          std::is_same<
-              typename std::decay<First>::type,
-              std::decay<const char (&)[]>::type>::value>>
-  void push_back(First&& first, Second&& second, Rest&&... rest) {
-    push_back(std::forward<First>(first));
-    // Recursively calls this method, until the parameter pack only thas this
-    // entry left. Then calls `push_back()` a final time (above).
-    push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
+      typename... Rest>
+  void push_back(std::size_t idx, First&& first, Second&& second, Rest&&... rest) {
+    // recursively unpack the parameter pack whilst iterating each module's name 
+    // to avoid duplicate labels, and conform to existing behavior
+    push_back(c10::to_string(idx), std::forward<First>(first));
+    push_back(idx + 1, std::forward<Second>(second), std::forward<Rest>(rest)...);
   }
-
-  /// The base case, when the list of modules is empty.
-  void push_back() {}
+  
+  /*
+   *  Base case of 1 parameter for the variadic `push_back()` expansion above
+   */
+  template <typename First>
+  void push_back(std::size_t idx, First&& first) {
+    push_back(c10::to_string(idx), std::forward<First>(first));
+  }
 
   // Box the AnyModules to give Sequential reference semantics, like the rest of
   // the API. Note that this is not required otherwise, this could just be a
