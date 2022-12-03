@@ -235,6 +235,53 @@ inline c10::SymInt multiply_integers(const C& container) {
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
+template <
+    typename Iter,
+    typename = std::enable_if_t<std::is_same<
+        typename std::iterator_traits<Iter>::value_type,
+        c10::SymInt>::value>>
+inline c10::SymInt multiply_integers(Iter begin, Iter end) {
+  return std::accumulate(
+      begin,
+      end,
+      c10::SymInt(1),
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
+}
+
+inline SymInt operator+(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) + b;
+}
+inline SymInt operator-(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) - b;
+}
+inline SymInt operator*(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) * b;
+}
+inline SymInt operator/(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) / b;
+}
+inline SymInt operator%(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) % b;
+}
+inline bool operator==(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) == b;
+}
+inline bool operator!=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) != b;
+}
+inline bool operator<(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) < b;
+}
+inline bool operator<=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) <= b;
+}
+inline bool operator>(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) > b;
+}
+inline bool operator>=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) >= b;
+}
+
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
 } // namespace c10

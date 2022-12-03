@@ -347,6 +347,12 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
@@ -977,7 +983,7 @@ class Scheduler:
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
-        return sum(dep.numel_hint() for dep in common_memory_deps)
+        return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):
         """
@@ -1080,9 +1086,9 @@ class Scheduler:
         else:
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
-                if device_props.major < 6:
+                if device_props.major < 7:
                     raise RuntimeError(
-                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                     )
                 else:
                     raise RuntimeError(

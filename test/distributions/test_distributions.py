@@ -2036,7 +2036,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lowrank_multivariate_normal_sample(self):
@@ -2176,7 +2176,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
@@ -2331,7 +2331,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_wishart_sample(self):
@@ -2975,6 +2975,9 @@ class TestDistributions(DistributionsTestCase):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
+                # We do not need grads wrt params here, e.g. shape of gamma distribution.
+                param = {key: value.detach() if isinstance(value, torch.Tensor) else value
+                         for key, value in param.items()}
                 dist = Dist(**param)
                 samples = dist.sample()
                 if not dist.support.is_discrete:
