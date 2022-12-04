@@ -26,7 +26,6 @@
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 
 namespace std {
   template<> struct hash<at::BFloat16>
@@ -297,7 +296,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor counts = at::zeros(indices.size(), self.options().dtype(kLong));
   std::vector<Tensor> input_unbind = at::unbind(input_sorted, 0);
   auto last = _unique_dim_cpu_impl(
-    input_unbind.begin(), input_unbind.end(), indices, inverse_indices, std::move(counts));
+    input_unbind.begin(), input_unbind.end(), indices, inverse_indices, counts);
   input_unbind.erase(last, input_unbind.end());
   counts = at::narrow(counts, 0, 0, input_unbind.size());
 
