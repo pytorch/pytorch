@@ -102,8 +102,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   SequentialImpl() = default;
 
   /*
-   *  Constructs `Sequential` from a variadic list of modules. Arguments are 
-   *  registered as submodules of `Sequential` with names corresponding to 
+   *  Constructs `Sequential` from a variadic list of modules. Arguments are
+   *  registered as submodules of `Sequential` with names corresponding to
    *  order of insertion, e.g. `Linear`, `ReLU`, and `BatchNorm1d` have names
    *  `0`, `1`, and `2` respectively below:
    *  ```
@@ -113,9 +113,10 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
    *  variable `OrderedDict children_`, which will runtime error with duplicate
    *  keys (will occur if you have two arguments of the same type).
    *
-   *  A variadic template is used to support the passing arguments by any type 
-   *  supported by the `push_back()` methods, e.g. `AnyModule`, 
-   *  `std::shared_ptr<ModuleType>`. Parameters expanded by private `push_back()`.
+   *  A variadic template is used to support the passing arguments by any type
+   *  supported by the `push_back()` methods, e.g. `AnyModule`,
+   *  `std::shared_ptr<ModuleType>`. Parameters expanded by private
+   *  `push_back()`.
    */
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {
@@ -154,7 +155,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     // We don't want to use `modules_[i].ptr->name()` since this can return
     // just the type name via RTTI. Since an `OrderedDict` cannot have duplicate
     // key values, this will result in a runtime error if we have two submodules
-    // of the same type, e.g.: 
+    // of the same type, e.g.:
     // `Sequential sequential(Linear(3, 4), ReLU(), Linear(4, 1), ReLU())`
     std::vector<std::string> registered_names = children_.keys();
     for (std::size_t i = 0; i < modules_.size(); ++i) {
@@ -373,7 +374,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
    *  behavior, modules are given zero-indexed labels in order of insertion.
    *
    *  @requires: At least two parameters in the variadic template. The base case
-   *  of 1 parameter is addressed below. Oberve that the case of 0 parameters 
+   *  of 1 parameter is addressed below. Oberve that the case of 0 parameters
    *  __is not needed__ since the default constructor would be called.
    *
    *  @param idx: Label given to the next parameter to unpack
@@ -382,17 +383,19 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
    *  @param rest: Rest of the parameter pack to recursively process
    *
    */
-  template <
-      typename First,
-      typename Second,
-      typename... Rest>
-  void push_back(std::size_t idx, First&& first, Second&& second, Rest&&... rest) {
-    // recursively unpack the parameter pack whilst iterating each module's name 
+  template <typename First, typename Second, typename... Rest>
+  void push_back(
+      std::size_t idx,
+      First&& first,
+      Second&& second,
+      Rest&&... rest) {
+    // recursively unpack the parameter pack whilst iterating each module's name
     // to avoid duplicate labels, and conform to existing behavior
     push_back(c10::to_string(idx), std::forward<First>(first));
-    push_back(idx + 1, std::forward<Second>(second), std::forward<Rest>(rest)...);
+    push_back(
+        idx + 1, std::forward<Second>(second), std::forward<Rest>(rest)...);
   }
-  
+
   /*
    *  Base case of 1 parameter for the variadic `push_back()` expansion above
    */

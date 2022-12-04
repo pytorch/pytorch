@@ -370,27 +370,31 @@ TEST_F(SequentialTest, IsCloneable) {
 
   // Test that named submodule labels are propagated
   Sequential sequential_named(
-    { {"layer1", Linear(10, 5)}, 
-      {"activation1", ReLU()},
-      {"layer2", Linear(5, 3)},
-      {"layer2norm", BatchNorm1d(2)},
-      {"activation2", ReLU()} });
+      {{"layer1", Linear(10, 5)},
+       {"activation1", ReLU()},
+       {"layer2", Linear(5, 3)},
+       {"layer2norm", BatchNorm1d(2)},
+       {"activation2", ReLU()}});
 
-  Sequential clone_named = std::dynamic_pointer_cast<SequentialImpl>(sequential_named->clone());
+  Sequential clone_named =
+      std::dynamic_pointer_cast<SequentialImpl>(sequential_named->clone());
   ASSERT_EQ(sequential_named->size(), clone_named->size());
   for (std::size_t i = 0; i < sequential_named->size(); ++i) {
     ASSERT_EQ(sequential_named[i]->name(), clone_named[i]->name());
     ASSERT_NE(sequential_named[i], clone_named[i]);
   }
   ASSERT_EQ(c10::str(sequential_named), c10::str(clone_named));
-  
 
-  Sequential sequential_name_mix({{"layer1", Linear(10, 5)},});
+  // Mix named and unnamed submodules
+  Sequential sequential_name_mix({
+      {"layer1", Linear(10, 5)},
+  });
   sequential_name_mix->push_back(ReLU());
   sequential_name_mix->push_back("layer2", Linear(5, 3));
   sequential_name_mix->push_back("layer2norm", BatchNorm1d(2));
   sequential_name_mix->push_back(ReLU());
-  Sequential clone_mix = std::dynamic_pointer_cast<SequentialImpl>(sequential_name_mix->clone());
+  Sequential clone_mix =
+      std::dynamic_pointer_cast<SequentialImpl>(sequential_name_mix->clone());
 
   ASSERT_EQ(sequential_name_mix->size(), clone_mix->size());
   for (std::size_t i = 0; i < sequential_name_mix->size(); ++i) {
