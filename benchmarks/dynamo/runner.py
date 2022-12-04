@@ -33,6 +33,7 @@ import io
 import itertools
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -53,7 +54,7 @@ import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
-import platform
+
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
 
@@ -264,16 +265,27 @@ def parse_args():
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
     )
-    parser.add_argument("--batch_size", type=int, default=None, help="batch size for benchmarking")
     parser.add_argument(
-        "--threads", "-t", type=int, default=None, help="number of threads to use for eager"
+        "--batch_size", type=int, default=None, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        default=None,
+        help="number of threads to use for eager",
     )
     numactl_group = parser.add_argument_group("Numactl Parameters")
     numactl_group.add_argument(
-        "--physcpubind", "-C", type=str, default=None, help="Only execute process on cpus."
+        "--physcpubind",
+        "-C",
+        type=str,
+        default=None,
+        help="Only execute process on cpus.",
     )
     numactl_group.add_argument(
-        "--membind", "-m", type=int, default=0, help="Only allocate memory from nodes.")
+        "--membind", "-m", type=int, default=0, help="Only allocate memory from nodes."
+    )
     args = parser.parse_args()
     return args
 
@@ -316,23 +328,32 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         if r.returncode == 0:
             numactl_available = True
         return numactl_available
+
     def get_numactl_cmd():
         numactl = ""
         if device == "cpu" and platform.system() == "Linux" and is_numactl_available():
-            cores = int(subprocess.getstatusoutput("lscpu | grep Core | awk '{print $4}'")[1].strip())
+            cores = int(
+                subprocess.getstatusoutput("lscpu | grep Core | awk '{print $4}'")[
+                    1
+                ].strip()
+            )
             if args.physcpubind is None:
-                args.physcpubind = "0-{}".format(cores-1)
+                args.physcpubind = "0-{}".format(cores - 1)
             if args.membind is None:
                 args.membind = 0
-            numactl = "numactl -C {} --membind={}".format(args.physcpubind, args.membind)
+            numactl = "numactl -C {} --membind={}".format(
+                args.physcpubind, args.membind
+            )
         return numactl
 
     mode = get_mode(args)
-    suites_str = '_'.join(suites)
-    devices_str = '_'.join(devices)
-    dtypes_str = '_'.join(dtypes)
-    compilers_str = '_'.join(compilers)
-    generated_file="run_{}_{}_{}_{}_{}.sh".format(mode, devices_str, dtypes_str, suites_str, compilers_str)
+    suites_str = "_".join(suites)
+    devices_str = "_".join(devices)
+    dtypes_str = "_".join(dtypes)
+    compilers_str = "_".join(compilers)
+    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
+        mode, devices_str, dtypes_str, suites_str, compilers_str
+    )
     with open(generated_file, "w") as runfile:
         lines = []
 
@@ -748,7 +769,9 @@ class ParsePerformanceLogs(Parser):
             description = (
                 "We evaluate different backends "
                 "across three benchmark suites - torchbench, huggingface and timm. We run "
-                "these experiments on " + machine + ". Each experiment runs one iteration of forward "
+                "these experiments on "
+                + machine
+                + ". Each experiment runs one iteration of forward "
                 "pass. For accuracy, we check the numerical correctness of forward "
                 "pass outputs by comparing with native pytorch. We measure speedup "
                 "by normalizing against the performance of native pytorch. We report mean "
@@ -1376,12 +1399,18 @@ if __name__ == "__main__":
     args.suites = suites
 
     if args.print_run_commands:
-        generated_file = generate_commands(args, dtypes, suites, devices, compilers, output_dir)
-        print(f"Running commands are generated in file {generated_file}. Please run (bash {generated_file}).")
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
+        print(
+            f"Running commands are generated in file {generated_file}. Please run (bash {generated_file})."
+        )
     elif args.visualize_logs:
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
-        generated_file = generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
         # generate memoized archive name now so that the date is reflective
         # of when the run started
         get_archive_name(args, dtypes[0])
