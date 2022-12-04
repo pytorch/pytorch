@@ -530,8 +530,8 @@ bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   return functional_count > 0;
 }
 
-bool isFunctionalTensor(ITensorListRef list) {
-  return isFunctionalTensorIListRef(std::move(list));
+bool isFunctionalTensor(const ITensorListRef& list) {
+  return isFunctionalTensorIListRef(list);
 }
 
 void freeze_functional_tensor(const Tensor& tensor) {
