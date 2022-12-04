@@ -10,6 +10,10 @@ from torch.fx import Node
 from torch.nn.utils import parametrize
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+__all__ = [
+    "apply_match"
+]
+
 def _match(modules: Dict[str, nn.ModuleDict], node: Node, current: Union[nn.Module, Any]) -> bool:
     r"""
     checks to see if a single node of a pattern matches
