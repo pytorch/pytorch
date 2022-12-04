@@ -10,6 +10,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
 
+
 def compiler_safe_fn(gm, example_inputs, is_safe):
     is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs)
     return gm.forward
@@ -288,10 +289,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
     # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
     # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
-    # 
-    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs 
+    #
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs
     # is because dynamo sends fake tensors down to aot_autograd.
-    @patch("functorch._src.config.debug_assert", True)
+    @patch("torch._functorch.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
             def forward(self, x, y):
@@ -321,6 +322,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         failure_reason = None
+
         def guard_fail_fn(failure):
             nonlocal failure_reason
             failure_reason = failure[0][0]
@@ -328,11 +330,14 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         compare(F(), fxy, (x, y))
         compare(F(), fxy, (x, z))
-        self.assertEqual(failure_reason, "tensor 'y' requires_grad mismatch. expected requires_grad=1")
-        
+        self.assertEqual(
+            failure_reason,
+            "tensor 'y' requires_grad mismatch. expected requires_grad=1",
+        )
+
         # Reset failure reason
         failure_reason = None
-        
+
         self.assertEqual(cc.frame_count, 2)
 
         torch._dynamo.reset()  # for new backend

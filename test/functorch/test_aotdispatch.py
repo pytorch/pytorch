@@ -1071,8 +1071,8 @@ def forward(self, primals_1, primals_2):
         )
 
     # See Note: Dynamo recompilation guarding invalid grad for why this test exists
-    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
-    @patch("functorch._src.config.debug_assert", True)
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_requires_grad_fake(self, counter):
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -1107,8 +1107,6 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
-    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
-    @patch("functorch._src.config.debug_assert", True)
     def test_invalid_requires_grad(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
