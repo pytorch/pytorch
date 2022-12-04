@@ -81,6 +81,7 @@ class DispatchKey(Enum):
     SparseCsrCUDA = auto()
 
     Python = auto()
+    FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -91,6 +92,8 @@ class DispatchKey(Enum):
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
+    FuncTorchDynamicLayerFrontMode = auto()
+    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 

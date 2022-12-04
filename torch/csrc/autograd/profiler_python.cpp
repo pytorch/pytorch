@@ -340,7 +340,10 @@ TensorMetadata toTensorMetadata(PyObject* self) {
   TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
   const auto& t = THPVariable_Unpack(self);
   RawTensorMetadata m{t};
-  return TensorMetadata{m};
+  return TensorMetadata{
+      m,
+      t.sizes().vec(),
+      m.layout_ == at::kStrided ? t.strides().vec() : std::vector<int64_t>()};
 }
 
 c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {

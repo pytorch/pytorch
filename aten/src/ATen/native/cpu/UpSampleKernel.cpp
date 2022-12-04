@@ -471,12 +471,12 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[0]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[1]);
 
     auto input_indexr = [=](int64_t n, int64_t h, int64_t w) {
@@ -486,7 +486,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
-    scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto oh : c10::irange(output_height)) {
         compute_source_index_and_lambda(
@@ -501,10 +501,10 @@ void cpu_upsample_linear_channels_last(
           scalar_t* i01 = input_indexr(n, ih0, iw1);
           scalar_t* i10 = input_indexr(n, ih1, iw0);
           scalar_t* i11 = input_indexr(n, ih1, iw1);
-          accscalar_t w00 = h0lambda * w0lambda;
-          accscalar_t w01 = h0lambda * w1lambda;
-          accscalar_t w10 = h1lambda * w0lambda;
-          accscalar_t w11 = h1lambda * w1lambda;
+          opmath_t w00 = h0lambda * w0lambda;
+          opmath_t w01 = h0lambda * w1lambda;
+          opmath_t w10 = h1lambda * w0lambda;
+          opmath_t w11 = h1lambda * w1lambda;
 
           int64_t size = channels;
           int64_t d = 0;
@@ -521,11 +521,11 @@ void cpu_upsample_linear_channels_last(
   };
 
   auto loop3d = [&](int64_t begin, int64_t end) {
-    const scalar_t depth_scale = area_pixel_compute_scale<scalar_t>(
+    const auto depth_scale = area_pixel_compute_scale<opmath_t>(
         input_depth, output_depth, align_corners, scales[0]);
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[1]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[2]);
 
     auto input_indexr = [=](int64_t n, int64_t d, int64_t h, int64_t w) {
@@ -536,7 +536,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
-    scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto od : c10::irange(output_depth)) {
         compute_source_index_and_lambda(
@@ -559,14 +559,14 @@ void cpu_upsample_linear_channels_last(
             scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
             scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
             scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
-            accscalar_t w000 = d0lambda * h0lambda * w0lambda;
-            accscalar_t w001 = d0lambda * h0lambda * w1lambda;
-            accscalar_t w010 = d0lambda * h1lambda * w0lambda;
-            accscalar_t w011 = d0lambda * h1lambda * w1lambda;
-            accscalar_t w100 = d1lambda * h0lambda * w0lambda;
-            accscalar_t w101 = d1lambda * h0lambda * w1lambda;
-            accscalar_t w110 = d1lambda * h1lambda * w0lambda;
-            accscalar_t w111 = d1lambda * h1lambda * w1lambda;
+            opmath_t w000 = d0lambda * h0lambda * w0lambda;
+            opmath_t w001 = d0lambda * h0lambda * w1lambda;
+            opmath_t w010 = d0lambda * h1lambda * w0lambda;
+            opmath_t w011 = d0lambda * h1lambda * w1lambda;
+            opmath_t w100 = d1lambda * h0lambda * w0lambda;
+            opmath_t w101 = d1lambda * h0lambda * w1lambda;
+            opmath_t w110 = d1lambda * h1lambda * w0lambda;
+            opmath_t w111 = d1lambda * h1lambda * w1lambda;
 
             int64_t size = channels;
             int64_t d = 0;
@@ -775,10 +775,10 @@ struct HelperInterpNearest : public HelperInterpBase {
         // index_f32 = (output_index) * scale
         // input_index = floor(index_f32)
         // Same as OpenCV INTER_NEAREST
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const accscalar_t real_input_index =
-              area_pixel_compute_source_index<accscalar_t>(
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
                   scale, i, /*align_corners=*/true, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
@@ -826,10 +826,10 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // index_f32 = (output_index + 0.5) * scale - 0.5
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const accscalar_t real_input_index =
-              area_pixel_compute_source_index<accscalar_t>(
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
                   scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
           input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
@@ -975,10 +975,10 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const accscalar_t real_input_index =
-              area_pixel_compute_source_index<accscalar_t>(
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
                   scale, i, align_corners, /*cubic=*/true);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           get_cubic_upsample_coefficients<scalar_t>(coeffs, real_input_index - input_index);
