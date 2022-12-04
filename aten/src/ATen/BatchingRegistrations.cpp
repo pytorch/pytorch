@@ -8,6 +8,8 @@
 #include <c10/util/irange.h>
 #include <c10/core/SymIntArrayRef.h>
 
+#include <utility>
+
 namespace at {
 
 // NOTE: [What is a batching rule?]
@@ -143,7 +145,7 @@ Tensor binary_pointwise_batching_rule(
     logical_other = logical_other.to(result_type);
   }
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
-      {logical_self, logical_other});
+      {std::move(logical_self), std::move(logical_other)});
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
