@@ -295,8 +295,24 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      qengine = at::kFBGEMM;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -332,8 +348,8 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
-      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif

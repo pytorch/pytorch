@@ -1942,7 +1942,11 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
-    strides = utils.compute_elementwise_output_strides(a)
+    # dtype conversion preserves dense strides
+    if torch._prims_common.is_non_overlapping_and_dense(a):
+        strides = a.stride()
+    else:
+        strides = utils.compute_elementwise_output_strides(a)
 
     return TensorMeta(a, strides=strides, dtype=dtype)
 
@@ -2320,10 +2324,12 @@ def _arange_meta(
         step != 0,
         lambda: "step must be nonzero",
     )
-    utils.check(
-        math.isfinite(start) and math.isfinite(end),
-        lambda: f"unsupported range: {start} -> {end}",
-    )
+    # SymInts can't represent inf
+    if not isinstance(start, torch.SymInt) and not isinstance(end, torch.SymInt):
+        utils.check(
+            math.isfinite(start) and math.isfinite(end),
+            lambda: f"unsupported range: {start} -> {end}",
+        )
     utils.check(
         (step > 0 and end >= start) or (step < 0 and end <= start),
         lambda: "upper bound and lower bound inconsistent with step sign",
