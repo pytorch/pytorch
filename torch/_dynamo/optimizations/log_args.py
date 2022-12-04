@@ -34,6 +34,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
+
         if n.op == "call_function":
             if n.target == aten.convolution.default:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -66,8 +67,8 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
 
 def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
-    def conv_arg_inner(*args):
-        fx_g = make_fx(gm)(*args)
-        return ConvArgsAnalysis(fx_g).run(*args)
-
-    return conv_arg_inner
+    # lowering graph
+    gm = make_fx(gm)(*example_inputs)
+    # use Interpreter to logs the args of conv
+    ConvArgsAnalysis(gm).run(*example_inputs)
+    return gm

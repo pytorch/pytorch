@@ -88,10 +88,21 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
+def wrap_compiler_fn(compiler_fn: CompilerFn) -> CompilerFn:
+    """WrapperBackend if config.verify_correctness is True"""
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
+
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+        return wrapper_backend_compiler_fn
+
+    return compiler_fn
+
+
 class WrapperBackend:
-    def __init__(self, backend: CompilerFn, original_example_inputs):
+    def __init__(self, backend: CompilerFn):
         self.backend: CompilerFn = backend
-        self.original_example_inputs = original_example_inputs
 
     @property
     def example_inputs(self):
@@ -100,6 +111,7 @@ class WrapperBackend:
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
 
         self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
@@ -529,61 +541,15 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
-            # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
-                compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
-
-            # NOTE: [Real Tensors in Accuracy Evaluation]
-            #
-            # Today, tensors are passed to backends as fake at compile time. See the .fake_example_inputs()
-            # call to compiler_fn below. At runtime, backends use real tensors.
-            #
-            # This should be a strong invariant we hold across all backends,
-            # and generally, it is. However, for accuracy evaluation, we need real tensors at compile time,
-            # for now, due to the unfortunate setup described below.
-            #
-            # Due to the nature of how we invoke comparison as a backend in two different ways:
-            #
-            # (1) Less bad, but still worth rewriting, WrapperBackend above, which takes
-            # real inputs for its ctor. see the config.verify_correctnes above.
-            #
-            # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
-            # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
-            # by the fact that the minifier will spawn new processes during minification. As such, we have
-            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
-            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
-            #
-            # The longer term PoR is to:
-            # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
-            # correctness and accuracy logic, so as not to have two different ways of doing the same thing.
-            #
-            # (B) Refactor minifier accuracy backend to do its comparison fully at runtime, so as not to need to
-            # pass real tensors to it at compile time.
-            is_top_level_minifying = (
-                config.repro_after is not None and config.repro_level == 4
-            )
-            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
-                compiled_fn = compiler_fn(gm, self.example_inputs())
-            else:
-                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
+                compiler_fn = wrap_compiler_fn(compiler_fn)
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
-
-    def fake_example_inputs(self) -> List[torch.Tensor]:
-        result = []
-        for arg in self.graphargs:
-            example = arg.get_fake_examples()
-            if example is not None:
-                result.extend(example)
-            else:
-                # Fallback, in case fake_tensor was not set
-                # Particularly for graph args that are not tensors
-                result.extend(arg.get_examples())
-        return result
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []

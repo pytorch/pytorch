@@ -9,7 +9,7 @@ import operator
 import re
 import types
 from abc import ABCMeta
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -108,13 +108,8 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
-    fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor):
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -123,13 +118,6 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
-
-    def get_fake_examples(self):
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-            return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -535,9 +523,7 @@ class VariableBuilder:
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), value, False, None)
-            )
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
@@ -565,6 +551,10 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), value, False)
+                )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
@@ -584,15 +574,6 @@ class VariableBuilder:
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
-
-            fake_tensor_value = None
-            example_value = tensor_variable.proxy.node.meta["example_value"]
-            if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                fake_tensor_value = example_value
-
-            graph_arg = GraphArg(self.get_source(), value, False, fake_tensor_value)
-            self.tx.output.graphargs.append(graph_arg)
-
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)
@@ -617,6 +598,10 @@ class VariableBuilder:
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), wrapped_value, True)
+                )
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
@@ -647,14 +632,6 @@ class VariableBuilder:
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
-            if not is_constant_source(self.get_source()):
-                fake_tensor_value = None
-                example_value = unspec_var.proxy.node.meta["example_value"]
-                if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                    fake_tensor_value = example_value
-                self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
-                )
             return unspec_var
 
 
@@ -712,14 +689,11 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     with preserve_rng_state():
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
+
         else:
-            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
-            # TODO(voz): Find all the callsites and burn this down.
-            # Flipping it to an assert fails dozens of tests.
-            if not isinstance(example_value, torch._subclasses.FakeTensor):
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-                example_value = fake_wrapper(example_value)
+            proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+            example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)

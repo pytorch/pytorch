@@ -51,6 +51,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         proc = subprocess.run(
             ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
         )
+
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -99,6 +100,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         repro_proc = subprocess.run(
             ["python3", repro_file], capture_output=True, cwd=repro_dir
         )
+
         return repro_proc, repro_code
 
     # Template for testing code.
