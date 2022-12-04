@@ -1,4 +1,3 @@
-import math
 import torch
 from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable
@@ -257,9 +256,9 @@ def _single_tensor_nadam(params: List[Tensor],
         # by updating the grad and exp_avg directly and not using the
         # scalar "value" argument of addcdiv.
         grad = grad * (-lr * (1. - mu) / (1. - mu_product))
-        exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
-        param.addcdiv_(grad, denom)
-        param.addcdiv_(exp_avg, denom)
+        exp_avg = exp_avg * (-lr * mu_next) / (1. - mu_product_next)
+        param.addcdiv_(grad, denom, value=1.0)
+        param.addcdiv_(exp_avg, denom, value=1.0)
 
 
 def _multi_tensor_nadam(params: List[Tensor],
@@ -285,7 +284,6 @@ def _multi_tensor_nadam(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
-    bias_correction1 = [1 - beta1 ** step for step in state_steps]
     bias_correction2 = [1 - beta2 ** step for step in state_steps]
     mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]
     mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
@@ -305,7 +303,7 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
 
     exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-    bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+    bias_correction_sqrt = [bc.sqrt() for bc in bias_correction2]
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
