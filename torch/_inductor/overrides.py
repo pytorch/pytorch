@@ -11,7 +11,6 @@ import numpy
 import torch
 import torch.nn as nn
 from torch import _prims
-from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -531,12 +530,10 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
 
-    fake_mode = fake_mode_from_tensors(example_inputs)
-
     if config.permute_fusion and not is_cpu:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
-        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+        ShapeProp(gm).propagate(*example_inputs)
         gm = linear_permute_fusion(gm)
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
@@ -552,8 +549,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_conv_bn(gm)
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
-
-    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+    ShapeProp(gm).propagate(*example_inputs)
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
