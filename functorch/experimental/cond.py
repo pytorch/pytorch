@@ -1,6 +1,6 @@
 # TODO(zhxchen17) Expose API through functorhc.experimental.control_flow
 #                 and rename this file to _cond.py.
-from functorch._src.eager_transforms import functionalize
+from functorch._src.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 import torch
 
 import torch.utils._pytree as pytree
@@ -12,6 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
     get_isolated_graphmodule,
     get_proxy_slot,
     ProxyTorchDispatchMode,
+    make_fx,
     track_tensor_tree,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -103,6 +104,7 @@ def cond_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU key"
     if pred:
+        print(true_fn, operands)
         return true_fn(*operands)
     else:
         return false_fn(*operands)
@@ -152,21 +154,23 @@ def cond_python_dispatcher(*args):
     return cond(*args)
 
 
-@cond.py_impl(DispatchKey.FuncTorchDynamicLayerFrontMode)
-def cond_functionalize(pred, true_fn, false_fn, inputs):
-    functional_true_fn = functionalize(true_fn)
-    functional_false_fn = functionalize(false_fn)
-
+@cond.py_impl(torch._C._functorch.TransformType.Functionalize)
+def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
+    reapply_views = interpreter.functionalizeAddBackViews()
+    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
+    functional_true_fn = make_fx(functionalize(true_fn, remove=mode))(*unwrapped_inputs)
+    functional_false_fn = make_fx(functionalize(false_fn, remove=mode))(*unwrapped_inputs)
     _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchDynamicLayerFrontMode))
+    return _wrap_all_tensors_to_functional(cond(pred, functional_true_fn, functional_false_fn, unwrapped_inputs), level=interpreter.level())
 
-    if pred:
-        return functional_true_fn(*inputs)
-    return functional_false_fn(*inputs)
-
+# TODO (tugsbayasgalan) somehow I can't fall through FuncTorchDynamicLayerBackMode
+@cond.py_impl(DispatchKey.FuncTorchDynamicLayerBackMode)
+def cond_functorch_layer_back_mode(*args):
+    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchDynamicLayerBackMode))
+    return cond(*args)
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
-cond.fallthrough(DispatchKey.Functionalize)
-cond.fallthrough(DispatchKey.FuncTorchDynamicLayerBackMode)
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)

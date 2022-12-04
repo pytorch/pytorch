@@ -502,6 +502,13 @@ void initFuncTorchBindings(PyObject* module) {
       .def("key", &VmapInterpreterPtr::key)
       .def("level", &VmapInterpreterPtr::level)
       .def("batchSize", &VmapInterpreterPtr::batchSize);
+  py::class_<FunctionalizeInterpreterPtr>(m, "CFunctionalizeInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &FunctionalizeInterpreterPtr::key)
+      .def("level", &FunctionalizeInterpreterPtr::level)
+      .def(
+          "functionalizeAddBackViews",
+          &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
 }
 
 } // namespace impl

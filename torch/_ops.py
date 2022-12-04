@@ -125,7 +125,6 @@ class PyOperator(PyOperatorABC):
         self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
 
     def py_impl(self, dispatch_key_or_mode_or_transform):
-        print("F", dispatch_key_or_mode_or_transform)
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode_or_transform) and issubclass(
                 dispatch_key_or_mode_or_transform,
@@ -159,8 +158,6 @@ class PyOperator(PyOperatorABC):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
-            if dispatch_key in self.table:
-                return self.table[dispatch_key](*args, **kwargs)
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
