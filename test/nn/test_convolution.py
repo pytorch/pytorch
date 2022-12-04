@@ -1034,7 +1034,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data,
                                         m2.weight.grad.data], 0),
-                             atol=atol, rtol=rtol)
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
 
     @onlyCUDA
@@ -1412,7 +1412,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:feat_dim]
 
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion

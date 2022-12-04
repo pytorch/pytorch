@@ -98,6 +98,9 @@ def get_strip_error_messages():
         return True  # always strip in OSS CI to expose potential issues
     return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
 
+def get_disable_warn():
+    return read_bool("pt", "disable_warn", False)
+
 def get_enable_eager_symbolication():
     return read_bool("pt", "enable_eager_symbolication", default = False, required = False)
 
@@ -144,6 +147,7 @@ THIRD_PARTY_LIBS = {
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
     "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
+    "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
 }
 
 def third_party(name):
@@ -200,6 +204,8 @@ _COMMON_PREPROCESSOR_FLAGS = [
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
 ) + (
     ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
+) + (
+    ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
 def get_aten_preprocessor_flags():
@@ -1727,9 +1733,7 @@ def define_buck_targets(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS
-            else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h")
-            : ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
+            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h"): ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
         },
         # Avoid leaking implementation details by only exposing this header to
         # the internals of the loader/serializer layer.
@@ -1927,7 +1931,12 @@ def define_buck_targets(
                 third_party("glog"),
                 third_party("XNNPACK"),
                 third_party("pocketfft"),
-            ],
+            ] + select({
+                "DEFAULT": [],
+                "ovr_config//runtime:fbcode-arm64": [
+                  third_party("sleef_arm"),
+                ],
+            }),
             compiler_flags = get_aten_compiler_flags(),
             exported_preprocessor_flags = get_aten_preprocessor_flags(),
             exported_deps = [

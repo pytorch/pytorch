@@ -222,7 +222,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     }
 
     if (!output_name_) {
-      throw std::runtime_error("Output name not specififed!");
+      throw std::runtime_error("Output name not specified!");
     }
 
     return environment.at(*output_name_);

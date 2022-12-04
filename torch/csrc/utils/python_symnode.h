@@ -94,82 +94,78 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   c10::SymNode add(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode sub(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode mul(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode truediv(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode pow(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode floordiv(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode mod(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode eq(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode gt(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode lt(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode le(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode ge(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode min(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
   c10::SymNode max(const c10::SymNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
+    return dispatch_common_(__func__, other);
   }
 
   c10::SymNode ceil() override {
-    return dispatch_common_(__FUNCTION__);
+    return dispatch_common_(__func__);
   }
 
   c10::SymNode floor() override {
-    return dispatch_common_(__FUNCTION__);
+    return dispatch_common_(__func__);
   }
 
   c10::SymNode neg() override {
-    return dispatch_common_(__FUNCTION__);
+    return dispatch_common_(__func__);
   }
 
   c10::SymNode clone() override {
-    return dispatch_common_(__FUNCTION__);
-  }
-
-  c10::SymNode sym_int() override {
-    return dispatch_common_(__FUNCTION__);
+    return dispatch_common_(__func__);
   }
 
   c10::SymNode sym_float() override {
-    return dispatch_common_(__FUNCTION__);
+    return dispatch_common_(__func__);
   }
 
   py::handle getPyObj() {
