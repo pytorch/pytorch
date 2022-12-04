@@ -946,7 +946,7 @@ Args:
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
     storage_offset (int, optional): the offset in the underlying storage of the output tensor.
-    If ``None``, the storage_offset of the output tensor will match the input tensor.
+        If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 
