@@ -8996,8 +8996,8 @@ Example::
 add_docstr(
     torch.rand,
     """
-rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
-pin_memory=False) -> Tensor
+rand(*size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, \
+requires_grad=False, pin_memory=False) -> Tensor
 """
     + r"""
 Returns a tensor filled with random numbers from a uniform distribution
