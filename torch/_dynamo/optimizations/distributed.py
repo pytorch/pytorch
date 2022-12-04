@@ -157,7 +157,7 @@ class DDPOptimizer:
                 for name, p in target.named_parameters():
                     param = target.get_parameter(name)
                     if p.requires_grad and not self._ignore_parameter(param):
-                        buckets[0].size += p.storage().nbytes()
+                        buckets[0].size += p._storage().nbytes()
                         buckets[0].params.append(f"{node.target}_{name}")
                         buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
@@ -165,7 +165,7 @@ class DDPOptimizer:
                 if maybe_param.requires_grad and not self._ignore_parameter(
                     maybe_param
                 ):
-                    buckets[0].size += maybe_param.storage().nbytes()
+                    buckets[0].size += maybe_param._storage().nbytes()
                     buckets[0].params.append(node.target)
                     buckets[0].param_ids.append(id(maybe_param))
 

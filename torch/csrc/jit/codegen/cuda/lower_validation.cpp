@@ -86,7 +86,7 @@ class ValidateSiblings : public IterVisitor {
         auto sibling_id = it->second;
         TORCH_INTERNAL_ASSERT(
             sibling->axis(i) == sibling_id,
-            "Invalid matching sinbling ID detected. Expr: ",
+            "Invalid matching sibling ID detected. Expr: ",
             expr->toString(),
             "Sibling ID: ",
             sibling_id->toString());

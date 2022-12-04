@@ -293,7 +293,7 @@ class EtcdRendezvous(object):
                 time.sleep(1)
 
             except RendezvousTimeoutError:
-                log.info("Rendezvous timeout occured in EtcdRendezvousHandler")
+                log.info("Rendezvous timeout occurred in EtcdRendezvousHandler")
                 raise
 
             except RendezvousClosedError:
