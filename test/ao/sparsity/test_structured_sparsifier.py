@@ -302,7 +302,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         SimpleLinear(),
                         config,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -343,7 +343,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         LinearBias(),
                         config,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -363,7 +363,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     LinearActivation(),
                     config,
                     shape,
-                    device,
+                    torch.device(device),
                     also_prune_bias,
                 )
                 # test functional version
@@ -371,7 +371,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     LinearActivationFunctional(),
                     config,
                     shape,
-                    device,
+                    torch.device(device),
                     also_prune_bias,
                 )
 
@@ -438,7 +438,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         config,
                         x,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -483,7 +483,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         config,
                         x,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -534,7 +534,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         config,
                         x,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -589,7 +589,7 @@ class TestBaseStructuredSparsifier(TestCase):
                         config,
                         x,
                         shape,
-                        device,
+                        torch.device(device),
                         also_prune_bias,
                     )
 
@@ -611,7 +611,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     config,
                     x,
                     shape,
-                    device,
+                    torch.device(device),
                     also_prune_bias,
                 )
 
@@ -634,7 +634,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     config,
                     x,
                     shape,
-                    device,
+                    torch.device(device),
                     also_prune_bias,
                 )
                 self._test_conv2d_on_device(
