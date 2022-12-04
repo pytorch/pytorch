@@ -187,7 +187,22 @@ class save_on_cpu(saved_tensors_hooks):
 #                                # exiting check0, clears `y` and `z`
 #                                # whatever f and g save are hidden
 #
+# NB: We never need to recompute function until we have finished running it
+#
 # TODO: Handling of free variables.
+# The current stack was created to recompute values for some call to checkpoint.
+# If that checkpointed function calls checkpoint one or more times (possibly
+# in a nested way), the inputs to the top-most checkpoints are cleared, so if we
+# detect that we are the direct children to the ambient frame, we save its inputs
+#
+# We can register as many hooks as we want, they all do the same thing
+# Backward usually happens outside of the context of any checkpoint anyway
+# so we'll at least need to call this once per recomputation stack
+#
+# We can reuse the checkpoint code because what we are doing is very similar
+# to checkpointing, we want to manage the tensors saved and collect the ones
+# that remain alive at the very end.
+# Creating a new CheckpointStack creates an ambient frame which manages this
 #
 # Sketch of the mechanism
 # =======================
@@ -204,8 +219,8 @@ class CheckpointFrame():
         self.fn = fn
         self.exited = False
         self.needed_counter = 0
-        # Doesn't actually have to save
-        # Assume that weakref dictionary is ordered
+        # Assume that entries are added/removed determinsitically
+        #        and that removal preserves order
         self.saved_tensors: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.child_inputs: List[Tuple[Any, ...]] = []
         # Set this when we leave
@@ -218,10 +233,9 @@ class CheckpointFrame():
         self.recomputed_child_inputs: List[Tuple[Any, ...]] = []
 
 class CheckpointStack():
-    def __init__(self, parent, frame_to_recompute_for=None):
-        self.parent = parent
-        self.lvl = parent.lvl + 1 if parent is not None else 0
-        self.frame_to_recompute_for = frame_to_recompute_for
+    def __init__(self, parent, target_frame=None):
+        self.parent: CheckpointStack = parent
+        self.target_frame: CheckpointFrame = target_frame
         self.frames = [CheckpointFrame(parent=None, fn=None)]
 
 checkpoint_stacks: List[CheckpointStack] = []
@@ -239,9 +253,9 @@ class _checkpoint_hook(saved_tensors_hooks):
         def unpack_hook(saved):
             handle, frames, idx = saved
 
+            # backward was called before leaving checkpoint context
             if not frames[-1].exited:
                 assert handle in frames[-1].saved_tensors
-                # backward was called before leaving checkpoint context
                 return frames[-1].saved_tensors[handle]
             # TODO: give a nice error for when we backwarded during the context
 
@@ -249,25 +263,20 @@ class _checkpoint_hook(saved_tensors_hooks):
             if len(frames[-1].recomputed) < frames[-1].num_needs_recompute:
                 # The first frame is always the ambient frame
                 for frame in frames[1:]:
-                    if (len(frame.recomputed) == frame.num_needs_recompute and
-                            len(frame.recomputed_child_inputs) == frame.num_child_inputs_need_recompute):
+                    if (frame.exited is False
+                            or (len(frame.recomputed) == frame.num_needs_recompute
+                                and len(frame.recomputed_child_inputs) == frame.num_child_inputs_need_recompute)):
                         continue
-
-                    assert frame.parent is not None
-                    assert frame.parent() is not None
+                    assert frame.parent is not None and frame.parent() is not None
                     parent = frame.parent()
                     inps = parent.recomputed_child_inputs if parent.exited else parent.child_inputs
                     args, kwargs = inps[frame.idx_of_input_in_parent]
 
-                    # We can reuse the checkpoint code because what we are doing is very similar
-                    # to checkpointing, we want to manage the tensors saved and collect the ones
-                    # that remain alive at the very end.
-                    # Creating a new CheckpointStack creates an ambient frame which manages this
                     with torch.autograd.enable_grad():
-                        _checkpoint(frame.fn, *args, frame_to_recompute_for=frame, **kwargs)
+                        # Do recomputation in a fresh checkpoint stack
+                        _checkpoint(frame.fn, *args, target_frame=frame, **kwargs)
 
             ret = frames[-1].recomputed[idx]
-            # assert torch.allclose(ret, reference), f"Mismatch between reference: {reference} and recomputed: {ret}"
             return ret
 
         super().__init__(pack_hook, unpack_hook)
@@ -278,68 +287,60 @@ def get_wrapped_fn(fn):
         return fn(*args, **kwargs)
     return wrapped
 
-def _checkpoint(fn, *args, frame_to_recompute_for: CheckpointFrame = None, **kwargs):
+def _checkpoint(fn, *args, target_frame: CheckpointFrame = None, **kwargs):
     needs_to_pop = False
-    if len(checkpoint_stacks) == 0 or frame_to_recompute_for is not None:
+    if len(checkpoint_stacks) == 0 or target_frame is not None:
         needs_to_pop = True
         parent = None if len(checkpoint_stacks) == 0 else checkpoint_stacks[-1]
-        checkpoint_stacks.append(CheckpointStack(parent=parent, frame_to_recompute_for=frame_to_recompute_for))
+        checkpoint_stacks.append(CheckpointStack(parent=parent, target_frame=target_frame))
 
-    current_stack = checkpoint_stacks[-1]
+    curr_stack = checkpoint_stacks[-1]
 
-    if frame_to_recompute_for is None:
+    if target_frame is None:
         # Create a proper checkpoint frame and append it to the current stack
         wrapped_fn = get_wrapped_fn(fn)
-        checkpoint_frame = CheckpointFrame(parent=current_stack.frames[-1], fn=wrapped_fn)
-        current_stack.frames.append(checkpoint_frame)
+        curr_frame = CheckpointFrame(parent=curr_stack.frames[-1], fn=wrapped_fn)
+        curr_stack.frames.append(curr_frame)
+    else:
+        # Don't need a checkpoint frame if we're starting a stack for recomputation
+        assert len(curr_stack.frames) == 1
+        curr_frame = curr_stack.frames[0]
 
-        # Inputs are saved before enter the function, because you may need replay
-        # this function before it completes (why?)
+    if (curr_stack.target_frame is not None
+            and curr_frame.parent is not None
+            and curr_frame.parent() is curr_stack.frames[0]):
+        # Top-level checkpoints save their inputs to the target frame during recomputation
+        assert len(curr_stack.frames) == 2
+        curr_stack.target_frame.recomputed_child_inputs.append((args, kwargs))
+
+    with _checkpoint_hook():
+        # We can register this hook as many times as we want, it only reads global state
+        ret = fn(*args, **kwargs)
+
+    curr_frame.num_needs_recompute = len(curr_frame.saved_tensors)
+    if target_frame is None:
+        # Children register their inputs to the parent checkpoint to be cleared
+        # when the parent exits and restored when the parent is recomputed
         inputs = (args, kwargs)
-        # What do we do if we didn't save it in the parent?
-        assert checkpoint_frame.parent is not None
-        parent = checkpoint_frame.parent()
+        assert curr_frame.parent is not None
+        parent = curr_frame.parent()
         assert parent is not None
-        checkpoint_frame.idx_of_input_in_parent = len(parent.child_inputs)
+        curr_frame.idx_of_input_in_parent = len(parent.child_inputs)
         parent.child_inputs.append(inputs)
         parent.num_child_inputs_need_recompute += 1
     else:
-        # This call to _checkpoint was triggered by recomputation (see unpack_hook)
-        assert len(current_stack.frames) == 1
-        checkpoint_frame = current_stack.frames[0]
+        # Stack for recomputation is getting destroyed, save into the target frame
+        assert len(target_frame.recomputed) == 0
+        detached_saved = [t.detach() for t in curr_frame.saved_tensors.values()]
+        target_frame.recomputed.extend(detached_saved)
 
-    if (current_stack.frame_to_recompute_for is not None
-            and checkpoint_frame.parent is not None
-            and checkpoint_frame.parent() is current_stack.frames[0]):
-        # The current stack was created to recompute values for some call to checkpoint.
-        # If that checkpointed function calls checkpoint one or more times (possibly
-        # in a nested way), the inputs to the top-most checkpoints are cleared, so if we
-        # detect that we are the direct children to the ambient frame, we save its inputs
-        assert len(current_stack.frames) == 2
-        current_stack.frame_to_recompute_for.recomputed_child_inputs.append((args, kwargs))
+    curr_frame.child_inputs.clear()
+    curr_frame.saved_tensors.clear()
+    curr_frame.exited = True
 
-    try:
-        with _checkpoint_hook():
-            # We can register as many hooks as we want, they all do the same thing
-            ret = fn(*args, **kwargs)
-    finally:
-        # Exit the context
-        checkpoint_frame.num_needs_recompute = len(checkpoint_frame.saved_tensors)
-        # if checkpoint_frame.num_needs_recompute > 0:
-        # Store your own inputs in the parent (always do this for now)
-
-        if frame_to_recompute_for is not None:
-            assert len(frame_to_recompute_for.recomputed) == 0
-            # Detach all the way here is OK?
-            frame_to_recompute_for.recomputed.extend([t.detach() for t in checkpoint_frame.saved_tensors.values()])
-        # Clear your own child inputs and saved tensors
-        checkpoint_frame.child_inputs.clear()
-        checkpoint_frame.saved_tensors.clear()
-        checkpoint_frame.exited = True
-        # No longer need to maintain a reference here, it should be stored on the graph?
-        current_stack.frames.pop()
-        if needs_to_pop:
-            checkpoint_stacks.pop()
+    curr_stack.frames.pop()
+    if needs_to_pop:
+        checkpoint_stacks.pop()
 
     return ret
 
