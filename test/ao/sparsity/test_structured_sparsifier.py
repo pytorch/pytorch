@@ -173,7 +173,7 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _test_step_linear_on_device(self, model, device):
         model = model.to(device)
-        x = torch.ones(7, 7)
+        x = torch.ones(7, 7, device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, None)
         self._check_pruner_valid_before_step(model, pruner, device)
@@ -193,7 +193,7 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _test_step_conv2d_on_device(self, model, expected_shape, config, device):
         model = model.to(device)
-        x = torch.ones((1, 1, 28, 28)).to(device)
+        x = torch.ones((1, 1, 28, 28), device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, config)
         self._check_pruner_valid_before_step(model, pruner, device)
@@ -430,7 +430,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shapes.append((1, 52, 20, 20))
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 for config, shape in zip(configs, shapes):
                     self._test_conv2d_on_device(
@@ -475,7 +475,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shapes.append((1, 52, 18, 18))
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 for config, shape in zip(configs, shapes):
                     self._test_conv2d_on_device(
@@ -526,7 +526,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shapes.append((1, 52, 18, 18))
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 for config, shape in zip(configs, shapes):
                     self._test_conv2d_on_device(
@@ -581,7 +581,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shapes.append((1, 52, 24, 24))
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 for config, shape in zip(configs, shapes):
                     self._test_conv2d_on_device(
@@ -604,7 +604,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shape = (1, 52, 3, 3)
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 self._test_conv2d_on_device(
                     Conv2dPool(),
@@ -627,7 +627,7 @@ class TestBaseStructuredSparsifier(TestCase):
         shape = (1, 13)
 
         for device in DEVICES:
-            x = torch.ones((1, 1, 28, 28)).to(device)
+            x = torch.ones((1, 1, 28, 28), device=device)
             for also_prune_bias in [True, False]:
                 self._test_conv2d_on_device(
                     Conv2dPoolFlattenFunctional(),
