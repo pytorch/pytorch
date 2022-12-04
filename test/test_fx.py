@@ -1679,6 +1679,36 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
+    def test_nn_module_stack(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub_mod = SubModule()
+
+            def forward(self, x):
+                return self.sub_mod(x)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        mod_stack = {}
+        expected_stack = [('sub_mod', str(type(m.sub_mod))),
+                          ('sub_mod.conv_mod', str(type(m.sub_mod.conv_mod)))]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get('nn_module_stack', {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
+
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3925,7 +3955,6 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool2d": PROXY_ITERABLE,
         "max_pool3d": PROXY_ITERABLE,
 
-        "group_norm": PROXY_ITERATED,
         "lp_pool2d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
@@ -3959,6 +3988,7 @@ class TestFunctionalTracing(JitTestCase):
         "gaussian_nll_loss": CONTROL_FLOW,
         "glu": CONTROL_FLOW,
         "grid_sample": CONTROL_FLOW,
+        "group_norm": CONTROL_FLOW,
         "gumbel_softmax": CONTROL_FLOW,
         "hardsigmoid": CONTROL_FLOW,
         "hardswish": CONTROL_FLOW,
@@ -4029,7 +4059,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool2d": PROXY_ITERATED,
         "max_pool3d": PROXY_ITERATED,
 
-        "group_norm": LEN_ERROR
+        "group_norm": CONTROL_FLOW
     }
 
     @classmethod

@@ -199,7 +199,7 @@ Tensor fft_c2r(c10::string_view function_name,
               " expects a floating point output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input, /*require_complex=*/true);
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(2*(input.sizes()[dim] - 1));
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -225,7 +225,7 @@ Tensor fft_r2c(c10::string_view function_name,
               " expects a complex output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -257,7 +257,7 @@ Tensor fft_c2c(c10::string_view function_name,
   TORCH_CHECK(input.is_complex(), function_name,
               " expects a complex input tensor, but got ", input.scalar_type());
   const auto input_dim = input.dim();
-  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
+  const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim, /*wrap_scalar=*/false);
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
@@ -284,7 +284,7 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
   if (dim) {
     ret.dim.resize(dim->size());
     std::copy(dim->begin(), dim->end(), ret.dim.begin());
-    maybe_wrap_dims(ret.dim, input_dim);
+    maybe_wrap_dims(ret.dim, input_dim, /*wrap_scalars=*/false);
 
     // Check dims are unique
     DimVector copy = ret.dim;
@@ -750,7 +750,7 @@ DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
     dim.resize(dim_unwrapped.size());
     for (const auto i : c10::irange(dim.size())) {
-      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim(), /*wrap_scalars=*/false);
     }
   } else {
     dim.resize(self.dim());
@@ -1053,13 +1053,13 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   if (onesided) {
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
-      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onsided=True, but got " << fft_size;
+      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onesided=True, but got " << fft_size;
       AT_ERROR(ss.str());
     }
   } else {
     if (n_fft != fft_size) {
       std::ostringstream ss;
-      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onsided=False, but got " << fft_size;
+      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onesided=False, but got " << fft_size;
       AT_ERROR(ss.str());
     }
   }
@@ -1182,7 +1182,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto input_strides = input.strides();
   TORCH_CHECK(dim_.size() > 0);
   DimVector dim(dim_.begin(), dim_.end());
-  at::maybe_wrap_dims(dim, input_strides.size());
+  at::maybe_wrap_dims(dim, input_strides.size(), /*wrap_scalars=*/false);
 
   if (input.numel() == 0 || input_sizes[dim.back()] <= 2) {
     return;  // No elements need writing
