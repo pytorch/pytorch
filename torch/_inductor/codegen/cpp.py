@@ -401,6 +401,14 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"std::log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def signbit(x):
         return f"std::signbit({x})"
 
@@ -1408,9 +1416,11 @@ class KernelGroup:
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
                 code.writelines(
                     [
-                        f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
                     ]
                 )
             for old, new in self.args.aliases():
