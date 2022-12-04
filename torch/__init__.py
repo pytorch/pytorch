@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
+from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'compile',
 ]
 
 ################################################################################
@@ -204,8 +205,6 @@ class SymInt:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -218,11 +217,26 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
-        ...
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
 
     # For BC; direct access of node is OK too
     def get_pyobj(self):
@@ -247,8 +261,20 @@ class SymFloat:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __sym_int__(self):
-        ...
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -500,7 +526,6 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
-        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
@@ -709,7 +734,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
+from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage, _warn_typed_storage_removal
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
@@ -717,86 +742,171 @@ from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.uint8
 
 class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.double
 
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.float
 
 class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.half
 
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.long
 
 class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int
 
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.short
 
 class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int8
 
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bool
 
 class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bfloat16
 
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cdouble
 
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cfloat
 
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint8
 
 class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint8
 
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint32
 
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint4x2
 
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint2x4
 
 _storage_classes = {
@@ -1002,6 +1112,74 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+
+def compile(model: Optional[Callable] = None, *,
+            fullgraph: builtins.bool = False,
+            dynamic: builtins.bool = False,
+            backend: Union[str, Callable] = "inductor",
+            mode: Union[str, None] = None,
+            passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            **kwargs) -> Callable:
+    """
+    Optimizes given model/function using Dynamo and specified backend
+
+    Args:
+       model (Callable): Module/function to optimize
+       fullgraph (bool): Whether it is ok to break model into several subgraphs
+       dynamic (bool): Use dynamic shape tracing
+       backend (str or Callable): backend to be used
+       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       passes (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
+                       - static-memory
+                       - matmul-tune
+                       - matmul-padding
+                       - triton-autotune
+                       - triton-bmm
+                       - triton-mm
+                       - triton-convolution
+                       - rematerialize-threshold
+                       - rematerialize-acc-threshold
+
+    Example::
+
+        @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
+        def foo(x):
+            return torch.sin(x) + torch.cos(x)
+
+    """
+    # Decorator mode
+    if model is None:
+        def fn(model: Callable):
+            if model is None:
+                raise RuntimeError("Model can't be None")
+            return compile(model,
+                           fullgraph=fullgraph,
+                           dynamic=dynamic,
+                           backend=backend,
+                           mode=mode,
+                           passes=passes,
+                           **kwargs)
+        return fn
+
+    import torch._dynamo
+    from torch._dynamo.eval_frame import lookup_backend
+    from torch._inductor.config import InductorConfigContext
+    if mode is not None and passes is not None:
+        raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
+    if mode is None and passes is None:
+        mode = "default"
+    if backend == "inductor":
+        compile_fn = lookup_backend(backend)
+        cm = InductorConfigContext(mode if mode is not None else passes)
+
+        def _compile_fn(model_, inputs_):
+            with cm:
+                return compile_fn(model_, inputs_)
+
+        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
+        backend = _compile_fn
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

@@ -49,15 +49,24 @@ The BackendConfig is comprised of a list of BackendPatternConfigs, each of which
 
 ```
 import torch
-from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType,
+)
 
 weighted_int8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.quint8,
     weight_dtype=torch.qint8,
-    bias_type=torch.float)
+    bias_dtype=torch.float)
 
+def fuse_conv2d_relu(is_qat, relu, conv):
+    """Return a fused ConvReLU2d from individual conv and relu modules."""
+    return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
+
+# For quantizing Linear
 linear_config = BackendPatternConfig(torch.nn.Linear) \
     .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
     .add_dtype_config(weighted_int8_dtype_config) \
@@ -65,15 +74,25 @@ linear_config = BackendPatternConfig(torch.nn.Linear) \
     .set_qat_module(torch.ao.nn.qat.Linear) \
     .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
+# For fusing Conv2d + ReLU into ConvReLU2d
 conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
     .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
     .add_dtype_config(weighted_int8_dtype_config) \
     .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
-    .set_fuser_method(reverse_sequential_wrapper2(torch.ao.nn.intrinsic.ConvReLU2d))
+    .set_fuser_method(fuse_conv2d_relu)
+
+# For quantizing ConvReLU2d
+fused_conv_relu_config = BackendPatternConfig(torch.ao.nn.intrinsic.ConvReLU2d) \
+    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+    .add_dtype_config(weighted_int8_dtype_config) \
+    .set_root_module(torch.nn.Conv2d) \
+    .set_qat_module(torch.ao.nn.intrinsic.qat.ConvReLU2d) \
+    .set_reference_quantized_module(torch.ao.nn.quantized.reference.Conv2d)
 
 backend_config = BackendConfig("my_backend") \
     .set_backend_pattern_config(linear_config) \
-    .set_backend_pattern_config(conv_relu_config)
+    .set_backend_pattern_config(conv_relu_config) \
+    .set_backend_pattern_config(fused_conv_relu_config)
 ```
 
 ### Observer Insertion
@@ -152,3 +171,7 @@ The user's QConfig may specify `quant_min` and `quant_max`, which are min and ma
 #### Scale range
 
 Similarly, the user's QConfig may specify a minimum value for the quantization scale (currently exposed as `eps` but will change in the future to better reflect the semantics). Here we set the lower bound for the `scale_min` to represent the limits of the backend. If a QConfig's min scale value falls below this limit, the QConfig will be treated as violating this constraint. Note that `scale_max_upper_bound` is currently not used, because there is no corresponding mechanism to enforce this on the observer yet.
+
+#### Fixed quantization parameters
+
+For ops with fixed quantization parameters such as `torch.nn.Sigmoid` or `torch.nn.Tanh`, the BackendConfig can specify the specific scale and zero point values as constraints on the input and output activations. The user's QConfigs for these ops must use `FixedQParamsObserver` or `FixedQParamsFakeQuantize` for their activations with matching scale and zero point values, otherwise these QConfigs will be ignored.
