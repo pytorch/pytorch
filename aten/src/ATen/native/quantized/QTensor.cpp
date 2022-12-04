@@ -239,7 +239,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   // Quantizers can have specific logic for comparison
   auto self_quantizer = get_qtensorimpl(self)->quantizer();
   auto other_quantizer = get_qtensorimpl(other)->quantizer();
-  if (!self_quantizer->equalTo(std::move(other_quantizer))) {
+  if (!self_quantizer->equalTo(other_quantizer)) {
     return false;
   }
 
