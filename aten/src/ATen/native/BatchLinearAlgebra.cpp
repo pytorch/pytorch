@@ -3716,7 +3716,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // 'singular_values' is expected to have real float dtype
   checkLinalgCompatibleDtype("torch.linalg.lstsq", singular_values.scalar_type(), real_dtype, "singular_values");
 
-  std::string driver_name = get_default_lstsq_driver(std::move(driver), input);
+  std::string driver_name = get_default_lstsq_driver(driver, input);
 
   // set default rcond value
   double rcond_value = rcond.has_value()
@@ -3839,7 +3839,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));
   Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
-      at::linalg_lstsq_outf(input, other, rcond, std::move(driver), solution, residuals, rank, singular_values);
+      at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
   return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
 }
 
