@@ -10,7 +10,7 @@
 
 namespace at { namespace functorch {
 
-void vmap_check_escaped(optional<DynamicLayer> layer, const char* what) {
+void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what) {
   TORCH_CHECK(
     layer.has_value(),
     "Either your tensor may have escaped from inside a function being vmapped and this is a user error ",
