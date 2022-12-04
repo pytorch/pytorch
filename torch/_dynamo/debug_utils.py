@@ -745,6 +745,9 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 def backend_accuracy_fails(
     gm, example_inputs, compiler_fn, only_fwd=False, real_args=None
 ):
+    # TODO(voz): Cleanup backend_accuracy_fails callsites until we can assert
+    # that all example_inputs are fake tensors.
+    # See NOTE: [Real Tensors in Accuracy Evaluation]
     try:
         compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
     except Exception as e:
@@ -963,7 +966,7 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
 
     from torch._dynamo.optimizations.backends import BACKENDS
 
-    # (1) Get the backend
+    # (1) Get the backend.
     if compiler_name == "inductor":
         from torch._inductor.compile_fx import compile_fx
 
@@ -975,14 +978,19 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
         compiler_fn = BACKENDS[compiler_name]
 
     def backend_accuracy_fwd(*args):
+        # (2) Pass it to accuracy eval, we compile within this func.
         if backend_accuracy_fails(
             gm, example_inputs=example_inputs, real_args=args, compiler_fn=compiler_fn
         ):
+            # (3) Accuracy failed - this is good, we are trying to repro this.
             log.warning("Accuracy failed for the TorchDyanmo produced graph")
             dump_state_fn = functools.partial(
                 dump_backend_state, compiler_name=compiler_name, check_accuracy=True
             )
 
+            # (4) Bind the current compiler_fn and real_args to accuracy_eval
+            # We need to do this in order to ensure that (a) we correctly recompile on every
+            # minification, and (b) that the args captured here, in the runtime, are passed to eval
             fails_fn = functools.partial(
                 backend_accuracy_fails,
                 real_args=args,
@@ -990,6 +998,12 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
             )
 
             dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), args)
+
+            # (5) Run the minifier - note that example_inputs from *compile_time* are
+            # still used, because we want to invoke backend_accuracy_fails with these inputs
+            # in this position as it will get compiled with minification. We could pass *args*
+            # here and still maybe get a valid compile, but our compilation strategy involves fake
+            # tensors.
             minifier(
                 gm,
                 example_inputs,
