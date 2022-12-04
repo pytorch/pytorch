@@ -877,11 +877,17 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_);
-    return allreduce_hook.runHook(grad_bucket);
+    return run_allreduce_hook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
   }
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
+  GradBucket& grad_bucket
+) {
+    _AllReduceBySumCommHook allreduce_hook(process_group_);
+    return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {

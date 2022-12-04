@@ -58,7 +58,8 @@ def _apply_optim_in_backward_hook(
         hook_state: Any, bucket: dist.GradBucket, optim_stream_state,
     ) -> torch.futures.Future[torch.Tensor]:
         # Run original hook
-        fut = hook(hook_state, bucket)
+        #fut = hook(hook_state, bucket)
+        fut = hook_state()._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
         with torch.cuda.stream(optimizer_stream):
             fut.wait()
