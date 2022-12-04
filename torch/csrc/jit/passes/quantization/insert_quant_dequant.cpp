@@ -257,19 +257,6 @@ at::ScalarType getObserverDtype(Module& module, Value* v) {
   return at::ScalarType::Undefined;
 }
 
-at::ScalarType getObserverComputeDtype(Module& module, Value* v) {
-  auto observer_name = findObserverName(v);
-  if (observer_name.has_value()) {
-    auto observer_module = module.attr(observer_name.value()).toModule();
-    if (observer_module.hasattr("compute_dtype")) {
-      at::ScalarType scalar_type =
-          observer_module.attr("compute_dtype").toScalarType();
-      return scalar_type;
-    }
-  }
-  return at::ScalarType::Undefined;
-}
-
 c10::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
     Node* n) {
@@ -480,12 +467,8 @@ void insertQuantizationOps(
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
       auto observer_dtype = getObserverDtype(module, observer_out);
-      auto observer_compute_dtype =
-          getObserverComputeDtype(module, observer_out);
       if (observer_dtype == at::ScalarType::QUInt8 ||
-          observer_dtype == at::ScalarType::QInt8 ||
-          observer_compute_dtype == at::ScalarType::QUInt8 ||
-          observer_compute_dtype == at::ScalarType::QInt8) {
+          observer_dtype == at::ScalarType::QInt8) {
         // For activation tensors we insert choose_qparams, quant, dequant ops.
         Value* dtype = g->insertGetAttr(self, qparams.back());
         std::tie(choose_qparams, quant, dequant) =
@@ -1092,9 +1075,10 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   auto scalar_type = observer_module.attr("dtype");
   if (isPlaceholderObserver(n->input(0))) {
     // get compute_dtype for dynamic quantization
-    if (observer_module.hasattr("compute_dtype")) {
+    if (observer_module.hasattr("is_dynamic") &&
+        observer_module.attr("is_dynamic").toBool()) {
       qparams.push_back(
-          std::make_pair(kScalarType, observer_module.attr("compute_dtype")));
+          std::make_pair(kScalarType, observer_module.attr("dtype")));
     }
     return std::make_tuple(qscheme, qparams);
   } else if (scalar_type == at::ScalarType::Half) {
@@ -1554,7 +1538,7 @@ Node* insertQuantDequantNodes<QuantOpParams>(
 void checkCalculateQParamsResultTypes(const Node* out) {
   TORCH_CHECK(
       out->outputs().size() == 2,
-      "cacluate_qparams should produce output of size 2 (scale, zero_point).");
+      "calculate_qparams should produce output of size 2 (scale, zero_point).");
   Value* scale = out->output(0);
   Value* zp = out->output(1);
   TORCH_CHECK(

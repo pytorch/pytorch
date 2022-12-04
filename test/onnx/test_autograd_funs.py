@@ -1,16 +1,16 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
+import pytorch_test_common
 
 import torch
-
 from onnx_test_common import run_model_test
 from torch.onnx import OperatorExportTypes
 from torch.onnx._globals import GLOBALS
 from torch.onnx.utils import _model_to_graph
+from torch.testing._internal import common_utils
 
 
-class TestAutogradFuns(unittest.TestCase):
+class TestAutogradFuns(pytorch_test_common.ExportTestCase):
     opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -209,4 +209,4 @@ class TestAutogradFuns(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

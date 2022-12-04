@@ -108,6 +108,16 @@ factory_common_args = merge_dicts(
         returned Tensor. Default: ``torch.contiguous_format``.
 """
     ),
+    {
+        "sparse_factory_device_note": """\
+.. note::
+
+   If the ``device`` argument is not specified the device of the given
+   :attr:`values` and indices tensor(s) must match. If, however, the
+   argument is specified the input Tensors will be converted to the
+   given device and in turn determine the device of the constructed
+   sparse tensor."""
+    },
 )
 
 factory_like_common_args = parse_kwargs(
@@ -7980,8 +7990,10 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (Tensor or int): the starting dimension
-    length (int): the distance to the ending dimension
+    start (int or Tensor): index of the element to start the narrowed dimension
+        from. Can be negative, which means indexing from the end of `dim`. If
+        `Tensor`, it must be an 0-dim integral `Tensor` (bools not allowed)
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Example::
 
@@ -7993,6 +8005,10 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+    >>> torch.narrow(x, -1, torch.tensor(-1), 1)
+    tensor([[3],
+            [6],
+            [9]])
 """,
 )
 
@@ -8008,8 +8024,9 @@ do not have a shared-storage narrow method.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting offset
-    length (int): the distance to the ending dimension
+    start (int): index of the element to start the narrowed dimension from. Can
+        be negative, which means indexing from the end of `dim`
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Keyword args:
     {out}
@@ -8027,13 +8044,13 @@ Example::
     >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
     >>> torch.narrow_copy(s, 0, 0, 1)
     tensor(indices=tensor([[0, 0],
-                        [0, 1]]),
-        values=tensor([[[0, 1],
-                        [2, 3]],
+                           [0, 1]]),
+           values=tensor([[[0, 1],
+                           [2, 3]],
 
-                        [[4, 5],
-                        [6, 7]]]),
-        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+                          [[4, 5],
+                           [6, 7]]]),
+           size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
 
 .. seealso::
 
@@ -9660,6 +9677,11 @@ select(input, dim, index) -> Tensor
 Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
+.. note:: If :attr:`input` is a sparse tensor and returning a view of
+          the tensor is not possible, a RuntimeError exception is
+          raised. In this is the case, consider using
+          :func:`torch.select_copy` function.
+
 Args:
     {input}
     dim (int): the dimension to slice
@@ -10149,6 +10171,8 @@ typically faster than that for sparse tensors in COO format. Make you
 have a look at :ref:`the note on the data type of the indices
 <sparse-compressed-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     compressed_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, compressed_dim_size + 1)``.  The last element of
@@ -10161,10 +10185,12 @@ Args:
     plain_indices (array_like): Plain dimension (column or row)
         co-ordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
+
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types.  that
-        represents a (1+K)-dimensional or (1+2+K)-dimensional tensor
-        where ``K`` is the number of dense dimensions.
+        represents a (1+K)-dimensional (for CSR and CSC layouts) or
+        (1+2+K)-dimensional tensor (for BSR and BSC layouts) where
+        ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
         blocksize[1], *densesize)`` where ``blocksize[0] ==
@@ -10213,6 +10239,8 @@ Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
 in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
@@ -10274,6 +10302,8 @@ multiplication operations in CSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-csc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncols + 1)``.  The last element of each batch
@@ -10333,6 +10363,8 @@ Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
 multiplication operations in BSR format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsr-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     crow_indices (array_like): (B+1)-dimensional array of size
@@ -10399,6 +10431,8 @@ multiplication operations in BSC format are typically faster than that
 for sparse tensors in COO format. Make you have a look at :ref:`the
 note on the data type of the indices <sparse-bsc-docs>`.
 
+{sparse_factory_device_note}
+
 Args:
     ccol_indices (array_like): (B+1)-dimensional array of size
         ``(*batchsize, ncolblocks + 1)``. The last element of each
@@ -10463,6 +10497,8 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 .. note::
 
    This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+
+{sparse_factory_device_note}
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
@@ -12666,7 +12702,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
 
 """.format(
         **factory_common_args
