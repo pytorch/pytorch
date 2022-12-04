@@ -263,9 +263,15 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
         kwargs = dict(storage_offset=storage_offset)
         yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
 
+def sample_inputs_as_strided_partial_views(op_info, device, dtype, requires_grad, **kwargs):
+    def make_arg():
+        base = make_tensor((20,), device=device, dtype=dtype)
+        return base[5:15].requires_grad_(requires_grad)
+
     # as_strided on offset, partial views
-    # yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)))
-    # yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)), kwargs={'storage_offset': 0})
+    yield SampleInput(make_arg(), (2, 2), (1, 2))
+    yield SampleInput(make_arg(), (2, 2), (1, 2), storage_offset=0)
+    yield SampleInput(make_arg(), (2, 2), (1, 2), storage_offset=10)
 
 def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -10721,8 +10727,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
            )),
     OpInfo('as_strided',
-           op=lambda x, size, stride, storage_offset=0:
-               torch.as_strided(x, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
@@ -10743,7 +10747,47 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
-               DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'))),
+               DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'),
+           )),
+    OpInfo('as_strided',
+           variant_test_name='partial_views',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_as_strided_partial_views,
+           skips=(
+               # Note: This xfail is fine -- it's inherent to how as_strided works
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+               # RuntimeError: This operator is not Composite Compliant: the
+               # storage_offset of the tensor was modified directly without
+               # going through the PyTorch dispatcher.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance'),
+
+
+               # These fail because the test changes the input's in-memory layout
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
+                            dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_inplace_forward_mode_AD'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_gradgrad'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo',
+                            'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               # Fail but are also flaky
+               DecorateInfo(unittest.skip("Test changes in memory layout"), 'TestMathBits'),
+               DecorateInfo(unittest.skip("Modifies input strides and storage_offset"), 'TestCommon',
+                            'test_non_standard_bool_values'),
+           )),
     OpInfo('as_strided_scatter',
            op=lambda x, src, size, stride, storage_offset=0:
                torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
@@ -18282,13 +18326,25 @@ python_ref_db = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_nvfuser=False,
         skips=(
-            # TODO: fix and/or update to xfails
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"),
-                         'TestCommon', 'test_python_ref_meta'),
             # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.as_strided",
+        torch_opinfo_name="as_strided",
+        torch_opinfo_variant_name="partial_views",
+        # FIXME: doesn't support chalf
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_nvfuser=False,
+        skips=(
+            # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
