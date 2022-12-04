@@ -115,9 +115,10 @@ class Foo:
 
     def __eq__(self, other):
         def eq(value, other):
-            if isinstance(value, torch.Tensor):
-                return torch.equal(value, other)
-            return value == other
+            result = value == other
+            if isinstance(result, torch.Tensor):
+                result = result.all().item()
+            return result
 
         for attr, value in self.__dict__.items():
             other_value = other.__dict__[attr]
@@ -353,7 +354,7 @@ class ControlFlowToyModel(nn.Module):
 
     def forward(self, x):
         # Second layer is used dependent on input x.
-        use_second_layer = torch.equal(x, torch.ones(20, 10, device=x.device))
+        use_second_layer = (x == torch.ones(20, 10, device=x.device)).all()
         if use_second_layer:
             return self.lin2(F.relu(self.lin1(x)))
         else:
@@ -3313,7 +3314,7 @@ class DistributedTest:
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
-                    if not torch.equal(t1, t2):
+                    if not (t1 == t2).all():
                         return False
             return True
 
@@ -4606,6 +4607,7 @@ class DistributedTest:
 
                 optim.zero_grad(set_to_none=True)
 
+        @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
                 with self.subTest(optim_cls=optim_cls):
@@ -4613,6 +4615,7 @@ class DistributedTest:
                         optim_cls=optim_cls, optim_kwargs={"lr": 0.03}
                     )
 
+        @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_no_register_hook(self):
             for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
                 with self.subTest(optim_cls=optim_cls):
@@ -4621,8 +4624,6 @@ class DistributedTest:
                         optim_kwargs={"lr": 0.03},
                         register_hook=False,
                     )
-
-
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
@@ -7514,7 +7515,7 @@ class DistributedTest:
                     # Control-flow that is rank and input dependent for the
                     # model.
                     use_second_layer = (
-                        torch.equal(x, torch.ones(batch, dim, device=x.device))
+                        (x == torch.ones(batch, dim, device=x.device)).all()
                         and self.rank == 1
                     )
 

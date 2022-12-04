@@ -697,12 +697,16 @@ class DistributedDataParallel(Module, Joinable):
             self._set_static_graph()
 
         # Check if user has used apply_optim_in_backward to overlap optimizer
-        # step + DDP backward. Currnent constraints:
+        # step + DDP backward. Current constraints:
         # 1. Only allreduce is supported at the moment, no custom communication.
         # 2. The reducer by default sets all grads for parameters DDP manages to
         # None after they have been applied by the optimizer. There is no support
         # for setting only some parameter grads to None, this must be done manually
         # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
+        # If your use case requires some DDP managed parameters to run with
+        # an in-backward optimizer and some with a traditional optimizer, please
+        # ping https://github.com/pytorch/pytorch/issues/90052.
+        # self._module_parameters
         if any(
             hasattr(p, '_in_backward_optimizers') for p in self.module.parameters()
         ):
