@@ -5,6 +5,7 @@ import inspect
 import math
 import os
 import warnings
+import collections
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -28,7 +29,7 @@ from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
-from .proxy import ParameterProxy, Proxy, TracerBase
+from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -43,7 +44,6 @@ _is_fx_tracing_flag = False
 
 def is_fx_tracing():
     return _is_fx_tracing_flag
-
 
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
@@ -250,6 +250,13 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.root_module_name: str = ""
+        # Maps the containing module's name to the operator name
+        self.scope = Scope("", None)
+        # Records the module call stack
+        self.module_stack = collections.OrderedDict()
+        # Mapping of node name to module scope
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -430,9 +437,18 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
+            # module_stack is an ordered dict so writing then deleting the
+            # entry is equivalent to push/pop on a list
+            self.module_stack[_scope.module_path] = str(_scope.module_type)
+            if not self.is_leaf_module(m, module_qualified_name):
+                ret_val = forward(*args, **kwargs)
+            else:
+                ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
+            key, _ = self.module_stack.popitem(last=True)
+            assert key == _scope.module_path, f" Unexpected key {key}"
+
+        return ret_val
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -580,7 +596,7 @@ class Tracer(TracerBase):
                 name,
                 default,
                 {},
-                type_expr=fn_for_analysis.__annotations__.get(name, None),
+                type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
@@ -663,6 +679,7 @@ class Tracer(TracerBase):
                 ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
 
                 fn = getattr(type(root), self.traced_func_name)
+                self.root_module_name = root._get_name()
                 self.submodule_paths = {mod: name for name, mod in root.named_modules()}
             else:
                 self.root = torch.nn.Module()

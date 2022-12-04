@@ -34,10 +34,10 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_functionalization_type import (
-    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -2502,7 +2502,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
@@ -2518,7 +2522,14 @@ def gen_source_files(
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(

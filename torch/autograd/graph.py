@@ -1,15 +1,17 @@
 import torch
 import contextlib
-from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List
+from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List, Set
 from torch.utils.hooks import RemovableHandle
-
-__all__ = ["saved_tensors_hooks", "save_on_cpu"]
+from torch.utils._python_dispatch import TorchDispatchMode
+from collections import defaultdict
+import weakref
 
 __all__ = [
     "saved_tensors_hooks",
     "save_on_cpu",
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
+    "allow_mutation_on_saved_tensors",
 ]
 
 class saved_tensors_hooks():
@@ -270,3 +272,158 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
         handles.append(t.register_hook(get_inner_hook(i)))
 
     return Handle(tuple(handles))
+
+
+# NOTE [Allow mutation on tensors saved for backward]
+#
+# 1. Tensor gets saved for backward
+#    - remember the python object id and the version of the tensor
+#    - remember aliasing information (data_ptr of base + version)
+#    - save the original so we control its lifetime
+# 2. Any time a tensor gets in-placed
+#    - for each tensor aliased to it:
+#      - check using its object id and version to see if it has been saved
+#      - if it has been saved, clone it
+#      - delete the reference to the original
+# 3. during backward
+#    - if the clone exists, the tensor must've been modified in-place
+_allow_mutation_on_saved_tensors_enabled = False
+
+def _get_tid(t) -> Tuple[int, int, int]:
+    return (id(t), t.data_ptr(), t._version)
+
+def _get_sid(t) -> Tuple[int, int]:
+    return (t.data_ptr(), t._version)
+
+class _Handle():
+    pass
+
+class _swap_with_cloned(saved_tensors_hooks):
+    def __init__(self, ctx):
+        def pack_hook(t):
+            tid = _get_tid(t)
+            sid = _get_sid(t)
+            # Tensors saved for backward have an entry in _tid_to_weakhandle
+            handle: Optional[_Handle] = None
+
+            # Save aliasing information
+            ctx.sid_to_tid[sid].add(tid)
+
+            # NB: The same tensor (of the same version) can be saved multiple times
+            if tid not in ctx.tid_to_weakhandle:
+                handle = _Handle()
+                ctx.tid_to_weakhandle[tid] = handle
+                ctx.original[handle] = t
+            else:
+                # Store an additional strong reference to the handle
+                handle = ctx.tid_to_weakhandle[tid]
+            return handle
+
+        def unpack_hook(tup):
+            handle = tup
+            error_msg = (
+                "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
+                "in which the graph was originally recorded.")
+            assert _allow_mutation_on_saved_tensors_enabled, error_msg
+            if handle in ctx.cloned:
+                res = ctx.cloned[handle]
+            else:
+                assert handle in ctx.original, error_msg
+                res = ctx.original[handle]
+            return res
+
+        super().__init__(pack_hook, unpack_hook)
+
+class _CloneArgBeforeMutateMode(TorchDispatchMode):
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        for idx, arg in enumerate(func._schema.arguments):
+            if arg.alias_info is not None and arg.alias_info.is_write:
+                t = kwargs["out"] if arg.is_out else args[idx]
+                tid = _get_tid(t)
+                sid = _get_sid(t)
+                ctx = self.ctx
+                if sid in ctx.sid_to_tid:
+                    for tid in ctx.sid_to_tid[sid]:
+                        if tid not in ctx.tid_to_weakhandle:
+                            # We know that if tid is in sid_to_tid, then it must also be in
+                            # tid_to_weakhandle. However, it is possible for the tensor to be
+                            # saved at one point, but cleared by backward before it is modified
+                            # in-place. Consider the following example:
+                            #
+                            # >>> a = torch.randn(2, 3, requires_grad=True).clone()
+                            # >>> out = (a**2).sum()
+                            # >>> out.backward()
+                            # >>> a.sin_()
+                            continue
+                        handle = ctx.tid_to_weakhandle[tid]
+                        if handle in ctx.cloned:
+                            # The same exact tensor has been cloned already
+                            continue
+                        ctx.cloned[handle] = ctx.original[handle].clone()
+                        del ctx.original[handle]
+
+        rs = func(*args, **kwargs)
+        return rs
+
+class _AllowMutationOnSavedContext():
+    def __init__(self):
+        self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self.tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+        self.sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int, int]]] = defaultdict(set)
+
+    def clear(self):
+        self.cloned.clear()
+        self.original.clear()
+        self.tid_to_weakhandle.clear()
+        self.sid_to_tid.clear()
+
+@contextlib.contextmanager
+def allow_mutation_on_saved_tensors():
+    """Context manager under which mutating tensors saved for backward is allowed
+
+    Under this context manager, tensors saved for backward are cloned on mutation,
+    so the original version can still be used during backward. Normally, mutating a tensor
+    saved for backward will result in an error raised when it's used during backward.
+
+    To ensure the correct behavior, both the forward and backward should be run under
+    the same context manager.
+
+    returns:
+        An _AllowMutationOnSavedContext object storing the state managed by this
+        context manager. This object can be useful for debugging purposes. The state
+        managed by the context manager is automatically cleared upon exiting.
+
+    Example::
+
+        >>> import torch
+        >>> with torch.autograd.graph.allow_mutation_on_saved_tensors():
+        ...     # forward
+        ...     a = torch.ones(2, 3, requires_grad=True)
+        ...     b = a.clone()
+        ...     out = (b**2).sum()
+        ...     b.sin_()
+        ...     # backward
+        ...     out.sum().backward()
+        ...
+        tensor([[0.8415, 0.8415, 0.8415],
+                [0.8415, 0.8415, 0.8415]], grad_fn=<SinBackward0>)
+    """
+    global _allow_mutation_on_saved_tensors_enabled
+
+    ctx = _AllowMutationOnSavedContext()
+
+    with _swap_with_cloned(ctx), _CloneArgBeforeMutateMode(ctx):
+        try:
+            if _allow_mutation_on_saved_tensors_enabled:
+                raise RuntimeError("allow_mutation_on_saved_tensors contexts cannot be nested")
+            _allow_mutation_on_saved_tensors_enabled = True
+            yield ctx
+        finally:
+            ctx.clear()
+            _allow_mutation_on_saved_tensors_enabled = False
