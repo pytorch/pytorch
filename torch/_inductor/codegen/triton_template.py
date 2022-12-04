@@ -330,12 +330,12 @@ def template_codegen(scheduler, scheduler_node, epilogue):
     kernel_buf_replace_name = None
     if could_remove_kernel_buf:
         for node in epilogue:
-            if kernel.args.output_buffers[node.get_name()] != "REMOVED":
+            if not kernel.args.is_removed(node.get_name()):
                 kernel_buf_replace_name = node.get_name()
                 break
         assert kernel_buf_replace_name is not None
 
-    kernel_name = wrapper.next_kernel_name()
+    kernel_name = "triton_template_" + wrapper.next_kernel_suffix()
     # code gen kernel
     wrapper.header.splice(
         kernel.codegen_kernel(

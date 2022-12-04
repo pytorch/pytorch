@@ -467,9 +467,9 @@ class TestReductions(TestCase):
                partial(torch.std_mean, correction=0), partial(torch.var_mean, correction=0)]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, 64)
+                op(x, dim=64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, -1)
+                op(x, dim=-1)
 
         for op in [torch.std, torch.var, torch.var_mean, torch.std_mean]:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
@@ -1802,11 +1802,9 @@ class TestReductions(TestCase):
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
-        norm_error_msg = r'Expected dims to be different, got'
         for op in ops:
             for dim in [(0, 0), (0, -4)]:
-                e_msg = norm_error_msg if op == torch.norm else error_msg
-                with self.assertRaisesRegex(RuntimeError, e_msg):
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
         for op in [torch.std, torch.var, torch.var_mean, torch.std_mean]:
@@ -2861,6 +2859,9 @@ class TestReductions(TestCase):
 
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
+
+        linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
+        test_against_np(linear, bins=20, min=0, max=0.99)
 
     @onlyCPU
     def test_histc_bfloat16(self, device):

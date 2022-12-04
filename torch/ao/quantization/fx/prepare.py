@@ -18,25 +18,22 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
-    obs_or_fq_ctr_equals,
-    float16_dynamic_qconfig,
-    float16_static_qconfig,
-    is_reuse_input_qconfig,
+    _is_reuse_input_qconfig,
     QConfigAny,
 )
 from ..qconfig_mapping import (
     QConfigMapping,
 )
-from ..qconfig_mapping_utils import (
-    get_flattened_qconfig_dict,
-    update_qconfig_for_qat,
-)
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
     update_qconfig_for_fusion,
+    _get_flattened_qconfig_dict,
+    _update_qconfig_for_qat,
 )
 
-from .quantization_patterns import (
+from .quantize_handler import (
+    _default_root_node_getter,
+    _get_pattern_to_quantize_handlers,
     QuantizeHandler,
 )
 
@@ -44,8 +41,6 @@ from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )
-
-from torch.ao.quantization import FixedQParamsFakeQuantize
 
 from ._equalize import (
     is_equalization_observer,
@@ -91,24 +86,18 @@ from ..utils import (
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
-    activation_is_int8_quantized,
 )
 
 from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
-    get_fixed_qparams_op_to_overwrite_output_observer,
 )
 from ..backend_config import (
     BackendConfig,
     DTypeConfig,
     get_native_backend_config,
 )
-from .backend_config_utils import (
-    get_pattern_to_quantize_handlers,
-)
-
 from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
@@ -251,10 +240,10 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
+    pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
 
-    # TODO: this only works for one input and one output patterns, need to generalize to multiple
-    # inputs/output
-    root_node = _default_root_node_getter(matched_node_pattern)
+    root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
+    root_node = root_node_getter(matched_node_pattern)
     input_node = root_node
     output_node = matched_node_pattern[0]
     for dtype_config in dtype_configs:
@@ -306,12 +295,6 @@ def add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str])
     elif isinstance(matched_node_pattern, (list, tuple)):
         for maybe_node in matched_node_pattern:
             add_matched_node_name_to_set(maybe_node, s)
-
-# this is temporary, will be removed soon
-def _default_root_node_getter(node_pattern):
-    while not isinstance(node_pattern, Node):
-        node_pattern = node_pattern[-1]
-    return node_pattern
 
 def insert_observer(
     node: Node,
@@ -414,9 +397,8 @@ def get_target_activation_dtype_for_node(
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
-                act_dtype, weight_dtype, act_compute_dtype = \
+                act_dtype, weight_dtype, input_act_is_dynamic = \
                     get_qconfig_dtypes(qconfig)
-                input_act_is_dynamic = act_compute_dtype is not None
 
                 # Currently `QConfig` only has one `activation` field.
                 # For static quantization, it is reused for both input
@@ -426,13 +408,13 @@ def get_target_activation_dtype_for_node(
                 # In the future this may change as we add more fields
                 # to the `QConfig` object.
                 output_act_dtype = act_dtype \
-                    if input_act_is_dynamic is not True else torch.float
+                    if (not input_act_is_dynamic) else torch.float
 
                 bias_dtype = torch.float16 \
                     if (
                         act_dtype == torch.float16
                         and weight_dtype == torch.float16
-                        and act_compute_dtype is None
+                        and (not input_act_is_dynamic)
                     ) else torch.float
                 return {
                     "input_activation_dtype": (act_dtype, input_act_is_dynamic),
@@ -585,7 +567,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg, backend_config)
 
-        is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
+        _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
 
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
@@ -613,7 +595,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
                 (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
                 # if qconfig is reuse_input qconfig, we won't insert extra observer for input
-                not is_reuse_input_qconfig_
+                not _is_reuse_input_qconfig_
             ) or (
                 # need to add input observer for dynamic quantization
                 # only add observer for first input for now, we may need to extend
@@ -826,13 +808,7 @@ def maybe_insert_output_observer_for_node(
         (not is_standalone_module)
 
     if should_insert_observer:
-        act_post_process_ctr = qconfig.activation
-        if activation_is_int8_quantized(qconfig):
-            act_post_process_ctr = qhandler.get_activation_ctr(
-                qconfig,
-                matched_pattern,
-                is_qat)
-        observer = act_post_process_ctr()
+        observer = qconfig.activation()
         return insert_observer(node, observer, model, modules, graph)
     else:
         return None
@@ -946,9 +922,7 @@ def maybe_propagate_dtype_for_node(
 ) -> None:
     """
     Assigns `target_dtype` to `node`, setting `is_dynamic` to False. If `node`
-    is a general tensor shape op
-    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
-    also call this function recursively on
+    is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype_info[node.name]["input_activation_dtype"] = (target_dtype, False)
@@ -1119,14 +1093,10 @@ def swap_custom_module_to_observed(
 
 def insert_observers_for_model(
     model: GraphModule,
-    modules: Dict[str, torch.nn.Module],
     matches: Dict[str, _MatchResultWithQConfig],
     node_name_to_qconfig: Dict[str, QConfigAny],
-    graph: Graph,
     prepare_custom_config: PrepareCustomConfig,
     equalization_config_map: Dict[str, Any],
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
     backend_config: BackendConfig,
     observed_node_names: Set[str],
     is_qat: bool,
@@ -1198,6 +1168,8 @@ def insert_observers_for_model(
     for node in model.graph.nodes:
         root_node, _, pattern, qhandler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
+        input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
+        output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
         node_name_to_target_dtype_info[node.name] = get_target_activation_dtype_for_node(
             node, qconfig, inputs_seen_counter, outputs_seen_counter,
             input_quantized_idxs, output_quantized_idxs, qhandler,
@@ -1290,15 +1262,14 @@ def insert_observers_for_model(
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
 
-                    # TODO: this only works for sequential fusion right now, extend it
-                    # it to automatically detect all input nodes based on the pattern
-                    # need to change find_matches function to return this information
-                    root_node = _default_root_node_getter(matched_node_pattern)
+                    pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
+                    root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
+                    root_node = root_node_getter(matched_node_pattern)
                     is_input_node_of_the_pattern = node is root_node
                     if is_input_node_of_the_pattern:
                         # this modifies node inplace
                         maybe_insert_input_observers_for_node(
-                            node, qconfig, model, modules, graph,
+                            node, qconfig, model, modules, model.graph,
                             node_name_to_target_dtype_info,
                             qhandler,
                             prepare_custom_config,
@@ -1306,13 +1277,13 @@ def insert_observers_for_model(
 
                         # Insert equalization input observers if needed
                         maybe_insert_input_equalization_observers_for_node(
-                            node, equalization_qconfig, model, modules, graph,
+                            node, equalization_qconfig, model, modules, model.graph,
                             node_name_to_target_dtype_info, is_quantized_branch, backend_config)
 
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
-                    is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
+                    _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(node, modules, qconfig, qhandler):
@@ -1327,12 +1298,12 @@ def insert_observers_for_model(
                             # these output observers are the same as DeQuantStubs. In the future, we
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
-                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
+                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, model.graph)
                             swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = maybe_insert_output_observer_for_node(
-                                node, model, modules, graph, matches,
+                                node, model, modules, model.graph, matches,
                                 node_name_to_target_dtype_info, pattern, qhandler, is_qat)
 
                             if maybe_output_obs_node is not None:
@@ -1364,7 +1335,7 @@ def insert_observers_for_model(
                                 # to make all inputs and outputs use the first input's
                                 # observer
                                 if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
-                                        is_reuse_input_qconfig_:
+                                        _is_reuse_input_qconfig_:
                                     if not maybe_make_input_output_share_observers(node, model, modules):
                                         remove_output_observer(node, model, modules)
 
@@ -1375,7 +1346,7 @@ def insert_observers_for_model(
                     maybe_insert_observers_before_graph_output(
                         node, output_quantized_idxs,
                         node_name_to_target_dtype_info, node_name_to_qconfig,
-                        model, modules, graph)
+                        model, modules, model.graph)
 
         #
         # After this point, the current node has input and output observers
@@ -1391,51 +1362,6 @@ def insert_observers_for_model(
             results_node = node
 
     return results_node
-
-def _validate_fixed_qparams_qconfigs(
-        model: GraphModule,
-        node_name_to_qconfig: Dict[str, QConfigAny],
-        backend_config: BackendConfig):
-    """
-    Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
-    """
-    # TODO: handle fp16 qconfigs properly
-    allowed_observer_ctrs = [
-        float16_dynamic_qconfig.activation,
-        float16_static_qconfig.activation,
-    ]
-    named_modules = dict(model.named_modules(remove_duplicate=False))
-    fixed_qparams_op_to_overwrite_output_observer = \
-        get_fixed_qparams_op_to_overwrite_output_observer(backend_config)
-    for node in model.graph.nodes:
-        if node.op == "call_function":
-            module_type_or_function_or_method = node.target
-        elif node.op == "call_module":
-            module_type_or_function_or_method = type(named_modules[node.target])
-        else:
-            module_type_or_function_or_method = None
-
-        if module_type_or_function_or_method in fixed_qparams_op_to_overwrite_output_observer:
-            bad_observer = True
-            qconfig = node_name_to_qconfig.get(node.name, None)
-            if qconfig is None:
-                bad_observer = False
-            else:
-                for observer_ctr in allowed_observer_ctrs + [
-                        fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
-                    if obs_or_fq_ctr_equals(
-                            qconfig.activation,
-                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
-                            obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
-                        bad_observer = False
-            if bad_observer:
-                raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
-                                 "'%s' type: '%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
-                                 "torch.ao.quantization.get_default_qat_qconfig_mapping"
-                                 " instead. Example: \n"
-                                 "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\") \n"
-                                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
-                                 "" % (node.format_node(), module_type_or_function_or_method))
 
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
@@ -1579,7 +1505,7 @@ def prepare(
     pattern_to_quantize_handler: Dict[Pattern, QuantizeHandler] = {}
     if backend_config is None:
         backend_config = get_native_backend_config()
-    pattern_to_quantize_handler = get_pattern_to_quantize_handlers(backend_config)
+    pattern_to_quantize_handler = _get_pattern_to_quantize_handlers(backend_config)
     pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
 
     root_node_getter_mapping = \
@@ -1587,14 +1513,14 @@ def prepare(
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, _equalization_config)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
+    flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
 
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         qat_swap_modules(model, module_to_qat_module)
-        update_qconfig_for_qat(qconfig_mapping, {})
+        _update_qconfig_for_qat(qconfig_mapping, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1609,7 +1535,6 @@ def prepare(
     equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
     node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
-    _validate_fixed_qparams_qconfigs(model, node_name_to_qconfig, backend_config)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())
@@ -1626,9 +1551,6 @@ def prepare(
         match_with_qconfig = (*match_without_qconfig, node_name_to_qconfig[node_name])
         matches[node_name] = match_with_qconfig
 
-    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
-
     run_prepare_fx_on_standalone_modules(
         model, is_qat, modules, matches, prepare_custom_config, backend_config)
 
@@ -1638,14 +1560,15 @@ def prepare(
     observed_node_names: Set[str] = set()
 
     result_node = insert_observers_for_model(
-        model, modules, matches, node_name_to_qconfig,
-        model.graph, prepare_custom_config,
+        model,
+        matches,
+        node_name_to_qconfig,
+        prepare_custom_config,
         equalization_node_name_to_qconfig,
-        input_quantized_idxs,
-        output_quantized_idxs,
         backend_config,
         observed_node_names,
-        is_qat)
+        is_qat
+    )
 
     save_state(model, node_name_to_qconfig, node_name_to_scope,
                prepare_custom_config, equalization_node_name_to_qconfig, qconfig_mapping, is_qat, observed_node_names)
@@ -1660,6 +1583,8 @@ def prepare(
         # these inputs are observed in parent
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
+        input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
+        output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
         model._standalone_module_input_quantized_idxs = \
             torch.tensor(input_quantized_idxs)
         model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
