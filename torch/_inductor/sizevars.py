@@ -17,35 +17,12 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class ZeroGuard:
-    """
-    An expression we should check equals zero.
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
-@dataclasses.dataclass
-class PositiveGuard:
-    """
-    An expression we should check for > 0
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
 class SizeVarAllocator(object):
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.var_to_val = self.shape_env.var_to_val
-        self.guards = []
-        self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -63,22 +40,23 @@ class SizeVarAllocator(object):
         self.need_seed = True
         return sympy_symbol("seed")
 
+    # TODO(voz): Collapse, pass through for now to keep callsites intact
     def simplify(self, expr: Expr):
-        return sympy.expand(expr).xreplace(self.replacements)
+        return self.shape_env.simplify(expr)
 
     def make_simplify_with_ranges_cache(self):
         """
         self._simplify_with_ranges() can be expensive, cache its results
         """
         cache = dict()
-        replacement_count = len(self.replacements)
+        replacement_count = len(self.shape_env.replacements)
 
         def simplify_with_ranges(expr: Expr, var_ranges: VarRanges):
             nonlocal replacement_count
-            if replacement_count != len(self.replacements):
+            if replacement_count != len(self.shape_env.replacements):
                 # new replacements invalidates cached results
                 cache.clear()
-                replacement_count = len(self.replacements)
+                replacement_count = len(self.shape_env.replacements)
             key = (expr, *var_ranges.items())
             result = cache.get(key, None)
             if result is None:
@@ -93,14 +71,14 @@ class SizeVarAllocator(object):
         self._simplify_with_ranges() can be expensive, cache its results
         """
         cache = dict()
-        replacement_count = len(self.replacements)
+        replacement_count = len(self.shape_env.replacements)
 
         def simplify_loops(index_vars, sizes, index_formulas):
             nonlocal replacement_count
-            if replacement_count != len(self.replacements):
+            if replacement_count != len(self.shape_env.replacements):
                 # new replacements invalidates cached results
                 cache.clear()
-                replacement_count = len(self.replacements)
+                replacement_count = len(self.shape_env.replacements)
             key = (*index_vars, *sizes, *index_formulas)
             result = cache.get(key, None)
             if result is None:
@@ -261,11 +239,11 @@ class SizeVarAllocator(object):
                     and solutions[0]
                     and "/" not in str(solutions[0])
                 ):
-                    self.replacements[free[-1]] = solutions[0]
+                    self.shape_env.replacements[free[-1]] = solutions[0]
             except NotImplementedError:
                 pass
 
-        self.guards.append(ZeroGuard(expr))
+        self.shape_env.evaluate_expr(expr)
 
         if len(right.free_symbols) < len(left.free_symbols):
             return right
@@ -319,7 +297,7 @@ class SizeVarAllocator(object):
             return
         if "-" in str(expr):
             # all vars are positive, so needs a minus sign to get negative values
-            self.guards.append(PositiveGuard(expr))
+            self.shape_env.evaluate_expr(expr)
 
     def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
@@ -357,9 +335,9 @@ class SizeVarAllocator(object):
     def __getitem__(self, val: int) -> Expr:
         return self.shape_env.create_symbol(val)
 
+    # TODO(voz): Collapse, pass through for now to keep callsites intact
     def size_hint(self, expr: Expr) -> int:
-        out = sympy_subs(sympy.expand(expr), self.var_to_val)
-        return int(out)
+        return (int)self.shape_env.size_hint(expr)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -367,13 +345,13 @@ class SizeVarAllocator(object):
         has been invalidated.
         """
         fn_cache = functools.lru_cache(maxsize)(fn)
-        prior_len = len(self.replacements)
+        prior_len = len(self.shape_env.replacements)
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             nonlocal prior_len
-            if prior_len != len(self.replacements):
-                prior_len = len(self.replacements)
+            if prior_len != len(self.shape_env.replacements):
+                prior_len = len(self.shape_env.replacements)
                 fn_cache.cache_clear()
             return fn_cache(*args, **kwargs)
 
@@ -459,7 +437,7 @@ class SizeVarAllocator(object):
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
-        needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
+        needed = set(self.shape_env.var_to_val.keys()) - set(self.shape_env.replacements.keys())
         added = set()
 
         for name, value in graph_inputs.items():
