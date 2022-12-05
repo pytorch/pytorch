@@ -527,7 +527,7 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= torchdynamo_logging.CODE:
+            if config.log_level <= logging.CODE:
                 graph_str = (
                     gm.print_readable()
                     if config.output_graph_code
