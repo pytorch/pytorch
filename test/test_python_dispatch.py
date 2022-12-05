@@ -1069,30 +1069,6 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             """Illegal attempt to push an already pushed mode onto the stack"""
         )
 
-    def test_nesting_across_instances_across_threads(self):
-        # If the pushed mode is a different instance from current mode, we raise
-        from threading import Thread
-
-        modeA = LoggingTensorMode()
-        modeB = LoggingTensorMode()
-
-        def withA(fn, nested_fn):
-            with modeA:
-                fn(nested_fn)
-
-        def withATail(fn):
-            with modeA:
-                fn()
-
-        def foo():
-            withA(withATail, torch.empty)
-
-        # Counterfactual first
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: foo(),
-            """Illegal attempt to push an already pushed mode onto the stack"""
-        )
-
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
             @classmethod
