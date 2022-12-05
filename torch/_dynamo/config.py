@@ -6,6 +6,9 @@ from types import ModuleType
 
 import torch
 
+# needed so that CODE is registered as a level in logging
+from . import logging as torchdynamo_logging  # noqa: F401
+
 try:
     import torch._prims
     import torch._refs
@@ -17,7 +20,7 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.logging.CODE print compiled functions + graphs
+# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
@@ -64,9 +67,6 @@ guard_nn_modules = False
 # Run the FX graph as it is created to get better type information
 dynamic_propagation = True
 
-# Run the FX graph with FakeTensors
-fake_tensor_propagation = True
-
 # run FX normalization passes in optimizer
 normalize_ir = False
 
@@ -74,7 +74,7 @@ normalize_ir = False
 # __torch_function__ logic of the subclass.
 traceable_tensor_subclasses = set()
 
-# Suppress errors in torchdynamo.optimize, instead forcing a fallback to eager.
+# Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
@@ -84,8 +84,14 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # if an exception is encountered
 replay_record_enabled = False
 
+# Rewrite assert statement in python with torch._assert
+rewrite_assert_with_torch_assert = True
+
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Disable dynamo
+disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
@@ -93,6 +99,7 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
     torch.testing,
+    torch.ao.nn,
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
@@ -134,8 +141,11 @@ capture_scalar_outputs = False
 enforce_cond_guards_match = True
 
 # Automatically split model graph into pieces to match DDP bucket sizes
-# to allow DDP comm/compute overlap
-optimize_ddp = False
+# to allow DDP comm/compute overlap.  Disable to allow DDP models to
+# run without graph-breaks, but also without comm/compute overlap.
+# set torch._dynamo.config.log_level to INFO or DEBUG for more info
+# about optimize_ddp behavior.
+optimize_ddp = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
@@ -143,11 +153,15 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo, either torchdynamo or torch.dynamo
+# How to import torchdynamo, either torchdynamo or torch._dynamo
 dynamo_import = __name__.replace(".config", "")
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
+
+# If true, error with a better message if we symbolically trace over a
+# dynamo-optimized function. If false, silently suppress dynamo.
+error_on_nested_fx_trace = True
 
 # root folder of the project
 if "torch." in dynamo_import:

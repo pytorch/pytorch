@@ -30,11 +30,22 @@ def get_per_process_cpu_info() -> List[Dict[str, Any]]:
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
             "rss_memory": p.memory_info().rss,
-            "uss_memory": p.memory_full_info().uss,
         }
-        if "pss" in p.memory_full_info():
-            # only availiable in linux
-            info["pss_memory"] = p.memory_full_info().pss
+
+        # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
+        # requires higher user privileges and could throw AccessDenied error, i.e. mac
+        try:
+            memory_full_info = p.memory_full_info()
+
+            info["uss_memory"] = memory_full_info.uss
+            if "pss" in memory_full_info:
+                # only availiable in linux
+                info["pss_memory"] = memory_full_info.pss
+
+        except psutil.AccessDenied as e:
+            # It's ok to skip this
+            pass
+
         per_process_info.append(info)
     return per_process_info
 

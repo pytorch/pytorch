@@ -24,14 +24,14 @@ from torch.testing._internal.common_fsdp import (
     MixtureOfExperts,
     NestedWrappedModule,
     NestedWrappedModuleWithDelay,
-    TransformerWithSharedParams,
     subtest_name,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -47,7 +47,11 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 params = "cpu_offload,sharding_strategy"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-sharding_strategy_config = [None, ShardingStrategy.SHARD_GRAD_OP, ShardingStrategy.NO_SHARD]
+sharding_strategy_config = [
+    None,
+    ShardingStrategy.SHARD_GRAD_OP,
+    ShardingStrategy.NO_SHARD,
+]
 configs = list(itertools.product(cpu_offload_config, sharding_strategy_config))
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
@@ -259,7 +263,7 @@ class TestParityWithDDP(FSDPTest):
             ref_init_fn=self._dummy_ddp_fn,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
-            init_kwargs={"delay_before_free_ms": 250}
+            init_kwargs={"delay_before_free_ms": 250},
         )
 
 
@@ -361,13 +365,30 @@ class TestHooks(FSDPTest):
             fsdp_kwargs,
         )
         input = fsdp_model.module.get_input(torch.device("cuda"))
-        fsdp_model._register_pre_backward_hooks = mock.MagicMock(return_value=None)
-        fsdp_model._register_post_backward_hooks = mock.MagicMock(return_value=None)
-        self.assertFalse(fsdp_model._register_post_backward_hooks.called)
-        self.assertFalse(fsdp_model._register_pre_backward_hooks.called)
-        fsdp_model(*input)
-        self.assertTrue(fsdp_model._register_post_backward_hooks.called)
-        self.assertTrue(fsdp_model._register_pre_backward_hooks.called)
+
+        # Since `_register_pre_backward_hooks()` modifies the forward output,
+        # we cannot directly mock it. We implement our own counter instead.
+        orig_register_pre_backward_hooks = (
+            torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks
+        )
+        register_pre_backward_hooks_call_count = 0
+
+        def _register_pre_backward_hooks_with_count(*args, **kwargs):
+            nonlocal register_pre_backward_hooks_call_count
+            register_pre_backward_hooks_call_count += 1
+            return orig_register_pre_backward_hooks(*args, **kwargs)
+
+        with mock.patch(
+            "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
+            _register_pre_backward_hooks_with_count,
+        ), mock.patch(
+            "torch.distributed.fsdp._runtime_utils._register_post_backward_hooks"
+        ) as register_post_bwd_mock:
+            self.assertEqual(register_pre_backward_hooks_call_count, 0)
+            self.assertFalse(register_post_bwd_mock.called)
+            fsdp_model(*input)
+            self.assertTrue(register_pre_backward_hooks_call_count > 0)
+            self.assertTrue(register_post_bwd_mock.called)
 
 
 class TestNoGrad(FSDPTest):
@@ -397,7 +418,7 @@ class TestNoGrad(FSDPTest):
             fsdp_model,
             num_steps=1,
             autocast=False,
-            mixed_precision=fsdp_kwargs["mixed_precision"]
+            mixed_precision=fsdp_kwargs["mixed_precision"],
         )
         input = fsdp_model.module.get_input(torch.device("cuda"))
         # Run a forward in eval mode

@@ -3,6 +3,7 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/IListRef.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -204,10 +205,11 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
-#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -416,7 +418,7 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     const auto itemsize = result.dtype().itemsize();
     c10::SymInt size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, storage_offset);
-    storage.set_nbytes(size_bytes);
+    storage.set_nbytes(std::move(size_bytes));
   }
   return result;
 }
@@ -537,8 +539,8 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   return at::sparse_coo_tensor(new_indices, new_values, size)._coalesced_(is_coalesced);
 }
 
-Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
-  return self.expand(size);
+Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
+  return self.expand_symint(size);
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
@@ -917,9 +919,12 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt sym_sections, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  // NB: intentional, sections specifies number of output tensors, which
+  // cannot be polymorphic
+  int64_t sections = sym_sections.guard_int(__FILE__, __LINE__);
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
@@ -934,19 +939,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   return splits;
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+template <typename T>
+std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indices, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
-  int64_t start_idx = 0;
+  T start_idx(0);
   for (const auto split_idx : c10::irange(num_indices)) {
-    int64_t end_idx = indices[split_idx];
-    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    auto end_idx = indices[split_idx];
+    splits[split_idx] = at::symint::slice<T>(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
   }
-  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, at::symint::size<T>(self, dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
+}
+
+std::vector<Tensor> tensor_split_indices_symint(const Tensor& self, SymIntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
@@ -1174,8 +1188,8 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, optional<c10::SymInt> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
 }
@@ -1184,6 +1198,8 @@ Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t
   return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
+// Should just use narrow_copy_out, but this API is used internally at Meta:
+// https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
   auto output = at::empty_like(self);
   return narrow_copy_dense_cpu_out(self, dim, start, length, output);
@@ -1193,9 +1209,10 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   int64_t allDim = self.dim();
   int64_t end = start+length;
   TORCH_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   TORCH_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
-  TORCH_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
+  TORCH_CHECK(start >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   Tensor indices = self._indices();
   int64_t sparse_dim = self.sparse_dim();
@@ -1223,6 +1240,8 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   return newTensor._coalesced_(self.is_coalesced());
 }
 
+// Should just use narrow_copy_out, but this API is used internally at Meta:
+// https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
 Tensor& narrow_copy_dense_cpu_out(
   const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
 ) {
@@ -1306,22 +1325,24 @@ Tensor& narrow_copy_dense_cpu_out(
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+  TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+  TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice_symint(self, dim, start, start + length, 1);
 }
@@ -1553,13 +1574,30 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
       return self._reshape_alias_symint(shape, stride.value());
     } else {
       return self.view_symint(shape);
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
+  }
+
+  if (self.is_contiguous()) {
+    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
+  } else {
+    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  }
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
@@ -1690,22 +1728,29 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  return at::select_symint(self, dim, c10::SymInt{index});
+}
+
+Tensor select(const Tensor& self, Dimname dim, int64_t index) {
+  return at::select_symint(self, dimname_to_position(self, dim), c10::SymInt{index});
+}
+
+Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.sym_sizes()[dim];
-  if (size < -index_ || size <= index_) {
+  if (size < -index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
@@ -1738,13 +1783,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
   return result;
 }
 
-Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  return at::select(self, dimname_to_position(self, dim), index);
-}
-
-Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.select(dim, index).copy_(grad);
+Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
+  grad_input.select_symint(dim, index).copy_(grad);
   return grad_input;
 }
 
@@ -3067,7 +3108,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
     for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
@@ -3751,9 +3792,9 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
     slice.copy_(src);
     return output;
 }
-at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = self.clone();
-    auto slice = output.select(dim, index);
+    auto slice = output.select_symint(dim, index);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -3893,8 +3934,8 @@ at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef siz
 }
 
 
-at::Tensor& select_copy_int_out(const at::Tensor & self, int64_t dim, int64_t index, at::Tensor & out) {
-  auto tmp = self.select(dim, index);
+at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
+  auto tmp = self.select_symint(dim, index);
   out.copy_(tmp);
   return out;
 }

@@ -70,9 +70,9 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
     string key = "eye_out_mps:" + getTensorsStringKey({result});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -94,7 +94,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation

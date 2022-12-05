@@ -207,8 +207,8 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymFloatNode",
-            "SymIntNode",
+            "SymFloat",
+            "SymInt",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -261,7 +261,7 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-
+            "VULKAN_AUTOMATIC_GPU_TRANSFER",
             "wait",
             "Tag",
         }

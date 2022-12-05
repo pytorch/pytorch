@@ -21,6 +21,7 @@
 #include <c10/util/hash.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
 namespace torch {
@@ -30,11 +31,8 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : impl_{t.unsafeGetTensorImpl()},
-      data_{t.has_storage() ? t.storage().data() : nullptr},
-      device_type_{t.device().type()},
-      device_index_{t.device().index()},
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
       dim_{static_cast<uint32_t>(t.sizes().size())} {
@@ -42,6 +40,24 @@ RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
+}
+
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : RawTensorMetadataBase(t),
+      weak_self_{WeakTensor(t)},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()} {}
+
+TensorMetadata::TensorMetadata(
+    const RawTensorMetadata& r,
+    const std::vector<int64_t>& sizes,
+    const std::vector<int64_t>& strides)
+    : RawTensorMetadataBase(r),
+      weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
+      device_{r.device_type_, r.device_index_},
+      sizes_{sizes},
+      strides_{strides} {
+  SOFT_ASSERT(r.weak_self_.has_value());
 }
 
 // ============================================================================
@@ -64,7 +80,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
-      // TODO: Skip TensorList for now.
+      for (const auto& t : value.toTensorList()) {
+        push(t);
+      }
       tags_.emplace_back(Tag::TERMINATOR);
     } else {
       tags_.emplace_back(Tag::Other);
@@ -94,54 +112,49 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin()]() mutable {
-    struct Inputs out;
+    auto decode_tensor = [&]() -> TensorMetadata {
+      const auto& raw_metadata = *tensor_metadata_it++;
+      std::vector<int64_t> sizes;
+      std::vector<int64_t> strides;
+      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+        sizes.push_back(*tensor_size_strides_it++);
+      }
+      if (raw_metadata.layout_ == at::kStrided) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+          strides.push_back(*tensor_size_strides_it++);
+        }
+      }
+      return {raw_metadata, sizes, strides};
+    };
+
+    std::vector<op_input_t> out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
-      out.shapes_.emplace_back();
-      out.strides_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor: {
-          const TensorMetadata md{*tensor_metadata_it++};
-          for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
-            out.shapes_.back().push_back(*tensor_size_strides_it++);
-          }
-          if (md.layout_ == at::kStrided) {
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.strides_.back().push_back(*tensor_size_strides_it++);
-            }
-          }
-          out.tensor_metadata_.emplace_back(TensorMetadata(md));
-          out.ivalues_.emplace_back();
-          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
-        } break;
-
-        case Tag::TensorListBegin:
-          while (*(++tag_it) != Tag::TERMINATOR) {
-            // TODO: Skip TensorLists for now.
-          }
-          out.dtypes_.emplace_back("TensorList");
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+        case Tag::Tensor:
+          out.emplace_back(decode_tensor());
           break;
 
+        case Tag::TensorListBegin: {
+          std::vector<TensorMetadata> arg;
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
+            arg.emplace_back(decode_tensor());
+          }
+          out.emplace_back(std::move(arg));
+        } break;
+
         case Tag::Scalar:
-          out.dtypes_.emplace_back("Scalar");
-          out.ivalues_.emplace_back(*ivals_it++);
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(*ivals_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          out.dtypes_.emplace_back();
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(c10::nullopt);
           break;
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
-          out.shapes_.pop_back();
-          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -246,6 +259,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
   event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  if (!config_.experimental_config.performance_events.empty()) {
+    const size_t n = config_.experimental_config.performance_events.size();
+    event->counters_ = std::make_unique<perf_counters_t>(n, 0);
+    perf_profiler_->Enable();
+  }
   return out;
 }
 
@@ -327,7 +345,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         gpu_fallback(),
-        event->allow_tf32_cublas_};
+        event->allow_tf32_cublas_,
+        std::move(event->counters_)};
 
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
@@ -468,6 +487,11 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
+  if (config_.experimental_config.performance_events.size()) {
+    perf_profiler_ =
+        std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
+    perf_profiler_->Configure(config_.experimental_config.performance_events);
+  }
 }
 
 RecordQueue::RecordQueue(
@@ -822,163 +846,6 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-template <typename T>
-struct PairHash {
-  size_t operator()(const std::pair<T, T>& i) {
-    return c10::get_hash(i.first, i.second);
-  }
-};
-
-void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
-  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
-  // We first cluster events with a greedy index assignment, and then merge
-  // groups that overlap.
-
-  using storage_id_t = strong::type<
-      size_t,
-      struct _StorageID,
-      strong::regular,
-      strong::hashable,
-      strong::arithmetic,
-      strong::ordered>;
-
-  struct TensorStoragePair {
-    TensorImplAddress impl_;
-    storage_id_t storage_id_;
-
-    // Used to assign the result.
-    std::reference_wrapper<c10::optional<TensorID>> id_ref_;
-  };
-  std::vector<TensorStoragePair> tensors;
-
-  // Step 1) Flatten and convert storage data pointers. (Handle address reuse.)
-  // --------------------------------------------------------------------------
-  {
-    storage_id_t current_id{0};
-    ska::flat_hash_map<StorageImplData, storage_id_t> live_storage;
-    auto lookup = [&current_id, &live_storage](const StorageImplData data) {
-      auto inserted = live_storage.insert({data, current_id});
-      current_id += storage_id_t(inserted.second);
-      return inserted.first->second;
-    };
-
-    ska::flat_hash_set<storage_id_t> tensor_set;
-    auto insert_tensor = [&lookup, &tensors, &tensor_set](TensorMetadata& m) {
-      if (m.impl_ && m.data_) {
-        const auto id = lookup(m.data_);
-        tensor_set.insert(id);
-        tensors.emplace_back(TensorStoragePair{m.impl_, id, m.id_});
-      }
-    };
-
-    for (auto& result : sorted_results) {
-      result->visit(c10::overloaded(
-          [&](ExtraFields<EventType::TorchOp>& torch_op) {
-            for (auto& m : torch_op.inputs_.tensor_metadata_) {
-              if (m.has_value()) {
-                insert_tensor(*m);
-              }
-            }
-          },
-          [&](ExtraFields<EventType::Allocation>& alloc_op) {
-            // We won't know which allocations are for Tensor storage yet.
-            // We'll filter after we see all of the op inputs.
-            tensors.emplace_back(TensorStoragePair{
-                TensorImplAddress(nullptr),
-                lookup(StorageImplData(alloc_op.ptr_)),
-                alloc_op.id_});
-
-            // Handle deallocation
-            if (alloc_op.alloc_size_ < 0) {
-              live_storage.erase(StorageImplData(alloc_op.ptr_));
-            }
-          },
-          [&](ExtraFields<EventType::PyCall>& py_call) {
-            // torch.nn.Module
-            if (py_call.module_.has_value()) {
-              for (auto& p : py_call.module_->parameters_) {
-                insert_tensor(p.metadata_);
-                if (p.grad_metadata_.has_value()) {
-                  insert_tensor(*p.grad_metadata_);
-                }
-              }
-            }
-
-            // torch.optim.Optimizer
-            if (py_call.optimizer_.has_value()) {
-              for (auto& p : py_call.optimizer_->parameters_) {
-                insert_tensor(p.metadata_);
-                if (p.grad_metadata_.has_value()) {
-                  insert_tensor(*p.grad_metadata_);
-                }
-                for (auto& state_i : p.state_) {
-                  insert_tensor(state_i.second);
-                }
-              }
-            }
-          },
-          [](const auto&) {}));
-    }
-
-    // Handle any allocation events which we cannot prove are for
-    // `StorageImpl`s.
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&tensor_set](const auto& i) {
-              return tensor_set.find(i.storage_id_) == tensor_set.end();
-            }),
-        tensors.end());
-  }
-
-  // Step 2) Handle the case that the storage of a TensorImpl changed.
-  // --------------------------------------------------------------------------
-  using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
-  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_t>> same_group_set;
-  {
-    ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
-    for (const auto& t : tensors) {
-      // Storage allocations / frees don't have an associated TensorImpl, so
-      // we don't want all storages to merge through nullptr.
-      if (!t.impl_) {
-        continue;
-      }
-
-      const auto it = impl_map.insert({t.impl_, t.storage_id_}).first;
-
-      // The pair needs to be sorted for the coalesce step to work properly.
-      it->second < t.storage_id_
-          ? same_group_set.insert({it->second, t.storage_id_})
-          : same_group_set.insert({t.storage_id_, it->second});
-    }
-  }
-
-  // Step 3) Coalesce groups and assign final IDs.
-  // --------------------------------------------------------------------------
-  ska::flat_hash_map<storage_id_t, size_t> id_map;
-  {
-    std::vector<storage_id_pair_t> unique_pairs;
-    for (const auto& i : same_group_set) {
-      unique_pairs.push_back(i);
-    }
-    std::sort(unique_pairs.begin(), unique_pairs.end());
-
-    size_t current_id{0};
-    for (const auto& i : unique_pairs) {
-      auto inserted = id_map.insert({i.first, current_id});
-      current_id += inserted.second;
-      id_map.insert({i.second, inserted.first->second});
-    }
-  }
-
-  // Step 4) Write back to metadata
-  // --------------------------------------------------------------------------
-  for (const auto& t : tensors) {
-    t.id_ref_.get() = TensorID(id_map.at(t.storage_id_));
-  }
-}
-
 struct ResultGreater {
   bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
     return a->endTimeNS() > b->endTimeNS();
@@ -1141,7 +1008,7 @@ RecordQueue::getRecords(
   });
 
   if (config_.report_input_shapes && config_.profile_memory) {
-    calculate_unique_tensor_ids(out);
+    calculateUniqueTensorIDs(out);
   }
 
   build_tree(out);
