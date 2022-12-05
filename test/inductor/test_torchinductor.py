@@ -42,6 +42,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics
+    from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -2775,6 +2776,34 @@ class CommonTemplate:
             (torch.randn([64]),),
         )
 
+    def test_expm1(self):
+        def fn(x):
+            return torch.expm1(x), torch.expm1(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
+    def test_log1p(self):
+        def fn(x):
+            return torch.log1p(x), torch.log1p(x) * 2
+
+        for dtype in (torch.float16, torch.float, torch.double, torch.int, torch.int64):
+            self.common(
+                fn,
+                (torch.randn([64]).to(dtype=dtype),),
+            )
+            self.common(
+                fn,
+                (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
+            )
+
     def test_flip(self):
         def fn(x):
             return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
@@ -4793,6 +4822,24 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
+    @patch.object(config, "cpp_wrapper", True)
+    @unittest.skipIf(HAS_CUDA, "cpp_wrapper only supports cpu")
+    def test_cpp_wrapper(self):
+        device = "cpu"
+        for name in [
+            "test_as_strided",  # buffer reuse
+            "test_cat",  # alias
+            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
+            "test_relu",  # multiple inputs
+            "test_silu",  # single input, single output
+            "test_transpose",  # multiple outputs, buffer clear
+        ]:
+            test_name = f"{name}_{device}"
+            assert hasattr(self, test_name), "undefined function"
+            func = getattr(self, test_name)
+            assert callable(func), "not a callable"
+            func()
+
 
 if HAS_CPU:
 
@@ -5028,6 +5075,39 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        def test_cpu_vec_cosim(self):
+            cpp_vec_op_list = []
+            cpp_op_list = []
+
+            for k, v in CppVecOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_vec_op_list.append(k)
+            for k, v in CppOverrides.__dict__.items():
+                if isinstance(v, staticmethod):
+                    cpp_op_list.append(k)
+
+            self.assertEqual(cpp_op_list.sort(), cpp_vec_op_list.sort())
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_erf_cpu_only(self):
+            def fn(x):
+                return (torch.erf(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -5142,7 +5222,12 @@ if HAS_CPU:
             b = torch.rand((100,))
             with profile() as prof:
                 fn(a, b)
-            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
+
+            kernel_profile_events = []
+            for e in prof.profiler.function_events:
+                if "kernel_cpp_0" in e.name:
+                    kernel_profile_events.append(e.name)
+            assert len(kernel_profile_events) > 0
 
 
 if HAS_CUDA:
@@ -5189,6 +5274,41 @@ if HAS_CUDA:
             self.assertEqual(num_linear_transpose, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_buffer_autotune(self):
+            def foo(x, y, z):
+                a = x @ y
+                return a.unsqueeze(0).unsqueeze(0) + z
+
+            x = torch.zeros(5, 5, device="cuda")
+            y = torch.zeros(5, 5, device="cuda")
+            z = torch.zeros(1, 1, 5, 5, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            self.common(
+                foo,
+                (x, y, z),
+                check_lowp=False,
+            )
 
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
@@ -5499,6 +5619,7 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
+                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
@@ -5609,7 +5730,7 @@ if HAS_CUDA:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from functorch._src.aot_autograd import Interpreter
+                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
 

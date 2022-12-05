@@ -352,11 +352,6 @@ def convolution_backward(
     return (grad_inp, grad_weight, grad_bias)
 
 
-@register_decomposition([aten.rsqrt])
-def rsqrt(x):
-    return torch.reciprocal(torch.sqrt(x))
-
-
 @register_decomposition([aten.log2])
 def log2(x):
     return torch.log(x) * (1.0 / math.log(2.0))
@@ -452,11 +447,6 @@ def silu_(x):
 @register_decomposition(aten.masked_fill_)
 def masked_fill_(x, mask, value):
     return x.copy_(aten.masked_fill(x, mask, value))
-
-
-@register_decomposition([aten.log1p])
-def log1p(x):
-    return torch.log(x + 1)
 
 
 @register_decomposition([aten.baddbmm])
