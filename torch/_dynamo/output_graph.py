@@ -7,7 +7,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union, NamedTuple
 
 import sympy
 from typing_extensions import Protocol
@@ -56,9 +56,12 @@ class CompiledFn(Protocol):
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
-OutputGraphState = Tuple[
-    List[GraphArg], Set[Guard], Optional[Dict[str, torch.nn.Module]], SideEffects, int
-]
+class OutputGraphState(NamedTuple):
+    graphargs: List[GraphArg]
+    guards: Set[Guard]
+    nn_modules: Optional[Dict[str, torch.nn.Module]]
+    side_effects: SideEffects
+    timestamp: int
 
 
 @functools.lru_cache(None)
@@ -206,7 +209,7 @@ class OutputGraph(fx.Tracer):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        state = (
+        state = OutputGraphState(
             list(self.graphargs),
             set(self.guards),
             dict(self.nn_modules),
@@ -216,7 +219,7 @@ class OutputGraph(fx.Tracer):
         self.timestamp += 1
         return state
 
-    def restore_graphstate(self, state):
+    def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
