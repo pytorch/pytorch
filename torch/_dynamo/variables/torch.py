@@ -712,6 +712,16 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
 
+            # The current recursive export() implementation will
+            # not "see" any side effect updates from the enclosing
+            # context, which can result in possibly incorrect
+            # export.  This assert ensures that there were no
+            # outstanding side effects at the time cond() was called.
+            #
+            # TODO: This assert may be too aggressive; I'm landing it
+            # to see if it is or not.
+            assert tx.output.side_effects.is_empty()
+
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
             assert type(p_args[1]) is UserFunctionVariable  # true_fn
