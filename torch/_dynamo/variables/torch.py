@@ -380,6 +380,16 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif self.value == torch.addcdiv and len(args) == 3 and "value" in kwargs:
+            # decompose addcdiv into constituent ops, prevents a graph break due to converting
+            # value to a scalar
+            result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return TorchVariable(torch.add, **options).call_function(
+                tx, [args[0], result], {}
+            )
         else:
             any_symints_or_symfloats = any(
                 [isinstance(x, DynamicShapeVariable) for x in args]
