@@ -104,6 +104,8 @@ def make_reuse_graph_test(module_class, niter=100):
             xla_inputs_copy = copy.deepcopy(xla_inputs)
 
             expected = xla_module(*xla_inputs)
+            # make sure above lazy computation is executed.
+            xm.mark_step()
 
             actual = optimized_mod(*xla_inputs_copy)
 
@@ -117,7 +119,7 @@ def make_reuse_graph_test(module_class, niter=100):
             # to handle inplace updates.
             if not allclose(xla_inputs, xla_inputs_copy):
                 print(
-                    f"Incorrect updated arguments at iter {i}. expected\n{rand_args}, actual\n{rand_args_copy}"
+                    f"Incorrect updated arguments at iter {i}. expected\n{xla_inputs}, actual\n{xla_inputs_copy}"
                 )
                 self.assertTrue(False)
 

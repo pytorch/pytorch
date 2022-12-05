@@ -16,6 +16,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
+export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -215,6 +216,7 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -249,6 +251,7 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
+  python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops --verbose
   PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
