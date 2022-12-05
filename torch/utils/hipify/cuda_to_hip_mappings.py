@@ -8268,7 +8268,6 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 # put it as API_CAFFE2
 C10_MAPPINGS = collections.OrderedDict(
     [
-        ("USE_CUDA", ("USE_ROCM", API_C10)),
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),
