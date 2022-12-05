@@ -154,8 +154,8 @@ def check_device_dtype(a: Tensor, b: Tensor):
     return (
         a.is_cuda
         and b.is_cuda
-        and a.dtype in (torch.float32, torch.float16)
-        and b.dtype in (torch.float32, torch.float16)
+        and a.dtype in (torch.float32, torch.float16, torch.bfloat16)
+        and b.dtype in (torch.float32, torch.float16, torch.bfloat16)
     )
 
 
