@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
+// The index is a TensorList containing kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -140,7 +140,6 @@
 namespace at {
 namespace native {
 
-std::string shapes_as_str(TensorList tensors);
 AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
 } // namespace native
@@ -502,21 +501,6 @@ static bool all_strides_match(TensorList tensors) {
   return true;
 }
 
-inline std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
-}
-
 // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
 // The offset in these dimensions is computed by the kernel using the index tensor's
 // values and the stride of src. The new shape is not meaningful. It's used to make
@@ -715,7 +699,46 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
-      index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
+      // auto info = make_info(self, orig=indices);
+      ///////////////////////////// START OF MAKE_INFO /////////////////////////////////////
+      checkIndexTensorTypes(indices, /*allow_int*/ true);
+      // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+      auto expandedIndices = expandTensors(self, indices);
+      // next broadcast all index tensors together
+      try {
+        expandedIndices = expand_outplace(expandedIndices);
+      } catch (std::exception& e) {
+        TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
+                      " with shapes ", shapes_as_str(expandedIndices));
+      }
+      // add missing null Tensors so that it matches self.dim()
+      while (expandedIndices.size() < (size_t)self.dim()) {
+        expandedIndices.emplace_back();
+      }
+      // if the non-null indices are not all adjacent, transpose self and indices
+      // together so that they're adjacent at the front
+      if (!hasContiguousSubspace(expandedIndices)) {
+        std::tie(self, expandedIndices) = transposeToFront(self, expandedIndices);
+      }
+      // Ensure indices are on the same device as self
+      for (auto & indice : expandedIndices) {
+        if (indice.defined() && indice.device() != self.device()) {
+          indice = indice.to(self.device());
+        }
+      }
+      for (auto & indice : expandedIndices) {
+        if (indice.defined() && indice.dtype() == at::kInt) {
+          indice = indice.to(at::kLong);
+          TORCH_WARN(indice);
+        }
+      }
+  ///////////////////////////// END OF MAKE_INFO /////////////////////////////////////
+  ///////////////////////////// START OF MAKE_INDEX_PUT_ITERATOR /////////////////////
+      // make_index_put_iterator(AdvancedIndex(self, expandedIndices), value_);
+  ///////////////////////////// END OF MAKE_INDEX_PUT_ITERATOR /////////////////////////////////////
+      TORCH_WARN(indices.get(0)->data());
+      c10::List<c10::optional<at::Tensor>> newIndices = expandedIndices.to<c10::List<at::Tensor>>();
+      index_put_with_sort_stub(self.device().type(), self, (const c10::List<c10::optional<at::Tensor> >&) newIndices, value_, accumulate, unsafe);
       return self;
   }
 
