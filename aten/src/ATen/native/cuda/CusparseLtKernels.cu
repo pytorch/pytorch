@@ -2,6 +2,7 @@
 The following source file implements a sparse linear operator using cusparseLt
 */
 
+#include <ATen/Functions.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <torch/custom_class.h>
@@ -141,9 +142,32 @@ int run(
     at::Tensor tensor_c,
     at::Tensor tensor_d) {
   // tensor a is m x k; tensor b is k x n
-  const int length_m = 512;
-  const int length_n = 512;
-  const int length_k = 1024;
+  const int length_m = tensor_a.size(0);
+  const int length_n = tensor_b.size(1);
+  const int length_k = tensor_b.size(0);
+
+  std::cout << "kSparse: " << kSparse << std::endl;
+  TORCH_CHECK(
+      tensor_b.size(0) % kSparse == 0,
+      "Expected tensor_b.size(0) of value ",
+      tensor_b.size(0),
+      " to be evenly divisible by ",
+      kSparse,
+      " but got.");
+  TORCH_CHECK(
+      tensor_a.size(1) * kSparse == tensor_b.size(0),
+      "Expected tensor_a.size(1) of value ",
+      tensor_a.size(1),
+      " to match tensor_b.size(0) of value ",
+      tensor_b.size(0),
+      " to match after being multiplied by ",
+      kSparse);
+
+  TORCH_CHECK(tensor_c.size(0) == tensor_a.size(0));
+  TORCH_CHECK(tensor_d.size(0) == tensor_a.size(0));
+
+  TORCH_CHECK(tensor_c.size(1) == tensor_b.size(1));
+  TORCH_CHECK(tensor_d.size(1) == tensor_b.size(1));
 
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
@@ -340,8 +364,10 @@ Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense) {
   //   return 0;
   // }
 
-  std::cout << "run: " << run(sparse, dense, dense, dense) << std::endl;
-  return sparse.mm(dense);
+  auto result = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
+  auto init = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
+  run(sparse, dense, init, result);
+  return result;
 }
 
 }
