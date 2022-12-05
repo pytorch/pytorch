@@ -285,6 +285,11 @@ test_inductor_timm_shard() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  python benchmarks/dynamo/timm_models.py --ci --accuracy \
+    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
   # Check training with --amp
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
     --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
