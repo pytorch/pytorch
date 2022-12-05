@@ -14,12 +14,13 @@ from torch.onnx import _constants, _experimental, verification
 from torch.testing._internal import common_utils
 
 
+@common_utils.instantiate_parametrized_tests
 class TestVerification(pytorch_test_common.ExportTestCase):
     @common_utils.parametrize(
         "onnx_backend",
         [
             common_utils.subtest(
-                verification.OnnxBackend.ONNX,
+                verification.OnnxBackend.REFERENCE,
                 # TODO: enable this when ONNX submodule catches up to >= 1.13.
                 decorators=[unittest.expectedFailure],
             ),
@@ -271,8 +272,6 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
                 self.onnx_backend
             )
 
-
-common_utils.instantiate_parametrized_tests(TestVerification)
 
 if __name__ == "__main__":
     common_utils.run_tests()
