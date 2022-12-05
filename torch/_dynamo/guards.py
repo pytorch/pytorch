@@ -474,15 +474,14 @@ class GuardBuilder:
         """ProcessGroup state match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
-        code = list()
         # type_id encompasses NCCL vs Gloo
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        self.TYPE_MATCH(guard)
+
         # size/rank appear to be the only other critical attributes
+        code = list()
         code.append(f"{ref}.size() == {value.size()!r}")
         code.append(f"{ref}.rank() == {value.rank()!r}")
-
         self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
