@@ -2699,13 +2699,13 @@ else:
     def _test_large_cum_fn_helper(self, x, fn):
         expected = fn(x.cpu().float())
         actual = fn(x).cpu().float()
-        # Direct comparison to save memory usage.
-        self.assertTrue((expected == actual).all())
+        # Avoid self.assertEqual to save memory.
+        torch.testing.assert_close(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
-    @largeTensorTest('10GB', device='cpu')
+    @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
@@ -2717,7 +2717,7 @@ else:
 
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
-    @largeTensorTest('10GB', device='cpu')
+    @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
