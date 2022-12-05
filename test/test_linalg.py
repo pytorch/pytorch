@@ -1357,17 +1357,16 @@ class TestLinalg(TestCase):
     def test_norm_fused_type_promotion(self, device, dtype):
         x = torch.randn(10, device=device, dtype=dtype)
 
-        def profile_and_check(fn, x, kwargs, fn_name):
+        def profile_and_check(fn, x, kwargs):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 fn(x, **kwargs, dtype=torch.float)
             # smoke check that profiler returned some events
-            self.assertTrue(fn_name in map(lambda e: e.name, p.events()))
+            self.assertTrue("aten::linalg_vector_norm" in (e.name for e in p.events()))
             # test that there was no explicit copy
-            self.assertFalse("aten::to" in map(lambda e: e.name, p.events()))
+            self.assertFalse("aten::to" in (e.name for e in p.events()))
 
-        for f, kwargs, fn_name in zip((torch.norm, torch.linalg.vector_norm), ({"p" : 2}, {}),
-                                      ("aten::norm", "aten::linalg_vector_norm")):
-            profile_and_check(f, x, kwargs, fn_name)
+        for f, kwargs, in zip((torch.linalg.vector_norm, torch.norm), ({}, {"p" : 2})):
+            profile_and_check(f, x, kwargs)
 
     @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
@@ -1540,7 +1539,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
-    @precisionOverride({torch.cfloat: 2e-4})
+    @precisionOverride({torch.cfloat: 5e-4})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
@@ -2310,10 +2309,10 @@ class TestLinalg(TestCase):
             x = torch.tensor(lst, dtype=torch.double, device=device)
             for axes in (), (0,):
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
-            self.assertRaises(IndexError, torch.norm, x, "nuc", (0, 1))
+            self.assertRaises(RuntimeError, torch.norm, x, "nuc", (0, 1))
 
         x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
-        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(RuntimeError, "must be different", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
@@ -2475,28 +2474,6 @@ class TestLinalg(TestCase):
         S = torch.linalg.svdvals(a)
         result = torch.linalg.svd(a, full_matrices=False)
         self.assertEqual(result.S, S)
-
-    # This test doesn't work with MAGMA backend https://github.com/pytorch/pytorch/issues/72106
-    @skipMeta
-    @skipCUDAIfRocm
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_nan_error(self, device, dtype):
-        for svd in [torch.svd, torch.linalg.svd]:
-            # if input contains NaN then an error is triggered for svd
-            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
-            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
-            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
-            a[0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
-            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
-            a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix

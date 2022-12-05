@@ -560,6 +560,7 @@ int register_embedding_params() {
             return PackedEmbeddingBagWeight::prepack(weight);
           })
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+      .def("unpack", &EmbeddingPackedParamsBase::unpack)
       .def("version", &EmbeddingPackedParamsBase::version);
 
   return 0;

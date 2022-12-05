@@ -517,10 +517,10 @@ at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(
     const at::Tensor& sparse_grad_out,
     const at::Tensor& indices);
-at::Tensor embedding_dense_double_backward(
+at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,
-    int64_t padding_idx);
+    c10::SymInt padding_idx);
 at::Tensor index_backward(
     at::Tensor zeros_like_self,
     const torch::List<c10::optional<Tensor>>& indices,
@@ -937,10 +937,10 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups);
 
 Tensor _convolution_jvp(
@@ -951,10 +951,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,

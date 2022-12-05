@@ -21,16 +21,39 @@ TORCH_API c10::intrusive_ptr<Work> allreduce(
     at::TensorList tensors,
     const AllreduceOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<Work> allreduce_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    const AllreduceCoalescedOptions& opts = {});
+
 TORCH_API c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const AllgatherOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<Work> _allgather_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const AllgatherOptions& opts = {});
+
+TORCH_API c10::intrusive_ptr<Work> allgather_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const AllgatherOptions& opts = {});
+
 TORCH_API c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const ReduceScatterOptions& opts = {});
+
+TORCH_API c10::intrusive_ptr<Work> _reduce_scatter_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+     at::Tensor& output_tensor,
+     at::Tensor& input_tensor,
     const ReduceScatterOptions& opts = {});
 
 TORCH_API c10::intrusive_ptr<Work> reduce(
@@ -59,6 +82,11 @@ TORCH_API c10::intrusive_ptr<Work> alltoall(
 TORCH_API c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts = {});
+
+TORCH_API void monitored_barrier(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const BarrierOptions& opts,
+    bool waitAllRanks);
 
 TORCH_API c10::intrusive_ptr<Work> send(
     const c10::intrusive_ptr<ProcessGroup>& process_group,

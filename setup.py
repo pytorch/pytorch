@@ -762,6 +762,14 @@ class sdist(setuptools.command.sdist.sdist):
             super().run()
 
 
+def get_cmake_cache_vars():
+    try:
+        return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+    except FileNotFoundError:
+        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        return defaultdict(lambda: False)
+
+
 def configure_extension_build():
     r"""Configures extension build options according to system environment and user's choice.
 
@@ -769,11 +777,7 @@ def configure_extension_build():
       The input to parameters ext_modules, cmdclass, packages, and entry_points as required in setuptools.setup.
     """
 
-    try:
-        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
-    except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
-        cmake_cache_vars = defaultdict(lambda: False)
+    cmake_cache_vars = get_cmake_cache_vars()
 
     ################################################################################
     # Configure compile flags
@@ -791,7 +795,7 @@ def configure_extension_build():
         # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
@@ -848,7 +852,7 @@ def configure_extension_build():
     pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
     if pytorch_extra_install_requirements:
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
-        extra_install_requires += pytorch_extra_install_requirements.split(";")
+        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
 
     # Cross-compile for M1
@@ -877,7 +881,12 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    packages = find_packages(exclude=('tools', 'tools.*'))
+    excludes = ['tools', 'tools.*']
+    if not cmake_cache_vars['BUILD_CAFFE2']:
+        excludes.extend(['caffe2', 'caffe2.*'])
+    if not cmake_cache_vars['BUILD_FUNCTORCH']:
+        excludes.extend(['functorch', 'functorch.*'])
+    packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
@@ -1027,9 +1036,11 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',
+        'include/ATen/cpu/vec/vec256/vsx/*.h',
         'include/ATen/cpu/vec/vec512/*.h',
         'include/ATen/cpu/vec/*.h',
         'include/ATen/core/*.h',
@@ -1055,8 +1066,7 @@ def main():
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
-        'include/caffe2/utils/*.h',
-        'include/caffe2/utils/**/*.h',
+        'include/caffe2/serialize/*.h',
         'include/c10/*.h',
         'include/c10/macros/*.h',
         'include/c10/core/*.h',
@@ -1070,7 +1080,6 @@ def main():
         'include/c10/cuda/impl/*.h',
         'include/c10/hip/*.h',
         'include/c10/hip/impl/*.h',
-        'include/caffe2/**/*.h',
         'include/torch/*.h',
         'include/torch/csrc/*.h',
         'include/torch/csrc/api/include/torch/*.h',
@@ -1140,6 +1149,7 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        'include/sleef.h',
         "_inductor/codegen/*.h",
         "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
@@ -1158,6 +1168,13 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+
+    if get_cmake_cache_vars()['BUILD_CAFFE2']:
+        torch_package_data.extend([
+            'include/caffe2/**/*.h',
+            'include/caffe2/utils/*.h',
+            'include/caffe2/utils/**/*.h',
+        ])
     torchgen_package_data = [
         # Recursive glob doesn't work in setup.py,
         # https://github.com/pypa/setuptools/issues/1806

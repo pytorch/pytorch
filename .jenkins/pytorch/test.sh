@@ -16,6 +16,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
+export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -109,14 +110,6 @@ if [[ "$TEST_CONFIG" == *inductor* ]]; then
   export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
-# TODO: this condition is never true, need to fix this.
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
-  # skip expensive checks when on PR and CI_MASTER flag is not set
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
-else
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
@@ -125,7 +118,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user ninja
+  pip_install --user "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -135,9 +128,8 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    # Suppress vptr violations arising from multiple copies of pybind11
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -180,9 +172,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
@@ -223,6 +216,7 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -249,28 +243,36 @@ test_dynamo_shard() {
   assert_git_not_dirty
 }
 
-
-test_inductor() {
-  echo "TODO: enable inductor unit tests"
-  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
-
-  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
-  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
-  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+test_inductor_distributed() {
+  # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
+  # with if required # gpus aren't available
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  assert_git_not_dirty
 }
 
-test_inductor_huggingface_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+test_inductor() {
+  python tools/dynamo/verify_dynamo.py
+  python test/run_test.py --include test_modules test_ops --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
+  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
+  # seen intest_ops_gradients.py
+  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
+}
+
+test_inductor_huggingface() {
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  python benchmarks/dynamo/huggingface.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  # Check training with --amp
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
 }
 
 test_inductor_timm_shard() {
@@ -278,12 +280,34 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  python benchmarks/dynamo/timm_models.py --ci --accuracy \
+    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  # Check training with --amp
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+}
+
+test_inductor_torchbench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  # Check training with --amp
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
 }
 
 test_python_gloo_with_tls() {
@@ -402,12 +426,9 @@ test_libtorch() {
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
 
-    # TODO: this condition is never (BUILD_ENVIRONMENT doesn't start with pytorch-), need to fix this.
-    if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
-        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
-      fi
+    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+      # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+      "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
     assert_git_not_dirty
   fi
@@ -727,6 +748,11 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
 elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
+elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -738,24 +764,32 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchtext
   install_torchvision
   install_filelock
   install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 10 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  checkout_install_torchbench
+  test_inductor_torchbench
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
+  test_inductor_distributed
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision

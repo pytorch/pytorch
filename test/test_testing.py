@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator, Sequence
+from typing import Any, Callable, Iterator, List, Tuple, Generator
 
 import torch
 
@@ -1178,6 +1178,17 @@ class TestAssertCloseSparseCSR(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
                 fn()
 
+    @unittest.expectedFailure
+    def test_hybrid_support(self):
+        # If you read this after the test unexpectedly succeeded, this is a good thing. It means that you added support
+        # for `.to_dense()` for hybrid sparse CSR tensors and in turn enabled support for them in
+        # `torch.testing.assert_close` if comparing to strided tensors. You can safely remove this test as well as the
+        # patch on `TensorOrArrayPair` in `torch.testing._internal.common_utils`.
+        actual = torch.sparse_csr_tensor([0, 2, 4], [0, 1, 0, 1], [[1, 11], [2, 12], [3, 13], [4, 14]])
+        expected = torch.stack([actual[0].to_dense(), actual[1].to_dense()])
+
+        torch.testing.assert_close(actual, expected, check_layout=False)
+
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
 class TestAssertCloseSparseCSC(TestCase):
@@ -1777,18 +1788,24 @@ class TestImports(TestCase):
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
-                           "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS or IS_MACOS:
-            # Distributed does not work on Windows or by default on Mac
-            ignored_modules.append("torch.distributed.")
+            # Distributed should be importable on Windows(except nn.api.), but not on Mac
+            if IS_MACOS:
+                ignored_modules.append("torch.distributed.")
+            else:
+                ignored_modules.append("torch.distributed.nn.api.")
+                ignored_modules.append("torch.distributed.optim.")
+                ignored_modules.append("torch.distributed.pipeline.")
+                ignored_modules.append("torch.distributed.rpc.")
             ignored_modules.append("torch.testing._internal.dist_utils")
             # And these both end up with transitive dependencies on distributed
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
+            ignored_modules.append("torch.testing._internal.common_distributed")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
@@ -1817,6 +1834,27 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
+
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    @parametrize('path', ['torch', 'functorch'])
+    def test_no_mutate_global_logging_on_import(self, path) -> None:
+        # Calling logging.basicConfig, among other things, modifies the global
+        # logging state. It is not OK to modify the global logging state on
+        # `import torch` (or other submodules we own) because users do not expect it.
+        expected = 'abcdefghijklmnopqrstuvwxyz'
+        commands = [
+            'import logging',
+            f'import {path}',
+            '_logger = logging.getLogger("torch_test_testing")',
+            'logging.root.addHandler(logging.StreamHandler())',
+            'logging.root.setLevel(logging.INFO)',
+            f'_logger.info("{expected}")'
+        ]
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
+        self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
@@ -1884,35 +1922,27 @@ class TestOpInfos(TestCase):
 # Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
-    def _assert_is_generator_or_singleton(self, item, property_name):
-        if isinstance(item, Sequence):
-            msg = (
-                "{property_name} may only return lists for single items"
-                ", please use a coroutine which yields items instead")
-            self.assertTrue(len(item) <= 1, msg=msg)
-        else:
-            self.assertIsInstance(item, Generator)
-
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self._assert_is_generator_or_singleton(samples, "sample_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self._assert_is_generator_or_singleton(samples, "reference_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self._assert_is_generator_or_singleton(samples, "error_inputs_func")
+        self.assertIsInstance(samples, Generator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_parametrized_tests(TestImports)
 
 
 if __name__ == '__main__':
