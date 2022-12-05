@@ -116,6 +116,14 @@ jobs:
         run: |
           set -eux
           python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+      - name: Report Status   
+        if: always()
+        uses: ravsamhq/notify-slack-action@v1
+        with:
+            status: ${{ job.status }}
+            notify_when: 'skipped'
+        env:
+            SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/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'
 
   pr-sanity-checks:
     name: pr-sanity-checks
