@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import numpy as np
 import sympy
@@ -32,7 +32,7 @@ import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -398,10 +398,6 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
-    # TODO: this is questionable
-    if isinstance(x, torch._subclasses.FakeTensor):
-        # this func fails on fake tensors in __torch_dispatch__
-        return x
 
     def torch_clone(x):
         y = torch.clone(x)
@@ -758,10 +754,7 @@ def wrap_to_fake_tensor(e, fake_mode):
 
 
 def wrap_to_fake_tensor_and_record(e, tx):
-    # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
-    # However, get_fake_value takes args and passes them through this, which may include fake tensors.
-    # see tree_map(fake_wrapper, args) in get_fake_value.
-    if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
+    if type(e) in (torch.Tensor, torch.nn.Parameter):
         static_shapes = config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
@@ -824,9 +817,6 @@ def same(
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
-        assert not isinstance(ref, torch._subclasses.FakeTensor)
-        assert not isinstance(res, torch._subclasses.FakeTensor)
-
         if ref.is_sparse:
             assert res.is_sparse
             ref = ref.to_dense()
@@ -1166,20 +1156,3 @@ def assert_no_fake_params_or_buffers(gm):
         assert not isinstance(
             param, torch._subclasses.FakeTensor
         ), f"Unexpected fake param {name}"
-
-
-def fake_mode_from_tensors(inputs: List[Any]):
-    """
-    Takes a list of anything, unflattened is fine, returns a fake_mode
-    if any are fake. All fake modes on all fake tensors must be identical.
-    Returns None if no fake_mode is fine
-    """
-    flat_inputs, _ = tree_flatten(inputs)
-    fake_mode = None
-    for flat_input in flat_inputs:
-        if isinstance(flat_input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
