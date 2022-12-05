@@ -1079,6 +1079,7 @@ make_fx_failures = {
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),
     skip('nn.functional.max_unpool2d', '', device_type='cpu'),
     skip('nn.functional.max_unpool3d', '', device_type='cpu'),
+    xfail('nn.functional.one_hot'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
@@ -1342,6 +1343,13 @@ inplace_symbolic_tensor_failures = {
     # Views
     xfail('t', ''),
     xfail('transpose', ''),
+    xfail('bitwise_right_shift'),
+    xfail('bitwise_or'),
+    xfail('bitwise_not'),
+    xfail('bitwise_left_shift'),
+    xfail('bitwise_xor'),
+    xfail('gcd'),
+    xfail('lcm')
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
