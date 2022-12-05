@@ -392,6 +392,19 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    def test_uniform(self, device):
+        size = (2, 3, 4, 5)
+        dtype = torch.float32
+        x = torch.rand(size, dtype=dtype, device=device)
+        low = 0.3
+        high = 0.9
+
+        torch.manual_seed(123)
+        ref = torch.ops.aten.uniform(x, low, high)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.uniform(x, low=low, high=high)
+        self.assertTrue(torch.allclose(ref, res))
+
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         test_keys = [
