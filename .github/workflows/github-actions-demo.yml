@@ -70,6 +70,7 @@ jobs:
         if: always()
         uses: ravsamhq/notify-slack-action@v1
         with:
+            message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: {workflow_url}"
             status: ${{ job.status }}
             notify_when: 'failure,cancelled,warnings,skipped,success'
         env:
