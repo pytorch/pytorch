@@ -758,6 +758,44 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_forced_buffer_realize(self):
+        # Test torch._test_inductor_realize forces a buffer to be realized
+        def fn(a):
+            b = torch._test_inductor_realize(a * 2)
+            return (b * 2,)
+
+        self.common(fn, (torch.randn(10),))
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
+
+    def test_scheduler_vertical_fusion1(self):
+        realize = torch._test_inductor_realize
+
+        def fn(sa, ct, p):
+            # From torchbench.pyhpc_equation_of_state
+            v17 = -3.087032500374211e-7
+            v18 = -1.988366587925593e-8
+            v19 = -1.061519070296458e-11
+            v20 = 1.550932729220080e-10
+            t15 = realize(v19 * ct)
+            t19 = realize(v17 + ct * (v18 + t15) + v20 * sa)
+            t20 = realize(1.0 / t19)
+            t128 = realize(t19 * p)
+            return t20 + t128
+
+        self.common(
+            fn,
+            (
+                torch.randn(204, 204, 26),
+                torch.randn(204, 204, 26),
+                torch.randn(26),
+            ),
+        )
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            1 if self.device == "cuda" else 3,
+        )
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
