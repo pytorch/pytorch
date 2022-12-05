@@ -3,7 +3,7 @@ import copy
 from torch.testing._internal.common_methods_invocations import op_db
 from functorch_additional_op_db import additional_op_db
 from enum import Enum
-import functorch._src.top_operators_github_usage as top_ops
+import torch._functorch.top_operators_github_usage as top_ops
 import pprint
 import unittest
 import enum
