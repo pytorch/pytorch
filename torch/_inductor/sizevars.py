@@ -146,6 +146,11 @@ class SizeVarAllocator(object):
                 base_s = base.args[2] - 1
             elif not base.has(ModularIndexing):
                 # actual iteration range is to size-1
+                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
+                base_lowest = sympy_subs(base, iter_ranges_zero)
+                if self.maybe_guard_lt(base_lowest, 0):
+                    # can't replace with indexing div if base can be negative
+                    return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
