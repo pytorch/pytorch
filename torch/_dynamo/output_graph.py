@@ -7,7 +7,18 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union, NamedTuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from typing_extensions import Protocol

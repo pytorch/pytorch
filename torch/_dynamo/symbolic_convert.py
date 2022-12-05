@@ -12,7 +12,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, NamedTuple
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple
 from unittest.mock import patch
 
 import torch
