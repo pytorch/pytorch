@@ -6044,6 +6044,16 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
+        def test_input_is_view(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            args = [((1, 1, 1, 12, 11, 3), (396, 396, 396, 33, 3, 1), torch.int64, 'cpu')]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+            fn(*args)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
