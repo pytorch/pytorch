@@ -1853,7 +1853,7 @@ class TensorOrArrayPair(TensorLikePair):
 
     def _handle_hybrid_sparse_csr(self, actual, expected):
         compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
+        if not ((actual.layout in compressed_sparse_layouts) or (expected.layout in compressed_sparse_layouts)):
             return actual, expected
 
         def to_dense(tensor):
@@ -1863,7 +1863,8 @@ class TensorOrArrayPair(TensorLikePair):
             def partial_to_dense(tensor):
                 if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
                     return tensor.to_dense()
-                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
+                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
+                return torch.stack(lst) if lst else tensor.to_dense()
 
             return partial_to_dense(tensor)
 
