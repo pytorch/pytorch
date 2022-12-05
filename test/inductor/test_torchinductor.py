@@ -521,7 +521,12 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-
+        # if there are negative terms in ModularIndexing base, we cannot replace it with IndexingDiv
+        expr = ModularIndexing(i1 - 15, 1, 64)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(i1 - 15, 1, 64),
+        )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
@@ -549,6 +554,14 @@ class TestIndexingSimplification(TorchTestCase):
         # the same things happens with symbolic divisor
         self.assertEqual(
             ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
+        )
+
+        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
+        self.assertEqual(
+            ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
+        )
+        self.assertEqual(
+            ModularIndexing(-15 + i1 * 20, 2, 10), ModularIndexing(-15 + i1 * 20, 2, 10)
         )
 
         # Constant fold from divisor into base
