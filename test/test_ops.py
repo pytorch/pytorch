@@ -1092,6 +1092,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
+
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     @skipIfTorchInductor("Inductor does not support view with dtype yet")
@@ -1972,6 +1973,54 @@ class TestFakeTensor(TestCase):
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
             except torch._subclasses.fake_tensor.DataDependentOutputException:
                 self.assertTrue(name in data_dependent_op_tests)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_pointwise_ops(self, device, dtype, op):
+        test_self = self
+
+        class TestPointwiseMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                out = func(*args, **kwargs)
+
+                if torch.Tag.pointwise in func.tags:
+                    shapes = []
+                    for inp in tree_flatten((args, kwargs)):
+                        if isinstance(inp, torch.Tensor):
+                            shapes.append(inp.shape)
+
+                    out_shape = torch._refs._broadcast_shapes(*shapes)
+                    breakpoint()
+
+                    for out_elem in tree_flatten(out):
+                        if isinstance(out_elem, torch.Tensor):
+                            test_self.assertEqual(out_elem.shape, out_shape)
+
+                return out
+
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+
+            def map_to_fake(e):
+                if isinstance(e, torch.Tensor):
+                    return mode.from_tensor(e)
+                else:
+                    return e
+
+            input = tree_map(map_to_fake, sample.input)
+            args = tree_map(map_to_fake, sample.args)
+            kwargs = tree_map(map_to_fake, sample.kwargs)
+
+            try:
+                op(input, *args, **kwargs)
+            except Exception as e:
+                continue
+
+            with TestPointwiseMode():
+                with mode:
+                    op(input, *args, **kwargs)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
