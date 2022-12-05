@@ -54,8 +54,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 
