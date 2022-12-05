@@ -53,6 +53,20 @@ class TorchDispatchMode:
     def __exit__(self, exc_type, exc_val, exc_tb):
         _pop_mode()
 
+    def check_mode_state_push(self):
+        if not hasattr(self, "tracking"):
+            self.tracking = threading.local()
+        else:
+            if hasattr(self.tracking, "on_stack"):
+                assert self.tracking.on_stack is False, "Illegal attempt to push an already pushed mode onto the stack"
+
+        self.tracking.on_stack = True
+
+    def check_mode_state_pop(self):
+        assert hasattr(self, "tracking"), "Unexpected, popping a mode we are not tracking"
+        assert self.tracking.on_stack is True, "Unexpected, popping a mode that thinks its already off the stack"
+        self.tracking.on_stack = False
+
     @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
@@ -69,21 +83,11 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    if not hasattr(mode, "tracking"):
-        mode.tracking = threading.local()
-    else:
-        if hasattr(mode.tracking, "on_stack"):
-            assert mode.tracking.on_stack is False, "Illegal attempt to push an already pushed mode onto the stack"
-
-    mode.tracking.on_stack = True
     _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode():
     mode = _pop_torch_dispatch_stack()
-    assert hasattr(mode, "tracking"), "Unexpected, popping a mode we are not tracking"
-    assert mode.tracking.on_stack is True, "Unexpected, popping a mode that thinks its already off the stack"
-    mode.tracking.on_stack = False
     return mode
 
 

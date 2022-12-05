@@ -135,6 +135,12 @@ def _init_core_state(
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
     if state.world_size == 1:
+        if sharding_strategy != ShardingStrategy.NO_SHARD:
+            warnings.warn(
+                "FSDP is switching to use `NO_SHARD` instead of "
+                f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
+                "the world size is 1."
+            )
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
@@ -664,8 +670,6 @@ def _sync_module_params_and_buffers(
     """
     _check_params_for_sync_module_states(params)
     module_states: List[torch.Tensor] = []
-    # TODO (awgu): When exposing the original parameters, we need to also
-    # use this attribute to prevent re-synchronizing parameters.
     for buffer in module.buffers():
         # Avoid re-synchronizing buffers in case of nested wrapping
         if not getattr(buffer, FSDP_SYNCED, False):

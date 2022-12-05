@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
 import torch
 from torch import Tensor
 import functools
@@ -41,7 +41,7 @@ from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
-from functorch._src.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp
 
 aten = torch.ops.aten
 
@@ -414,6 +414,7 @@ class TestOperators(TestCase):
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
+        xfail('as_strided', 'partial_views'),
         decorate('linalg.det', 'singular',
                  decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
     }))
@@ -512,11 +513,35 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
+
+        # ---- Non-Contiguous Failures ----
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # RuntimeError: query: last dimension must be contiguous
+        # NOTE: This passes on Windows!
+        decorate('nn.functional._scaled_dot_product_attention',
+                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # BUG
+        # AssertionError: Tensor-likes are not close!
+        xfail('as_strided'),
+        xfail('as_strided_scatter'),
+        xfail('_softmax_backward_data', device_type='cpu'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('matmul',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('svd_lowrank',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
@@ -534,14 +559,22 @@ class TestOperators(TestCase):
                 result = fn(*primals)
                 cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
+                noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
+                noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
+
                 out, vjp_fn = vjp(fn, *primals)
                 self.assertEqual(out, result)
                 result_vjps = vjp_fn(cotangents)
+
+                out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                self.assertEqual(out_noncontig, result)
+                noncontig_result_vjps = vjp_fn(noncontig_cotangents)
 
                 _, vjp_fn = ref_vjp(fn, *primals)
                 expected_vjps = vjp_fn(cotangents)
 
                 self.assertEqual(result_vjps, expected_vjps)
+                self.assertEqual(noncontig_result_vjps, expected_vjps)
 
         _test(op)
         for a_op in op.aliases:
@@ -623,6 +656,7 @@ class TestOperators(TestCase):
         skip("atleast_3d"),  # Takes too long
         skip("ormqr"),  # Takes too long
         xfail("as_strided"),  # incorrect output
+        xfail("as_strided", "partial_views"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -703,6 +737,9 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
+    @skipOps('TestOperators', 'test_vmapvjpvjp', {
+        xfail('as_strided', 'partial_views'),
+    })
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap
@@ -770,6 +807,7 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('as_strided', 'partial_views'),
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -819,7 +857,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
-    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
+    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
+        xfail('as_strided', 'partial_views'),
+    }))
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -867,6 +907,7 @@ class TestOperators(TestCase):
         decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
+        xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -1169,6 +1210,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail('as_strided', 'partial_views'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1351,6 +1393,7 @@ class TestOperators(TestCase):
 
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
+        xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format

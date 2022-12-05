@@ -29,6 +29,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 
 #include <set>
 #include <unordered_set>
@@ -676,7 +677,7 @@ static PyObject* push_on_torch_dispatch_stack(
   HANDLE_TH_ERRORS
   if (arg != Py_None) {
     Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::push_onto_stack(
+    torch::torch_dispatch_mode::push_onto_dispatch_stack(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -687,7 +688,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::pop_stack();
+  const auto& mode = torch::torch_dispatch_mode::pop_dispatch_stack();
   auto* r = mode->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;

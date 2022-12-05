@@ -8,7 +8,7 @@ namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
-void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
+void TorchDispatchModeTLS::unsafe_push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   if (torchDispatchModeState.stack_.size() == 0) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
@@ -17,9 +17,9 @@ void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
-const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::pop_stack() {
+const std::shared_ptr<SafePyObject> TorchDispatchModeTLS::unsafe_pop_stack() {
   TORCH_CHECK(
-      torchDispatchModeState.stack_.size() > 0,
+      c10::impl::TorchDispatchModeTLS::stack_len() > 0,
       "trying to pop from empty mode stack");
   const std::shared_ptr<SafePyObject> out =
       torchDispatchModeState.stack_.back();

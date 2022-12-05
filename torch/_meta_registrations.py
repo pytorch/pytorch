@@ -1012,8 +1012,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     check(p >= 0, lambda: "cdist only supports non-negative p values")
     check(
-        compute_mode >= 0 and compute_mode <= 2,
-        lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 1, 2),
+        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
