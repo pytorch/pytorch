@@ -25,9 +25,11 @@ from transformers.models.t5.modeling_t5 import T5Block
 
 
 def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
+    os.environ["MASTER_PORT"] = os.getenv("MASTER_PORT", "12355")
+    os.environ["RANK"] = os.getenv("RANK", "0")
+    os.environ["WORLD_SIZE"] = os.getenv("WORLD_SIZE", "1")
+    dist.init_process_group("nccl")
 
 
 def cleanup():
