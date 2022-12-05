@@ -46,6 +46,7 @@ docs/source/generated/
 log
 usage_log.txt
 test-reports/
+test/*.bak
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
@@ -338,3 +339,6 @@ third_party/glog/
 
 # Virtualenv
 venv/
+
+# Log files
+*.log

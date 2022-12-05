@@ -443,6 +443,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -597,7 +601,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int]: ...",
+                "def stride(self) -> Tuple[_int, ...]: ...",
                 "def stride(self, _int) -> _int: ...",
             ],
             "new_ones": [
@@ -722,7 +726,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -732,7 +736,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )

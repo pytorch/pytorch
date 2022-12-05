@@ -21,7 +21,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TestCase, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
@@ -130,7 +130,6 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
-@skipIfSlowGradcheckEnv
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -1811,9 +1810,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -1887,10 +1886,9 @@ class TestQuantizedOps(TestCase):
                     devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
                     for device in devices:
                         qX_hat = op(qX.to(device=device), output_size=output_size)
-                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                        self.assertEqualIgnoreType(
+                        self.assertEqual(
                             X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat), exact_dtype=False)
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
                             msg=error_message.format(name + '.scale', scale,
@@ -1962,9 +1960,9 @@ class TestQuantizedOps(TestCase):
             for name, op in ops_under_test.items():
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                           msg=error_message.format(name, X_ref, X_hat.int_repr()))
+                self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
                                  msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
@@ -2109,10 +2107,10 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={} X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={} X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref),
+                             exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -2164,10 +2162,9 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off: qX_hat={}, X_ref={}"
-                                           .format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
+                             msg="{} results are off: qX_hat={}, X_ref={}"
+                             .format(name, qX_hat.int_repr(), X_ref), exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -5454,6 +5451,35 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs,
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
+
+    def test_conv_reorder_issue_onednn(self):
+        """ Ensure reorder failure issue in conv is fixed for onednn backend.
+            Onednn backend used to encounter reorder failure
+            when running conv with dynamic input shapes.
+            Solved by https://github.com/pytorch/pytorch/pull/86876
+        """
+        if 'onednn' not in supported_qengines:
+            return
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 128, 512
+            kh, kw = 1, 1
+            ih, iw = 28, 28
+            bias = None
+            strides, paddings, dilates, groups = (1, 1), (0, 0), (1, 1), 1
+            w = torch.randn((oc, ic, kh, kw))
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            w_packed = torch.ops.quantized.conv2d_prepack(
+                qw, bias, strides, paddings, dilates, groups
+            )
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            ih, iw = 5, 4
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            # The following should pass when input shape is changed
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),

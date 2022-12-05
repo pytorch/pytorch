@@ -1401,7 +1401,7 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !AT_USE_CUSPARSE_GENERIC_SDDMM()
+#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_52_API())
   TORCH_CHECK(
       false,
       "Calling sampled_addmm with sparse GPU tensors requires compiling ",

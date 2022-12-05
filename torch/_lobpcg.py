@@ -399,7 +399,7 @@ def lobpcg(
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When not specified, `B` is interpereted as
+                  m)`. When not specified, `B` is interpreted as
                   identity matrix.
 
       X (tensor, optional): the input tensor of size :math:`(*, m, n)`

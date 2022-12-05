@@ -1,12 +1,14 @@
 import sys
 import torch
 import contextlib
+from enum import IntEnum
 
 from typing import Union
 
 __all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
-           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "enable_flash_sdp",
-           "flash_sdp_enabled", "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "SDPBackend", "enable_flash_sdp",
+           "flash_sdp_enabled", "enable_mem_efficient_sdp", "mem_efficient_sdp_enabled",
+           "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
 
 def is_built():
     r"""Returns whether PyTorch is built with CUDA support.  Note that this
@@ -163,6 +165,20 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     return torch._C._get_linalg_preferred_backend()
 
 
+class SDPBackend(IntEnum):
+    r"""Enum class for the scaled dot product attention backends.
+
+    .. warning:: This flag is experimental and subject to change.'
+
+    This class needs to stay inline with the enum defined in:
+    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
+    """
+    ERROR = -1
+    MATH = 0
+    FLASH_ATTENTION = 1
+    EFFICIENT_ATTENTION = 2
+
+
 def flash_sdp_enabled():
     r"""
     .. warning:: This flag is experimental and subject to change.
@@ -180,6 +196,22 @@ def enable_flash_sdp(enabled: bool):
     """
     torch._C._set_sdp_use_flash(enabled)
 
+def mem_efficient_sdp_enabled():
+    r"""
+    .. warning:: This flag is experimental and subject to change.
+
+    Returns whether memory efficient sdp is enabled or not.
+    """
+    return torch._C._get_mem_efficient_sdp_enabled()
+
+
+def enable_mem_efficient_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is experimental and subject to change.
+
+    Enables or disables memory efficient sdp.
+    """
+    torch._C._set_sdp_use_mem_efficient(enabled)
 
 def math_sdp_enabled():
     r"""
@@ -200,23 +232,26 @@ def enable_math_sdp(enabled: bool):
 
 
 @contextlib.contextmanager
-def sdp_kernel(enable_flash: bool = True, enable_math: bool = True):
+def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
     r"""
     .. warning:: This flag is experimental and subject to change.
 
-    This context manager can be used to temporarily enable or disable flash sdp and math sdp.
+    This context manager can be used to temporarily enable or disable flash/memory efficient sdp and math sdp.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
     previous_flash: bool = flash_sdp_enabled()
+    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
     try:
         enable_flash_sdp(enable_flash)
+        enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
         yield{}
     except RuntimeError as err:
         raise err
     finally:
         enable_flash_sdp(previous_flash)
+        enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
 
 cufft_plan_cache = cuFFTPlanCacheManager()

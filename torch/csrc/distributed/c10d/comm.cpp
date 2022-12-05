@@ -32,7 +32,13 @@ class BroadcastWork {
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
     for (const auto i : c10::irange(output_tensors.size())) {
-      bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
+      // if output_tensor is empty, no need to copy it back,
+      // this can avoid error when both bucket_tensor and output_tensor
+      // are empty, but they have different shapes, see
+      // https://github.com/pytorch/pytorch/issues/87280
+      if (output_tensors[i].numel() != 0) {
+        bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
+      }
     }
   }
 
