@@ -754,10 +754,12 @@ ANY_DTYPE_ORDER = (
 
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
-                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
+                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None,
+                 secondary_allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
+        self.secondary_allowed_dtypes = set(secondary_allowed_dtypes) if allowed_dtypes is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function across each op and its associated dtypes. """
@@ -806,7 +808,10 @@ class ops(_TestParametrizer):
                 raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
 
             if self.allowed_dtypes is not None:
-                dtypes = dtypes.intersection(self.allowed_dtypes)
+                op_info_dtypes = dtypes
+                dtypes = op_info_dtypes.intersection(self.allowed_dtypes)
+                if len(dtypes) == 0:
+                    dtypes = op_info_dtypes.intersection(self.secondary_allowed_dtypes)
 
             # Construct the test name; device / dtype parts are handled outside.
             # See [Note: device and dtype suffix placement]
