@@ -143,16 +143,16 @@ Tensor max_pool1d(
     return at::quantized_max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+
+  check_max_pool1d(self, kernel_size, stride, padding, dilation);
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu() ||
       isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
-    check_max_pool1d(self, kernel_size, stride, padding, dilation);
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
-  check_max_pool1d(self, kernel_size, stride, padding, dilation);
   return max_pool1d_impl(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
