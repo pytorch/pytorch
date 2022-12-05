@@ -25,7 +25,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
   OP_DECOMPOSE2(__iand__, Tensor);
