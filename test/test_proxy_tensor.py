@@ -1348,6 +1348,7 @@ inplace_symbolic_tensor_failures = {
     xfail('bitwise_not'),
     xfail('bitwise_left_shift'),
     xfail('bitwise_xor'),
+    xfail('bitwise_and'),
     xfail('gcd'),
     xfail('lcm')
 }
