@@ -164,6 +164,71 @@ class Transformer(Module):
             if p.dim() > 1:
                 xavier_uniform_(p)
 
+    @ property
+    def num_encoder_layers(self):
+        if isinstance(self.encoder, TransformerEncoder):
+            return self.encoder.num_layers
+
+    @ property
+    def num_decoder_layers(self):
+        if isinstance(self.decoder, TransformerDecoder):
+            return self.decoder.num_layers
+
+    @ property
+    def dim_feedforward(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.layers[0].linear1.out_features
+        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.layers[0].linear1.out_features
+        else:
+            raise ValueError("Transformer has no official layers")
+
+    @ property
+    def dropout(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.layers[0].dropout.p
+        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.layers[0].dropout.p
+        else:
+            raise RuntimeError("Transformer has no official layers")
+
+    @ property
+    def activation(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.layers[0].activation
+        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.layers[0].activation
+        else:
+            raise RuntimeError("Transformer has no official layers")
+
+    @ property
+    def layer_norm_eps(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.layers[0].norm1.eps
+        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.layers[0].norm1.eps
+        else:
+            raise RuntimeError("Transformer has no official layers")
+
+    @ property
+    def encoder_layer(self):
+        if isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.encoder_layer
+
+    @ property
+    def decoder_layer(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.decoder_layer
+
+    @ property
+    def norm_first(self):
+        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
+            return self.decoder.layers[0].norm_first
+        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
+            return self.encoder.layers[0].norm_first
+        else:
+            raise RuntimeError("Transformer has no official layers")
+
 
 class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers. Users can build the
@@ -289,6 +354,11 @@ class TransformerEncoder(Module):
 
         return output
 
+    @ property
+    def encoder_layer(self):
+        if self.num_layers > 0:
+            return self.layers[0]
+
 
 class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers
@@ -342,6 +412,12 @@ class TransformerDecoder(Module):
             output = self.norm(output)
 
         return output
+
+    @ property
+    def decoder_layer(self):
+        if self.num_layers > 0:
+            return self.layers[0]
+
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
@@ -552,6 +628,30 @@ class TransformerEncoderLayer(Module):
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout2(x)
 
+    @ property
+    def d_model(self) -> int:
+        return self.self_attn.embed_dim
+
+    @ property
+    def nhead(self) -> int:
+        return self.self_attn.num_heads
+
+    @ property
+    def dim_feedforward(self) -> int:
+        return self.linear2.in_features
+
+    @ property
+    def dropout_probability(self) -> float:
+        return self.dropout.p
+
+    @ property
+    def layer_norm_eps(self) -> float:
+        return self.norm1.eps
+
+    @ property
+    def batch_first(self) -> bool:
+        return self.self_attn.batch_first
+
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
@@ -674,6 +774,30 @@ class TransformerDecoderLayer(Module):
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout3(x)
+
+    @ property
+    def d_model(self) -> int:
+        return self.self_attn.embed_dim
+
+    @ property
+    def nhead(self) -> int:
+        return self.self_attn.num_heads
+
+    @ property
+    def dim_feedforward(self) -> int:
+        return self.linear2.in_features
+
+    @ property
+    def dropout_probability(self) -> float:
+        return self.dropout.p
+
+    @ property
+    def layer_norm_eps(self) -> float:
+        return self.norm1.eps
+
+    @ property
+    def batch_first(self) -> bool:
+        return self.self_attn.batch_first
 
 
 def _get_clones(module, N):
