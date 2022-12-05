@@ -11,7 +11,7 @@ import unittest
 import torch
 import torch.nn as nn
 
-from torch.distributed.optim import NamedOptimizer
+from torch.distributed.optim import _NamedOptimizer
 
 
 class TestDummyModel(torch.nn.Module):
@@ -28,21 +28,21 @@ class TestDummyModel(torch.nn.Module):
 
 
 class NamedOptimizerTest(unittest.TestCase):
-    def _compare_state_dict_group(self, group, named_group, compare_equal=True):
+    def _compare_state_dict_group(self, group, named_group, assert_equal=True):
         for key, val in group.items():
             if key != "params":
-                assert key in named_group, f"{key} not in named optimizer state dict"
+                self.assertTrue(
+                    key in named_group, f"{key} not in named optimizer state dict"
+                )
+                err_msg = (
+                    f"{key} state not equal" if assert_equal else f"{key} state equal"
+                )
                 if isinstance(val, torch.Tensor):
-                    if compare_equal:
-                        assert torch.allclose(val, named_group[key]), f"{key} state not equal"
-                    else:
-                        assert not torch.allclose(val, named_group[key]), f"{key} state equal"
+                    fn = self.assertTrue if assert_equal else self.assertFalse
+                    fn(torch.allclose(val, named_group[key]), err_msg)
                 else:
-                    if compare_equal:
-                        assert val == named_group[key], f"{key} state not equal"
-                    else:
-                        assert val != named_group[key], f"{key} state equal"
-
+                    fn = self.assertEqual if assert_equal else self.assertNotEqual
+                    fn(val, named_group[key], err_msg)
 
     def test_state_dict(self):
         """Check that NamedOptimizer exposes the expected state dict
@@ -65,7 +65,7 @@ class NamedOptimizerTest(unittest.TestCase):
             ]
         )
 
-        named_optim_1 = NamedOptimizer(
+        named_optim_1 = _NamedOptimizer(
             m_dup.named_parameters(),
             torch.optim.SGD,
             [
@@ -76,7 +76,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        named_optim_2 = NamedOptimizer(
+        named_optim_2 = _NamedOptimizer(
             m_dup.named_parameters(),
             torch.optim.Adam,
             [
@@ -84,7 +84,7 @@ class NamedOptimizerTest(unittest.TestCase):
                 {"params": m_dup.net4.parameters(), "lr": 1e-5},
             ],
         )
-        for i in range(10):
+        for i in range(2):
             x = torch.rand(5, 8)
             y = m(x)
             y.sum().backward()
@@ -103,38 +103,48 @@ class NamedOptimizerTest(unittest.TestCase):
 
         # Compare "state" in optim state dict
         self._compare_state_dict_group(
-            sd_1["state"][0], named_sd_1["state"]["net1.0.weight"]
+            sd_1["state"][0],
+            named_sd_1["state"]["net1.0.weight"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            sd_2["state"][1], named_sd_2["state"]["net2.0.bias"]
+            sd_2["state"][1],
+            named_sd_2["state"]["net2.0.bias"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            sd_1["state"][2], named_sd_1["state"]["net3.weight"]
+            sd_1["state"][2],
+            named_sd_1["state"]["net3.weight"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            sd_2["state"][3], named_sd_2["state"]["net4.1.bias"]
+            sd_2["state"][3],
+            named_sd_2["state"]["net4.1.bias"],
+            assert_equal=True,
         )
 
         # Compare "param_groups" in optim state dict
         self._compare_state_dict_group(
-            sd_1["param_groups"][0], named_sd_1["param_groups"][0]
+            sd_1["param_groups"][0],
+            named_sd_1["param_groups"][0],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            sd_2["param_groups"][1], named_sd_2["param_groups"][1]
+            sd_2["param_groups"][1], named_sd_2["param_groups"][1], assert_equal=True
         )
 
     def test_load_state_dict(self):
         """Check that NamedOptimizer exposes the expected state dict
         interface."""
         m = TestDummyModel()
-        named_optim_1 = NamedOptimizer(
+        named_optim_1 = _NamedOptimizer(
             m.named_parameters(),
             torch.optim.SGD,
             lr=1e-2,
             momentum=0.9,
         )
 
-        for i in range(2):
+        for _ in range(2):
             x = torch.rand(5, 8)
             y = m(x)
             y.sum().backward()
@@ -142,14 +152,14 @@ class NamedOptimizerTest(unittest.TestCase):
 
         state_dict_to_load = named_optim_1.state_dict()
 
-        named_optim_2 = NamedOptimizer(
+        named_optim_2 = _NamedOptimizer(
             m.named_parameters(),
             torch.optim.SGD,
             lr=1e-2,
             momentum=0.6,
         )
 
-        for i in range(2):
+        for _ in range(2):
             x = torch.rand(5, 8)
             y = m(x)
             y.sum().backward()
@@ -159,16 +169,24 @@ class NamedOptimizerTest(unittest.TestCase):
 
         # Compare "state" in optim state dict
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net1.0.weight"], state_dict_before_load["state"]["net1.0.weight"], False
+            state_dict_to_load["state"]["net1.0.weight"],
+            state_dict_before_load["state"]["net1.0.weight"],
+            assert_equal=False,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net2.0.bias"], state_dict_before_load["state"]["net2.0.bias"], False
+            state_dict_to_load["state"]["net2.0.bias"],
+            state_dict_before_load["state"]["net2.0.bias"],
+            assert_equal=False,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net3.weight"], state_dict_before_load["state"]["net3.weight"], False
+            state_dict_to_load["state"]["net3.weight"],
+            state_dict_before_load["state"]["net3.weight"],
+            assert_equal=False,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net4.1.bias"], state_dict_before_load["state"]["net4.1.bias"], False
+            state_dict_to_load["state"]["net4.1.bias"],
+            state_dict_before_load["state"]["net4.1.bias"],
+            assert_equal=False,
         )
 
         named_optim_2.load_state_dict(state_dict_to_load)
@@ -176,14 +194,52 @@ class NamedOptimizerTest(unittest.TestCase):
 
         # Compare "state" in optim state dict
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net1.0.weight"], state_dict_after_load["state"]["net1.0.weight"]
+            state_dict_to_load["state"]["net1.0.weight"],
+            state_dict_after_load["state"]["net1.0.weight"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net2.0.bias"], state_dict_after_load["state"]["net2.0.bias"]
+            state_dict_to_load["state"]["net2.0.bias"],
+            state_dict_after_load["state"]["net2.0.bias"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net3.weight"], state_dict_after_load["state"]["net3.weight"]
+            state_dict_to_load["state"]["net3.weight"],
+            state_dict_after_load["state"]["net3.weight"],
+            assert_equal=True,
         )
         self._compare_state_dict_group(
-            state_dict_to_load["state"]["net4.1.bias"], state_dict_after_load["state"]["net4.1.bias"]
+            state_dict_to_load["state"]["net4.1.bias"],
+            state_dict_after_load["state"]["net4.1.bias"],
+            assert_equal=True,
         )
+
+    def test_load_state_dict_error(self):
+        m = TestDummyModel()
+        named_optim_1 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        for _ in range(2):
+            x = torch.rand(5, 8)
+            y = m(x)
+            y.sum().backward()
+            named_optim_1.step()
+
+        state_dict_to_load = named_optim_1.state_dict()
+
+        named_optim_2 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            lr=1e-2,
+            momentum=0.6,
+        )
+
+        err_msg = (
+            "Expects the optim to be initialized before load but found not initialized"
+        )
+        with self.assertRaisesRegex(ValueError, err_msg):
+            named_optim_2.load_state_dict(state_dict_to_load)

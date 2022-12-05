@@ -9,25 +9,27 @@ from torch import optim
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
-__all__ = ["NamedOptimizer"]
+__all__ = ["_NamedOptimizer"]
 
 logger = logging.getLogger(__name__)
 
 
-class NamedOptimizer(optim.Optimizer):
+class _NamedOptimizer(optim.Optimizer):
     """
-    NamedOptimizer takes a dict of parameters and exposes state_dict by parameter key.
-    We replace the original key (number) in an optim to the FQN string. User can
-    initialize the optim as they initialize a PyTorch optim, the only difference is
-    that they also need to passed in the FQN of each parameters.
+    ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by
+    parameter key. We replace the original key (number) in an optim to the
+    fully qualifed name (FQN) string. User can initialize the optim as they
+    initialize a PyTorch optim, the only difference is that they also need to
+    pass in the FQN of each parameters.
 
     Args:
         named_parameters (Mapping[str, Union[torch.Tensor, ShardedTensor]]):
-            Parameters of the module and its FQN.
+            Mapping from FQN to parameter.
         optimizer_class (optim.Optimizer):
-            the class of optimizer to instantiate.
+            The class of optimizer to instantiate.
         param_groups (Collection[Mapping[str, Any]]):
-            param_groups to pass to optimizer if specified.
+            `param_groups` to pass to optimizer if specified.
+            The key of the inner map needs to be FQNs.
             Default: None
         args: arguments to pass to the optimizer constructor.
         kwargs: arguments to pass to the optimizer constructor.
@@ -35,18 +37,22 @@ class NamedOptimizer(optim.Optimizer):
     Example::
         >>> # xdoctest: +SKIP("distributed")
         >>> from torch import optim
-        >>> from torch.distributed.optim import NamedOptimizer
+        >>> from torch.distributed.optim import _NamedOptimizer
         >>>
         >>> # Define the named optimizer.
         >>> m = Model(...)
-        >>> named_optim = NamedOptimizer(m.named_parameters(), optim.SGD)
+        >>> named_optim = _NamedOptimizer(m.named_parameters(), optim.SGD)
         >>> # Forward pass + backward pass.
         >>> named_optim.step()
         >>> ...
         >>> # Call state_dict for the named optimizer returns a FQN state_dict.
         >>> named_optim.state_dict()
 
-    __ TODO: Add tutorial for NamedOptimizer.
+    Warning: This API is still in development and subject to change.
+
+    TODO: Add tutorial for _NamedOptimizer.
+    TODO: Add documentation in the docstring for the public attributes
+          like self.param_groups and self.named_parameters.
     """
 
     def __init__(
@@ -57,43 +63,46 @@ class NamedOptimizer(optim.Optimizer):
         *args,
         **kwargs,
     ) -> None:
-        torch._C._log_api_usage_once("torch.distributed.optim.NamedOptimizer")
+        torch._C._log_api_usage_once("torch.distributed.optim._NamedOptimizer")
         self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
         self.named_parameters = dict(named_parameters)
-        params_optimizer = (
+        params_for_optimizer = (
             self.named_parameters.values() if param_groups is None else param_groups
         )
         self._optimizer = optimizer_class(  # type: ignore[operator]
-            params_optimizer,
+            params_for_optimizer,
             *args,
             **kwargs,
         )
+        # TODO: Add param_groups validations and unit tests.
         if param_groups is None:
-            self.param_keys_order = list(self.named_parameters.keys())
+            self.ordered_param_keys = list(self.named_parameters.keys())
         else:
             warnings.warn(
                 "Since we pass in param_groups, we will use param_groups to "
                 "initialize the optimizer, not all parameters of the module."
             )
-            param_to_key = {param: key for key, param in self.named_parameters}  # type: ignore[misc, has-type]
-            param_keys_order = []
+            param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+            ordered_param_keys = []
             for group in param_groups:
                 for param in group["params"]:
                     if param not in param_to_key:
-                        raise ValueError(f"Expect param name {param} found in param group but is missing.")
-                    param_keys_order.append(param_to_key[param])
-            self.param_keys_order = param_keys_order
+                        raise ValueError(
+                            f"Expect param name {param} found in param group but is missing."
+                        )
+                    ordered_param_keys.append(param_to_key[param])
+            self.ordered_param_keys = ordered_param_keys
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        Return the state_dict of the optimzer. Instead of using number to index
+        Return the ``state_dict`` of the optimzer. Instead of using number to index
         parameters, we will use module fully qualifed name (FQN) as the key.
         """
         state_dict = self._optimizer.state_dict()
         param_groups = state_dict["param_groups"]
 
         ret_state = {
-            self.param_keys_order[st_key]: state_val
+            self.ordered_param_keys[st_key]: state_val
             for st_key, state_val in state_dict["state"].items()
         }
 
@@ -101,7 +110,7 @@ class NamedOptimizer(optim.Optimizer):
         for group in param_groups:
             param_keys = []
             for param in group["params"]:
-                param_keys.append(self.param_keys_order[param])
+                param_keys.append(self.ordered_param_keys[param])
             ret_group = {"params": sorted(param_keys)}
             for k, v in group.items():
                 if k != "params":
@@ -109,12 +118,6 @@ class NamedOptimizer(optim.Optimizer):
             ret_groups.append(ret_group)
 
         return {"state": ret_state, "param_groups": ret_groups}
-
-    def register_state_dict_pre(self):
-        raise NotImplementedError("register_state_dict_pre not supported yet and might be implemented soon.")
-
-    def register_state_dict_post(self):
-        raise NotImplementedError("register_state_dict_post not supported yet and might be implemented soon.")
 
     def step(self):
         """
@@ -128,43 +131,49 @@ class NamedOptimizer(optim.Optimizer):
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
         This public function defines the default behavior to load a state_dict
-        for named optimizer.
+        for ``_NamedOptimizer``.
 
         Sample Code
         ```
             my_model = MyModule()
-            optimizer = NamedOptimizer(my_model.named_parameters(), Adagrad)
+            optimizer = _NamedOptimizer(my_model.named_parameters(), Adagrad)
             ...
 
             optim_state_dict = optimizer.state_dict()
             ...
-
-            fs_storage_loader = torch.distributed.FileSystemLoader("/checkpoint/1")
-            torch.distributed.load_state_dict(
-                state_dict=optim_state_dict,
-                storage_reader=fs_storage_loader,
-            )
+            ...
 
             optimizer.load_state_dict(optim_state_dict)
             ...
         ```
         Args:
             state_dict (Dict[str, Any]) : A ``state_dict`` to load into the optimizer.
-                Note that this state dict update is performed in places.
+                Note that this state dict update is performed in place.
+
+        .. note:: PyTorch is using lazy init to initialize the optim states.
+            So it is possible that there is no optim state when user call
+            ``load_state_dict`` and for ``_NamedOptimizer`` we make it stricter
+            that users can only call ``load_state_dict`` after the state is initialized.
+            By doing this, we can validate the optim ``state_dict`` to be loaded.
         """
-        # TODO: Need to handle the case when self._optimizer has not been initialized.
         new_state_dict = self._optimizer.state_dict()
         state = state_dict["state"]
         new_state = new_state_dict["state"]
+        if len(new_state) == 0:
+            raise ValueError(
+                "Expects the optim to be initialized before load but found not initialized."
+            )
 
         # Load state of state_dict
         if len(new_state) != len(state):
             raise ValueError(
                 f"Expects equal length as {len(new_state)} in `state_dict` state length but found {len(state)}."
             )
-        for idx, param_key in enumerate(self.param_keys_order):
+        for idx, param_key in enumerate(self.ordered_param_keys):
             if param_key not in state.keys():
-                raise ValueError(f"Expect {param_key} as a parameter in `state_dict` state but not found.")
+                raise ValueError(
+                    f"Expect {param_key} as a parameter in `state_dict` state but not found."
+                )
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
                     f"Expects equal length as {len(new_state[idx])} for parameter {param_key} but found: {len(state[param_key])}"
@@ -213,11 +222,13 @@ class NamedOptimizer(optim.Optimizer):
         for new_group in new_param_groups:
             param_keys = []
             for param_key in new_group["params"]:
-                param_keys.append(self.param_keys_order[param_key])  # type: ignore[call-overload]
+                param_keys.append(self.ordered_param_keys[param_key])  # type: ignore[call-overload]
             new_group_map[_gen_param_group_key(param_keys)] = new_group
         for group_key, new_group in new_group_map.items():
             if group_key not in src_group_map:
-                raise ValueError(f"Expects group {group_key} to be in `state_dict` but is missing")
+                raise ValueError(
+                    f"Expects group {group_key} to be in `state_dict` but is missing"
+                )
             src_group = src_group_map[group_key]
             if len(src_group) != len(new_group):
                 raise ValueError(
@@ -225,7 +236,9 @@ class NamedOptimizer(optim.Optimizer):
                 )
             for k in src_group:
                 if k not in new_group:
-                    raise ValueError(f"Expects group key {k} to be in group {group_key} in `state_dict` but is missing.")
+                    raise ValueError(
+                        f"Expects group key {k} to be in group {group_key} in `state_dict` but is missing."
+                    )
                 if k != "params":
                     new_group[k] = deepcopy(src_group[k])
 
@@ -233,12 +246,13 @@ class NamedOptimizer(optim.Optimizer):
 
     # pyre-ignore [2]
     def add_param_group(self, param_group: Any) -> None:
-        raise NotImplementedError("add_param_group not supported yet and might be implemented soon.")
+        raise NotImplementedError(
+            "add_param_group not supported yet and might be implemented soon."
+        )
 
 
 def _gen_param_group_key(param_keys: List[str]) -> str:
     """
     Concatenate all param keys as a unique indentifier for one param group.
     """
-
     return "/".join(sorted(param_keys))
