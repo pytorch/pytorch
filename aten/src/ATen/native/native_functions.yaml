@@ -1373,6 +1373,7 @@
 - func: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   variants: function, method
   structured_delegate: clamp.Tensor_out
+  tags: pointwise
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1384,6 +1385,7 @@
 - func: clamp_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp.Tensor_out
+  tags: pointwise
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1402,6 +1404,7 @@
   dispatch:
     CPU, CUDA: clamp_Tensor_out
     MPS: clamp_Tensor_out_mps
+  tags: pointwise
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1416,10 +1419,12 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: clamp_max.out
+  tags: pointwise
 
 - func: clamp_max_.Tensor(Tensor(a!) self, Tensor max) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp_max.Tensor_out
+  tags: pointwise
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1450,10 +1455,12 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: clamp_min.out
+  tags: pointwise
 
 - func: clamp_min_.Tensor(Tensor(a!) self, Tensor min) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp_min.Tensor_out
+  tags: pointwise
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9221,16 +9228,18 @@
   dispatch:
     CPU, CUDA: maximum_out
     MPS: maximum_out_mps
+  tags: pointwise
 
 # binary max, alias of maximum
 # NOTE: max is not an alias for maximum, since there is also unary max
-  tags: pointwise
 - func: max.other(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9251,16 +9260,18 @@
   dispatch:
     CPU, CUDA: minimum_out
     MPS: minimum_out_mps
+  tags: pointwise
 
 # binary min, alias for minimum
 # NOTE: min is not an alias for minimum, since there is also unary min
-  tags: pointwise
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: min.other(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
@@ -9470,6 +9481,7 @@
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
+
 
 - func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: function, method
@@ -11964,6 +11976,7 @@
   dispatch:
     SparseCPU, SparseCUDA: isposinf_sparse
     SparseCsrCPU, SparseCsrCUDA: isposinf_sparse_csr
+  tags: pointwise
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11972,6 +11985,7 @@
     CPU, CUDA: isposinf_out
     SparseCPU, SparseCUDA: isposinf_sparse_out
     SparseCsrCPU, SparseCsrCUDA: isposinf_sparse_csr_out
+  tags: pointwise
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
@@ -11979,6 +11993,7 @@
   dispatch:
     SparseCPU, SparseCUDA: isneginf_sparse
     SparseCsrCPU, SparseCsrCUDA: isneginf_sparse_csr
+  tags: pointwise
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11987,6 +12002,7 @@
     CPU, CUDA: isneginf_out
     SparseCPU, SparseCUDA: isneginf_sparse_out
     SparseCsrCPU, SparseCsrCUDA: isneginf_sparse_csr_out
+  tags: pointwise
 
 # NOTE [_add_batch_dim and _remove_batch_dim]
 # _add_batch_dim and _remove_batch_dim are meant to be used in the implementation
