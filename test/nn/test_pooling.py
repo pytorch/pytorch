@@ -415,7 +415,7 @@ class TestPoolingNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_samples(self, device):
-        samples = torch.rand([0, 16, 2], dtype=torch.float32)
+        samples = torch.rand([0, 16, 2], device=device)
         mod = nn.FractionalMaxPool2d([2, 2], output_size=[1, 1], _random_samples=samples)
         inp = torch.randn([0, 16, 32, 32], device=device)
         out = mod(inp)
@@ -427,7 +427,7 @@ class TestPoolingNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_samples(self, device):
-        samples = torch.rand([0, 16, 3], dtype=torch.float32)
+        samples = torch.rand([0, 16, 3], device=device)
         mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[1, 1, 1], _random_samples=samples)
         inp = torch.randn([0, 16, 50, 32, 32], device=device)
         out = mod(inp)
