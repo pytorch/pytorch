@@ -101,7 +101,12 @@ Tensor max_pool1d_impl(
   const int64_t DJ = dilation[0];
 
   const int64_t OW = pooling_output_shape(IW, KW, PJ, SJ, DJ, ceil_mode);
-  TORCH_CHECK(OW >= 0, "max_pool1d() Invalid computed output size: ", OW);
+  TORCH_CHECK(OW >= 0,
+              "Given input size: (",
+              NB, "x", NC, "x", IW, "). ",
+              "Calculated output size: (",
+              NB, "x", NC, "x", OW, "). ",
+              "Output size is too small");
   Tensor output = at::empty({NB, NC, OW}, self.options());
 
   PoolingParams1D params{NB, NC, IW, OW, KW, SJ, PJ, DJ};
