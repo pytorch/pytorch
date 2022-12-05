@@ -14,7 +14,6 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -250,8 +249,6 @@ class TestFSDPRuntime(FSDPTest):
                 optim.step()
             self.assertEqual(losses[0], losses[1])
 
-
-instantiate_parametrized_tests(TestFSDPInitialization)
 
 if __name__ == "__main__":
     run_tests()
