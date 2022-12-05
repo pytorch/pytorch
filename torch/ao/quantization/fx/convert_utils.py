@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional, Set, Tuple, Type
 import warnings
 import torch
+import torch.ao.quantization.quantize_fx
 from torch.fx import GraphModule
 from torch.fx.graph import (
     Argument,

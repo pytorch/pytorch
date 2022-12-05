@@ -33,6 +33,8 @@ from ..utils import (
     _parent_name,
     is_per_channel,
     get_qparam_dict,
+    to_underlying_dtype,
+    weight_is_quantized,
 )
 # importing the lib so that the quantized_decomposed ops are registered
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
