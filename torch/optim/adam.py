@@ -165,6 +165,60 @@ class Adam(Optimizer):
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
 
+    def _init_group(
+        self,
+        group,
+        grad_scaler,
+        params_with_grad,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps
+    ):
+
+        grad_scale = None
+        found_inf = None
+        if group['fused'] and grad_scaler is not None:
+            grad_scale = grad_scaler._get_scale_async()
+            device = grad_scale.device
+            grad_scale = _MultiDeviceReplicator(grad_scale)
+            found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
+
+        for p in group['params']:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # Lazy state initialization
+                if len(state) == 0:
+                    state['step'] = (
+                        torch.zeros((1,), dtype=torch.float, device=p.device)
+                        if self.defaults['capturable'] or self.defaults['fused']
+                        else torch.tensor(0.)
+                    )
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if group['amsgrad']:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
+
+                if group['amsgrad']:
+                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+                if group['differentiable'] and state['step'].requires_grad:
+                    raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
+                state_steps.append(state['step'])
+
+        return grad_scale, found_inf
+
     @_use_grad_for_differentiable
     def step(self, closure=None, *, grad_scaler=None):
         """Performs a single optimization step.
@@ -191,45 +245,15 @@ class Adam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            grad_scale = None
-            found_inf = None
-            if group['fused'] and grad_scaler is not None:
-                grad_scale = grad_scaler._get_scale_async()
-                device = grad_scale.device
-                grad_scale = _MultiDeviceReplicator(grad_scale)
-                found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
-
-            for p in group['params']:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-                    # Lazy state initialization
-                    if len(state) == 0:
-                        state['step'] = (
-                            torch.zeros((1,), dtype=torch.float, device=p.device)
-                            if self.defaults['capturable'] or self.defaults['fused']
-                            else torch.tensor(0.)
-                        )
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        if group['amsgrad']:
-                            # Maintains max of all exp. moving avg. of sq. grad. values
-                            state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                    exp_avgs.append(state['exp_avg'])
-                    exp_avg_sqs.append(state['exp_avg_sq'])
-
-                    if group['amsgrad']:
-                        max_exp_avg_sqs.append(state['max_exp_avg_sq'])
-                    if group['differentiable'] and state['step'].requires_grad:
-                        raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
-                    state_steps.append(state['step'])
+            grad_scale, found_inf = self._init_group(
+                group,
+                grad_scaler,
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps)
 
             adam(params_with_grad,
                  grads,
@@ -410,6 +434,7 @@ def _single_tensor_adam(params: List[Tensor],
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
             param.addcdiv_(exp_avg, denom, value=-step_size)
+
 
 
 def _multi_tensor_adam(params: List[Tensor],

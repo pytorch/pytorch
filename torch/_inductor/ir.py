@@ -190,10 +190,24 @@ class ModularIndexing(sympy.Function):
 
         if isinstance(base, sympy.Add):
             new_terms = []
+            all_positive = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
-                    new_terms.append(term)
-            if len(new_terms) != len(base.args):
+                    if (isinstance(term, sympy.Integer) and term < 0) or (
+                        isinstance(term, sympy.Mul)
+                        and isinstance(term.args[0], sympy.Integer)
+                        and term.args[0] < 0
+                    ):
+                        # workaround for https://github.com/openai/triton/issues/619,
+                        # if there are negative terms, // produces wrong result
+                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # this optimization would become valid
+                        all_positive = False
+                        break
+                    else:
+                        new_terms.append(term)
+
+            if len(new_terms) != len(base.args) and all_positive:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
         if isinstance(base, IndexingDiv):
@@ -2985,7 +2999,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
-            aten.upsample_bilinear2d.default,
+            aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
