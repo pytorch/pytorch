@@ -5275,6 +5275,41 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_buffer_autotune(self):
+            def foo(x, y, z):
+                a = x @ y
+                return a.unsqueeze(0).unsqueeze(0) + z
+
+            x = torch.zeros(5, 5, device="cuda")
+            y = torch.zeros(5, 5, device="cuda")
+            z = torch.zeros(1, 1, 5, 5, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            self.common(
+                foo,
+                (x, y, z),
+                check_lowp=False,
+            )
+
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
                 def __init__(self, k: int, n: int):
@@ -5584,6 +5619,7 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
+                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
@@ -5694,7 +5730,7 @@ if HAS_CUDA:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from functorch._src.aot_autograd import Interpreter
+                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
 

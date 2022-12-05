@@ -32,10 +32,10 @@ from functorch import (
     jvp, make_functional, make_functional_with_buffers,
     combine_state_for_ensemble, make_fx
 )
-from functorch._src.make_functional import (
+from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
+from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
@@ -988,7 +988,7 @@ class TestAutogradFunction(TestCase):
                 return x, y
 
             @staticmethod
-            def setup_context(ctx, outputs, x, y):
+            def setup_context(ctx, inputs, outputs):
                 ctx.set_materialize_grads(False)
 
             @staticmethod
@@ -1014,7 +1014,7 @@ class TestAutogradFunction(TestCase):
                 return x * y
 
             @staticmethod
-            def setup_context(ctx, outputs, x, y):
+            def setup_context(ctx, inputs, outputs):
                 return
 
             @staticmethod
@@ -1028,6 +1028,60 @@ class TestAutogradFunction(TestCase):
         # grad differentiates w.r.t. arg 0 by default
         grad(A.apply)(x, y)
         grad(grad(A.apply))(x, y)
+
+    def _get_NumpyCubeNotComposable(self):
+        class NumpyCubeNotComposable(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = input.cpu().numpy()
+                return torch.tensor(input_np ** 3, device=input.device), input_np
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                ctx.input_np = outputs[1]
+                ctx.device = inputs[0].device
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad_output, grad_saved):
+                result_np = 3 * (ctx.input_np ** 2)
+                return torch.tensor(result_np, device=ctx.device)
+
+        return NumpyCubeNotComposable
+
+    def test_once_differentiable_autograd_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        def f(x):
+            y, _ = NumpyCubeNotComposable.apply(x)
+            return y
+
+        # regular autograd x vjp
+        x = torch.randn([], requires_grad=True, device=device)
+        grad_y = torch.randn_like(x, requires_grad=True)
+        _, vjp_fn = vjp(f, x)
+        gx, = vjp_fn(grad_y)
+
+        with self.assertRaisesRegex(RuntimeError, "marked with @once_differentiable"):
+            gx.backward()
+
+    # TODO: support torch.autograd.function.once_differentiable
+    # (or, if impossible, figure out how to raise a nice error)
+    # https://github.com/pytorch/pytorch/issues/90224
+    @unittest.expectedFailure
+    def test_once_differentiable_grad_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
+        # grad x vjp
+        x = torch.randn([], device=device)
+        grad_y = torch.randn_like(x)
+
+        def h(x, grad_y):
+            _, vjp_fn = vjp(f, x)
+            gx, = vjp_fn(grad_y)
+            return gx
+
+        grad(h, argnums=(0, 1))(x, grad_y)
 
 
 class TestAutogradFunctionVmapAPI(TestCase):
