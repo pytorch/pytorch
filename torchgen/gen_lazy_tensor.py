@@ -445,7 +445,6 @@ def run_gen_lazy_tensor(
     # The registration will lazily happen when init_ts_backend is called.
     gen_dispatchkey_nativefunc_headers(
         fm,
-        class_name,
         cpp_namespace,
         backend_indices,
         grouped_native_functions,
@@ -458,6 +457,8 @@ def run_gen_lazy_tensor(
     for dispatch_key in (
         [backend_key] if autograd_key is None else [backend_key, autograd_key]
     ):
+        class_name = backend_indices[dispatch_key].native_function_class_name()
+        assert class_name is not None
         gen_dispatcher_registrations(
             fm,
             output_dir,

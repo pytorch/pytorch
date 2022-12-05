@@ -191,60 +191,6 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
         assert autograd_key not in backend_indices
         backend_indices[autograd_key] = autograd_idx
 
-    for g in grouped_native_functions:
-        if isinstance(g, NativeFunction):
-            forward_kernels = (
-                []
-                if backend_key is None
-                else [
-                    m
-                    for m in [backend_indices[backend_key].get_kernel(g)]
-                    if m is not None
-                ]
-            )
-            backward_kernels = (
-                []
-                if autograd_key is None
-                else [
-                    m
-                    for m in [backend_indices[autograd_key].get_kernel(g)]
-                    if m is not None
-                ]
-            )
-        else:
-            forward_kernels = (
-                []
-                if backend_key is None
-                else [
-                    m
-                    for m in [
-                        backend_indices[backend_key].get_kernel(f)
-                        for f in g.functions()
-                    ]
-                    if m is not None
-                ]
-            )
-            backward_kernels = (
-                []
-                if autograd_key is None
-                else [
-                    m
-                    for m in [
-                        backend_indices[autograd_key].get_kernel(f)
-                        for f in g.functions()
-                    ]
-                    if m is not None
-                ]
-            )
-
-        forward_kernels = [f for f in forward_kernels if f is not None]
-        backward_kernels = [f for f in backward_kernels if f is not None]
-        assert (
-            len(forward_kernels) == 0 or len(backward_kernels) == 0
-        ), f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
-autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! \
-{forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
-
     return ParsedExternalYaml(
         backend_key, autograd_key, class_name, cpp_namespace, backend_indices
     )
@@ -270,34 +216,37 @@ def error_on_missing_kernels(
     if full_codegen is None:
         full_codegen = []
 
-    indices = [backend_indices[backend_key].index] + (
-        [] if autograd_key is None else [backend_indices[autograd_key].index]
-    )
     # Quick mapping from each OperatorName used by the external backend
     # to its backend kernel name
-    expected_backend_op_names: Dict[OperatorName, str] = dict(
-        list(
-            concatMap(
-                lambda index: [
-                    (op_name, metadata.kernel) for op_name, metadata in index.items()
-                ],
-                indices,
-            )
-        )
-    )
     expected_backend_native_funcs: List[NativeFunction] = [
         f
         for f in native_functions
-        if f.func.name in expected_backend_op_names.keys()
+        if f.func.name in backend_indices[backend_key].index.keys()
         and f.func.name not in full_codegen
     ]
+    expected_autograd_native_funcs: List[NativeFunction] = [] if autograd_key is None else [
+        f
+        for f in native_functions
+        if f.func.name in backend_indices[autograd_key].index.keys()
+        and f.func.name not in full_codegen
+    ]
+
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(
         list
     )
     for native_f in expected_backend_native_funcs:
         expected_backend_kernel_name_counts[
-            expected_backend_op_names[native_f.func.name]
+            backend_indices[backend_key].index[native_f.func.name].kernel
         ].append(native_f)
+
+    expected_autograd_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(
+        list
+    )
+    if autograd_key is not None:
+        for native_f in expected_autograd_native_funcs:
+            expected_autograd_kernel_name_counts[
+                backend_indices[autograd_key].index[native_f.func.name].kernel
+            ].append(native_f)
 
     # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
     # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
@@ -317,7 +266,10 @@ def error_on_missing_kernels(
 
     missing_kernels_err_msg = ""
     for expected_name, funcs in expected_backend_kernel_name_counts.items():
-        expected_overload_count = len(funcs)
+        expected_backend_overload_count = len(funcs)
+        expected_autograd_overload_count = len(expected_autograd_kernel_name_counts[expected_name])
+        expected_overload_count = expected_backend_overload_count + expected_autograd_overload_count
+
         actual_overload_count = actual_backend_kernel_name_counts[expected_name]
         if expected_overload_count != actual_overload_count:
 
@@ -357,7 +309,6 @@ def main() -> None:
 
 def gen_dispatchkey_nativefunc_headers(
     fm: FileManager,
-    class_name: str,
     cpp_namespace: str,
     backend_indices: Dict[DispatchKey, BackendIndex],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
@@ -365,7 +316,6 @@ def gen_dispatchkey_nativefunc_headers(
     autograd_dispatch_key: Optional[DispatchKey],
     backend_name: str = "",
 ) -> None:
-    assert class_name is not None
     generated_comment = (
         "Autogenerated file by gen_backend_stubs.py. Do not edit directly!"
     )
@@ -401,19 +351,25 @@ def gen_dispatchkey_nativefunc_headers(
     )
 
     ns_helper = NamespaceHelper(cpp_namespace)
-    fm.write_with_template(
-        f"{backend_dispatch_key}NativeFunctions.h",
-        "DispatchKeyNativeFunctions.h",
-        lambda: {
-            "generated_comment": generated_comment,
-            "namespace_prologue": ns_helper.prologue,
-            "class_name": class_name,
-            "namespace_epilogue": ns_helper.epilogue,
-            "dispatch_declarations": backend_declarations + autograd_declarations,
-            "BackendName": backend_name,
-            "DispatchKey": backend_dispatch_key,
-        },
-    )
+    for dispatch_key in (
+        [backend_dispatch_key] if autograd_dispatch_key is None else [backend_dispatch_key, autograd_dispatch_key]
+    ):
+        class_name = backend_indices[dispatch_key].native_function_class_name()
+        assert class_name is not None
+        declarations = autograd_declarations if dispatch_key == autograd_dispatch_key else backend_declarations
+        fm.write_with_template(
+            f"{dispatch_key}NativeFunctions.h",
+            "DispatchKeyNativeFunctions.h",
+            lambda: {
+                "generated_comment": generated_comment,
+                "namespace_prologue": ns_helper.prologue,
+                "class_name": class_name,
+                "namespace_epilogue": ns_helper.epilogue,
+                "dispatch_declarations": declarations,
+                "BackendName": backend_name,
+                "DispatchKey": backend_dispatch_key,
+            },
+        )
 
 
 def gen_dispatcher_registrations(
@@ -589,7 +545,6 @@ def run(
 
     gen_dispatchkey_nativefunc_headers(
         fm,
-        class_name,
         cpp_namespace,
         backend_indices,
         grouped_native_functions,
