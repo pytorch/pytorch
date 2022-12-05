@@ -12,17 +12,44 @@
 #undef USE_KINETO
 #endif
 
-#include <ActivityType.h>
-
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/api.h>
 
 #ifdef USE_KINETO
+#include <ActivityType.h>
+
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
 class GenericTraceActivity;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
+} // namespace libkineto
+
+#else
+namespace libkineto {
+// Should match https://github.com/pytorch/kineto/blob/main/libkineto/include/ActivityType.h
+enum class ActivityType {
+    // Activity types enabled by default
+    CPU_OP = 0, // cpu side ops
+    USER_ANNOTATION,
+    GPU_USER_ANNOTATION,
+    GPU_MEMCPY,
+    GPU_MEMSET,
+    CONCURRENT_KERNEL, // on-device kernels
+    EXTERNAL_CORRELATION,
+    CUDA_RUNTIME, // host side cuda runtime events
+    CPU_INSTANT_EVENT, // host side point-like events
+    PYTHON_FUNCTION,
+    OVERHEAD, // CUPTI induced overhead events sampled from its overhead API.
+
+    // Optional Activity types
+    GLOW_RUNTIME, // host side glow runtime events
+    CUDA_PROFILER_RANGE, // CUPTI Profiler range for performance metrics
+    HPU_OP, // HPU host side runtime event
+
+    ENUM_COUNT, // This is to add buffer and not used for any profiling logic. Add your new type before it.
+    OPTIONAL_ACTIVITY_TYPE_START = GLOW_RUNTIME,
+};
 } // namespace libkineto
 #endif
 
