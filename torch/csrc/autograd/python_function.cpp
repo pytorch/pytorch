@@ -851,7 +851,8 @@ THPObjectPtr make_ctx_input_output_tuple(
   Py_INCREF(unpacked_input.input_tuple.get());
   Py_INCREF(outputs);
   PyTuple_SET_ITEM(result.get(), 0, (PyObject*)ctx);
-  PyTuple_SET_ITEM(result.get(), 1, (PyObject*)unpacked_input.input_tuple.get());
+  PyTuple_SET_ITEM(
+      result.get(), 1, (PyObject*)unpacked_input.input_tuple.get());
   PyTuple_SET_ITEM(result.get(), 2, (PyObject*)outputs);
   return result;
 }
