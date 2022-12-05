@@ -52,7 +52,7 @@ _InputKwargsType = Mapping[str, Any]
 class OnnxBackend(enum.Enum):
     """Enum class for ONNX backend used for export verification."""
 
-    ONNX = "ONNXReferenceEvaluator"
+    REFERENCE = "ONNXReferenceEvaluator"
     ONNX_RUNTIME_CPU = "CPUExecutionProvider"
     ONNX_RUNTIME_CUDA = "CUDAExecutionProvider"
 
@@ -85,15 +85,15 @@ class VerificationOptions:
             It should be a float of value between 0.0 and 1.0.
     """
 
-    flatten: bool = dataclasses.field(default=True)
-    ignore_none: bool = dataclasses.field(default=True)
-    check_shape: bool = dataclasses.field(default=True)
-    check_dtype: bool = dataclasses.field(default=True)
-    backend: OnnxBackend = dataclasses.field(default=OnnxBackend.ONNX_RUNTIME_CPU)
-    rtol: float = dataclasses.field(default=1e-3)
-    atol: float = dataclasses.field(default=1e-7)
-    remained_onnx_input_idx: Optional[Sequence[int]] = dataclasses.field(default=None)
-    acceptable_error_percentage: Optional[float] = dataclasses.field(default=None)
+    flatten: bool = True
+    ignore_none: bool = True
+    check_shape: bool = True
+    check_dtype: bool = True
+    backend: OnnxBackend = OnnxBackend.ONNX_RUNTIME_CPU
+    rtol: float = 1e-3
+    atol: float = 1e-7
+    remained_onnx_input_idx: Optional[Sequence[int]] = None
+    acceptable_error_percentage: Optional[float] = None
 
 
 @_beartype.beartype
@@ -192,9 +192,6 @@ def _ort_session(
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
     session_options.log_severity_level = 3
-    session_options.graph_optimization_level = (
-        onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-    )
     ort_session = onnxruntime.InferenceSession(
         model if isinstance(model, str) else model.getvalue(),
         session_options,
@@ -222,7 +219,7 @@ def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
 
 @_beartype.beartype
 def _onnx_backend_session(model: Union[str, io.BytesIO], backend: OnnxBackend):
-    if backend == OnnxBackend.ONNX:
+    if backend == OnnxBackend.REFERENCE:
         onnx_session = _onnx_reference_evaluator_session(model)
     elif backend in {OnnxBackend.ONNX_RUNTIME_CPU, OnnxBackend.ONNX_RUNTIME_CUDA}:
         onnx_session = _ort_session(model, (backend.value,))
@@ -1538,7 +1535,7 @@ def _all_nodes(nodes: Collection[torch.Node]) -> Set[torch.Node]:
     all_nodes = set(nodes)
     for n in nodes:
         for b in n.blocks():
-            all_nodes.update(b.nodes())
+            all_nodes.update(_all_nodes(list(b.nodes())))
     return all_nodes
 
 
