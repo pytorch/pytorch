@@ -93,7 +93,8 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
 
     if backend == 'onednn':
-        qconfig_mapping.set_object_type(torch.nn.LeakyReLU, qconfig) \
+        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig) \
+                       .set_object_type(torch.nn.LeakyReLU, qconfig) \
                        .set_object_type(torch.nn.functional.leaky_relu, qconfig)
 
     # Use special observers for ops with fixed qparams
