@@ -49,8 +49,7 @@ jobs:
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}  
             
-    Explore-GitHub-Actions3:
- 
+  Explore-GitHub-Actions3:
     runs-on: ubuntu-latest
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
