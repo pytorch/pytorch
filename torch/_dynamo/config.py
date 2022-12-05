@@ -70,6 +70,9 @@ dynamic_propagation = True
 # run FX normalization passes in optimizer
 normalize_ir = False
 
+# This feature doesn't really work.  We offer this flag for experimental
+# purposes / if you want to help us build out support.
+#
 # torchdynamo has very limited support for tensor subclasses that implement
 # __torch_function__.  Our current support is limited to tensor subclasses
 # that DO NOT store metadata on the tensor (in general, dynamo does not
@@ -80,7 +83,9 @@ normalize_ir = False
 # so it is up to you to ensure that your subclass is well behaved.  See also
 # https://github.com/pytorch/torchdynamo/issues/1948
 #
-# We do NOT currently support __torch_dispatch__.
+# We do NOT currently support __torch_dispatch__.  The implementation is
+# currently buggy, the main show stopper for nontrivial use is
+# https://github.com/pytorch/torchdynamo/issues/1952
 traceable_tensor_subclasses = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
