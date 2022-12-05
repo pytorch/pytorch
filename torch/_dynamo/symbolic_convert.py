@@ -1115,10 +1115,20 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
+                recursively_contains=new_rec_contains,
+                regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
         )
@@ -1487,7 +1497,7 @@ class InstructionTranslatorBase(object):
         self.current_instruction: Instruction = create_instruction("NOP")
         self.next_instruction: typing.Optional[Instruction] = None
         self.block_stack: List[BlockStackEntry] = []
-        self.lineno: int = code_options.get("co_firstlineno")
+        self.lineno: int = code_options["co_firstlineno"]
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
