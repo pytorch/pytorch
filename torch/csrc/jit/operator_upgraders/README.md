@@ -177,7 +177,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
             except Exception as e:
                 self.skipTest("Failed to load fixture!")
 
-            # Step4. Load the new model and it won't apply the ugprader
+            # Step4. Load the new model and it won't apply the upgrader
             current_mobile_module_float = self._save_load_mobile_module(MyModuleFloat)
             current_server_module_float = self._save_load_module(MyModuleFloat)
 
@@ -226,7 +226,7 @@ def foo(x, y, z=100):
     return x, y, z
 ```
 
-2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch Github](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
+2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch GitHub](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
 
     - Adding new default argument:
     - Adding a new default argument not RIGHT BEFORE the out arguments which can be 0 or more.

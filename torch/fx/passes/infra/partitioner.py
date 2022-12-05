@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Sequence, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -35,21 +35,23 @@ class CapabilityBasedPartitioner:
     def __init__(self,
                  graph_module: GraphModule,
                  operator_support: OperatorSupportBase,
-                 allows_single_node_partition: bool = False
+                 allows_single_node_partition: bool = False,
+                 non_compute_ops: Optional[Sequence[str]] = None,
+                 allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
                  ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
+        self.non_compute_ops = non_compute_ops if non_compute_ops is not None else []
+        self.allowed_single_node_partition_ops = (
+            allowed_single_node_partition_ops
+            if allowed_single_node_partition_ops is not None
+            else []
+        )
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
             self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
-            and
-            # reject 'getitem' node since they are special cased in partitioning.
-            (
-                node.op != "call_function" or
-                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
-            )
         )
 
     def propose_partitions(self) -> List[Partition]:
@@ -66,6 +68,9 @@ class CapabilityBasedPartitioner:
             merged_nodes = copy(partitions_by_id[self_id].nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
+            # Note it's ok to use `set` here, since we are only query if a node
+            # has been visited. We are NEVER going to iterate on nodes inside
+            # the set.
             visited: Set[Node] = set()
 
             def dfs_find_cycle(node):
@@ -83,7 +88,7 @@ class CapabilityBasedPartitioner:
                     # dependencies after the fusion
                     for p_node in partitions_by_id[assignment[node]].nodes:
                         for user_node in p_node.users:
-                            if dfs_find_cycle(user_node):
+                            if user_node not in partitions_by_id[assignment[node]].nodes and dfs_find_cycle(user_node):
                                 return True
                 else:
                     for user_node in node.users:
@@ -110,13 +115,17 @@ class CapabilityBasedPartitioner:
 
             return True
 
-        def merge_single_node(node: Node, id: int):
-            assert node not in assignment
+        def merge_single_node(node: Node, id: Optional[int]):
+            if node in assignment:
+                partitions_by_id[assignment[node]].remove_node(node)
 
-            assignment[node] = id
-            if id not in partitions_by_id:
+            if id is None:
+                assignment.pop(node)
+            elif id not in partitions_by_id:
+                assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
+                assignment[node] = id
                 partitions_by_id[id].add_node(node)
 
         logger.debug("Proposing partitions...")
@@ -171,13 +180,17 @@ class CapabilityBasedPartitioner:
         # filter out single node partitions
         if not self.allows_single_node_partition:
             logger.debug("Filtering out single node partitions...")
-            non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
                     if node.op == "call_function" and \
                        _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
+                        compute_node_count += 1
+                    if node.op == "call_function" and \
+                       _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
                         compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
@@ -194,6 +207,62 @@ class CapabilityBasedPartitioner:
         logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
+
+    # remove non-compute-ops that sits at the boundary of a partition.
+    def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
+        non_compute_ops = set(self.non_compute_ops)
+
+        def is_non_compute_node(node: Node):
+            return node.op == "call_function" and \
+                _get_qualified_name(node.target) in non_compute_ops  # type: ignore[arg-type]
+
+        # cache transparent nodes
+        transparent_input_nodes: Dict[Node, bool] = {}
+        transparent_output_nodes: Dict[Node, bool] = {}
+
+        def is_transparent_input_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
+            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+                return True
+            if node in transparent_input_nodes:
+                return transparent_input_nodes[node]
+            if is_non_compute_node(node):
+                for input_n in node.all_input_nodes:
+                    if not is_transparent_input_node(input_n, partition, removed_nodes):
+                        transparent_input_nodes[node] = False
+                        return False
+                transparent_input_nodes[node] = True
+                return True
+            transparent_input_nodes[node] = False
+            return False
+
+        def is_transparent_output_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
+            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+                return True
+            if node in transparent_output_nodes:
+                return transparent_output_nodes[node]
+            if is_non_compute_node(node):
+                for output_n in node.users:
+                    if not is_transparent_output_node(output_n, partition, removed_nodes):
+                        transparent_output_nodes[node] = False
+                        return False
+                transparent_output_nodes[node] = True
+                return True
+            transparent_output_nodes[node] = False
+            return False
+
+        for partition in partitions:
+            # Note it's ok to use `set` here, since we are only query if a node
+            # has been removed. We are NEVER going to iterate on nodes inside
+            # the set.
+            remove_node: Set[Node] = set()
+            for node in partition.nodes:
+                if is_non_compute_node(node) and \
+                    (is_transparent_input_node(node, partition.nodes, remove_node) or
+                     is_transparent_output_node(node, partition.nodes, remove_node)):
+                    remove_node.add(node)
+
+            if len(remove_node) != 0:
+                partition.nodes = partition.nodes - remove_node
 
     def partition_and_fuse(self) -> GraphModule:
         partitions = self.propose_partitions()

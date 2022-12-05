@@ -4,6 +4,7 @@ import torch
 import torch.utils.bundled_inputs
 import io
 from typing import Dict, List, NamedTuple
+import unittest
 
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -28,12 +29,13 @@ class TestLiteScriptModule(TestCase):
         buffer.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer)  # Error here
         mobile_module_result = mobile_module(sample_input).a
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
 
 
+    @unittest.skip("T137512434")
     def test_typing_dict_with_namedtuple(self):
         class Foo(NamedTuple):
             id: torch.Tensor
@@ -91,7 +93,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -117,7 +119,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -136,7 +138,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -166,7 +168,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result.baz.di,
             mobile_module_result.baz.di
         )

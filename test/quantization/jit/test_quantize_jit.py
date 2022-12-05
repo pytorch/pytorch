@@ -73,7 +73,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
-from torch.testing._internal.common_utils import skipIfSlowGradcheckEnv
 
 from torch.jit._recursive import wrap_cpp_module
 
@@ -1626,7 +1625,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         torch.jit.save(model, b)
 
 
-@skipIfSlowGradcheckEnv
 class TestQuantizeJitOps(QuantizationTestCase):
     """Test graph mode post training static quantization works
     for individual ops end to end.

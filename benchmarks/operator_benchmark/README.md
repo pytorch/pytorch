@@ -374,7 +374,7 @@ unary_ops_list = op_bench.op_list(
 ```
 
 #### Part 2. Create Tensors and Add Computation
-In this example, both operators share the same input so we only need to implement one TorchBenchmakrBase subclass.
+In this example, both operators share the same input so we only need to implement one TorchBenchmarkBase subclass.
 Every new subclass is required to implement 3 methods:
 * `init` is used to create tensors and set the operator name and function. In this example, the parameters to `init` are `M`, `N`, and `op_func` which have been specified in the configurations.
 * `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.
