@@ -224,13 +224,23 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 memory_format in self.is_contiguous, **options
             )
-        elif name == "type" and self.dtype is not None and len(args) == 0:
+        elif (
+            name == "type"
+            and self.dtype is not None
+            and len(args) == 0
+            and isinstance(self.device, torch.device)
+        ):
             tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
                 0
             ]
-            constant_result = ConstantVariable(
-                f"torch.{tensortype.__name__}", **options
-            )
+            if self.device.type == "cuda":
+                constant_result = ConstantVariable(
+                    f"torch.cuda.{tensortype.__name__}", **options
+                )
+            else:
+                constant_result = ConstantVariable(
+                    f"torch.{tensortype.__name__}", **options
+                )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)

@@ -344,19 +344,16 @@ class Pair(abc.ABC):
             Pair._inputs_not_supported()
 
     def _fail(
-        self, type: Type[Exception], msg: str, *, id: Optional[Tuple[Any, ...]] = None
+        self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
     ) -> NoReturn:
         """Raises an :class:`ErrorMeta` from a given exception type and message and the stored id.
 
         .. warning::
 
-            Since this method uses instance attributes of :class:`Pair`, it should not be used before the
-            ``super().__init__(...)`` call in the constructor.
+            If you use this before the ``super().__init__(...)`` call in the constructor, you have to pass the ``id``
+            explicitly.
         """
-        if id is None and hasattr(self, "id"):
-            id = self.id
-
-        raise ErrorMeta(type, msg, id=id)
+        raise ErrorMeta(type, msg, id=self.id if not id and hasattr(self, "id") else id)
 
     @abc.abstractmethod
     def compare(self) -> None:
