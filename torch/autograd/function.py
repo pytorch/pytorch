@@ -520,7 +520,7 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
         elif isinstance(obj, dict):
             # We only accept primitive key types, so we needn't inspect them
             for o in obj.values():
-                yield from _iter(o)           
+                yield from _iter(o)
         elif allow_unknown:
             yield obj
         else:
