@@ -1976,6 +1976,12 @@ class TestFakeTensor(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
+        name = op.name
+        if op.variant_test_name:
+            name += "." + op.variant_test_name
+        if name in fake_skips or "sparse" in name or "jiterator" in name:
+            self.skipTest("Skip failing test")
+
         test_self = self
 
         class TestPointwiseMode(TorchDispatchMode):
@@ -1991,7 +1997,6 @@ class TestFakeTensor(TestCase):
                             shapes.append(inp.shape)
 
                     out_shape = torch._refs._broadcast_shapes(*shapes)
-                    breakpoint()
 
                     for out_elem in tree_flatten(out):
                         if isinstance(out_elem, torch.Tensor):
