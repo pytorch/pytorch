@@ -144,3 +144,11 @@ jobs:
         timeout-minutes: 120
         with:
           extra-delete-dir: /c/${{ github.run_id }}/build-results/
+      - name: Report Status
+        if: always()
+        uses: ravsamhq/notify-slack-action@v1
+        with:
+            status: ${{ job.status }}
+            notify_when: 'success'
+        env:
+            SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/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'
