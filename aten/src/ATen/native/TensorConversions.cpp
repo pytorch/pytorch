@@ -54,6 +54,8 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
+#include <iostream>
+
 namespace at {
 namespace native {
 
@@ -563,39 +565,59 @@ Tensor sparse_compressed_to_dense(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
 
-  // Guard upfront against hybrid tensors (causes segfault)
   auto batch_ndim = sparse_csr::numBatchDimensions(self);
 
-  TORCH_CHECK(
-      (self.dim() - batch_ndim) == 2,
-      "sparse_compressed_to_dense: Hybrid tensors are not supported");
+  if (self.layout() == kSparseCsr || self.layout() == kSparseCsc) {
+    Tensor compressed_indices;
+    Tensor plain_indices;
+    std::tie(compressed_indices, plain_indices) =
+        sparse_csr::getCompressedPlainIndices(self);
 
-  if (self.layout() == kSparseCsr) {
-    Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-    return dst.add_(self);
+    auto values = self.values();
+    Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
+
+    if (batch_ndim == 0) {
+      // Pad shape so we can treat 2-d like batched, we will squeeze out the
+      // phantom batch dim at the end
+      compressed_indices.unsqueeze_(0);
+      plain_indices.unsqueeze_(0);
+      values = values.unsqueeze_(0);
+      dense = dense.unsqueeze_(0);
+    }
+    if (batch_ndim > 0) {
+      // Flatten batch dims
+      compressed_indices = compressed_indices.flatten(0, batch_ndim - 1);
+      plain_indices = plain_indices.flatten(0, batch_ndim - 1);
+      values = values.flatten(0, batch_ndim - 1);
+      dense = dense.flatten(0, batch_ndim - 1);
+    }
+
+    // At this point everything has 3d shape either the batch dim was inserted,
+    // existed already or was flattened from multiple batch dims
+    auto n_batch = values.size(0);
+    // If we already had batch dim(s) and any of them were zero we can take the
+    // early exit.
+    if (n_batch == 0) {
+      return dense.reshape(self.sizes());
+    }
+
+    dense = dense.flatten(1, 2);
+    for (auto batch : c10::irange(n_batch)) {
+      Tensor batch_indices = at::_convert_indices_from_csr_to_coo(
+          compressed_indices[batch],
+          plain_indices[batch],
+          false,
+          self.layout() == kSparseCsc);
+      auto batch_row_indices = batch_indices.select(0, 0);
+      auto batch_col_indices = batch_indices.select(0, 1);
+
+      auto offsets = batch_col_indices + batch_row_indices * self.size(batch_ndim + 1);
+      dense[batch].index_add_(0, offsets, values[batch]);
+    }
+
+    return dense.reshape(self.sizes());
   }
-  // dense.add_ is not yet implemented for CSC.
-  // Once it is there, use add_ instead.
-  // It is easier to implement it like this for now,
-  // because add_ will be modified to work with
-  // dense dimensions once CSR/CSC support them.
-  if (self.layout() == kSparseCsc) {
-    const auto batch_ndim = self.ccol_indices().dim() - 1;
-    auto dst_transposed_sizes = self.sizes().vec();
-    std::swap(dst_transposed_sizes[batch_ndim], dst_transposed_sizes[batch_ndim + 1]);
-    // TODO: write a utility function, or use a transpose once view semantics are there
-    const auto to_transposed_csr = at::native::_sparse_csr_tensor_unsafe(
-        self.ccol_indices(),
-        self.row_indices(),
-        self.values(),
-        dst_transposed_sizes,
-        self.values().scalar_type(),
-        kSparseCsr,
-        self.values().device());
-    auto dst_transposed = at::zeros(dst_transposed_sizes, self.options().layout(kStrided));
-    dst_transposed.add_(to_transposed_csr);
-    return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
-  }
+
   if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
     Tensor compressed_indices;
     Tensor plain_indices;
