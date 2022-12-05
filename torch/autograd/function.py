@@ -516,13 +516,11 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif isinstance(obj, dict):
             # We only accept primitive key types, so we needn't inspect them
             for o in obj.values():
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif allow_unknown:
             yield obj
         else:
