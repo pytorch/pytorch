@@ -659,6 +659,7 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
+        *,
         current_tx=None,
     ):
         rv = super().create_proxy(
