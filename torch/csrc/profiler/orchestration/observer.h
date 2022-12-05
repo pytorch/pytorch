@@ -13,6 +13,7 @@ namespace impl {
 enum class C10_API_ENUM ActivityType {
   CPU = 0,
   CUDA, // CUDA kernels, runtime
+  HPU, // HPU kernels
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
