@@ -18634,7 +18634,7 @@
                 "path": "torch/ao/quantization/fx/fuse.py"
               },
               {
-                "path": "torch/ao/quantization/fx/fusion_patterns.py"
+                "path": "torch/ao/quantization/fx/fuse_handler.py"
               },
               {
                 "path": "torch/ao/quantization/fx/match_utils.py"
@@ -18646,7 +18646,7 @@
                 "path": "torch/ao/quantization/fx/prepare.py"
               },
               {
-                "path": "torch/ao/quantization/fx/quantization_patterns.py"
+                "path": "torch/ao/quantization/fx/quantize_handler.py"
               },
               {
                 "path": "torch/ao/quantization/qconfig.py"
