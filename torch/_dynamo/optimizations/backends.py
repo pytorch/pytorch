@@ -643,6 +643,8 @@ def tvm_compile_inner(
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
                 if not cuda:
+                    # meta_schedule needs num-cores to be specified
+                    # here we use the maximum core count
                     target = tvm.target.Target(
                         f"{llvm_target()} --num-cores {ms.utils.cpu_count(logical=False)}"
                     )
@@ -687,7 +689,7 @@ def tvm_compile_inner(
         def to_tvm_tensor(torch_tensor):
             """A helper function to transfer a torch.tensor to NDArray."""
             if torch_tensor.dtype == torch.bool:
-                # same reason as abpve, fallback to numpy conversion which
+                # same reason as above, fallback to numpy conversion which
                 # could introduce data copy overhead
                 return tvm.nd.array(torch_tensor.cpu().numpy())
             return tvm.nd.from_dlpack(torch_tensor)
