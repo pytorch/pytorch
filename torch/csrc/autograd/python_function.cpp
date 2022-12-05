@@ -840,23 +840,19 @@ THPObjectPtr make_ctx_input_tuple(
   return ctx_input_tuple;
 }
 
-THPObjectPtr make_ctx_output_input_tuple(
+THPObjectPtr make_ctx_input_output_tuple(
     THPFunction* ctx,
-    PyObject* outputs,
     const UnpackedInput& unpacked_input,
-    int64_t num_args) {
-  THPObjectPtr result(PyTuple_New(num_args + 2));
+    PyObject* outputs) {
+  THPObjectPtr result(PyTuple_New(3));
   if (!result)
     return {};
   Py_INCREF(ctx);
+  Py_INCREF(unpacked_input.input_tuple.get());
   Py_INCREF(outputs);
   PyTuple_SET_ITEM(result.get(), 0, (PyObject*)ctx);
-  PyTuple_SET_ITEM(result.get(), 1, (PyObject*)outputs);
-  for (const auto i : c10::irange(num_args)) {
-    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(result.get(), i + 2, arg);
-  }
+  PyTuple_SET_ITEM(result.get(), 1, (PyObject*)unpacked_input.input_tuple.get());
+  PyTuple_SET_ITEM(result.get(), 2, (PyObject*)outputs);
   return result;
 }
 
@@ -928,15 +924,16 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       if (!outputs) {
         return nullptr;
       }
-      auto ctx_output_input_tuple =
-          make_ctx_output_input_tuple(ctx, outputs, unpacked_input, num_args);
-      if (!ctx_output_input_tuple) {
+      // signature is setup_context(ctx, inputs, outputs)
+      auto ctx_input_output_tuple =
+          make_ctx_input_output_tuple(ctx, unpacked_input, outputs);
+      if (!ctx_input_output_tuple) {
         return nullptr;
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
       auto result =
-          PyObject_CallObject(setup_context_fn, ctx_output_input_tuple);
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
       if (!result) {
         return nullptr;
       }
