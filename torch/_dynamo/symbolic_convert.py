@@ -12,8 +12,8 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, List
 from collections.abc import Sized
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1498,7 +1498,7 @@ class InstructionTranslatorBase(object):
         self.current_instruction: Instruction = create_instruction("NOP")
         self.next_instruction: typing.Optional[Instruction] = None
         self.block_stack: List[BlockStackEntry] = []
-        self.lineno: int = code_options.get("co_firstlineno")
+        self.lineno: int = code_options["co_firstlineno"]
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
