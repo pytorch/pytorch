@@ -378,6 +378,7 @@ if(NOT INTERN_DISABLE_AUTOGRAD)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNonNativeIr.h"
+    "${TORCH_SRC_DIR}/csrc/lazy/generated/AutogradLazyNativeFunctions.h"
     "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
   )
 endif()

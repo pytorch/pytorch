@@ -224,12 +224,16 @@ def error_on_missing_kernels(
         if f.func.name in backend_indices[backend_key].index.keys()
         and f.func.name not in full_codegen
     ]
-    expected_autograd_native_funcs: List[NativeFunction] = [] if autograd_key is None else [
-        f
-        for f in native_functions
-        if f.func.name in backend_indices[autograd_key].index.keys()
-        and f.func.name not in full_codegen
-    ]
+    expected_autograd_native_funcs: List[NativeFunction] = (
+        []
+        if autograd_key is None
+        else [
+            f
+            for f in native_functions
+            if f.func.name in backend_indices[autograd_key].index.keys()
+            and f.func.name not in full_codegen
+        ]
+    )
 
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(
         list
@@ -267,8 +271,12 @@ def error_on_missing_kernels(
     missing_kernels_err_msg = ""
     for expected_name, funcs in expected_backend_kernel_name_counts.items():
         expected_backend_overload_count = len(funcs)
-        expected_autograd_overload_count = len(expected_autograd_kernel_name_counts[expected_name])
-        expected_overload_count = expected_backend_overload_count + expected_autograd_overload_count
+        expected_autograd_overload_count = len(
+            expected_autograd_kernel_name_counts[expected_name]
+        )
+        expected_overload_count = (
+            expected_backend_overload_count + expected_autograd_overload_count
+        )
 
         actual_overload_count = actual_backend_kernel_name_counts[expected_name]
         if expected_overload_count != actual_overload_count:
@@ -352,11 +360,17 @@ def gen_dispatchkey_nativefunc_headers(
 
     ns_helper = NamespaceHelper(cpp_namespace)
     for dispatch_key in (
-        [backend_dispatch_key] if autograd_dispatch_key is None else [backend_dispatch_key, autograd_dispatch_key]
+        [backend_dispatch_key]
+        if autograd_dispatch_key is None
+        else [backend_dispatch_key, autograd_dispatch_key]
     ):
         class_name = backend_indices[dispatch_key].native_function_class_name()
         assert class_name is not None
-        declarations = autograd_declarations if dispatch_key == autograd_dispatch_key else backend_declarations
+        declarations = (
+            autograd_declarations
+            if dispatch_key == autograd_dispatch_key
+            else backend_declarations
+        )
         fm.write_with_template(
             f"{dispatch_key}NativeFunctions.h",
             "DispatchKeyNativeFunctions.h",
@@ -390,6 +404,8 @@ def gen_dispatcher_registrations(
     headers = [
         f"{output_dir}/{backend_dispatch_key}NativeFunctions.h",
     ]
+    if "Autograd" in str(dispatch_key):
+        headers.append(f"{output_dir}/{dispatch_key}NativeFunctions.h")
     if build_in_tree:
         external_backend_headers_str = "\n".join(f"#include <{h}>" for h in headers)
     else:

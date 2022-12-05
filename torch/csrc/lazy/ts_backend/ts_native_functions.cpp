@@ -12,6 +12,7 @@
 #include <torch/csrc/lazy/core/shape_inference.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/generated/AutogradLazyNativeFunctions.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
@@ -323,7 +324,7 @@ at::Tensor& LazyNativeFunctions::fill_(
   return self;
 }
 
-at::Tensor LazyNativeFunctions::max_pool3d(
+at::Tensor AutogradLazyNativeFunctions::max_pool3d(
     const at::Tensor& self,
     at::IntArrayRef kernel_size,
     at::IntArrayRef stride,
@@ -554,15 +555,16 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
 
 // re-use the composite kernel from core, that way we don't need to provide a
 // backwards formula for native_group_norm
-std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
-    const at::Tensor& input,
-    const c10::optional<at::Tensor>& weight,
-    const c10::optional<at::Tensor>& bias,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    double eps) {
+std::tuple<Tensor, Tensor, Tensor> AutogradLazyNativeFunctions::
+    native_group_norm(
+        const at::Tensor& input,
+        const c10::optional<at::Tensor>& weight,
+        const c10::optional<at::Tensor>& bias,
+        int64_t N,
+        int64_t C,
+        int64_t HxW,
+        int64_t group,
+        double eps) {
   return at::native::math_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }

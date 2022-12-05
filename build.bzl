@@ -248,6 +248,7 @@ GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
     "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
+    "torch/csrc/lazy/generated/AutogradLazyNativeFunctions.h",
 ]
 
 _GENERATED_AUTOGRAD_PYTHON_CPP = [
