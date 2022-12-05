@@ -1422,6 +1422,20 @@ class TestAssertNotClose(TestCase):
         with self.assertRaisesRegex(AssertionError, "are close"):
             torch.testing.assert_not_close(actual, expected)
 
+class TestInt64Overflow(TestCase):
+    def test_guard(self):
+        with self.assertRaisesRegex(AssertionError, "FIXME"):
+            torch.testing.assert_close(
+                torch.tensor([(1 << 63) - 1], dtype=torch.int64),
+                torch.tensor([-1], dtype=torch.int64),
+            )
+
+    def test_ubsan(self):
+        a = torch.tensor([(1 << 63) - 1], dtype=torch.int64)
+        b = torch.tensor([-(1 << 63)], dtype=torch.int64)
+
+        self.assertEqual(abs(a - b), 0, atol=1, rtol=0)
+
 
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """
