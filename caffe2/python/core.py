@@ -640,7 +640,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                     assert(g1 == g2)
                     assert dev_1 == dev_2, (
                         "Unequal devices for sparse generators: "
-                        "{} and {}".format(dev1, dev2)
+                        "{} and {}".format(dev_1, dev_2)
                     )
                     assert(op1_i is None or op2_i is None)
                     assert(op1_v is None or op2_v is None)
