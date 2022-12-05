@@ -1,18 +1,13 @@
 name: GitHub Actions Demo
 run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
-on:
-  push:
-    branches:
-      - master
+on: [push]
 jobs:
-  Explore-GitHub-Actions:
+  Explore-GitHub-Actions1:
     runs-on: ubuntu-latest
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
       - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
       - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-      - name: Check out repository code
-        uses: actions/checkout@v3
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
       - name: List files in the repository
@@ -25,5 +20,31 @@ jobs:
         with:
             status: ${{ job.status }}
             notify_when: 'success'
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
+  Explore-GitHub-Actions2:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+      - name: List files in the repository
+        run: |
+          ls ${{ github.workspace }}
+      - run: echo "🍏 This job's status is ${{ job.status }}."
+      - name: Check
+        uses: actions/checkout@v1
+      - name: Try to fail
+        run: exit 1
+      - name: Print message if we don't fail
+      run: echo Should not get here
+      - name: Report Status   
+        if: always()
+        uses: ravsamhq/notify-slack-action@v1
+        with:
+            status: ${{ job.status }}
+            notify_when: 'failed'
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
