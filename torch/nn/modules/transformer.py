@@ -80,7 +80,7 @@ class Transformer(Module):
 
         self.d_model = d_model
         self.nhead = nhead
-
+        self.activation = activation
         self.batch_first = batch_first
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
@@ -189,15 +189,6 @@ class Transformer(Module):
             return self.decoder.layers[0].dropout.p
         elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
             return self.encoder.layers[0].dropout.p
-        else:
-            raise RuntimeError("Transformer has no official layers")
-
-    @ property
-    def activation(self):
-        if isinstance(self.decoder, TransformerDecoder) and self.num_decoder_layers > 0:
-            return self.decoder.layers[0].activation
-        elif isinstance(self.encoder, TransformerEncoder) and self.num_encoder_layers > 0:
-            return self.encoder.layers[0].activation
         else:
             raise RuntimeError("Transformer has no official layers")
 
