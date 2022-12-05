@@ -55,7 +55,7 @@ static void check_max_pool1d(
   if (stride.empty()) {
     stride = kernel_size;
   }
-  
+
   TORCH_CHECK(
       kernel_size[0] > 0,
       "max_pool1d() kernel_size must be greater than zero, but got ",
