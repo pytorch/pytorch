@@ -26,7 +26,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
+from .misc import AutocastModeVariable, NullContextVariable
 from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
@@ -163,8 +163,9 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
-            torch.is_tensor,
-            torch.overrides.is_tensor_like,
+            torch.cuda.is_available,
+            torch.nn.functional._Reduction.get_enum,
+            torch._utils._get_device_index,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
@@ -177,9 +178,9 @@ class TorchVariable(VariableTracker):
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
+            UserDefinedObjectVariable,
         )
 
-        # print("CALLING ON TORCH", self.value)
         from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
@@ -206,21 +207,26 @@ class TorchVariable(VariableTracker):
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
+        elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
+            assert len(args) == 1
+            if isinstance(args[0], TensorVariable) or (
+                self.value is torch.overrides.is_tensor_like
+                and isinstance(args[0], UserDefinedObjectVariable)
+                and hasattr(args[0].value, "__torch_function__")
+            ):
+                return ConstantVariable(True, **options)
+            else:
+                return ConstantVariable(False, **options)
         elif (
             self.value
             in (
-                torch.is_tensor,
                 torch.is_floating_point,
-                torch.is_complex,
-                torch.overrides.is_tensor_like,
                 torch.is_complex,
             )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
         ):
-            if self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
-                return ConstantVariable(True, **options)
-            elif self.value is torch.is_floating_point:
+            if self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
             elif self.value is torch.is_complex:
                 return ConstantVariable(args[0].dtype.is_complex, **options)
@@ -289,7 +295,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -297,7 +303,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.record_function,
         ):
             log.warning("Profiler will be ignored")
-            return ProfilerContextWrapperVariable(**options)
+            return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
@@ -331,21 +337,18 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1
             assert isinstance(args[0], TensorVariable)
 
-            if config.fake_tensor_propagation:
-                unimplemented(
-                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-                )
-                # In fake tensor case, this state doesn't matter, but
-                # it needs to be valid to not segfault. Pull a real tensor out.
-                # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
-                # However, it is imperative to record the call_function in the graph with the true args
-                # (Not the fake example_value) - for the sake of graph correctness.
-                if self.value == torch.random.set_rng_state:
-                    example_value = torch.random.get_rng_state()
-                else:
-                    example_value = self.value.__self__.get_state()
+            unimplemented(
+                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+            )
+            # In fake tensor case, this state doesn't matter, but
+            # it needs to be valid to not segfault. Pull a real tensor out.
+            # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
+            # However, it is imperative to record the call_function in the graph with the true args
+            # (Not the fake example_value) - for the sake of graph correctness.
+            if self.value == torch.random.set_rng_state:
+                example_value = torch.random.get_rng_state()
             else:
-                example_value = args[0].proxy.node.meta["example_value"]
+                example_value = self.value.__self__.get_state()
 
             self.value.__module__ = self.__module__
             return wrap_fx_proxy(
@@ -378,6 +381,31 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         else:
+            any_symints_or_symfloats = any(
+                [isinstance(x, DynamicShapeVariable) for x in args]
+            )
+            all_ints_or_floats = all(
+                [
+                    isinstance(
+                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                    )
+                    for x in args
+                ]
+            )
+            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            if (
+                self.value.__module__ == "torch"
+                and self.value.__name__ in bin_ops
+                and any_symints_or_symfloats
+                and all_ints_or_floats
+            ):
+                msg = f"""\
+Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
+To support this behavior, we need to allow const-propping tensors that store symint data.
+For now, dynamo will explicitly graph break when it encounters user code with this behavior.
+"""
+                log.warning(msg)
+                raise unimplemented(msg)
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (
@@ -683,9 +711,6 @@ class TorchPyOperator(VariableTracker):
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
-
-            if config.fake_tensor_propagation:
-                unimplemented("Fake tensor mode not yet supported for cond")
 
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
