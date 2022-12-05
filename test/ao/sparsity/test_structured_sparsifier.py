@@ -226,10 +226,10 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
-            for module in config["module"]:
-                assert next(module.parameters()).device == device
-                assert not hasattr(module, "parametrizations")
-                assert not hasattr(module, "mask")
+            module = config["module"]:
+            assert next(module.parameters()).device == device
+            assert not hasattr(module, "parametrizations")
+            assert not hasattr(module, "mask")
 
     def _test_linear_on_device(
         self, model, config, expected_shape, device, also_prune_bias
