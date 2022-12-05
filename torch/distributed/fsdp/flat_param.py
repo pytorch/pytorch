@@ -169,6 +169,9 @@ class FlatParameter(nn.Parameter):
             that is flattened into the ``FlatParameter``.
         _root_modules (Set[nn.Module]): Modules in ``self._modules`` that are
             root modules (i.e. parent-less) with respect to ``self._modules``.
+            These are the modules for which we register pre/post-forward hooks
+            in the composable code path. There will be one unshard/reshard pair
+            for each root module in this set.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
