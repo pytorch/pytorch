@@ -608,21 +608,25 @@ This class does not support ``__members__`` property.)");
   // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
   // I define some member methods.
   reduce_op
+      // todo(crcrpar): Support `RedOpType == ReduceOp`.
       .def(
+          // This calls `operator==(const ReduceOp::RedOpType)`
           "__eq__",
           [](const ::c10d::ReduceOp& self,
              const ::c10d::ReduceOp::RedOpType& other) {
             return self == other;
           })
       .def(
+          // This calls `operator==(const ReduceOp)` for the future support of
+          // `PREMUL_SUM` comparison
           "__eq__",
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
-            return self == other.op_;
+            return self == other;
           })
       .def(
+          // With the above custom `__eq__`'s, I have to manually support the
+          // other types.
           "__eq__",
-          // note(crcrpar): this could be a fallback path and resolve
-          // pytorch/pytorch#89591
           [](const ::c10d::ReduceOp& self, py::object) { return false; })
       .def(
           "__hash__",
