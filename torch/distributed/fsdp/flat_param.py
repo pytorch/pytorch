@@ -23,7 +23,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
@@ -113,7 +112,7 @@ class HandleConfig:
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: bool = False
+    keep_low_precision_grads: bool
 
 
 class FlatParameter(nn.Parameter):
@@ -1093,11 +1092,12 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
-                # This cast is meaningful when `param_dtype` is a low precision
-                # dtype.
-                flat_param.grad.data = flat_param.grad.to(
-                    self._config.low_prec_param_dtype
-                )
+                if flat_param.grad.dtype != self._config.low_prec_param_dtype:
+                    flat_param.grad.data = flat_param.grad.to(
+                        self._config.low_prec_param_dtype
+                    )
+                    if self._use_orig_params:
+                        self._use_sharded_grad_views()
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1292,12 +1292,6 @@ class FlatParamHandle:
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if self._use_orig_params and as_params:
-                if type(view) is DTensor:
-                    # A `DTensor` `view` is not compatible with assigning
-                    # `param.data = view`, so we cannot preserve the parameter
-                    # variable.
-                    setattr(module, param_name, nn.Parameter(view))
-                    continue
                 param = self.flat_param._params[i]  # type: ignore[index]
                 setattr(module, param_name, param)
                 param.data = view
@@ -1518,9 +1512,20 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    param.grad = grad[offset : offset + numel_in_shard].reshape(
-                        param.shape
-                    )
+                    if self._keep_low_precision_grads:
+                        # NOTE: This is a hack using `.data` to side step the
+                        # check that parameter/gradient dtypes match. Here,
+                        # `param` has full precision; `grad` has low precision.
+                        if param.grad is None:
+                            # `.grad` must have the same shape as `param`
+                            param.grad = torch.empty_like(param)
+                        param.grad.data = grad[
+                            offset : offset + numel_in_shard
+                        ].reshape(param.shape)
+                    else:
+                        param.grad = grad[offset : offset + numel_in_shard].reshape(
+                            param.shape
+                        )
                 else:
                     param.grad = None
                 offset += numel_in_shard
