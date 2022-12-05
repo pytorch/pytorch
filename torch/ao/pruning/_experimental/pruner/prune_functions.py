@@ -10,17 +10,6 @@ from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
 from .parametrization import FakeStructuredSparsity, BiasHook
 
-__all__ = [
-    "prune_linear",
-    "prune_linear_linear",
-    "prune_linear_activation_linear",
-    "prune_conv2d",
-    "prune_conv2d_conv2d",
-    "prune_conv2d_activation_conv2d",
-    "prune_conv2d_activation_pool_conv2d",
-    "prune_conv2d_pool_activation_conv2d",
-    "prune_conv2d_pool_flatten_linear",
-]
 
 # BIAS PROPOGATION
 def _remove_bias_handles(module: nn.Module) -> None:

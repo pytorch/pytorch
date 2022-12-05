@@ -21,8 +21,6 @@ from .prune_functions import (
     prune_conv2d_pool_flatten_linear,
 )
 
-__all__ = ["BaseStructuredSparsifier"]
-
 
 def _get_supported_structured_pruning_modules():
     SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
