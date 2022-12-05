@@ -71,8 +71,8 @@ using ElementOutput = cutlass::half_t;                      // <- data type of e
 
 // The code section below describes matrix layout of input and output matrices. Row Major for
 // Matrix A, Column Major for Matrix B and Row Major for Matrix C
-using LayoutInputA = cutlass::layout::ColumnMajor;
-using LayoutInputB = cutlass::layout::ColumnMajor;
+using LayoutInputA = cutlass::layout::RowMajor;
+using LayoutInputB = cutlass::layout::RowMajor;
 using LayoutOutput = cutlass::layout::RowMajor;
 
 // This code section describes whether you want to use tensor cores or regular SIMT cores on GPU SM
@@ -128,7 +128,7 @@ using ElementInputE = typename Gemm::ElementE;
 using LayoutInputE = cutlass::layout::RowMajor;
 using ReorderedLayoutInputE = typename Gemm::LayoutE;
 
-// Blow property is defined in include/cutlass/arch/sp_mma_sm80.h
+// Below property is defined in include/cutlass/arch/sp_mma_sm80.h
 // 50% Sparsity on Ampere
 constexpr int kSparse = Gemm::kSparse;
 // How many elements of A are covered per ElementE
@@ -172,23 +172,6 @@ int run(
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
 
-//  // Initialize tensors using CUTLASS helper functions
-//  cutlass::HostTensor<ElementInputA, LayoutInputA> tensor_a(
-//      cutlass::make_Coord(problem_size.m(), problem_size.k() / kSparse));  // <- Create matrix A with dimensions M x (K / 2) -- this is compressed
-//  cutlass::HostTensor<ElementInputA, LayoutInputA> tensor_a_uncompressed(
-//      problem_size.mk());  // <- Create uncompressed matrix A with dimensions M x K for reference computing
-//
-//  cutlass::HostTensor<ElementInputB, LayoutInputB> tensor_b(
-//      problem_size.kn());  // <- Create matrix B with dimensions K x N
-//  cutlass::HostTensor<ElementOutput, LayoutOutput> tensor_c(
-//      problem_size.mn());  // <- Create matrix C with dimensions M x N
-//  cutlass::HostTensor<ElementOutput, LayoutOutput> tensor_d(
-//      problem_size.mn());  // <- Create matrix D with dimensions M x N used to store output from
-//                           // CUTLASS kernel
-//  cutlass::HostTensor<ElementOutput, LayoutOutput> tensor_ref_d(
-//      problem_size.mn());  // <- Create matrix D with dimensions M x N used to store output from
-//                           // reference kernel
-
   // Create matrix E with dimensions M x (K / 2 / kElementsPerElementE). This one is used by reference computing.
   cutlass::HostTensor<ElementInputE, LayoutInputE> tensor_e(
       cutlass::make_Coord(problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE));
@@ -196,34 +179,10 @@ int run(
   cutlass::HostTensor<ElementInputE, ReorderedLayoutInputE> tensor_e_reordered(
       cutlass::make_Coord(problem_size.m(), problem_size.k() / kSparse / kElementsPerElementE));
 
-//  // Fill input and output matrices on host using CUTLASS helper functions
-//  // why does the output matrix need to be filled?
-//  cutlass::reference::host::TensorFillRandomUniform(
-//      tensor_a.host_view(),
-//      1,
-//      ElementInputA(2),
-//      ElementInputA(-2),
-//      0);  // <- Fill matrix A on host with uniform-distribution random data
-//  cutlass::reference::host::TensorFillRandomUniform(
-//      tensor_b.host_view(),
-//      1,
-//      ElementInputB(2),
-//      ElementInputB(-2),
-//      0);  // <- Fill matrix B on host with uniform-distribution random data
-//  cutlass::reference::host::TensorFillRandomUniform(
-//      tensor_c.host_view(),
-//      1,
-//      ElementOutput(2),
-//      ElementOutput(-2),
-//      0);  // <- Fill matrix C on host with uniform-distribution random data
   cutlass::reference::host::TensorFillRandomSparseMeta(
       tensor_e.host_view(),
       1,
       kMetaSizeInBits);   // <- Fill matrix E on host with uniform-distribution random meta data
-//  cutlass::reference::host::TensorFill(
-//      tensor_d.host_view());  // <- fill matrix D on host with zeros
-//  cutlass::reference::host::TensorFill(
-//      tensor_ref_d.host_view());  // <- fill matrix D for reference on host with zeros
 
   // Reorder the meta data matrix so that we can use ldmatrix to load them to tensor core
   // instructions.
@@ -231,13 +190,7 @@ int run(
                         {problem_size.m(), problem_size.n(),
                          problem_size.k() / kSparse / kElementsPerElementE});
 
-//  // Copy data from host to GPU
-//  tensor_a.sync_device();
-//  tensor_b.sync_device();
-//  tensor_c.sync_device();
-//  tensor_d.sync_device();
   tensor_e_reordered.sync_device();
-//  tensor_ref_d.sync_device();
 
   // Initialize alpha and beta for dot product computation
   ElementComputeEpilogue alpha = ElementComputeEpilogue(1);
@@ -288,82 +241,13 @@ int run(
   CUTLASS_CHECK(status);
   return 0;
 
-//  // uncompress tensor_a based on meta data tensor_e. We need it for reference computing.
-//  cutlass::uncompress(tensor_a_uncompressed.host_ref(), tensor_a.host_ref(),
-//                      tensor_e.host_ref(), problem_size.m(), problem_size.k());
-
-//  // Create instantiation for host reference gemm kernel
-//  // this takes the activation/input matrix, which could be problematic?
-//  cutlass::reference::host::Gemm<ElementInputA,
-//                                 LayoutInputA,
-//                                 ElementInputB,
-//                                 LayoutInputB,
-//                                 ElementOutput,
-//                                 LayoutOutput,
-//                                 ElementComputeEpilogue,
-//                                 ElementComputeEpilogue,
-//                                 typename Gemm::Operator>
-//      gemm_host;
-//
-//  // Launch host reference gemm kernel
-//  gemm_host(problem_size,
-//            alpha,
-//            tensor_a_uncompressed.host_ref(),
-//            tensor_b.host_ref(),
-//            beta,
-//            tensor_c.host_ref(),
-//            tensor_ref_d.host_ref());
-//
-//  // Copy output data from CUTLASS host for comparison
-//  tensor_d.sync_host();
-//
-//  // Check if output from CUTLASS kernel and reference kernel are equal or not
-//  bool passed = cutlass::reference::host::TensorEquals(
-//    tensor_d.host_view(),
-//    tensor_ref_d.host_view());
-//
-//  std::cout << (passed ? "Passed" : "Failed") << std::endl;
-//
-//  return (passed ? 0  : -1);
 }
 
 namespace at {
 namespace native {
 
+// TODO: Pull back in device and cuda version constraints.
 Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense) {
-  std::cout << "Calling _cusparselt_linear" << std::endl;
-
-  // bool notSupported = false;
-
-  // Ampere Sparse Tensor Core operations exposed with mma.sync and ldmatrix are first available
-  // in CUDA 11.1.
-  //
-  // CUTLASS must be compiled with CUDA 11.1 Toolkit to run these examples.
-
-  // if (!(__CUDACC_VER_MAJOR__ > 11 || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ >= 1))) {
-  //   std::cerr << "Ampere Tensor Core operations must be compiled with CUDA 11.1 Toolkit or later." << std::endl;
-  //   notSupported = true;
-  // }
-
-  // cudaDeviceProp props;
-
-  // cudaError_t error = cudaGetDeviceProperties(&props, 0);
-  // if (error != cudaSuccess) {
-  //   std::cerr << "cudaGetDeviceProperties() returned an error: " << cudaGetErrorString(error) << std::endl;
-  //   return -1;
-  // }
-
-  // if (props.major * 10 + props.minor < 80) {
-  //   std::cerr << "Ampere Tensor Core operations must be run on a machine with compute capability at least 80."
-  //             << std::endl;
-  //   notSupported = true;
-  // }
-
-  // if (notSupported) {
-  //   // Returning zero so this test passes on older Toolkits. Its actions are no-op.
-  //   return 0;
-  // }
-
   auto result = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
   auto init = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
   run(sparse, dense, init, result);
