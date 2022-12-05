@@ -314,6 +314,7 @@
     MPS: abs_out_mps
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA: abs_sparse_csr_out
+  tags: pointwise
 
 # Note [Adding an alias]
 # To add an alias do the following:
@@ -337,8 +338,8 @@
 # in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
-
 # Absolute, alias for abs
+
 - func: absolute(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -3129,6 +3130,7 @@
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
 
+
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: linspace
@@ -5323,6 +5325,7 @@
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
 
+
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -6146,12 +6149,14 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: frexp
+  tags: pointwise
 
 - func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
   dispatch:
     CPU, CUDA: frexp_out
-
+  tags: pointwise
 # Deprecated (v.1.12)
+
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
 
@@ -8995,7 +9000,6 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: fmod.Tensor_out
   variants: method, function
-
   tags: pointwise
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -11960,6 +11964,7 @@
   structured_delegate: special_entr.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11968,11 +11973,13 @@
   variants: function
   dispatch:
     CPU, CUDA: special_entr_out
+  tags: pointwise
 
 - func: special_ndtri(Tensor self) -> Tensor
   structured_delegate: special_ndtri.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_ndtri.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11981,11 +11988,13 @@
   variants: function
   dispatch:
     CPU, CUDA: special_ndtri_out
+  tags: pointwise
 
 - func: special_log_ndtr(Tensor self) -> Tensor
   structured_delegate: special_log_ndtr.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_log_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11994,6 +12003,7 @@
   variants: function
   dispatch:
     CPU, CUDA: special_log_ndtr_out
+  tags: pointwise
 
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
@@ -12054,6 +12064,7 @@
   python_module: special
   variants: function
   structured_delegate: special_erfcx.out
+  tags: pointwise
 
 - func: special_erfcx.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12061,6 +12072,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_erfcx_out
+  tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
   python_module: special
@@ -12205,6 +12217,7 @@
   python_module: special
   variants: function
   structured_delegate: special_i0e.out
+  tags: pointwise
 
 - func: special_i0e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12212,11 +12225,13 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i0e_out
+  tags: pointwise
 
 - func: special_i1(Tensor self) -> Tensor
   python_module: special
   variants: function
   structured_delegate: special_i1.out
+  tags: pointwise
 
 - func: special_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12224,11 +12239,13 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i1_out
+  tags: pointwise
 
 - func: special_i1e(Tensor self) -> Tensor
   python_module: special
   variants: function
   structured_delegate: special_i1e.out
+  tags: pointwise
 
 - func: special_i1e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12236,6 +12253,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i1e_out
+  tags: pointwise
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
@@ -13624,6 +13642,7 @@
   python_module: special
   structured_delegate: special_airy_ai.out
   variants: function
+  tags: pointwise
 
 - func: special_airy_ai.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13632,6 +13651,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -13649,6 +13669,7 @@
   python_module: special
   structured_delegate: special_bessel_j0.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13657,11 +13678,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_j1.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13670,11 +13693,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_y0.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13683,11 +13708,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_y1.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13696,6 +13723,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
@@ -13997,6 +14025,7 @@
   python_module: special
   structured_delegate: special_modified_bessel_i0.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14005,11 +14034,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_i1.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14018,11 +14049,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_k0.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14031,11 +14064,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_k1.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14044,11 +14079,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_scaled_modified_bessel_k0.out
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14057,11 +14094,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_scaled_modified_bessel_k1.out
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14070,6 +14109,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
@@ -14223,6 +14263,7 @@
   python_module: special
   structured_delegate: special_spherical_bessel_j0.out
   variants: function
+  tags: pointwise
 
 - func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14231,6 +14272,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 # Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
 # within test/test_python_dispatch.py
