@@ -1497,7 +1497,7 @@ class InstructionTranslatorBase(object):
         self.current_instruction: Instruction = create_instruction("NOP")
         self.next_instruction: typing.Optional[Instruction] = None
         self.block_stack: List[BlockStackEntry] = []
-        self.lineno: int = code_options.get("co_firstlineno")
+        self.lineno: int = code_options["co_firstlineno"]
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
