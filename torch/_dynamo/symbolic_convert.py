@@ -48,13 +48,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import (
-    counters,
-    fake_tensors_available,
-    graph_break_dup_warning_checker,
-    istype,
-    proxy_args_kwargs,
-)
+from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -1121,10 +1115,20 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
+                recursively_contains=new_rec_contains,
+                regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
         )
@@ -1513,13 +1517,10 @@ class InstructionTranslatorBase(object):
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True,
-                shape_env=output.shape_env,
-            ) as fake_mode:
-                pass
-            self._fake_mode = fake_mode
+        self._fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=output.shape_env,
+        )
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []

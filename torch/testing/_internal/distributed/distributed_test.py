@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
+    IS_SANDCASTLE,
     parametrize,
     sandcastle_skip,
     sandcastle_skip_if,
@@ -113,9 +114,10 @@ class Foo:
 
     def __eq__(self, other):
         def eq(value, other):
-            if isinstance(value, torch.Tensor):
-                return torch.equal(value, other)
-            return value == other
+            result = value == other
+            if isinstance(result, torch.Tensor):
+                result = result.all().item()
+            return result
 
         for attr, value in self.__dict__.items():
             other_value = other.__dict__[attr]
@@ -351,7 +353,7 @@ class ControlFlowToyModel(nn.Module):
 
     def forward(self, x):
         # Second layer is used dependent on input x.
-        use_second_layer = torch.equal(x, torch.ones(20, 10, device=x.device))
+        use_second_layer = (x == torch.ones(20, 10, device=x.device)).all()
         if use_second_layer:
             return self.lin2(F.relu(self.lin1(x)))
         else:
@@ -3311,7 +3313,7 @@ class DistributedTest:
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
-                    if not torch.equal(t1, t2):
+                    if not (t1 == t2).all():
                         return False
             return True
 
@@ -3748,7 +3750,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @sandcastle_skip_if(BACKEND == "ucc", "flaky on PyTorch CI with timeout")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3842,7 +3844,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3860,7 +3862,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -7451,7 +7453,7 @@ class DistributedTest:
                     # Control-flow that is rank and input dependent for the
                     # model.
                     use_second_layer = (
-                        torch.equal(x, torch.ones(batch, dim, device=x.device))
+                        (x == torch.ones(batch, dim, device=x.device)).all()
                         and self.rank == 1
                     )
 
@@ -7717,14 +7719,14 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
@@ -7748,7 +7750,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7771,7 +7773,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(
@@ -9185,11 +9187,8 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
-        @sandcastle_skip_if(
-            BACKEND == "ucc",
-            "flaky on PyTorch CI: No such file or directory: '/tmp/checkpoint.pt'"
-        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @sandcastle_skip_if(BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally")
         def test_ddp_hook_pickling_powerSGD(self):
 
             hook = powerSGD.powerSGD_hook

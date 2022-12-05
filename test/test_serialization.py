@@ -282,7 +282,7 @@ class SerializationMixin(object):
         with gzip.open(f2.name, 'rb') as f:
             j = pickle.load(f)
             b = torch.load(f)
-        self.assertTrue(torch.equal(a, b))
+        self.assertEqual(a, b, rtol=0, atol=0, exact_device=True)
         self.assertEqual(i, j)
 
     def _test_serialization_sparse(self, weights_only):
@@ -297,6 +297,9 @@ class SerializationMixin(object):
                 self.assertEqual(x, y["tensor"])
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
+        _test_serialization(lambda x: x.to_sparse_csc())
+        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
@@ -333,35 +336,59 @@ class SerializationMixin(object):
                     "size is inconsistent with indices"):
                 y = torch.load(f)
 
-    def test_serialization_sparse_csr_invalid(self):
+    def _test_serialization_sparse_compressed_invalid(self,
+                                                      conversion,
+                                                      get_compressed_indices,
+                                                      get_plain_indices):
         x = torch.zeros(3, 3)
         x[1][1] = 1
-        x = x.to_sparse_csr()
+        x = conversion(x)
 
         class TensorSerializationSpoofer(object):
             def __init__(self, tensor):
                 self.tensor = tensor
 
             def __reduce_ex__(self, proto):
-                invalid_crow_indices = self.tensor.crow_indices().clone()
-                invalid_crow_indices[0] = 3
+                invalid_compressed_indices = get_compressed_indices(self.tensor).clone()
+                invalid_compressed_indices[0] = 3
                 return (
                     torch._utils._rebuild_sparse_tensor,
                     (
                         self.tensor.layout,
                         (
-                            invalid_crow_indices,
-                            self.tensor.col_indices(),
+                            invalid_compressed_indices,
+                            get_plain_indices(self.tensor),
                             self.tensor.values(),
                             self.tensor.size())))
+
+        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices_name = 'crow_indices'
+        else:
+            compressed_indices_name = 'ccol_indices'
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
             f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "rebuilding sparse tensor for layout torch.sparse_csr"):
+                    f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
                 y = torch.load(f)
+
+    def test_serialization_sparse_csr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csr, torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_csc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csc, torch.Tensor.ccol_indices, torch.Tensor.row_indices)
+
+    def test_serialization_sparse_bsr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsr(1, 1), torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_bsc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsc(1, 1), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -527,7 +554,7 @@ class SerializationMixin(object):
         msg = 'filelike serialization with {}'
 
         b = torch.load(data)
-        self.assertTrue(torch.equal(tensor, b), msg.format(desc))
+        self.assertEqual(tensor, b), msg.format(desc, rtol=0, atol=0, exact_device=True)
 
     @unittest.skipIf((3, 8, 0) <= sys.version_info < (3, 8, 2), "See https://bugs.python.org/issue39681")
     def test_serialization_filelike_missing_attrs(self):
@@ -800,7 +827,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 512, dtype=torch.float32)
         m = torch.nn.Conv2d(1, 1, (1, 3))
         i, j = 41, 43
         with tempfile.NamedTemporaryFile() as f:
@@ -809,15 +836,15 @@ class TestOldSerialization(TestCase, SerializationMixin):
             pickle.dump(j, f)
             torch.save(b, f)
             torch.save(m, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f)
             j_loaded = pickle.load(f)
             b_loaded = torch.load(f)
             m_loaded = torch.load(f)
-        self.assertTrue(torch.equal(a, a_loaded))
-        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertEqual(a, a_loaded, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(b, b_loaded, rtol=0, atol=0, exact_device=True)
         self.assertTrue(m.kernel_size == m_loaded.kernel_size)
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
@@ -825,21 +852,21 @@ class TestOldSerialization(TestCase, SerializationMixin):
     @parametrize('weights_only', (True, False))
     def test_serialization_offset_filelike(self, weights_only):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 512, dtype=torch.float32)
         i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
             torch.save(a, f)
             pickle.dump(j, f)
             torch.save(b, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f, weights_only=weights_only)
             j_loaded = pickle.load(f)
             b_loaded = torch.load(f, weights_only=weights_only)
-        self.assertTrue(torch.equal(a, a_loaded))
-        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertEqual(a, a_loaded, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(b, b_loaded, rtol=0, atol=0, exact_device=True)
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
@@ -921,11 +948,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        # This should start failing once Parameter
-        # supports saving Python Attribute.
-        err_msg = "'Parameter' object has no attribute"
-        with self.assertRaisesRegex(AttributeError, err_msg):
-            _test_save_load_attr(torch.nn.Parameter(t))
+        _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:
