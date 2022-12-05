@@ -720,7 +720,14 @@ class TorchPyOperator(VariableTracker):
             #
             # TODO: This assert may be too aggressive; I'm landing it
             # to see if it is or not.
-            assert tx.output.side_effects.is_empty()
+            assert tx.output.side_effects.is_empty(), (
+                "Handling a cond operator when there are outstanding "
+                "side effects in the trace is not currently supported.  "
+                "Please file a bug to PyTorch requesting this functionality.  "
+                "You may be able to unblock by removing side effects (e.g., "
+                "mutating Python variables/data structures/etc) from your "
+                "model."
+            )
 
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
