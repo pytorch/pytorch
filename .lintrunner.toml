@@ -117,7 +117,6 @@ exclude_patterns = [
     'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
-    'torch/distributed/fsdp/flatten_params_wrapper.py',
     'torch/ao/quantization/fx/convert.py',
     'torch/ao/quantization/_dbr/function_fusion.py',
     'test/test_datapipe.py',
