@@ -50,9 +50,6 @@ def make_unspec_cls(cls):
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
-# RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
-unittest.expectedFailure(UnspecReproTests.test_batch_norm_act_unspec)
-
 
 @patch.object(torch._dynamo.config, "specialize_int_float", False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
@@ -140,7 +137,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)

@@ -62,12 +62,16 @@ namespace {
 // in the fallback path.
 void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_set<Symbol> alias_copy_op(
-      {prim::view_copy,
-       prim::reshape_copy,
-       prim::expand_copy,
+      {prim::expand_copy,
        prim::expand_as_copy,
+       prim::flatten_copy,
+       prim::permute_copy,
+       prim::reshape_copy,
        prim::squeeze_copy,
-       prim::unsqueeze_copy});
+       prim::t_copy,
+       prim::transpose_copy,
+       prim::unsqueeze_copy,
+       prim::view_copy});
 
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {

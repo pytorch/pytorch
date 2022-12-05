@@ -130,7 +130,7 @@ class TORCH_API PyTorchStreamWriter final {
  public:
   explicit PyTorchStreamWriter(std::string archive_name);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)>& writer_func);
+      const std::function<size_t(const void*, size_t)> writer_func);
 
   void setMinVersion(const uint64_t version);
 

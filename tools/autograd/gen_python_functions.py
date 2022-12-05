@@ -124,6 +124,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_local_scalar_dense",
     "to",
     "_to_copy",
+    "_reshape_copy",
     "copy_sparse_to_sparse_",
     "copy_",
     "numpy_T",

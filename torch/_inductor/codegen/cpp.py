@@ -1,6 +1,9 @@
 import contextlib
 import dataclasses
 import functools
+import math
+import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
 
@@ -9,11 +12,13 @@ import sympy
 import torch
 from torch._prims_common import is_float_dtype
 
-from .. import codecache, config
-from ..utils import sympy_product, sympy_symbol
+from .. import codecache, config, ir, metrics
+from ..codegen.wrapper import WrapperCodeGen
+from ..utils import sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
+    CppWrapperKernelArgs,
     DeferredIndentedBuffer,
     ExprPrinter,
     IndentedBuffer,
@@ -34,6 +39,20 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
 }
+
+DTYPE_TO_ATEN = {
+    torch.float32: "at::ScalarType::Float",
+    torch.float64: "at::ScalarType::Double",
+    torch.float16: "at::ScalarType::Half",
+    torch.int64: "at::ScalarType::Long",
+    torch.int32: "at::ScalarType::Int",
+    torch.int16: "at::ScalarType::Short",
+    torch.int8: "at::ScalarType::Char",
+    torch.uint8: "at::ScalarType::Byte",
+    torch.bool: "at::ScalarType::Bool",
+    torch.bfloat16: "at::ScalarType::BFloat16",
+}
+
 INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
@@ -70,6 +89,17 @@ def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
+
+
+def reduction_combine_vec(reduction_type, var, next_value):
+    if reduction_type == "max":
+        return f"{var} = at::vec::maximum({var}, {next_value})"
+    elif reduction_type == "min":
+        return f"{var} = at::vec::minimum({var}, {next_value})"
+    elif reduction_type == "sum":
+        return f"{var} += {next_value}"
+    else:
+        raise NotImplementedError()
 
 
 index_value_name_counter = 1
@@ -120,6 +150,13 @@ def float16_reduction_prefix(rtype):
     return prefix
 
 
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
+
+
 @functools.lru_cache()
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
@@ -151,6 +188,181 @@ class CppPrinter(ExprPrinter):
 cexpr = CppPrinter().doprint
 
 
+class CppVecOverrides(OpOverrides):
+    """Map element-wise ops to aten vectorization C++"""
+
+    @staticmethod
+    def add(a, b):
+        return f"{a} + {b}"
+
+    @staticmethod
+    def sub(a, b):
+        return f"{a} - {b}"
+
+    @staticmethod
+    def mul(a, b):
+        return f"{a} * {b}"
+
+    @staticmethod
+    def div(a, b):
+        return f"{a} / {b}"
+
+    @staticmethod
+    def abs(x):
+        return f"{x}.abs()"
+
+    @staticmethod
+    def sin(x):
+        return f"{x}.sin()"
+
+    @staticmethod
+    def cos(x):
+        return f"{x}.cos()"
+
+    @staticmethod
+    def exp(x):
+        return f"{x}.exp()"
+
+    @staticmethod
+    def erf(x):
+        return f"{x}.erf()"
+
+    @staticmethod
+    def sqrt(x):
+        return f"{x}.sqrt()"
+
+    @staticmethod
+    def rsqrt(x):
+        return f"{x}.rsqrt()"
+
+    @staticmethod
+    def pow(a, b):
+        return f"{a}.pow({b})"
+
+    @staticmethod
+    def log(x):
+        return f"{x}.log()"
+
+    @staticmethod
+    def round(x):
+        return f"{x}.round()"
+
+    @staticmethod
+    def floor(x):
+        return f"{x}.floor()"
+
+    @staticmethod
+    def ceil(x):
+        return f"{x}.ceil()"
+
+    @staticmethod
+    def trunc(x):
+        return f"{x}.trunc()"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"{a}.fmod({b})"
+
+    @staticmethod
+    def lgamma(x):
+        return f"{x}.lgamma()"
+
+    @staticmethod
+    def logical_and(a, b):
+        return f"{a} && {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} || {b}"
+
+    @staticmethod
+    def tanh(a):
+        return f"{a}.tanh()"
+
+    @staticmethod
+    def reciprocal(a):
+        return f"{a}.reciprocal()"
+
+    @staticmethod
+    def constant(val, dtype):
+        if val == float("inf"):
+            quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val == float("-inf"):
+            quote = f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
+        elif val is True or val is False:
+            quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({str(val).lower()})"
+        else:
+            quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({repr(val)})"
+        return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({quote})"
+
+    @staticmethod
+    def relu(x):
+        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+
+    @staticmethod
+    def sigmoid(x):
+        return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
+
+    @staticmethod
+    def neg(x):
+        return f"{x}.neg()"
+
+    @staticmethod
+    def floordiv(a, b):
+        # a and b are integer type
+        _t = f"decltype({a})"
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < {_t}(0)) != ({b} < {_t}(0)) ? ({rem} != {_t}(0) ? {quot} - {_t}(1) : {quot}) : {quot})"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # a and b are integer type
+        return f"{a} / {b}"
+
+    @staticmethod
+    def minimum(a, b):
+        return f"at::vec::minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def square(a):
+        return f"{a}.pow(2)"
+
+    @staticmethod
+    def where(a, b, c):
+        return f"decltype({b})::blendv({c}, {b}, {a})"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        vec_zero = f"decltype({x})(0)"
+        vec_one = f"decltype({x})(1)"
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        left = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {blendv};")
+
+        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        right = V.kernel.cse.newvar()
+        code.writeline(f"auto {right} = {blendv};")
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
+
+    @staticmethod
+    def to_dtype(x, dtype):
+        assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
+        return f"({x})"
+
+
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
@@ -177,12 +389,24 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def erf(x):
+        return f"std::erf({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
     @staticmethod
     def rsqrt(x):
         return f"1 / std::sqrt({x})"
+
+    @staticmethod
+    def log1p(x):
+        return f"std::log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
 
     @staticmethod
     def signbit(x):
@@ -246,11 +470,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"std::min({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -266,6 +490,8 @@ class CppOverrides(OpOverrides):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
             return ops.to_dtype(str(val).lower(), dtype)
         return ops.to_dtype(repr(val), dtype)
@@ -282,6 +508,8 @@ class CppOverrides(OpOverrides):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         elif other == float("inf"):
             code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
+        elif isinstance(other, float):
+            code.writeline(f"float {var} = {other};")
         else:
             code.writeline(f"auto {var} = {other!r};")
         code.writeline(f"if({mask})")
@@ -311,6 +539,19 @@ class CppOverrides(OpOverrides):
     def sigmoid(x):
         x = ops.exp(f"-{x}")
         return f"1 / (1 + {x})"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        left = V.kernel.cse.newvar()
+        right = V.kernel.cse.newvar()
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
+        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
 
 
 class CppKernel(Kernel):
@@ -413,9 +654,7 @@ class CppKernel(Kernel):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
     def codegen_loops(self, code, worksharing):
-        threads = config.cpp.threads
-        if threads < 1:
-            threads = torch.get_num_threads()
+        threads = parallel_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -423,11 +662,11 @@ class CppKernel(Kernel):
         )
         reductions.mark_reduction(self.reduction_vars)
 
-        if config.cpp.simdlen:
+        if codecache.pick_vec_isa():
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if reductions:
                 reductions.loops[-1].simd = True
-            else:
+            elif loops:
                 loops.loops[-1].simd = True
 
         par_depth = 0
@@ -509,13 +748,505 @@ class CppKernel(Kernel):
         (self.loads, self.compute, self.stores, self.cse) = prior
 
 
+class CppVecKernel(CppKernel):
+    overrides = CppVecOverrides
+
+    def __init__(self, args, num_threads):
+        super(CppVecKernel, self).__init__(args, num_threads)
+        assert codecache.pick_vec_isa()
+        self.simd_nelements = codecache.pick_vec_isa().nelements()
+        self.reduction_omp_dec: Dict[str, str] = {}
+        metrics.generated_cpp_vec_kernel_count += 1
+
+    def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
+        replacement = {var: var + 1}
+        new_index = sympy_subs(index, replacement)
+        delta = sympy.simplify(new_index - index)
+        return delta == 1
+
+    def is_var_irrevelant(self, var: sympy.Symbol, index: sympy.Expr):
+        expanded_index = sympy.expand(index)
+        return not expanded_index.has(var)
+
+    def transform_index(self, index: sympy.Expr):
+        expanded_index = sympy.expand(index)
+        assert self.simd_nelements
+        assert self.simd_nelements >= 1
+        most_inner_var = self.itervars[-1]
+        replacement = {most_inner_var: most_inner_var * self.simd_nelements}
+        new_index = sympy_subs(expanded_index, replacement)
+        return new_index
+
+    def load(self, name: str, index: sympy.Expr):
+        var = self.args.input(name)
+        index = self.rename_indexing(index)
+
+        expanded_index = sympy.expand(index)
+        new_index = self.transform_index(index)
+
+        if expanded_index == new_index:
+            line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
+        else:
+            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+                g_tmp_buf = f"g_tmp_buffer_{var}"
+                nelements = codecache.pick_vec_isa().nelements()
+                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                self.loads.writeline(
+                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                )
+                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+            else:
+                line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+
+        return self.cse.generate(self.loads, line)
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        assert mode is None
+
+        expanded_index = sympy.expand(index)
+        new_index = self.transform_index(index)
+        assert new_index != expanded_index
+        line = f"{value}.store({var} + {cexpr(new_index)});"
+        self.stores.writeline(name, line)
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        assert reduction_type in {"max", "min", "sum"}
+        assert dtype == torch.float
+        assert src_dtype == torch.float
+        reduce_map = {"max": "maximum", "min": "minimum"}
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+
+        if reduction_type not in self.reduction_omp_dec:
+            vec_reduc_prefix = "#pragma omp declare reduction("
+            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            if reduction_type == "sum":
+                vec_reduc_prefix += "omp_out += omp_in"
+            else:
+                vec_reduc_prefix += (
+                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+                )
+            vec_reduc_prefix += ")"
+            vec_reduc_prefix += " initializer("
+            vec_reduc_prefix += "omp_priv={{"
+            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
+            vec_reduc_prefix += "}})"
+            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_prefix.writeline(vec_reduc_prefix)
+
+        tmpvar = self.cse.generate(
+            self.loads, f"reduction {name} {cexpr(index)}", write=False
+        )
+        tmpvar_vec = f"{tmpvar}_vec"
+
+        index = self.rename_indexing(index)
+        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_prefix.writeline(
+            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+        )
+        self.reduction_prefix.writeline(
+            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
+        )
+        self.stores.writeline(
+            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+        )
+
+        reduce_all_body = "{"
+        if reduction_type == "sum":
+            reduce_all_body += "return x + y;"
+        else:
+            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+        reduce_all_body += "}"
+        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        self.reduction_suffix.writeline(
+            name,
+            f"{tmpvar} = {vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec});",
+        )
+        self.cse.store_cache[name] = tmpvar
+
+
+class CppVecKernelChecker(CppVecKernel):
+    def __init__(self, args, num_threads):
+        super(CppVecKernelChecker, self).__init__(args, num_threads)
+
+        # Since this kernel is only for checker but does not genreate any
+        # code, so we need to decrease the kernel count.
+        metrics.generated_kernel_count -= 1
+        metrics.generated_cpp_vec_kernel_count -= 1
+
+        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # changed during graph run.
+        self._orig_wrapper_code = None
+
+        self.simd_vec = True
+        self.fast_vec_list = []
+        for k, v in CppVecOverrides.__dict__.items():
+            if isinstance(v, staticmethod):
+                self.fast_vec_list.append(k)
+        self.exit_stack = contextlib.ExitStack()
+
+    def is_legal_data_access(self, var: sympy.Symbol, index: sympy.Expr):
+        return self.is_var_irrevelant(var, index) or self.is_single_step_var(var, index)
+
+    def could_vec(self, name: str, index: sympy.Expr):
+        assert self.itervars is not None
+        # Not a loop
+        if len(self.itervars) == 0:
+            return False
+
+        most_inner_var = self.itervars[-1]
+        return self.is_legal_data_access(most_inner_var, index)
+
+    def load(self, name: str, index: sympy.Expr):
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+            torch.bool,
+            torch.uint8,
+        ]:
+            self.simd_vec = False
+            return self.simd_vec
+
+        index = self.rename_indexing(index)
+        self.simd_vec = self.simd_vec and self.could_vec(name, index)
+        return self.simd_vec
+
+    def store(self, name, index, value, mode=None):
+        if not V.graph.get_dtype(name) in [torch.float, torch.float32]:
+            self.simd_vec = False
+            return self.simd_vec
+
+        assert "buf" in name
+        index = self.rename_indexing(index)
+
+        if mode:
+            self.simd_vec = False
+            return False
+
+        self.simd_vec = self.simd_vec and self.could_vec(name, index)
+        return self.simd_vec
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        if (
+            dtype == torch.float
+            and src_dtype == torch.float
+            and reduction_type in ["max", "min", "sum"]
+        ):
+            pass
+        else:
+            self.simd_vec = False
+        return self.simd_vec
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        assert self._orig_wrapper_code is not None
+        # Restore the wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def __enter__(self):
+        # Recorde the graph wrapper code. The wrapper_code status could be
+        # changed during graph run. Regarding this checker, we also need to
+        # run the graph but we don't expect to change any status that would
+        # impact the code generation. Hence, we record the graph wapper code
+        # and replace it with a dummy warpper_code and then restore to the
+        # original one as long as the checker is finished.
+        self._orig_wrapper_code = V.graph.wrapper_code
+        V.graph.wrapper_code = WrapperCodeGen()
+
+        class VecCheckerProxy:
+            @staticmethod
+            def __getattr__(name):
+                def inner(*args, **kwargs):
+                    if not (name in self.fast_vec_list):
+                        self.simd_vec = False
+                    return self.simd_vec
+
+                return inner
+
+            @staticmethod
+            def load(name: str, index: sympy.Expr):
+                return self.load(name, index)
+
+            @staticmethod
+            def store(name, index, value, mode=None):
+                return self.store(name, index, value, mode=mode)
+
+            @staticmethod
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
+
+            @staticmethod
+            def constant(val, dtype):
+                supported_dtype = (torch.float32, torch.int32)
+                is_supported_dtype = dtype in (supported_dtype)
+                if not is_supported_dtype:
+                    self.simd_vec = False
+                return is_supported_dtype
+
+            @staticmethod
+            def index_expr(expr, dtype):
+                self.simd_vec = False
+                tmp_var = self.cse.newvar()
+                return tmp_var
+
+            @staticmethod
+            def indirect_indexing(index_var):
+                self.simd_vec = False
+                return sympy.Symbol(str(index_var))
+
+            @staticmethod
+            def masked(mask, body, other):
+                tmp_var = self.cse.newvar()
+                return tmp_var
+
+            @staticmethod
+            def to_dtype(x, dtype):
+                if dtype != torch.bool:
+                    self.simd_vec = False
+                return x
+
+        self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
+        self.exit_stack.enter_context(V.set_kernel_handler(self))
+        return self
+
+
+class CppKernelProxy(CppKernel):
+    def __init__(self, args=None, num_threads=None):
+        super(CppKernelProxy, self).__init__(args, num_threads)
+        self.simd_vec_kernel: CppVecKernel = None
+        self.simd_omp_kernel: CppKernel = None
+        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+
+    def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
+        assert self.picked_vec_isa
+        nelements = self.picked_vec_isa.nelements(dtype)
+        loop_nest.split_most_inner_loop(nelements)
+        loop_with_tail = loop_nest.loops[-1]
+        assert isinstance(loop_with_tail, LoopLevelWithTail)
+
+        loop_with_tail.main_loop.simd_vec = True
+
+        loop_with_tail.tail_loop.simd_omp = True
+        # We chope the loop into two cubes by the nelements - main loop and tail loop.
+        # Regarding the main loop, it is straightforward that it could be vectorized with
+        # nelements. But for the tail loop, it still could be vectorized. For example,
+        # if the nelements is 8(256bits), then the tail loop still could be vectorized
+        # as 4(128bits).
+        loop_with_tail.tail_loop.simd_nelements = int(nelements / 2)
+        loop_with_tail.tail_loop.simd_vec = False
+
+        loop_with_tail.main_loop_body = self.simd_vec_kernel
+        loop_with_tail.tail_loop_body = self.simd_omp_kernel
+        return loop_nest
+
+    def codegen_loops(self, code, worksharing):
+        threads = parallel_num_threads()
+
+        if self.simd_vec_kernel is None or not self.picked_vec_isa:
+            assert self.simd_omp_kernel
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
+
+        assert self.simd_vec_kernel.itervars == self.simd_omp_kernel.itervars
+        assert self.simd_vec_kernel.ranges == self.simd_omp_kernel.ranges
+        assert (
+            self.simd_vec_kernel.reduction_vars == self.simd_omp_kernel.reduction_vars
+        )
+
+        itervars = self.simd_vec_kernel.itervars
+        rangs = self.simd_vec_kernel.ranges
+        loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
+        assert (
+            self.simd_vec_kernel.reduction_depth == self.simd_omp_kernel.reduction_depth
+        )
+        reduction_depth = self.simd_vec_kernel.reduction_depth
+        loops_nest_non_reduce, loops_nest_reduce = LoopNest(
+            loops[:reduction_depth]
+        ), LoopNest(loops[reduction_depth:])
+        loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
+
+        assert self.picked_vec_isa
+        # Do not apply vectorization since the range of most inner is too small. Meanwhile,
+        # If the range of the most inner is less then the codecache.pick_vec_isa().nelements(),
+        # the generated code for some reduction will be as follows that leads to incrrect result.
+        #
+        #    LINE01:  float tmp1 = 0;
+        #    LINE02:  auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+        #    LINE03:  for(long i1=0; i1<2; i1+=1)
+        #    LINE04:  {
+        #    LINE05:      for(long i2=0; i2<0; i2+=1)
+        #    LINE06:      {
+        #    LINE07:          auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (16*i2) + (32*i1));
+        #    LINE08:          tmp1_vec += tmp0;
+        #    LINE09:      }
+        #    LINE10:      tmp1 = vec_reduce_all<float>([](Vectorized<float>& x, Vectorized<float>&y) {return x + y;}, tmp1_vec);
+        #    LINE11:      #pragma omp simd simdlen(8)  reduction(+:tmp1)
+        #    LINE12:      for(long i2=0; i2<8; i2+=1)
+        #    LINE13:      {
+        #    LINE14:          auto tmp0 = in_ptr0[i2 + (8*i0) + (32*i1)];
+        #    LINE15:          tmp1 += tmp0;
+        #    LINE16:      }
+        #    LINE17:  }
+        #    LINE18:  out_ptr3[i0] = tmp1;
+        #
+        # tmp1_vec(LINE02) will always be zero as it is initialized with tmp1 value and the range(LINE05)
+        # is 0. Hence, the LINE10 will always reset tmp1 to 0. But tmp1(LINE01) is global value. So the result
+        # will be incorrect. We skip thie case.
+        most_inner_loop = (
+            loops_nest_reduce.loops[-1]
+            if loops_nest_reduce
+            else loops_nest_non_reduce.loops[-1]
+        )
+        main_loop_range = ir.IndexingDiv(
+            most_inner_loop.size, self.picked_vec_isa.nelements()
+        )
+        loop_interval = sympy.simplify(main_loop_range)
+        # TODO(Eikan): To support dynamic shape.
+        if not loop_interval.is_integer or loop_interval <= 0:
+            metrics.generated_cpp_vec_kernel_count -= 1
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
+
+        # TODO(jansel): detect stride-1 dimension and vectorize that
+        if loops_nest_reduce:
+            loops_nest_reduce.loops[-1].simd = True
+        elif loops_nest_non_reduce:
+            loops_nest_non_reduce.loops[-1].simd = True
+
+        par_depth = 0
+        reduction_par_depth = 0
+        if loops_nest_non_reduce:
+            par_depth = self.simd_vec_kernel.decide_parallel_depth(
+                self.simd_vec_kernel.call_ranges[:reduction_depth], threads
+            )
+        else:
+            reduction_par_depth = self.simd_vec_kernel.decide_parallel_depth(
+                self.simd_vec_kernel.call_ranges[reduction_depth:], threads
+            )
+
+        # If the most inner loop of the reduction will be vectorized, the vectorization
+        # will add a vec variable for reduction. Take the code snippet as an example:
+        #     float tmp1 = 0;
+        #     for(long i1=0; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # The vectorization will add tmp1_vec for reduction and then the loop will be transformed
+        # as follows.
+        #     float tmp1 = 0;
+        #     auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+        #     for(long i1=0; i1<1; i1+=1) {
+        #        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1));
+        #        tmp1_vec += tmp0;
+        #     }
+        #     tmp1 = at::vec::vec_reduce_all<float>([]
+        #       (at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;},
+        #       tmp1_vec);
+        #     for(long i1=8; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # It means that the vectorization introduce another reduction variable(tmp1_vec).
+        # If the most inner loop of the reduction is not a parallelized but its parent reduction
+        # loop is parallized, the new added reduction variable(tmp1_vec) could not be added
+        # to the parallelized loop reduction. So we skip this case and does not vectorize it.
+        if reduction_par_depth > 0 and reduction_par_depth != len(
+            loops_nest_reduce.loops
+        ):
+            metrics.generated_cpp_vec_kernel_count -= 1
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
+
+        with contextlib.ExitStack() as stack:
+            if par_depth:
+                worksharing.parallel(threads)
+                loops_nest_non_reduce.mark_parallel(par_depth)
+            elif reduction_par_depth:
+                # need to close the worksharing scope to define reduction vars outside it
+                worksharing.close()
+                loops_nest_reduce.mark_parallel(reduction_par_depth)
+            elif threads > 1:
+                if worksharing.single():
+                    stack.enter_context(code.indent())
+
+            non_reduce_loops = loops_nest_non_reduce.loops
+            reduce_loops = loops_nest_reduce.loops
+            loop_with_tail: LoopLevelWithTail = None
+
+            if loops_nest_reduce:
+                self.vectorize_most_inner_loop(loops_nest_reduce)
+                loop_with_tail = loops_nest_reduce.loops[-1]
+                # The most inner loop will be vectorized
+                reduce_loops = reduce_loops[0:-1]
+            else:
+                self.vectorize_most_inner_loop(loops_nest_non_reduce)
+                loop_with_tail = loops_nest_non_reduce.loops[-1]
+                # The most inner loop will be vectorized
+                non_reduce_loops = non_reduce_loops[0:-1]
+
+            # The reductions loops are always the loop body of non-reduction loops
+            for loop in non_reduce_loops:
+                code.writelines(loop.lines())
+                stack.enter_context(code.indent())
+
+            with contextlib.ExitStack() as stack_outer:
+                if self.simd_vec_kernel.reduction_prefix:
+                    stack_outer.enter_context(code.indent())
+                code.splice(self.simd_vec_kernel.reduction_prefix)
+
+                if reduction_par_depth:
+                    worksharing.parallel(threads)
+
+                with contextlib.ExitStack() as stack:
+                    for loop in reduce_loops:
+                        code.writelines(loop.lines())
+                        stack.enter_context(code.indent())
+
+                    def gen_vectorized_loop(loop, kernel, write_reduction_suffix=False):
+                        code.writelines(loop.lines())
+                        with contextlib.ExitStack() as stack:
+                            stack.enter_context(code.indent())
+                            code.splice(kernel.loads)
+                            code.splice(kernel.compute)
+                            code.splice(kernel.stores)
+                        if write_reduction_suffix:
+                            code.splice(kernel.reduction_suffix)
+
+                    # Regarding the vectorized reduction loop, we need to call reduce_all to to reduce
+                    # the vectorize as a single scalar. Hence, we set write_reduction_suffix to True to
+                    # gen the code.
+                    gen_vectorized_loop(
+                        loop_with_tail.main_loop, loop_with_tail.main_loop_body, True
+                    )
+
+                    gen_vectorized_loop(
+                        loop_with_tail.tail_loop, loop_with_tail.tail_loop_body, False
+                    )
+
+                if reduction_par_depth:
+                    worksharing.close()
+
+                code.splice(loop_with_tail.tail_loop_body.reduction_suffix)
+
+
 class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def get_kernel_group(self):
+        from .wrapper import CppWrapperCodeGen
+
+        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+            self.kernel_group = CppWrapperKernelGroup()
+        else:
+            self.kernel_group = KernelGroup()
 
     @staticmethod
     def can_fuse_horizontal(node1, node2):
@@ -532,42 +1263,116 @@ class CppScheduling:
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
-    def codegen_nodes(self, nodes):
-        """
-        Turn an set of pre-fused nodes into a C++ kernel.
-        """
-        kernel_group = self.kernel_group
-        scheduler = self.scheduler
+    def can_vec(self, nodes):
+        if not codecache.pick_vec_isa():
+            return False
+
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
-        in_suffix = False
 
-        with kernel_group.new_kernel() as kernel:
-            vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-
+        with CppVecKernelChecker(
+            deepcopy(self.kernel_group.args), parallel_num_threads()
+        ) as kernel_checker:
+            vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
             for node in nodes:
                 if node.group[1] in [
                     (group, reduction_group),
                     (group + reduction_group, ()),
                 ]:
-                    assert not in_suffix
                     node.run(vars, reduction_vars)
                 else:
-                    in_suffix = True
                     assert node.group[1] == (
                         group,
                         (),
                     ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                    # we can fuse in some extra pointwise into the suffix
-                    with kernel.write_to_suffix():
-                        node.run(vars, ())
+                    node.run(vars, ())
 
-        kernel_group.finalize_kernel(kernel, scheduler)
+            return kernel_checker.simd_vec
+
+    def _codegen_nodes_impl(self, nodes, is_simd_vec=False):
+        """
+        Turn an set of pre-fused nodes into a C++ kernel.
+        """
+        kernel_group = self.kernel_group
+        _, (group, reduction_group) = max(
+            nodes, key=lambda x: int(x.is_reduction())
+        ).group
+
+        def create_kernel(_is_simd_vec):
+            in_suffix = False
+
+            with kernel_group.new_kernel(_is_simd_vec) as kernel:
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+
+                for node in nodes:
+                    if node.group[1] in [
+                        (group, reduction_group),
+                        (group + reduction_group, ()),
+                    ]:
+                        assert not in_suffix
+                        node.run(vars, reduction_vars)
+                    else:
+                        in_suffix = True
+                        assert node.group[1] == (
+                            group,
+                            (),
+                        ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                        # we can fuse in some extra pointwise into the suffix
+                        with kernel.write_to_suffix():
+                            node.run(vars, ())
+                return kernel
+
+        org_inplace_buffers_flag = config.inplace_buffers
+        if is_simd_vec:
+            # Create vectorization kernel
+            cpp_vec_kernel = create_kernel(True)
+
+            # Since a kernel is divided into two parts - vectorization and non-vectorization.
+            # And the two parts share the same global contexts like V.graph.wrapper_code,
+            # V.kernel.args. But the vectorization kernel generation has updated these global
+            # contexts. Hence, the non-vectorization kernel should not do this again to avoid
+            # conext conflict. By now, we only control the config.inplace_buffers. In the future,
+            # we could maintain more contexts.
+            config.inplace_buffers = False
+
+            # Create non-vectorization kernel
+            cpp_kernel = create_kernel(False)
+
+            # Restore the inplace_buffers flag
+            config.inplace_buffers = org_inplace_buffers_flag
+            return (cpp_vec_kernel, cpp_kernel)
+        else:
+            return (None, create_kernel(False))
+
+    def codegen_nodes(self, nodes):
+        """
+        Turn an set of pre-fused nodes into a C++ kernel.
+        """
+        kernel_group = self.kernel_group
+
+        can_be_simd_vec = self.can_vec(nodes)
+        simd_vec_kernel, simd_omp_kernel = self._codegen_nodes_impl(
+            nodes, can_be_simd_vec
+        )
+
+        assert simd_omp_kernel
+        metrics.generated_kernel_count -= 1
+        # Maitain the metrics kernel count
+        if simd_vec_kernel:
+            metrics.generated_kernel_count -= 1
+
+        cpp_kernel_proxy = CppKernelProxy(
+            kernel_group.args, kernel_group.ws.num_threads
+        )
+        cpp_kernel_proxy.simd_vec_kernel = simd_vec_kernel
+        cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
+
+        kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
 
 class KernelGroup:
@@ -580,8 +1385,11 @@ class KernelGroup:
         self.stack.enter_context(self.ws)
         self.count = 0
 
-    def new_kernel(self):
-        return CppKernel(self.args, self.ws.num_threads)
+    def new_kernel(self, simd_vec=False):
+        if simd_vec:
+            return CppVecKernel(self.args, parallel_num_threads())
+        else:
+            return CppKernel(self.args, parallel_num_threads())
 
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
@@ -594,11 +1402,27 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        arg_defs, call_args = self.args.cpp_argdefs()
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
+        arg_types = ",".join(arg_types)
         code = BracesBuffer()
+        # TODO: support kernel profile on other platforms
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
+            code.writelines(["#include <ATen/record_function.h>"])
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+                code.writelines(
+                    [
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                    ]
+                )
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
@@ -608,17 +1432,20 @@ class KernelGroup:
         codecache_def.splice(code)
         codecache_def.writeline("''')")
 
-        kernel_name = wrapper.next_kernel_name()
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-
+        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
-        wrapper.writeline(
-            "{}({})".format(kernel_name, ", ".join(call_args)),
-        )
+        wrapper.generate_kernel_call(kernel_name, call_args)
+
+
+class CppWrapperKernelGroup(KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = CppWrapperKernelArgs()
 
 
 class WorkSharing:
@@ -660,39 +1487,63 @@ class WorkSharing:
 
 @dataclasses.dataclass
 class LoopLevel:
-    var: sympy.Expr
-    size: sympy.Expr
+    var: sympy.Expr = None
+    size: sympy.Expr = None
+    offset: sympy.Expr = sympy.Integer(0)
+    steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
-    simd: bool = False
+    simd_omp: bool = False
+    picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+    simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
+    simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None
 
     def lines(self):
         if self.reduction_vars:
+            suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
                 for var, rtype in self.reduction_vars.items()
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({config.cpp.simdlen})"
+        simd = (
+            f"simd simdlen({self.simd_nelements}) "
+            if self.simd_omp and self.simd_nelements > 1
+            else ""
+        )
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
             if self.parallel > 1:
                 line1 += f" collapse({self.parallel})"
-            if self.simd:
+            if self.simd_omp:
                 line1 = line1.replace(" for ", f" for {simd}")
-        elif self.simd:
+        elif self.simd_vec:
+            line1 = ""
+        elif self.simd_omp:
             line1 = f"#pragma omp {simd}{reduction}"
         elif not self.reduction_vars and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        line2 = f"for({INDEX_TYPE} {self.var}=0; {self.var}<{cexpr(self.size)}; ++{self.var})"
+        line2 = f"for({INDEX_TYPE} {self.var}={cexpr(self.offset)}; {self.var}<{cexpr(self.size)}; {self.var}+={cexpr(self.steps)})"
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]
+
+
+class LoopLevelWithTail(LoopLevel):
+    def __init__(self, main_loop: LoopLevel, tail_loop: LoopLevel):
+        super().__init__()
+        self.main_loop = main_loop
+        self.tail_loop = tail_loop
+        self.main_loop_body = None
+        self.tail_loop_body = None
+
+    def lines(self):
+        raise AssertionError("Not Implemented")
 
 
 @dataclasses.dataclass
@@ -711,7 +1562,38 @@ class LoopNest:
         loops[0].parallel = par_depth
         for i in range(1, par_depth):
             loops[i].collapsed = True
-        loops[0].simd = loops[par_depth - 1].simd
+
+    def split_most_inner_loop(self, factor):
+        sympy_factor = sympy.Integer(factor)
+
+        most_inner_loop = self.loops[-1]
+
+        # If the most inner loop needs to be collapsed, we need to
+        # exclude it since we need to split it into two loops. Meanwhile,
+        # we still mark it as parallized.
+        if most_inner_loop.collapsed:
+            assert self.loops[0].parallel == len(self.loops)
+            self.loops[0].parallel -= 1
+
+        main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
+
+        main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
+        main_loop.parallel = most_inner_loop.parallel
+        main_loop.collapsed = False
+        main_loop.reduction_vars = most_inner_loop.reduction_vars
+
+        offset = main_loop_range * sympy_factor
+        tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
+        tail_loop.offset = offset
+        tail_loop.parallel = most_inner_loop.parallel
+        tail_loop.collapsed = False
+        tail_loop.reduction_vars = most_inner_loop.reduction_vars
+
+        loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
+        loop_with_tail.parallel = 0
+        loop_with_tail.collapsed = False
+
+        self.loops[-1] = loop_with_tail
 
     def codegen(self, code, stack):
         for loop in self.loops:

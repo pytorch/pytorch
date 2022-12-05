@@ -37,10 +37,21 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
+      # This is copied from the main macos test workflow. It was missed in the earlier fix because macos M1
+      # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
+      # used
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+          brew link --force libomp
+
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install PyTorch
         env:
@@ -50,13 +61,12 @@ jobs:
         run: |
           # shellcheck disable=SC1090
           set -ex
-          ${CONDA_INSTALL} expecttest numpy=1.22.3 pyyaml=6.0
-          ${CONDA_RUN} python3 -mpip install "unittest-xml-reporting<=3.2.0,>=2.0.0"
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
-          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
 
       - name: Run MPS tests
+        id: test
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
         shell: arch -arch arm64 bash {0}
@@ -65,5 +75,18 @@ jobs:
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
 
-          ${CONDA_RUN} --cwd test python3 test_mps.py -v
-          ${CONDA_RUN} --cwd test python3 test_metal.py -v
+          ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
