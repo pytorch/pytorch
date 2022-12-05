@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -58,12 +59,41 @@ class CompositeModel(nn.Module):
         return self.l2(self.u2(self.u1(self.l1(x))))
 
 
+class UnitParamModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+        self.seq = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(100, 100),
+            nn.ReLU(),
+        )
+        self.p = nn.Parameter(torch.randn(100, 100))
+
+    def forward(self, x):
+        return torch.mm(self.seq(self.l(x)), self.p)
+
+
+class CompositeParamModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+        self.u1 = UnitModule()
+        self.u2 = UnitModule()
+        self.p = nn.Parameter(torch.randn(100, 100))
+
+    def forward(self, x):
+        a = self.u2(self.u1(self.l(x)))
+        b = self.p
+        return torch.mm(a, b)
+
+
 class TestFSDPCheckpoint(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
 
-    def _test_wrap_same_submodule(
+    def _test_parity(
         self,
         base_model: nn.Module,
         test_model: nn.Module,
@@ -110,7 +140,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "x": [torch.randn(2, 100, device="cuda")],
                 "grad_to_none": [True, False],
             },
-            self._test_wrap_same_submodule,
+            self._test_parity,
         )
 
     def _test_checkpoint_fsdp_submodules(self, use_reentrant):
@@ -142,7 +172,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 "x": [torch.randn(2, 100, device="cuda")],
                 "grad_to_none": [True, False],
             },
-            self._test_wrap_same_submodule,
+            self._test_parity,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -156,6 +186,52 @@ class TestFSDPCheckpoint(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_non_reentrant(self):
         self._test_checkpoint_fsdp_submodules(False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_with_param(self):
+        model = CompositeParamModel().to(torch.device("cuda"))
+
+        base_model = copy.deepcopy(model)
+
+        test_model = copy.deepcopy(model)
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
+        test_model = fully_shard(test_model)
+
+        with self.assertRaisesRegex(RuntimeError, "mat2 must be a matrix"):
+            self.run_subtests(
+                {
+                    "base_model": [base_model],
+                    "test_model": [test_model],
+                    "x": [torch.randn(2, 100, device="cuda")],
+                    "grad_to_none": [True, False],
+                },
+                self._test_parity,
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_with_param_no_shard(self):
+        model = CompositeParamModel().to(torch.device("cuda"))
+
+        base_model = copy.deepcopy(model)
+
+        test_model = copy.deepcopy(model)
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
+        test_model = fully_shard(test_model, strategy=ShardingStrategy.NO_SHARD)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot writeback when the parameter shape changes"
+        ):
+            self.run_subtests(
+                {
+                    "base_model": [base_model],
+                    "test_model": [test_model],
+                    "x": [torch.randn(2, 100, device="cuda")],
+                    "grad_to_none": [True, False],
+                },
+                self._test_parity,
+            )
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
