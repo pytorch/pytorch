@@ -9251,10 +9251,10 @@
   dispatch:
     CPU, CUDA: minimum_out
     MPS: minimum_out_mps
+  tags: pointwise
 
 # binary min, alias for minimum
 # NOTE: min is not an alias for minimum, since there is also unary min
-  tags: pointwise
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
