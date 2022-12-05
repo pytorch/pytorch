@@ -145,10 +145,14 @@ int run(
     at::Tensor tensor_b,
     at::Tensor tensor_c,
     at::Tensor tensor_d) {
-  // tensor a is m x k; tensor b is k x n
+  // tensor a is m x (k // kSparse); tensor b is k x n
   const int length_m = tensor_a.size(0);
-  const int length_n = tensor_b.size(1);
   const int length_k = tensor_b.size(0);
+  const int length_n = tensor_b.size(1);
+
+  std::cout << "length_m: " << length_m << std::endl;
+  std::cout << "length_n: " << length_n << std::endl;
+  std::cout << "length_k: " << length_k << std::endl;
 
   std::cout << "kSparse: " << kSparse << std::endl;
   std::cout << "kElementsPerElementE: " << kElementsPerElementE << std::endl;
@@ -267,8 +271,8 @@ namespace native {
 
 // TODO: Pull back in device and cuda version constraints.
 Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense) {
-  auto result = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
-  auto init = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(0);
+  auto result = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(1);
+  auto init = sparse.new_empty({sparse.size(0), dense.size(1)}).fill_(2);
   run(sparse, dense, init, result);
   return result;
 }
