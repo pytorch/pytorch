@@ -738,16 +738,29 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
     }
+    if(input.is_cpu() && !input.is_quantized()) {
+      auto igates = pre_compute_input ? input : params.linear_ih(input);
+      auto hgates = params.linear_hh(hx);
+      Tensor ccx = cx.contiguous();
+      auto result = at::_thnn_fused_lstm_cell(
+          igates, hgates, ccx);
+      // applying projections if w_hr is defined
+      auto hy = params.matmul_hr(std::get<0>(result));
+      // Slice off the workspace argument (it's needed only for AD).
+      return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+    }
 
-    auto igates = pre_compute_input ? input : params.linear_ih(input);
-    auto hgates = params.linear_hh(hx);
-    auto result = at::_thnn_fused_lstm_cell(
-        igates, hgates, cx);
-    // applying projections if w_hr is defined
-    auto hy = params.matmul_hr(std::get<0>(result));
-    // Slice off the workspace argument (it's needed only for AD).
-    return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
-
+    const auto gates = params.linear_hh(hx).add_(
+        pre_compute_input ? input : params.linear_ih(input));
+    auto chunked_gates = gates.unsafe_chunk(4, 1);
+    auto ingate = chunked_gates[0].sigmoid_();
+    auto forgetgate = chunked_gates[1].sigmoid_();
+    auto cellgate = chunked_gates[2].tanh_();
+    auto outgate = chunked_gates[3].sigmoid_();
+    auto cy = (forgetgate * cx).add_(ingate * cellgate);
+    auto hy = outgate * cy.tanh();
+    hy = params.matmul_hr(hy);
+    return std::make_tuple(std::move(hy), std::move(cy));
   }
 
 };
