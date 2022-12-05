@@ -1,47 +1,45 @@
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-import torch
 import copy
+import operator
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import warnings
-from torch.fx import (
-    GraphModule,
-)
+import torch
+from torch.fx import GraphModule
 from torch.fx.graph import (
     Graph,
     Node,
 )
-from ..utils import (
-    weight_is_quantized,
-    get_qparam_dict,
-    _parent_name,
-)
-from ..qconfig import (
-    QConfigAny,
-    qconfig_equals
-)
-from ..qconfig_mapping import QConfigMapping
-from .qconfig_mapping_utils import (
-    generate_node_name_to_qconfig,
-    compare_prepare_convert_qconfig_mappings,
-    update_qconfig_for_fusion,
-    is_qconfig_supported_by_dtype_configs,
-    _update_qconfig_for_qat,
-)
-from torch.ao.quantization.backend_config.utils import (
-    get_root_module_to_quantized_reference_module,
-    get_pattern_to_dtype_configs,
-    get_fused_module_classes,
-    get_qat_module_classes,
-)
-from torch.ao.quantization.backend_config import (
+from torch.nn.utils.parametrize import type_before_parametrizations
+from ..backend_config import (
     BackendConfig,
     get_native_backend_config,
 )
-from .graph_module import (
-    QuantizedGraphModule,
-    is_observed_standalone_module,
+from ..backend_config.utils import (
+    get_fused_module_classes,
+    get_pattern_to_dtype_configs,
+    get_qat_module_classes,
+    get_root_module_to_quantized_reference_module,
 )
-from ._equalize import update_obs_for_equalization, convert_eq_obs
-from torch.nn.utils.parametrize import type_before_parametrizations
+from ..quantize import (
+    _remove_qconfig,
+    is_activation_post_process,
+)
+from ..qconfig import (
+    qconfig_equals,
+    QConfigAny,
+)
+from ..qconfig_mapping import QConfigMapping
+from ..stubs import DeQuantStub
+from ..utils import (
+    _parent_name,
+    is_per_channel,
+    get_qparam_dict,
+)
+# importing the lib so that the quantized_decomposed ops are registered
+from ._decomposed import quantized_decomposed_lib  # noqa: F401
+from ._equalize import (
+    convert_eq_obs,
+    update_obs_for_equalization,
+)
 from .convert_utils import (
     _convert_custom_module,
     _convert_standalone_module,
@@ -54,27 +52,24 @@ from .convert_utils import (
     _restore_state,
     _run_weight_observers,
 )
-from .utils import (
-    _get_module,
-    get_custom_module_class_keys,
-    create_getattr_from_value,
-)
-from torch.ao.quantization.utils import (
-    is_per_channel,
-    to_underlying_dtype,
-)
-from torch.ao.quantization.quantize import (
-    _remove_qconfig,
-    is_activation_post_process,
-)
-from torch.ao.quantization.stubs import DeQuantStub
-from .custom_config import (
-    ConvertCustomConfig,
+from .custom_config import ConvertCustomConfig
+from .graph_module import (
+    is_observed_standalone_module,
+    QuantizedGraphModule,
 )
 from .lower_to_fbgemm import lower_to_fbgemm
-# importing the lib so that the quantized_decomposed ops are registered
-from ._decomposed import quantized_decomposed_lib  # noqa: F401
-import operator
+from .qconfig_mapping_utils import (
+    _update_qconfig_for_qat,
+    compare_prepare_convert_qconfig_mappings,
+    generate_node_name_to_qconfig,
+    is_qconfig_supported_by_dtype_configs,
+    update_qconfig_for_fusion,
+)
+from .utils import (
+    _get_module,
+    create_getattr_from_value,
+    get_custom_module_class_keys,
+)
 
 __all__ = [
     "convert",
