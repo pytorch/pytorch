@@ -3130,7 +3130,6 @@
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
 
-
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: linspace
@@ -5324,7 +5323,6 @@
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
-
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
