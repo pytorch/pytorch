@@ -59,15 +59,15 @@ class VerificationOptions:
             It should be a float of value between 0.0 and 1.0.
     """
 
-    flatten: bool = dataclasses.field(default=True)
-    ignore_none: bool = dataclasses.field(default=True)
-    check_shape: bool = dataclasses.field(default=True)
-    check_dtype: bool = dataclasses.field(default=True)
-    ort_providers: Sequence[str] = dataclasses.field(default=_ORT_PROVIDERS)
-    rtol: float = dataclasses.field(default=1e-3)
-    atol: float = dataclasses.field(default=1e-7)
-    remained_onnx_input_idx: Optional[Sequence[int]] = dataclasses.field(default=None)
-    acceptable_error_percentage: Optional[float] = dataclasses.field(default=None)
+    flatten: bool = True
+    ignore_none: bool = True
+    check_shape: bool = True
+    check_dtype: bool = True
+    ort_providers: Sequence[str] = _ORT_PROVIDERS
+    rtol: float = 1e-3
+    atol: float = 1e-7
+    remained_onnx_input_idx: Optional[Sequence[int]] = None
+    acceptable_error_percentage: Optional[float] = None
 
 
 @_beartype.beartype
