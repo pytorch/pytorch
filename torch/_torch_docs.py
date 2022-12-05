@@ -946,7 +946,7 @@ Args:
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
     storage_offset (int, optional): the offset in the underlying storage of the output tensor.
-    If ``None``, the storage_offset of the output tensor will match the input tensor.
+        If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 
@@ -8996,8 +8996,8 @@ Example::
 add_docstr(
     torch.rand,
     """
-rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
-pin_memory=False) -> Tensor
+rand(*size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, \
+requires_grad=False, pin_memory=False) -> Tensor
 """
     + r"""
 Returns a tensor filled with random numbers from a uniform distribution
@@ -9676,6 +9676,11 @@ select(input, dim, index) -> Tensor
 
 Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
+
+.. note:: If :attr:`input` is a sparse tensor and returning a view of
+          the tensor is not possible, a RuntimeError exception is
+          raised. In this is the case, consider using
+          :func:`torch.select_copy` function.
 
 Args:
     {input}
