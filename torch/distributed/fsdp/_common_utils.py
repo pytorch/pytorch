@@ -205,7 +205,7 @@ def _assert_in_training_states(
 def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
     """
     Returns:
-        Set[nn.Module: The subset of ``modules`` that are root modules (i.e.
+        Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
         parent-less) with respect to the modules in the set itself. In other
         words, these are the modules in ``modules`` that are not the child of
         any other module in ``modules``.
