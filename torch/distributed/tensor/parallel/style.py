@@ -1,15 +1,28 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from typing import Optional, Union
+
 import torch
-from abc import ABC
-from typing import Union, Optional
-from torch.distributed._tensor import DTensor, Shard, Replicate, DeviceMesh
-from torch.distributed._tensor.parallel.utils import (
-    _PrepareInputType,
-    _PrepareOutputType,
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor.parallel._utils import (
     _prepare_input_validate,
     _prepare_output_validate,
+    _PrepareInputType,
+    _PrepareOutputType,
 )
+
+__all__ = [
+    "ParallelStyle",
+    "RowwiseParallel",
+    "ColwiseParallel",
+    "PairwiseParallel",
+    "make_input_replicate_1d",
+    "make_input_shard_1d",
+    "make_input_shard_1d_dim_last",
+    "make_output_replicate_1d",
+    "make_output_tensor",
+    "make_output_shard_1d",
+]
 
 
 class ParallelStyle(ABC):
@@ -91,9 +104,7 @@ def make_input_shard_1d(
     if isinstance(input, DTensor):
         return input.redistribute(device_mesh, shard_spec)
     elif isinstance(input, torch.Tensor):
-        return DTensor.from_local(
-            input, device_mesh, shard_spec, run_check=False
-        )
+        return DTensor.from_local(input, device_mesh, shard_spec, run_check=False)
     else:
         raise RuntimeError(
             "Tensor parallel module expects torch.Tensor or DTensor input but"
@@ -150,9 +161,7 @@ def make_input_replicate_1d(
     if isinstance(input, DTensor):
         return input.redistribute(device_mesh, replicate)
     elif isinstance(input, torch.Tensor):
-        return DTensor.from_local(
-            input, device_mesh, replicate, run_check=False
-        )
+        return DTensor.from_local(input, device_mesh, replicate, run_check=False)
     else:
         raise RuntimeError(
             "Tensor parallel module expects torch.Tensor or DTensor input but"

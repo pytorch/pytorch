@@ -275,9 +275,14 @@ class SchedulerNode(BaseSchedulerNode):
             }
             # reduction not on the last dim swaps the sizes, and downstream
             # dependencies expect unswapped
-            self.read_writes.writes = self.read_writes.writes | {
-                w.maybe_swap_sizes() for w in self.read_writes.writes
-            }
+            # TODO swapping sizes doesn't work, leads to
+            # File "/scratch/ngimel/work/repos/torchdynamo/torchinductor/sizevars.py", line 130, in guard_equals
+            # if len(right.free_symbols) < len(left.free_symbols):
+            # AttributeError: 'int' object has no attribute 'free_symbols'
+            # even though memory dep looks correct
+            # self.read_writes.writes = self.read_writes.writes | {
+            #     w.maybe_swap_sizes() for w in self.read_writes.writes
+            # }
 
     def debug_str_extra(self):
         name = self.get_name()
@@ -342,6 +347,12 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        # mutations not tracked in cpp kernels
+                        if isinstance(
+                            V.kernel, torch._inductor.codegen.triton.TritonKernel
+                        ):
+                            V.kernel.mutations.add(input_node.get_name())
+                            V.kernel.mutations.add(self.get_name())
                         return
         super().allocate()
 
@@ -1075,9 +1086,9 @@ class Scheduler:
         else:
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
-                if device_props.major < 6:
+                if device_props.major < 7:
                     raise RuntimeError(
-                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                     )
                 else:
                     raise RuntimeError(
