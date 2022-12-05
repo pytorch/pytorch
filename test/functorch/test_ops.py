@@ -46,7 +46,7 @@ from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
-from functorch._src.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp
 
 aten = torch.ops.aten
 
@@ -296,6 +296,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('NumpyExpAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 }
 
 aliasing_ops = {
@@ -411,6 +412,7 @@ class TestOperators(TestCase):
         xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
+        xfail('NumpyExpAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -932,6 +934,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail('NumpyExpAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
         # ----------------------------------------------------------------------
     }
 
