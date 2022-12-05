@@ -935,6 +935,7 @@ class MultiThreadedTestCase(TestCase):
     def threaded_run_test(self):
         self.perThreadSetUp()
         try:
+            # TODO: use @spawn_threads_and_init_comms wrapper instead in tests?
             _run_test_with_mt_pg(
                 self=self,
                 timeout=TIMEOUT_DEFAULT,
