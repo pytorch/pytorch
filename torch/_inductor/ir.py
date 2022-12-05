@@ -2411,7 +2411,9 @@ class ExternKernel(InputsKernel):
         index = V.graph.sizevars.simplify_with_ranges(
             list(rw.reads)[0].index, rw.var_ranges
         )
-        strides, offset = V.graph.sizevars.maybe_stride_and_offset_vars(index, rw.range_vars)
+        strides, offset = V.graph.sizevars.maybe_stride_and_offset_vars(
+            index, rw.range_vars
+        )
         if offset is None or any(s is None for s in strides):
             raise NotImplementedError()
 

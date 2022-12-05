@@ -47,7 +47,9 @@ class SizeVarAllocator(object):
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
-        self.maybe_stride_and_offset_vars = self.make_maybe_stride_and_offset_vars_cache()
+        self.maybe_stride_and_offset_vars = (
+            self.make_maybe_stride_and_offset_vars_cache()
+        )
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
@@ -385,7 +387,9 @@ class SizeVarAllocator(object):
     def make_maybe_stride_and_offset_vars_cache(self):
         cache = self._lru_cache(self._maybe_stride_and_offset_vars)
 
-        def maybe_stride_and_offset_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+        def maybe_stride_and_offset_vars(
+            index: Expr, vars: List[sympy.Symbol]
+        ) -> List[Expr]:
             return cache(index, tuple(vars))
 
         return maybe_stride_and_offset_vars
@@ -431,7 +435,9 @@ class SizeVarAllocator(object):
 
         return strides, offset
 
-    def maybe_stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Optional[Expr]]:
+    def maybe_stride_vars(
+        self, index: Expr, vars: List[sympy.Symbol]
+    ) -> List[Optional[Expr]]:
         """Convert an indexing expression back into strides"""
         strides, offset = self.maybe_stride_and_offset_vars(index, vars)
         return strides
