@@ -500,6 +500,8 @@ def handle_subgraph_candidate(
     fqn: Optional[str],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
     example_inputs: Any,
+    custom_prepare_fn: Optional[Callable] = None,
+    custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -566,9 +568,24 @@ def handle_subgraph_candidate(
             .set_non_traceable_module_classes([OutputLogger, OutputComparisonLogger])
 
         # add a call to prepare_fx on the wrapper module
-        orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
-            orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
-            prepare_custom_config=prepare_custom_config)
+        if custom_prepare_fn is None:
+            orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
+                orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
+                prepare_custom_config=prepare_custom_config)
+        else:
+            if custom_prepare_kwargs is None:
+                custom_prepare_kwargs = {}
+            for kwarg_name in ["example_inputs", "prepare_custom_config", "qconfig_mapping"]:
+                assert kwarg_name not in custom_prepare_kwargs, f"cannot specify {kwarg_name} in custom_prepare_kwargs"
+            prepare_kwargs: Dict[str, Any] = {
+                "example_inputs": example_inputs,
+                "prepare_custom_config": prepare_custom_config,
+                "qconfig_mapping": qconfig_mapping
+            }
+            prepare_kwargs.update(custom_prepare_kwargs)
+            orig_mod_copy_wrapped = custom_prepare_fn(
+                orig_mod_copy_wrapped,
+                **prepare_kwargs)
 
         # attach the wrapper to the model
         attr_name = _get_attr_wrapper_name(subgraph_idx, subgraph_candidate_idx)
@@ -615,6 +632,8 @@ def handle_subgraph(
     nodes_in_this_subgraph: List[Any],
     qconfig_mappings: List[QConfigMapping],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    custom_prepare_fn: Optional[Callable] = None,
+    custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -690,7 +709,7 @@ def handle_subgraph(
         handle_subgraph_candidate(
             mt, subgraph_idx, subgraph_candidate_idx, first_node,
             last_node, fqn, list_of_node_name_to_qconfig,
-            example_inputs)
+            example_inputs, custom_prepare_fn, custom_prepare_kwargs)
 
 # TODO(future PR): redesign this to make it easier to consume outputs
 def group_results_by_subgraph(results: NSResultsType) -> Any:
