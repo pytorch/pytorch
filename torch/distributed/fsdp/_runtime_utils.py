@@ -547,6 +547,8 @@ def _post_backward_hook(
                 state
             ):
                 # TODO: Use the low precision communication hook directly
+                # TODO: We can avoid the double copy (first to `reduce_dtype`,
+                # then to `padded_unsharded_grad`) in the padding case.
                 param.grad.data = param.grad.to(state.mixed_precision.reduce_dtype)
 
             if handle.uses_sharded_strategy:
