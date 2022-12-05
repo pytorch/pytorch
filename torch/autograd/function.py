@@ -419,6 +419,7 @@ class Function(_SingleLevelFunction):
             return super().apply(*args, **kwargs)
 
         # TODO: fix circular import
+        # https://github.com/pytorch/pytorch/issues/90224
         from torch._functorch.autograd_function import custom_function_call
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
@@ -427,6 +428,7 @@ class Function(_SingleLevelFunction):
 
         if not hasattr(cls, 'setup_context'):
             # TODO: link documentation in error message
+            # https://github.com/pytorch/pytorch/issues/90224
             raise RuntimeError(
                 'In order to use an autograd.Function with functorch transforms ',
                 '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',

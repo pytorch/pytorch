@@ -83,26 +83,12 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
-        .set_object_type(torch.nn.Conv1d, qconfig) \
-        .set_object_type(torch.nn.Conv2d, qconfig) \
-        .set_object_type(torch.nn.Conv3d, qconfig) \
         .set_object_type(torch.nn.ConvTranspose1d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose2d, qconfig_transpose) \
         .set_object_type(torch.nn.ConvTranspose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.Linear, qconfig) \
-        .set_object_type(torch.nn.functional.conv1d, qconfig) \
-        .set_object_type(torch.nn.functional.conv2d, qconfig) \
-        .set_object_type(torch.nn.functional.conv3d, qconfig) \
         .set_object_type(torch.nn.functional.conv_transpose1d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose2d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.conv_transpose3d, qconfig_transpose) \
-        .set_object_type(torch.nn.functional.linear, qconfig) \
-        .set_object_type(torch.nn.ReLU, qconfig) \
-        .set_object_type(torch.nn.functional.relu, qconfig) \
-        .set_object_type(torch.relu, qconfig) \
-        .set_object_type(torch.nn.BatchNorm1d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm2d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm3d, qconfig) \
         .set_object_type(torch.nn.functional.layer_norm, qconfig_layernorm) \
         .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
 

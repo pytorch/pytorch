@@ -87,6 +87,7 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
     # TODO: The name of the grad_fn is GeneratedBackward. This isn't a great UX,
     # but in theory functorch users shouldn't be peeking at the grad_fn.
     # We should try to generate a better name for this.
+    # https://github.com/pytorch/pytorch/issues/90224
     class Generated(_SingleLevelFunction):
         @staticmethod
         def forward(*operands):
@@ -97,17 +98,14 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
             with torch.enable_grad(), maybe_interpreter.lower():
                 output = custom_function_call(autograd_function, *unwrapped_operands)
 
-            # autograd.Function's ctx.mark_dirty expect a returned input
-            # to have the same object identity as the input.
-            # Mode-only functorch will greatly simplify this logic.
-            return wrap_outputs_maintaining_identity(
-                output,
-                unwrapped_operands,
-                operands,
-                level)
+            return pytree.tree_map_only(
+                torch.Tensor,
+                lambda x: _wrap_for_grad(x, level),
+                output)
 
         @staticmethod
         def setup_context(ctx, outputs, *operands):
+            ctx.mark_dirty = mark_dirty_error
             return autograd_function.setup_context(ctx, outputs, *operands)
 
         @staticmethod
@@ -120,29 +118,23 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
     return flat_out
 
 
-def wrap_outputs_maintaining_identity(outputs, unwrapped_inputs, orig_inputs, level):
-    flat_output, _ = pytree.tree_flatten(outputs)
-    flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
-    flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
-
-    unwrapped_input_to_orig_input = {
-        id(unwrapped): orig
-        for unwrapped, orig in zip(flat_unwrapped_inputs, flat_orig_inputs)
-    }
-
-    flat_outputs, spec = pytree.tree_flatten(outputs)
-    result = []
-
-    for output in flat_outputs:
-        if not isinstance(output, torch.Tensor):
-            result.append(output)
-            continue
-        if id(output) in unwrapped_input_to_orig_input:
-            result.append(unwrapped_input_to_orig_input[id(output)])
-            continue
-        result.append(_wrap_for_grad(output, level))
-
-    return pytree.tree_unflatten(result, spec)
+# https://github.com/pytorch/pytorch/issues/90225
+# If an input was marked as dirty, and the autograd.Function returns the input
+# from the forward, then the grad rule for custom_function_call must also
+# return the corresponding input from the forward() of the Generated autograd.Function
+#
+# We haven't figured out how to do this yet. One possibility is to rely
+# on if the return from the redispatched custom_function_call in Generated.forward
+# has the same object id as one of the inputs,
+# but https://github.com/pytorch/pytorch/issues/90209 means we cannot rely on
+# that property.
+def mark_dirty_error(*args, **kwargs):
+    raise RuntimeError(
+        'NYI: we do not yet support ctx.mark_dirty with functorch transforms. '
+        'Please try to avoid modifying inputs to the autograd.Function in-place '
+        'by using out-of-place operations or by cloning the inputs. '
+        'Please see https://github.com/pytorch/pytorch/issues/90209 for more details'
+    )
 
 
 # NOTE: [functorch vjp and autograd interaction]
@@ -195,6 +187,7 @@ class VmapInfo(NamedTuple):
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
     if not hasattr(autograd_function, "vmap"):
         # TODO: link docs when they're ready.
+        # https://github.com/pytorch/pytorch/issues/90224
         raise RuntimeError(
             f"You tried to vmap over {autograd_function.__name__}, but "
             f"it does not have a vmap rule defined. Please add a vmap "
@@ -215,9 +208,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
         unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
 
     output = wrap_batched(unwrapped_output, out_dims, current_level)
-    # ctx.mark_dirty expects outputs that are the same as inputs to have
-    # the same object identity.
-    return preserve_object_identity(output, operands, unwrapped_output, unwrapped_operands)
+    return output
 
 
 def unwrap_batched(args, level):
@@ -234,36 +225,12 @@ def wrap_batched(args, bdims, level):
     # TODO: raise better error message to the user when they don't follow the API.
     # Should probably mimic the logic of _process_batched_inputs,
     # but that one is hyperspecialized on error messages.
+    # https://github.com/pytorch/pytorch/issues/90224
     flat_args, spec = pytree.tree_flatten(args)
     flat_bdims = _broadcast_to_and_flatten(bdims, spec)
     assert flat_bdims is not None
     result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
     return result
-
-
-def preserve_object_identity(outputs, inputs, unwrapped_outputs, unwrapped_inputs):
-    flat_outputs, _ = pytree.tree_flatten(outputs)
-    flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
-    flat_inputs, _ = pytree.tree_flatten(inputs)
-
-    unwrapped_input_to_input = {
-        id(unwrapped): inp
-        for unwrapped, inp in zip(flat_unwrapped_inputs, flat_inputs)
-    }
-
-    flat_unwrapped_outputs, spec = pytree.tree_flatten(unwrapped_outputs)
-    result = []
-
-    for output, unwrapped_output in zip(flat_outputs, flat_unwrapped_outputs):
-        if not isinstance(output, torch.Tensor):
-            result.append(output)
-            continue
-        if id(unwrapped_output) in unwrapped_input_to_input:
-            result.append(unwrapped_input_to_input[id(unwrapped_output)])
-            continue
-        result.append(output)
-
-    return pytree.tree_unflatten(result, spec)
 
 
 @custom_function_call.py_impl(TransformType.Jvp)
