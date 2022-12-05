@@ -17,7 +17,7 @@ using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
 struct C10_CUDA_API CUDAStreamCaptureModeGuard {
   CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
     strictness_ = desired;
@@ -32,7 +32,7 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
 };
 #endif
 
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
 // Protects against enum cudaStreamCaptureStatus implementation changes.
 // Some compilers seem not to like static_assert without the messages.
 static_assert(
@@ -47,7 +47,7 @@ static_assert(
 #endif
 
 enum class CaptureStatus : int {
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
   None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
   Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
   Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
@@ -61,7 +61,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
     case CaptureStatus::None:
       os << "cudaStreamCaptureStatusNone";
       break;
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
     case CaptureStatus::Active:
       os << "cudaStreamCaptureStatusActive";
       break;
@@ -78,7 +78,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 
 // Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
   cudaStreamCaptureStatus is_capturing;
   C10_CUDA_CHECK(
       cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));

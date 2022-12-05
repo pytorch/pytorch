@@ -371,12 +371,12 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if !defined(__HIPCC__)
+#if !defined(TORCH_HIP_VERSION)
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
