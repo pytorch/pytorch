@@ -56,6 +56,11 @@ class CompiledFn(Protocol):
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
+OutputGraphState = Tuple[
+    List[GraphArg], Set[Guard], Optional[Dict[str, torch.nn.Module]], SideEffects, int
+]
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -198,7 +203,7 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
-    def copy_graphstate(self):
+    def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
         state = (
@@ -625,6 +630,7 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
+        *,
         current_tx=None,
     ):
         rv = super().create_proxy(
