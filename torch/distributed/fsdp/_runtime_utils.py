@@ -578,7 +578,7 @@ def _post_backward_hook(
                     p_assert(
                         "Expects the padded unsharded gradient to have dtype "
                         f"{unsharded_grad.dtype} but pre-allocated with dtype "
-                        f"{padded_unsharded_grad.numel()}"
+                        f"{padded_unsharded_grad.dtype}"
                     )
                     padded_unsharded_grad[: unsharded_grad.numel()].copy_(
                         unsharded_grad
