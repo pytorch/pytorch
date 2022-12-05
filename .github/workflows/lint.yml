@@ -274,6 +274,14 @@ jobs:
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+      - name: Report Status   
+        if: always()
+        uses: ravsamhq/notify-slack-action@v1
+        with:
+            status: ${{ job.status }}
+            notify_when: 'skipped'
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
