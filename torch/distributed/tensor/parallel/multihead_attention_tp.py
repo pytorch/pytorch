@@ -3,14 +3,16 @@
 
 import math
 
+from typing import Optional, Union
+
 import torch
 from torch.distributed._tensor import DTensor as DT
 from torch.distributed._tensor.placement_types import Shard
-from torch.distributed._tensor.parallel._view_with_dim_change import (
+from torch.distributed.tensor.parallel._view_with_dim_change import (
     _view_with_sharding_dim_change,
 )
 
-from typing import Optional, Union
+__all__ = ["TensorParallelMultiheadAttention"]
 
 
 # TODO: Add a test to test equivalence between our Multihead Attention
@@ -180,9 +182,7 @@ class TensorParallelMultiheadAttention(torch.nn.Module):
             query_layer = _view_with_sharding_dim_change(
                 query_layer, 1, (sq, b * nh, -1)
             )
-            key_layer = _view_with_sharding_dim_change(
-                key_layer, 1, (sq, b * nh, -1)
-            )
+            key_layer = _view_with_sharding_dim_change(key_layer, 1, (sq, b * nh, -1))
             value_layer = _view_with_sharding_dim_change(
                 value_layer, 1, (sq, b * nh, -1)
             )
