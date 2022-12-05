@@ -34,8 +34,6 @@ jobs:
         run: |
           ls ${{ github.workspace }}
       - run: echo "🍏 This job's status is ${{ job.status }}."
-      - name: Check
-        uses: actions/checkout@v1
       - name: Try to fail
         run: exit 1
       - name: Print message if we don't fail
@@ -45,6 +43,6 @@ jobs:
         uses: ravsamhq/notify-slack-action@v1
         with:
             status: ${{ job.status }}
-            notify_when: 'failed'
+            notify_when: 'failure'
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
