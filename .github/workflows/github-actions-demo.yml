@@ -44,6 +44,7 @@ jobs:
         if: always()
         uses: ravsamhq/notify-slack-action@v1
         with:
+            message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             status: ${{ job.status }}
             notify_when: 'failure'
         env:
