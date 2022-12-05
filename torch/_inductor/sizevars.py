@@ -2,7 +2,7 @@ import dataclasses
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -11,7 +11,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
 from .codegen.common import IndentedBuffer
-from .utils import sympy_subs, sympy_symbol, VarRanges
+from .utils import sympy_dot, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class SizeVarAllocator(object):
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
-        self.stride_vars = self.make_stride_vars_cache()
+        self.maybe_stride_and_offset_vars = self.make_maybe_stride_and_offset_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
         self.declare = ""
@@ -186,7 +186,7 @@ class SizeVarAllocator(object):
         """
         sizes = list(map(self.simplify, sizes))
 
-        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        strides = [self.maybe_stride_vars(x, index_vars) for x in index_formulas]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
@@ -196,6 +196,9 @@ class SizeVarAllocator(object):
 
         def can_merge_dims(a, b):
             for k in range(len(strides)):
+                if strides[k][a] is None or strides[k][b] is None:
+                    return False
+
                 if self.simplify(strides[k][a] * sizes[a]) == self.simplify(
                     strides[k][b]
                 ):
@@ -379,52 +382,75 @@ class SizeVarAllocator(object):
 
         return wrapper
 
-    def make_stride_vars_cache(self):
-        cache = self._lru_cache(self._stride_vars)
+    def make_maybe_stride_and_offset_vars_cache(self):
+        cache = self._lru_cache(self._maybe_stride_and_offset_vars)
 
-        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+        def maybe_stride_and_offset_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
             return cache(index, tuple(vars))
 
-        return stride_vars
+        return maybe_stride_and_offset_vars
 
-    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-        """Convert an indexing expression back into strides"""
-        strides = []
+    def _maybe_stride_and_offset_vars(
+        self, index: sympy.Expr, vars: List[sympy.Symbol]
+    ) -> Tuple[List[Optional[sympy.Expr]], Optional[sympy.Expr]]:
+        """Convert an indexing expression back into strides and offset"""
         index = self.simplify(index)
-        # remove any offset
-        index = index - sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
-        for i in range(len(vars)):
-            # drop all the other dims
-            index_dim = sympy_subs(
-                index,
-                {
-                    vars[j]: sympy.Integer(0)
-                    for j in range(len(vars))
-                    if i != j and vars[j] != 0
-                },
-            )
-            v = vars[i]
-            if v == 0:
-                strides.append(sympy.Integer(0))
+
+        # TODO: vars aren't always symbols
+        assert all(isinstance(v, sympy.Symbol) or v == 0 for v in vars)
+        var_symbols = [v for v in vars if isinstance(v, sympy.Symbol)]
+
+        stride_symbols = [sympy.Wild(f"stride{i}") for i in range(len(var_symbols))]
+        var_to_stride = {v: s for v, s in zip(var_symbols, stride_symbols)}
+        offset_symbol = sympy.Wild("offset")
+        index_pattern = offset_symbol + sympy_dot(var_symbols, stride_symbols)
+
+        match = index.match(index_pattern)
+        if match is None:
+            # Index calculation is not strided
+            return [None] * len(vars), None
+
+        strides = []
+        for v in vars:
+            if v not in var_to_stride:
+                stride = 0 if v == 0 else None
             else:
-                # TODO(jansel): should we use sympy.diff here?
-                strides.append(
-                    sympy_subs(index_dim, {v: sympy.Integer(1)})
-                    - sympy_subs(index_dim, {v: sympy.Integer(0)})
-                )
+                stride = match.get(var_to_stride[v], None)
+            strides.append(stride)
+
+        offset = match[offset_symbol]
+
+        # If any vars appear in the offset terms, they are not strided
+        vars_set = set(vars)
+        if vars_set & offset.free_symbols:
+            for i, v in enumerate(vars):
+                if v in offset.free_symbols:
+                    strides[i] = None
+
+            offset = None
+
+        return strides, offset
+
+    def maybe_stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Optional[Expr]]:
+        """Convert an indexing expression back into strides"""
+        strides, offset = self.maybe_stride_and_offset_vars(index, vars)
         return strides
 
-    def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
+    def maybe_offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Optional[Expr]:
         """Extract offset part of an indexing expression"""
-        index = self.simplify(index)
-        return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
+        strides, offset = self.maybe_stride_and_offset_vars(index, vars)
+        return offset
 
     def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         for v in index.free_symbols:
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.stride_vars(index, vars):
+        for s in self.maybe_stride_vars(index, vars):
+            if s is None:
+                result.append(0)
+                continue
+
             try:
                 result.append(self.size_hint(s))
             except TypeError:
