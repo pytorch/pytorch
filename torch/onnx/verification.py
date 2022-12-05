@@ -1140,6 +1140,18 @@ class OnnxTestCaseRepro:
     ):
         """Create a repro under "{dir}/test_{name}" for an ONNX test case.
 
+        The test case contains the model and the inputs/outputs data. The directory
+        structure is as follows:
+
+        dir
+        ├── test_<name>
+        │   ├── model.onnx
+        │   └── test_data_set_0
+        │       ├── input_0.pb
+        │       ├── input_1.pb
+        │       ├── output_0.pb
+        │       └── output_1.pb
+
         Args:
             proto: ONNX model proto.
             inputs: Inputs to the model.
@@ -1161,13 +1173,17 @@ class OnnxTestCaseRepro:
         )
 
     @_beartype.beartype
-    def validate_test_case_repro(self, backend: OnnxBackend):
-        """Validate an ONNX test case.
+    def validate(self, options: VerificationOptions):
+        """Run the ONNX test case with options.backend, and compare with the expected outputs.
 
         Args:
-            backend: Backend to validate the repro.
+            options: Options for validation.
+
+        Raise:
+            AssertionError: if outputs from options.backend and expected outputs are not
+                equal up to specified precision.
         """
-        onnx_session = _onnx_backend_session(io.BytesIO(self.proto), backend)
+        onnx_session = _onnx_backend_session(io.BytesIO(self.proto), options.backend)
         run_outputs = onnx_session.run(None, self.inputs)
         if hasattr(onnx_session, "get_outputs"):
             output_names = [o.name for o in onnx_session.get_outputs()]
@@ -1176,7 +1192,6 @@ class OnnxTestCaseRepro:
         else:
             raise ValueError(f"Unknown onnx session type: {type(onnx_session)}")
         expected_outs = [self.outputs[name] for name in output_names]
-        options = VerificationOptions()
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
 

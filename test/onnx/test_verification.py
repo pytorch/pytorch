@@ -264,13 +264,11 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         mismatch_leaves = self.graph_info.all_mismatch_leaf_graph_info()
         self.assertTrue(len(mismatch_leaves) > 0)
         leaf_info = mismatch_leaves[0]
-        temp_dir = tempfile.TemporaryDirectory()
-        repro_dir = leaf_info.export_repro(temp_dir.name)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repro_dir = leaf_info.export_repro(temp_dir.name)
 
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
-            verification.OnnxTestCaseRepro(repro_dir).validate_test_case_repro(
-                self.onnx_backend
-            )
+            with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+                verification.OnnxTestCaseRepro(repro_dir).validate(self.onnx_backend)
 
 
 if __name__ == "__main__":
