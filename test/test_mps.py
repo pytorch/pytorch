@@ -1321,8 +1321,8 @@ class TestMPS(TestCase):
 
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
-        NUM_SAMPLES=60
-        s = (0,1)
+        NUM_SAMPLES = 60
+        s = (0, 1)
 
         X = torch.rand(8000, 3, dtype=torch.float32, device='cpu')
         X_mps = X.detach().clone().to("cpu")
@@ -1339,9 +1339,9 @@ class TestMPS(TestCase):
 
         for i in range(NUM_SAMPLES):
             for j in range(X.shape[1]):
-                actual_pts_mps[i,j] = X_mps[pts_mps[i,j],j]
-                actual_pts[i,j] = X[pts[i,j],j]
-                self.assertEqual(actual_pts[i,j], actual_pts_mps[i,j])
+                actual_pts_mps[i, j] = X_mps[pts_mps[i, j], j]
+                actual_pts[i, j] = X[pts[i, j], j]
+                self.assertEqual(actual_pts[i, j], actual_pts_mps[i, j])
 
 
     def test_slice(self):
