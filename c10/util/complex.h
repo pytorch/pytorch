@@ -525,8 +525,7 @@ constexpr T imag(const c10::complex<T>& z) {
 template <typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return thrust::abs(
-      static_cast<thrust::complex<T>>(z));
+  return thrust::abs(static_cast<thrust::complex<T>>(z));
 #else
   return std::abs(static_cast<std::complex<T>>(z));
 #endif
