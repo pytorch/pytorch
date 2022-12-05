@@ -40,6 +40,10 @@ pip install "ninja==1.10.0.post1" future "hypothesis==5.35.1" "expecttest==0.1.3
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
+pip uninstall sympy
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+
 set DISTUTILS_USE_SDK=1
 
 if not "%USE_CUDA%"=="1" goto cuda_build_end
