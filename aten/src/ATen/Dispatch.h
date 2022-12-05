@@ -76,9 +76,6 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   })
 #endif
 
-// Workaround for C10_UNUSED because CUDA 10.2 and below fails to handle unused
-// attribute in the type aliasing context. Keep name long and verbose to avoid
-// macro collisions.
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
 
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \

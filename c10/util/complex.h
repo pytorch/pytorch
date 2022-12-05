@@ -510,16 +510,6 @@ std::basic_istream<CharT, Traits>& operator>>(
 //
 // The implementation of these functions also follow the design of C++20
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-namespace c10_internal {
-template <typename T>
-C10_HOST_DEVICE constexpr thrust::complex<T>
-cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-  return static_cast<thrust::complex<T>>(x);
-}
-} // namespace c10_internal
-#endif
-
 namespace std {
 
 template <typename T>
@@ -536,7 +526,7 @@ template <typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return thrust::abs(
-      c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(z));
+      static_cast<thrust::complex<T>>(z));
 #else
   return std::abs(static_cast<std::complex<T>>(z));
 #endif
