@@ -357,6 +357,12 @@ class TestDistributedMultiProc(MultiProcessTestCase):
                 opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
                 self.assertTrue(same(correct_results, opt_results))
 
+    def test_allreduce_meta(self):
+        # Just make sure it runs w/o crash
+        x = torch.empty((4,2,3), device="meta")
+        with _per_rank_init(self.rank, self.world_size, backend="gloo"):
+            dist.all_reduce(x, group=dist.group.WORLD)
+
     def test_trace_allreduce(self):
         """
         Confirm allreduce op shows up in the graph, and ProcessGroup guards work
