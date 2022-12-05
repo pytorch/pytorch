@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import inspect
-from typing import Any
+from typing import Any, Dict, List
 
 import torch.nn
 
@@ -59,14 +59,18 @@ class AttributeMutationNew(AttributeMutation):
         return self is other
 
 
-class SideEffects(object):
+class SideEffects:
     """
     Track side effects (list mutation, setattr, etc) that need to be
     applied after an FX graph is run.
     """
 
+    id_to_variable: Dict[int, VariableTracker]
+    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    keepalive: List[Any]
+
     def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
-        super(SideEffects, self).__init__()
+        super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
