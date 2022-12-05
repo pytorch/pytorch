@@ -88,18 +88,6 @@ def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
 
-InstructionTranslatorGraphState = Tuple[
-    OutputGraphState,
-    Dict[str, VariableTracker],
-    List[VariableTracker],
-    List[BlockStackEntry],
-    Optional[int],
-    Instruction,
-    Optional[Instruction],
-    int,
-]
-
-
 @dataclasses.dataclass
 class BlockStackEntry:
     target: Instruction
@@ -115,6 +103,18 @@ class BlockStackEntry:
 
     def exit(self, tx):
         return self.with_context.exit(tx)
+
+
+InstructionTranslatorGraphState = Tuple[
+    OutputGraphState,
+    Dict[str, VariableTracker],
+    List[VariableTracker],
+    List[BlockStackEntry],
+    Optional[int],
+    Instruction,
+    Optional[Instruction],
+    int,
+]
 
 
 def stack_op(fn: typing.Callable[..., object]):
