@@ -91,8 +91,8 @@ def _step_logger():
 InstructionTranslatorGraphState = Tuple[
     OutputGraphState,
     Dict[str, VariableTracker],
-    Dict[str, VariableTracker],
     List[VariableTracker],
+    List[BlockStackEntry],
     Optional[int],
     Instruction,
     Optional[Instruction],
@@ -1433,7 +1433,7 @@ class InstructionTranslatorBase(object):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
-    def copy_graphstate(self):
+    def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""
         return (
             self.output.copy_graphstate(),
