@@ -510,6 +510,29 @@ def _post_backward_hook(
         if not state._sync_gradients:
             return
 
+        # Only define `padded_unsharded_grad` for sharded strategies
+        pre_allocated_grad = False
+        if handle.uses_sharded_strategy:
+            if handle._uses_param_mixed_precision:
+                grad_dtype = handle._config.low_prec_param_dtype
+            elif handle._uses_reduce_mixed_precision:
+                grad_dtype = handle._config.low_prec_reduce_dtype
+            else:
+                grad_dtype = param.grad.dtype
+            # Pre-allocate the padded unsharded gradient in the default stream
+            # if the gradient needs padding
+            padded_unsharded_grad: Optional[torch.Tensor] = (
+                torch.empty(
+                    handle.flat_param._padded_unsharded_size,
+                    dtype=grad_dtype,
+                    device=state.compute_device,
+                )
+                if handle.flat_param._padded_unsharded_size
+                != handle.flat_param._unpadded_unsharded_size
+                else None
+            )
+            pre_allocated_grad = padded_unsharded_grad is not None
+
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
         state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
@@ -542,11 +565,24 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                padded_unsharded_grad = (
-                    F.pad(unsharded_grad, [0, numel_to_pad])
-                    if numel_to_pad > 0
-                    else unsharded_grad
-                )
+                if pre_allocated_grad:
+                    p_assert(
+                        padded_unsharded_grad.numel() - unsharded_grad.numel()
+                        == numel_to_pad,
+                        f"Expects {numel_to_pad} numel to pad but got padded "
+                        f"shape {padded_unsharded_grad.shape} and unpadded "
+                        f"shape {unsharded_grad.shape}",
+                    )
+                    p_assert(
+                        "Expects the padded unsharded gradient to have dtype "
+                        f"{unsharded_grad.dtype} but pre-allocated with dtype "
+                        f"{padded_unsharded_grad.numel()}"
+                    )
+                    padded_unsharded_grad[: unsharded_grad.numel()].copy_(
+                        unsharded_grad
+                    )
+                else:  # does not need padding
+                    padded_unsharded_grad = unsharded_grad
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
@@ -595,6 +631,11 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 unsharded_grad_data, state._streams["post_backward"]
             )
+            if pre_allocated_grad:
+                # Same pattern for the pre-allocated padded unsharded gradient
+                _no_dispatch_record_stream(
+                    padded_unsharded_grad, state._streams["post_backward"]
+                )
 
             if handle._use_orig_params:
                 # Since the handle's `FlatParameter` completed its gradient
