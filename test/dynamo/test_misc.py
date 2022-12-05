@@ -1527,10 +1527,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res2, 9)
 
     def test_const_dict_variable_python_type(self):
-        from torch._dynamo.variables import ConstDictVariable
+        from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": 10, "b": 20}
-        d2 = collections.OrderedDict([("x", 12), ("y", 22)])
+        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d2 = collections.OrderedDict(
+            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+        )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
             ConstDictVariable(d2, collections.OrderedDict).python_type(),
