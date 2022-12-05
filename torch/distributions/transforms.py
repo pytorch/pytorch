@@ -973,22 +973,24 @@ class LowerCholeskyTransform(Transform):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
 
-class PositiveDefiniteTransform(LowerCholeskyTransform):
+class PositiveDefiniteTransform(Transform):
     """
     Transform from unconstrained matrices to positive-definite matrices.
     """
+    domain = constraints.independent(constraints.real, 2)
     codomain = constraints.positive_definite  # type: ignore[assignment]
 
     def __eq__(self, other):
         return isinstance(other, PositiveDefiniteTransform)
 
     def _call(self, x):
-        x = super()._call(x)
+        x = LowerCholeskyTransform()(x)
         return x @ x.mT
 
     def _inverse(self, y):
         y = torch.linalg.cholesky(y)
-        return super()._inverse(y)
+        return LowerCholeskyTransform().inv(y)
+
 
 class CatTransform(Transform):
     """
