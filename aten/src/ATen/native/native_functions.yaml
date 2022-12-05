@@ -6574,10 +6574,11 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.sparse_dim_out
 
-- func: to_sparse(Tensor self) -> Tensor
+- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
+    SparseCPU, SparseCUDA: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.out
 
@@ -12815,6 +12816,12 @@
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
 
+# Note: this function is only for testing.
+- func: _test_inductor_realize(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA, Meta: _test_inductor_realize
+
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
@@ -12921,6 +12928,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: select_copy_symint
+    SparseCsrCPU, SparseCsrCUDA: select_copy_sparse_csr
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor
