@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -198,6 +199,30 @@ class TestFSDPCheckpoint(FSDPTest):
         test_model = fully_shard(test_model)
 
         with self.assertRaisesRegex(RuntimeError, "mat2 must be a matrix"):
+            self.run_subtests(
+                {
+                    "base_model": [base_model],
+                    "test_model": [test_model],
+                    "x": [torch.randn(2, 100, device="cuda")],
+                    "grad_to_none": [True, False],
+                },
+                self._test_parity,
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_with_param_no_shard(self):
+        model = CompositeParamModel().to(torch.device("cuda"))
+
+        base_model = copy.deepcopy(model)
+
+        test_model = copy.deepcopy(model)
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
+        test_model = fully_shard(test_model, strategy=ShardingStrategy.NO_SHARD)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot writeback when the parameter shape changes"
+        ):
             self.run_subtests(
                 {
                     "base_model": [base_model],
