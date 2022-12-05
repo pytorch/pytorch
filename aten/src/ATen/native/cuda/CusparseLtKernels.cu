@@ -25,6 +25,9 @@ The following source file implements a sparse linear operator using cusparseLt
 #include <cutlass/util/tensor_view_io.h>
 #include <cuda_runtime.h>
 
+#include <typeinfo>
+#include <limits>
+
 #define CUTLASS_CHECK(status)                                                                    \
   {                                                                                              \
     cutlass::Status error = status;                                                              \
@@ -87,6 +90,7 @@ using SmArch = cutlass::arch::Sm80;
 using ShapeMMAThreadBlock =
     cutlass::gemm::GemmShape<128, 256, 64>;  // <- threadblock tile M = 128, N = 128, K = 256
 // This code section describes tile size a warp will compute
+// using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 64>;  // <- warp tile M = 64, N = 64, K = 256
 using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 64>;  // <- warp tile M = 64, N = 64, K = 256
 // This code section describes the size of MMA op
 using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 32>;  // <- MMA Op tile M = 16, N = 8, K = 128
@@ -147,6 +151,11 @@ int run(
   const int length_k = tensor_b.size(0);
 
   std::cout << "kSparse: " << kSparse << std::endl;
+  std::cout << "kElementsPerElementE: " << kElementsPerElementE << std::endl;
+//  std::cout << "ElementInputE: " << ElementInputE << std::endl;
+  ElementInputE asdf;
+  std::cout << "ElementInputE: " << typeid(asdf).name() << std::endl;
+  std::cout << "std::numeric_limits<ElementInputE>: " << std::numeric_limits<ElementInputE>::digits << std::endl;
   TORCH_CHECK(
       tensor_b.size(0) % kSparse == 0,
       "Expected tensor_b.size(0) of value ",
@@ -171,6 +180,16 @@ int run(
 
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
+
+  // TODO:
+  // Feed tensor_e as CPU int16 Tensor.
+  // Try various valid 2:4 meta configurations
+  // 0x4 0100
+  // 0x8 1000
+  // 0x9 1001
+  // 0xc 1100
+  // 0xd 1101
+  // 0xe 1110
 
   // Create matrix E with dimensions M x (K / 2 / kElementsPerElementE). This one is used by reference computing.
   cutlass::HostTensor<ElementInputE, LayoutInputE> tensor_e(
