@@ -504,9 +504,8 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
-                log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
+            if config.log_level <= logging.INFO and config.output_code:
+                log.info(
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
