@@ -226,15 +226,8 @@ class TestBaseStructuredSparsifier(TestCase):
 
     def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
-            modules = []
-            if type(config["module"]) is tuple:
-                for module in config["module"]:
-                    modules.append(module)
-            else:
-                module = config["module"]
-                modules.append(module)
-            for module in modules:
-                assert module.weight.device == device
+            for module in config["module"]:
+                assert next(module.parameters()).device == device
                 assert not hasattr(module, "parametrizations")
                 assert not hasattr(module, "mask")
 
