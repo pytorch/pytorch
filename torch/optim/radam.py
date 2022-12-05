@@ -75,7 +75,7 @@ class RAdam(Optimizer):
         eps=1e-8,
         weight_decay=0,
         *,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:

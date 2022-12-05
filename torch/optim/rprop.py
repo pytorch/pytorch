@@ -64,7 +64,7 @@ class Rprop(Optimizer):
         etas=(0.5, 1.2),
         step_sizes=(1e-6, 50),
         *,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         maximize: bool = False,
         differentiable: bool = False,
     ):

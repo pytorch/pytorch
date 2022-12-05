@@ -83,7 +83,7 @@ class AdamW(Optimizer):
         amsgrad=False,
         *,
         maximize: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         capturable: bool = False,
         differentiable: bool = False,
     ):

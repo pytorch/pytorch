@@ -58,7 +58,7 @@ class Adamax(Optimizer):
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         *,
         maximize: bool = False,
         differentiable: bool = False,

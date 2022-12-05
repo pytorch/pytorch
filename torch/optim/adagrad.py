@@ -58,7 +58,7 @@ class Adagrad(Optimizer):
         weight_decay=0,
         initial_accumulator_value=0,
         eps=1e-10,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         *,
         maximize: bool = False,
         differentiable: bool = False,

@@ -39,7 +39,7 @@ class ASGD(Optimizer):
         alpha=0.75,
         t0=1e6,
         weight_decay=0,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         maximize: bool = False,
         differentiable: bool = False,
     ):

@@ -77,7 +77,7 @@ class RMSprop(Optimizer):
         weight_decay=0,
         momentum=0,
         centered=False,
-        foreach: Optional[bool] = None,
+        foreach: Optional[bool] = True,
         maximize: bool = False,
         differentiable: bool = False,
     ):
