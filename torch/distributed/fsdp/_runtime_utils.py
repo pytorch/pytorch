@@ -576,6 +576,7 @@ def _post_backward_hook(
                         f"shape {unsharded_grad.shape}",
                     )
                     p_assert(
+                        unsharded_grad.dtype == padded_unsharded_grad.dtype,
                         "Expects the padded unsharded gradient to have dtype "
                         f"{unsharded_grad.dtype} but pre-allocated with dtype "
                         f"{padded_unsharded_grad.dtype}"
