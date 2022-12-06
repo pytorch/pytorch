@@ -306,6 +306,8 @@ class TorchVariable(VariableTracker):
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
+        elif self.value is torch.backends.cudnn.is_acceptable:
+            unimplemented("torch.backends.cudnn.is_acceptable not supported yet due to returning a bool")
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
