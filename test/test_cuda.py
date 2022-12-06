@@ -2450,7 +2450,12 @@ torch.cuda.synchronize()
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual, msg=k)
+
+                    expected = state_control[k]
+                    if isinstance(state_control[k], torch.Tensor) and state_control[k].dtype == torch.float64:
+                        expected = torch._cast_Float(state_control[k])
+
+                    self.assertEqual(expected, actual, msg=k)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
