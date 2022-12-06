@@ -126,7 +126,8 @@ class TestFSDPIgnoredModules(FSDPTest):
         )
         nonignored_numel = total_numel - ignored_numel
         with FSDP.summon_full_params(wrapped_model):
-            flat_param_numel = wrapped_model.params[0].numel()
+            flat_param = wrapped_model.params[0]
+            flat_param_numel = flat_param.numel() - flat_param._numel_to_pad
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
@@ -149,7 +150,8 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignored_numel = sum(p.numel() for p in nonwrapped_model.layer1.parameters())
         nonignored_numel = total_numel - ignored_numel
         with FSDP.summon_full_params(wrapped_model):
-            flat_param_numel = wrapped_model.params[0].numel()
+            flat_param = wrapped_model.params[0]
+            flat_param_numel = flat_param.numel() - flat_param._numel_to_pad
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
