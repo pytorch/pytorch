@@ -435,17 +435,17 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
             unary
         )
         packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
-                self.weight.to_mkldnn(),
-                self.padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                self.output_padding,
-                input_size,
-            )
+            self.weight.to_mkldnn(),
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups,
+            self.output_padding,
+            input_size,
+        )
         self.weight = torch.nn.Parameter(
             packed_weight,
-            requires_grad=self.weight.requires_grad,            
+            requires_grad=self.weight.requires_grad,
         )
 
     def _conv_transpose_forward(self, input, weight, bias):

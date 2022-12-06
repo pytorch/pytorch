@@ -3401,26 +3401,25 @@ def _prepare_convolution_fusion_create(
 
 # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
 def _conv_input_size(
-    output_size,
-    weight_size,
-    padding,
-    output_padding,
-    stride,
-    dilation,
-    groups
+    output_size, weight_size, padding, output_padding, stride, dilation, groups
 ):
     assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
     dim = len(output_size)
-    assert dim > 2, "Expect input dim > 2"    
-    
+    assert dim > 2, "Expect input dim > 2"
+
     BATCH_DIM = 0
     WEIGHT_INPUT_CHANNELS_DIM = 1
     input_size = []
     input_size.append(output_size[BATCH_DIM])
     input_size.append(weight_size[WEIGHT_INPUT_CHANNELS_DIM] * groups)
     for d in range(2, dim):
-        kernel = (weight_size[d] - 1) * dilation[d - 2] + 1;
-        input_size_d = (output_size[d] - 1) * stride[d - 2] - (padding[d - 2] * 2) + kernel + output_padding[d - 2];            
+        kernel = (weight_size[d] - 1) * dilation[d - 2] + 1
+        input_size_d = (
+            (output_size[d] - 1) * stride[d - 2]
+            - (padding[d - 2] * 2)
+            + kernel
+            + output_padding[d - 2]
+        )
         input_size.append(input_size_d)
     return input_size
 
@@ -3428,7 +3427,7 @@ def _conv_input_size(
 # The size of prepacked_weight is the prepacked size.
 #   Groups > 1:  [g*o, i/g, ...]
 #   Groups == 1: [o, i, ...]
-#Returns original weight size in [i, o, ...]
+# Returns original weight size in [i, o, ...]
 def _original_deconv_weight_size(
     prepacked_weight,
     groups,
@@ -3476,7 +3475,9 @@ def _prepare_convolution_transpose_fusion_create(
 
         weight_size = _original_deconv_weight_size(weight_fake, groups)
         input_size = x_fake.size()
-        output_size = _conv_input_size(input_size, weight_size, padding, output_padding, stride, dilation, groups)
+        output_size = _conv_input_size(
+            input_size, weight_size, padding, output_padding, stride, dilation, groups
+        )
 
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
