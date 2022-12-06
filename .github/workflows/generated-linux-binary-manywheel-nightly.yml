@@ -286,7 +286,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_1_1
       build_environment: linux-binary-manywheel
@@ -308,7 +308,7 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Clean workspace
@@ -381,7 +381,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -404,7 +404,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-rocm5_1_1
     secrets:
@@ -802,7 +802,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_1_1
       build_environment: linux-binary-manywheel
@@ -824,7 +824,7 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Clean workspace
@@ -897,7 +897,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -920,7 +920,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_1_1
     secrets:
@@ -1318,7 +1318,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_1_1
       build_environment: linux-binary-manywheel
@@ -1340,7 +1340,7 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Clean workspace
@@ -1413,7 +1413,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1436,7 +1436,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_1_1
     secrets:
@@ -1834,7 +1834,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_1_1
       build_environment: linux-binary-manywheel
@@ -1856,7 +1856,7 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Clean workspace
@@ -1929,7 +1929,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.1.1
+          docker-image: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Kill containers, clean up images
@@ -1952,7 +1952,7 @@ jobs:
       DESIRED_CUDA: rocm5.1.1
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_1_1
     secrets:
