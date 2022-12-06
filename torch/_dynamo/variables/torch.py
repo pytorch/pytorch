@@ -380,7 +380,12 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif self.value == torch.addcdiv and len(args) == 3 and "value" in kwargs:
+        elif (
+            self.value == torch.addcdiv
+            and len(args) == 3
+            and "value" in kwargs
+            and len(kwargs) == 1
+        ):
             # decompose addcdiv into constituent ops, prevents a graph break due to converting
             # value to a scalar
             result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
