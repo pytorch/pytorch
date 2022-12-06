@@ -314,6 +314,7 @@
     MPS: abs_out_mps
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA: abs_sparse_csr_out
+  tags: pointwise
 
 # Note [Adding an alias]
 # To add an alias do the following:
@@ -337,8 +338,8 @@
 # in op_db list in torch/testing/_internal/common_methods_invocations.py
 #
 # See torch.absolute, an alias for torch.abs, as an example.
-
 # Absolute, alias for abs
+
 - func: absolute(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -1095,11 +1096,13 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: copysign_out
+  tags: pointwise
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: copysign.out
+  tags: pointwise
 
 - func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1110,6 +1113,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: copysign
+  tags: pointwise
 
 - func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
@@ -1119,6 +1123,7 @@
 - func: copysign.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: copysign_out
+  tags: pointwise
 
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1368,6 +1373,7 @@
 - func: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   variants: function, method
   structured_delegate: clamp.Tensor_out
+  tags: pointwise
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1379,6 +1385,7 @@
 - func: clamp_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp.Tensor_out
+  tags: pointwise
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1397,6 +1404,7 @@
   dispatch:
     CPU, CUDA: clamp_Tensor_out
     MPS: clamp_Tensor_out_mps
+  tags: pointwise
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1411,10 +1419,12 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: clamp_max.out
+  tags: pointwise
 
 - func: clamp_max_.Tensor(Tensor(a!) self, Tensor max) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp_max.Tensor_out
+  tags: pointwise
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1445,10 +1455,12 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: clamp_min.out
+  tags: pointwise
 
 - func: clamp_min_.Tensor(Tensor(a!) self, Tensor min) -> Tensor(a!)
   variants: function, method
   structured_delegate: clamp_min.Tensor_out
+  tags: pointwise
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2002,7 +2014,7 @@
   dispatch:
     CompositeExplicitAutograd: div
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_div_Scalar
-  tags: canonical
+  tags: [canonical, pointwise]
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2010,17 +2022,20 @@
   dispatch:
     CompositeExplicitAutograd: div_
   autogen: div.Scalar_out
+  tags: pointwise
 
 - func: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
+  tags: pointwise
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
     CompositeExplicitAutograd: div_
   autogen: div.Scalar_mode_out
+  tags: pointwise
 
 # divide, alias for div
 - func: divide.Tensor(Tensor self, Tensor other) -> Tensor
@@ -2626,10 +2641,12 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: gcd_out
+  tags: pointwise
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
   structured_delegate: gcd.out
   variants: function, method
+  tags: pointwise
 
 - func: gcd_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   structured_delegate: gcd.out
@@ -2640,10 +2657,12 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lcm_out
+  tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
   structured_delegate: lcm.out
   variants: function, method
+  tags: pointwise
 
 - func: lcm_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   structured_delegate: lcm.out
@@ -3268,12 +3287,14 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: xlogy
+  tags: pointwise
 
 - func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: xlogy
+  tags: pointwise
 
 # xlogy: inplace variant
 - func: xlogy_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -3310,6 +3331,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: xlogy_out
+  tags: pointwise
 
 - func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6146,12 +6168,14 @@
   variants: method, function
   dispatch:
     CompositeExplicitAutograd: frexp
+  tags: pointwise
 
 - func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
   dispatch:
     CPU, CUDA: frexp_out
-
+  tags: pointwise
 # Deprecated (v.1.12)
+
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
 
@@ -6294,11 +6318,13 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: heaviside_out
+  tags: pointwise
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: heaviside.out
+  tags: pointwise
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7697,30 +7723,36 @@
 - func: __xor__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: __xor__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: __ixor__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: pointwise
 
 - func: __ixor__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  tags: pointwise
 
 - func: __lshift__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: __lshift__
+  tags: pointwise
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: __lshift__
+  tags: pointwise
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7728,6 +7760,7 @@
   dispatch:
     CPU, CUDA: __ilshift__
   autogen: __lshift__.Scalar_out
+  tags: pointwise
 
 - func: __ilshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7735,6 +7768,7 @@
   dispatch:
     CPU, CUDA: __ilshift__
   autogen: __lshift__.Tensor_out
+  tags: pointwise
 
 - func: bitwise_left_shift.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7790,12 +7824,14 @@
   variants: method, function
   dispatch:
     CPU, CUDA: __rshift__
+  tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
     CPU, CUDA: __rshift__
+  tags: pointwise
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8044,6 +8080,7 @@
     CPU, CUDA: ne_Scalar_out
     MPS: ne_scalar_out_mps
     QuantizedCPU: ne_out_quantized_cpu
+  tags: pointwise
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
   structured_delegate: ne.Scalar_out
@@ -8061,6 +8098,7 @@
     CPU, CUDA: ne_Tensor_out
     MPS: ne_tensor_out_mps
     QuantizedCPU: ne_out_quantized_cpu
+  tags: pointwise
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
   structured_delegate: ne.Tensor_out
@@ -8068,6 +8106,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+  tags: pointwise
 
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: ne.Scalar_out
@@ -8140,6 +8179,7 @@
     CPU, CUDA: ge_Scalar_out
     MPS: ge_scalar_out_mps
     QuantizedCPU: ge_out_quantized_cpu
+  tags: pointwise
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
   structured_delegate: ge.Scalar_out
@@ -8157,6 +8197,7 @@
     CPU, CUDA: ge_Tensor_out
     MPS: ge_tensor_out_mps
     QuantizedCPU: ge_out_quantized_cpu
+  tags: pointwise
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
   structured_delegate: ge.Tensor_out
@@ -8201,6 +8242,7 @@
     CPU, CUDA: le_Scalar_out
     MPS: le_scalar_out_mps
     QuantizedCPU: le_out_quantized_cpu
+  tags: pointwise
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
   structured_delegate: le.Scalar_out
@@ -8218,6 +8260,7 @@
     CPU, CUDA: le_Tensor_out
     MPS: le_tensor_out_mps
     QuantizedCPU: le_out_quantized_cpu
+  tags: pointwise
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
   structured_delegate: le.Tensor_out
@@ -8262,6 +8305,7 @@
     CPU, CUDA: gt_Scalar_out
     MPS: gt_scalar_out_mps
     QuantizedCPU: gt_out_quantized_cpu
+  tags: pointwise
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
   structured_delegate: gt.Scalar_out
@@ -8279,6 +8323,7 @@
     CPU, CUDA: gt_Tensor_out
     MPS: gt_tensor_out_mps
     QuantizedCPU: gt_out_quantized_cpu
+  tags: pointwise
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
   structured_delegate: gt.Tensor_out
@@ -8323,6 +8368,7 @@
     CPU, CUDA: lt_Scalar_out
     MPS: lt_scalar_out_mps
     QuantizedCPU: lt_out_quantized_cpu
+  tags: pointwise
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
   structured_delegate: lt.Scalar_out
@@ -8330,7 +8376,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: lt_quantized_cpu
-  tags: canonical
+  tags: [canonical, pointwise]
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -8340,6 +8386,7 @@
     CPU, CUDA: lt_Tensor_out
     MPS: lt_tensor_out_mps
     QuantizedCPU: lt_out_quantized_cpu
+  tags: pointwise
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
   structured_delegate: lt.Tensor_out
@@ -8347,6 +8394,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: lt_quantized_cpu
+  tags: pointwise
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: lt.Scalar_out
@@ -8995,7 +9043,6 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: fmod.Tensor_out
   variants: method, function
-
   tags: pointwise
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -9136,6 +9183,7 @@
   structured_delegate: fmin.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: fmin.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -9143,6 +9191,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: fmin_out
+  tags: pointwise
 
 - func: max(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9156,6 +9205,7 @@
   structured_delegate: fmax.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: fmax.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -9163,12 +9213,13 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: fmax_out
+  tags: pointwise
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
   structured_delegate: maximum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: canonical
+  tags: [canonical, pointwise]
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -9177,15 +9228,18 @@
   dispatch:
     CPU, CUDA: maximum_out
     MPS: maximum_out_mps
+  tags: pointwise
 
 # binary max, alias of maximum
 # NOTE: max is not an alias for maximum, since there is also unary max
 - func: max.other(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -9197,7 +9251,7 @@
   structured_delegate: minimum.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  tags: canonical
+  tags: [canonical, pointwise]
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -9206,15 +9260,18 @@
   dispatch:
     CPU, CUDA: minimum_out
     MPS: minimum_out_mps
+  tags: pointwise
 
 # binary min, alias for minimum
 # NOTE: min is not an alias for minimum, since there is also unary min
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: min.other(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  tags: pointwise
 
 - func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, str interpolation='linear') -> Tensor
   variants: method, function
@@ -11709,6 +11766,7 @@
   dispatch:
     CPU, CUDA: sigmoid_backward_out
     MPS: sigmoid_backward_out_mps
+  tags: pointwise
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
@@ -11721,10 +11779,12 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logit_backward_out
+  tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
   python_module: nn
   structured_delegate: logit_backward.grad_input
+  tags: pointwise
 
 - func: tanh_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -11733,6 +11793,7 @@
   dispatch:
     CPU, CUDA: tanh_backward_out
     MPS: tanh_backward_out_mps
+  tags: pointwise
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
@@ -11914,6 +11975,7 @@
   dispatch:
     SparseCPU, SparseCUDA: isposinf_sparse
     SparseCsrCPU, SparseCsrCUDA: isposinf_sparse_csr
+  tags: pointwise
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11922,6 +11984,7 @@
     CPU, CUDA: isposinf_out
     SparseCPU, SparseCUDA: isposinf_sparse_out
     SparseCsrCPU, SparseCsrCUDA: isposinf_sparse_csr_out
+  tags: pointwise
 
 - func: isneginf(Tensor self) -> Tensor
   variants: function, method
@@ -11929,6 +11992,7 @@
   dispatch:
     SparseCPU, SparseCUDA: isneginf_sparse
     SparseCsrCPU, SparseCsrCUDA: isneginf_sparse_csr
+  tags: pointwise
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11937,6 +12001,7 @@
     CPU, CUDA: isneginf_out
     SparseCPU, SparseCUDA: isneginf_sparse_out
     SparseCsrCPU, SparseCsrCUDA: isneginf_sparse_csr_out
+  tags: pointwise
 
 # NOTE [_add_batch_dim and _remove_batch_dim]
 # _add_batch_dim and _remove_batch_dim are meant to be used in the implementation
@@ -11960,6 +12025,7 @@
   structured_delegate: special_entr.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11968,11 +12034,13 @@
   variants: function
   dispatch:
     CPU, CUDA: special_entr_out
+  tags: pointwise
 
 - func: special_ndtri(Tensor self) -> Tensor
   structured_delegate: special_ndtri.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_ndtri.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11981,11 +12049,13 @@
   variants: function
   dispatch:
     CPU, CUDA: special_ndtri_out
+  tags: pointwise
 
 - func: special_log_ndtr(Tensor self) -> Tensor
   structured_delegate: special_log_ndtr.out
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_log_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11994,6 +12064,7 @@
   variants: function
   dispatch:
     CPU, CUDA: special_log_ndtr_out
+  tags: pointwise
 
 - func: special_expm1(Tensor self) -> Tensor
   python_module: special
@@ -12054,6 +12125,7 @@
   python_module: special
   variants: function
   structured_delegate: special_erfcx.out
+  tags: pointwise
 
 - func: special_erfcx.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12061,6 +12133,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_erfcx_out
+  tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
   python_module: special
@@ -12082,6 +12155,7 @@
   python_module: special
   variants: function
   structured_delegate: special_xlog1py.out
+  tags: pointwise
 
 - func: special_xlog1py.self_scalar(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -12089,6 +12163,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py
+  tags: pointwise
 
 - func: special_xlog1py.other_scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -12096,6 +12171,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py
+  tags: pointwise
 
 - func: special_xlog1py.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12105,6 +12181,7 @@
   variants: function
   dispatch:
     CPU, CUDA: special_xlog1py_out
+  tags: pointwise
 
 - func: special_xlog1py.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12112,6 +12189,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
+  tags: pointwise
 
 - func: special_xlog1py.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12119,6 +12197,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
+  tags: pointwise
 
 - func: special_xlogy(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -12155,6 +12234,7 @@
   python_module: special
   variants: function
   structured_delegate: special_zeta.out
+  tags: pointwise
 
 - func: special_zeta.self_scalar(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -12162,6 +12242,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_zeta
+  tags: pointwise
 
 - func: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -12169,6 +12250,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_zeta
+  tags: pointwise
 
 - func: special_zeta.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12178,6 +12260,7 @@
   variants: function
   dispatch:
     CPU, CUDA: special_zeta_out
+  tags: pointwise
 
 - func: special_zeta.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12185,6 +12268,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_zeta_out
+  tags: pointwise
 
 - func: special_zeta.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -12192,6 +12276,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: special_zeta_out
+  tags: pointwise
 
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
@@ -12205,6 +12290,7 @@
   python_module: special
   variants: function
   structured_delegate: special_i0e.out
+  tags: pointwise
 
 - func: special_i0e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12212,11 +12298,13 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i0e_out
+  tags: pointwise
 
 - func: special_i1(Tensor self) -> Tensor
   python_module: special
   variants: function
   structured_delegate: special_i1.out
+  tags: pointwise
 
 - func: special_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12224,11 +12312,13 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i1_out
+  tags: pointwise
 
 - func: special_i1e(Tensor self) -> Tensor
   python_module: special
   variants: function
   structured_delegate: special_i1e.out
+  tags: pointwise
 
 - func: special_i1e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -12236,6 +12326,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: special_i1e_out
+  tags: pointwise
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
@@ -13624,6 +13715,7 @@
   python_module: special
   structured_delegate: special_airy_ai.out
   variants: function
+  tags: pointwise
 
 - func: special_airy_ai.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13632,6 +13724,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -13649,6 +13742,7 @@
   python_module: special
   structured_delegate: special_bessel_j0.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13657,11 +13751,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_j1.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_j1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13670,11 +13766,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_y0.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13683,11 +13781,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_y1.out
   variants: function
+  tags: pointwise
 
 - func: special_bessel_y1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13696,22 +13796,26 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_chebyshev_polynomial_t.out
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13721,11 +13825,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_t.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13733,22 +13839,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_chebyshev_polynomial_u.out
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13758,11 +13868,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_u.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13770,22 +13882,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_chebyshev_polynomial_v.out
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13795,11 +13911,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_v.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13807,22 +13925,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_chebyshev_polynomial_w.out
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13832,11 +13954,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_chebyshev_polynomial_w.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13844,22 +13968,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_hermite_polynomial_h.out
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13869,11 +13997,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_h.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13881,22 +14011,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_hermite_polynomial_he.out
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13906,11 +14040,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_hermite_polynomial_he.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13918,22 +14054,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_laguerre_polynomial_l.out
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13943,11 +14083,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_laguerre_polynomial_l.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13955,22 +14097,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_legendre_polynomial_p.out
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -13980,11 +14126,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_legendre_polynomial_p.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13992,11 +14140,13 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_i0.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14005,11 +14155,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_i1.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14018,11 +14170,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_k0.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14031,11 +14185,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k1(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_modified_bessel_k1.out
   variants: function
+  tags: pointwise
 
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14044,11 +14200,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_scaled_modified_bessel_k0.out
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14057,11 +14215,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_scaled_modified_bessel_k1.out
   variants: function
+  tags: pointwise
 
 - func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14070,22 +14230,26 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_shifted_chebyshev_polynomial_t.out
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -14095,11 +14259,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_t.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14107,22 +14273,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_shifted_chebyshev_polynomial_u.out
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -14132,11 +14302,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_u.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14144,22 +14316,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_shifted_chebyshev_polynomial_v.out
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -14169,11 +14345,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_v.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14181,22 +14359,26 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   structured_delegate: special_shifted_chebyshev_polynomial_w.out
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.x_scalar(Scalar x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
@@ -14206,11 +14388,13 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.x_scalar_out(Scalar x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_shifted_chebyshev_polynomial_w.n_scalar_out(Tensor x, Scalar n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14218,11 +14402,13 @@
   device_check: NoCheck
   python_module: special
   variants: function
+  tags: pointwise
 
 - func: special_spherical_bessel_j0(Tensor x) -> Tensor
   python_module: special
   structured_delegate: special_spherical_bessel_j0.out
   variants: function
+  tags: pointwise
 
 - func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -14231,6 +14417,7 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
+  tags: pointwise
 
 # Aux function used in the test TestPythonDispatch.test_kwarg_only_and_positional_default
 # within test/test_python_dispatch.py
