@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
-#include <ATen/VmapTransforms.h>
+#include <ATen/LegacyVmapTransforms.h>
 #include <c10/util/irange.h>
 
 using namespace at;
