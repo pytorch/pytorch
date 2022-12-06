@@ -99,6 +99,12 @@ class TestFSDPIgnoredModules(FSDPTest):
     def test_ignored_modules_transformer(self):
         """Tests that ignored modules' parameters are not flattened for a
         transformer model with shared parameters."""
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_ignored_modules_transformer,
+        )
+
+    def _test_ignored_modules_transformer(self, use_orig_params: bool):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
         model: nn.Module = TransformerWithSharedParams.init(
@@ -111,6 +117,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             model,
             self.process_group,
             ignored_modules=[model.transformer],
+            use_orig_params=use_orig_params,
         )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
@@ -126,7 +133,8 @@ class TestFSDPIgnoredModules(FSDPTest):
         )
         nonignored_numel = total_numel - ignored_numel
         with FSDP.summon_full_params(wrapped_model):
-            flat_param_numel = wrapped_model.params[0].numel()
+            flat_param = wrapped_model.params[0]
+            flat_param_numel = flat_param.numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
@@ -136,12 +144,20 @@ class TestFSDPIgnoredModules(FSDPTest):
     def test_ignored_modules_nested(self):
         """Tests that passing a module with nested FSDP modules does not
         error and still ignores non-FSDP modules' parameters."""
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_ignored_modules_nested,
+        )
+
+    def _test_ignored_modules_nested(self, use_orig_params: bool):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
         model = Model().cuda()
-        model.layer1[1] = FSDP(model.layer1[1])
-        wrapped_model = FSDP(model, ignored_modules=[model.layer1])
+        model.layer1[1] = FSDP(model.layer1[1], use_orig_params=use_orig_params)
+        wrapped_model = FSDP(
+            model, ignored_modules=[model.layer1], use_orig_params=use_orig_params
+        )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
         nonwrapped_model = Model()
@@ -149,7 +165,8 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignored_numel = sum(p.numel() for p in nonwrapped_model.layer1.parameters())
         nonignored_numel = total_numel - ignored_numel
         with FSDP.summon_full_params(wrapped_model):
-            flat_param_numel = wrapped_model.params[0].numel()
+            flat_param = wrapped_model.params[0]
+            flat_param_numel = flat_param.numel()
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
