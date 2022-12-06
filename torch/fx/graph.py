@@ -1317,6 +1317,7 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
+            attr_warning_shown = False
             for node in self.nodes:
                 if node.op == 'call_function':
                     if not callable(node.target):
@@ -1343,9 +1344,16 @@ class Graph:
                               and not isinstance(new_m_itr, torch.nn.Module)
                               and not isinstance(new_m_itr, torch.nn.Parameter)
                               and atom not in m_itr._buffers):
-                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                            if not attr_warning_shown:
+                                warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
                                           'not reference an nn.Module, nn.Parameter, or buffer, which is '
-                                          'what \'get_attr\' Nodes typically target')
+                                          'what \'get_attr\' Nodes typically target.\n This warning only '
+                                          'shows once to avoid console overload.  Please review your graph '
+                                          'for similar issues, or correct this node and re-run the linter ' 
+                                          'to show the next node with similar issue, if any more exist. '
+                                          )
+                                attr_warning_shown = True
+                                
                         else:
                             m_itr = new_m_itr
 
