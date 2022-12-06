@@ -157,7 +157,7 @@ static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
   return getRawFunctorchTLS()->dynamicLayerStack;
 }
 
-std::shared_ptr<bool> getLifeHandleForLevel(int64_t level) {
+const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(
       dynamicLayerStack.size() >= level && level >= 1,

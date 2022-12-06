@@ -88,9 +88,7 @@ TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 // functorch's TensorWrapper (for grad transforms) stores a life handle.
 // If a TensorWrapper escapes from the scope of the transform, then somehow
 // it must know it escaped; it can tell by querying the life handle.
-//
-// NB: not lock safe. TODO: does it need a lock?
-TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
+TORCH_API const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level);
 
 // Returns if an operator is in-place. An operator is inplace if:
 // 1. The first argument is a Tensor and it is being written to

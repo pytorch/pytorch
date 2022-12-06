@@ -58,7 +58,7 @@ void dumpTensorCout(const Tensor& tensor) {
   std::cout << std::endl;
 }
 
-c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool> life_handle) {
+c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
   auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
       DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
@@ -72,14 +72,14 @@ Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable)
       tensor,
       level,
       is_immutable,
-      std::move(getLifeHandleForLevel(level)));
+      getLifeHandleForLevel(level));
 }
 
 Tensor makeTensorWrapper(
     const Tensor& tensor,
     int64_t level,
     bool is_immutable,
-    std::shared_ptr<bool> life_handle) {
+    const std::shared_ptr<bool>& life_handle) {
   auto wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     TORCH_INTERNAL_ASSERT(wrapped->level() < level);
@@ -90,7 +90,7 @@ Tensor makeTensorWrapper(
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
   auto result = at::detail::make_tensor<TensorWrapper>(
-      key_set, tensor, level, std::move(life_handle), is_immutable);
+      key_set, tensor, level, life_handle, is_immutable);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
   return result;
 }
