@@ -47,7 +47,7 @@ jobs:
             status: ${{ job.status }}
             notify_when: 'failure'
         env:
-            SLACK_WEBHOOK_URL: ${{ "https://hooks.slack.com/services/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" }}  
+            SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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" 
             
   Explore-GitHub-Actions3:
     runs-on: ubuntu-latest
