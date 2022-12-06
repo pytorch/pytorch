@@ -1,5 +1,5 @@
 #include <benchmarks/cpp/nvfuser/utils.h>
-
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
 #include <sstream>
@@ -168,6 +168,7 @@ void runBenchmarkIterations(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     std::vector<c10::IValue>& aten_inputs) {
+  c10::cuda::CUDACachingAllocator::emptyCache();
   fusion_executor_cache->runFusionWithInputs(aten_inputs);
   bool segmented =
       fusion_executor_cache->getMostRecentKernelRuntime()->isSegmented() &&
