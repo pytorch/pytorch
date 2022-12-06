@@ -414,6 +414,30 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
     @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 2], device=device)
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[1, 1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 50, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
+
+    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
