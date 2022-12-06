@@ -83,4 +83,4 @@ jobs:
             # For posting a simple plain text message
             slack-message: "GitHub build result: ${{ job.status }}\n<{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
-            SLACK_BOT_TOKEN: ${{ secrets.ACTION_MONITORING_SLACK }}
+            SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
