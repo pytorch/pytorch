@@ -567,7 +567,12 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols, base_symbols
+        self,
+        expr_to_tensor_ref,
+        id_to_name_map,
+        shape_env,
+        intermediary_symbols,
+        base_symbols,
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
@@ -582,12 +587,17 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        expr_found = expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols
+        expr_found = (
+            expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols
+        )
         if not expr_found:
             if expr in self.base_symbols:
                 return f"{self.shape_env.var_to_val[expr]}"
         import traceback
-        assert expr_found, f"Failed to find {expr} allocated at {''.join(traceback.format_list(expr.tb))}"
+
+        assert (
+            expr_found
+        ), f"Failed to find {expr} allocated at {''.join(traceback.format_list(expr.tb))}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -635,7 +645,11 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                and guard.create_fn != GuardBuilder.TENSOR_MATCH
+            ):
                 # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
                 # an exception to not guarding on nn_module properties
                 # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers

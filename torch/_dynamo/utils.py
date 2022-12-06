@@ -754,7 +754,10 @@ def wrap_fake_exception(fn):
         raise unimplemented(msg)
 
 
-def wrap_to_fake_tensor(e, fake_mode):
+def wrap_to_fake_tensor(
+    e,
+    fake_mode,
+):
     if type(e) in (torch.Tensor, torch.nn.Parameter):
         return wrap_fake_exception(
             lambda: make_fake_tensor(
@@ -765,7 +768,7 @@ def wrap_to_fake_tensor(e, fake_mode):
         return e
 
 
-def wrap_to_fake_tensor_and_record(e, tx):
+def wrap_to_fake_tensor_and_record(e, tx, source=None):
     # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
     # However, get_fake_value takes args and passes them through this, which may include fake tensors.
     # see tree_map(fake_wrapper, args) in get_fake_value.
@@ -773,6 +776,8 @@ def wrap_to_fake_tensor_and_record(e, tx):
         static_shapes = config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
+            static_shapes = True
+        if source and source.guard_source().is_nn_module():
             static_shapes = True
         return wrap_fake_exception(
             lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
@@ -1163,6 +1168,7 @@ def get_real_value(node, output_graph):
         raise TorchRuntimeError() from e
     return real_value
 
+
 def fake_mode_from_tensors(inputs: List[Any]):
     """
     Takes a list of anything, unflattened is fine, returns a fake_mode
@@ -1178,6 +1184,7 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode == flat_input.fake_mode
     return fake_mode
+
 
 def assert_no_fake_params_or_buffers(gm):
     for name, buffer in gm.named_buffers():
