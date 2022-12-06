@@ -59,7 +59,7 @@ with pushd('test'):
     subprocess.run(['echo', 'Run nn tests'])
 
     try:
-        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'python', 'run_test.py', '--exclude-jit-executor',
+        subprocess.run([*os.environ['CONDA_ENV_RUN'].split(), 'python', 'run_test.py', '--exclude-jit-executor',
             '--exclude-distributed-tests', '--shard', shard_number, str(os.environ['NUM_TEST_SHARDS']),
                 '--verbose'])
 

@@ -48,8 +48,8 @@ with pushd('build'):
 try:
 
     # Run tests Python-side and export a script module.
-    subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'python', 'test_custom_backend.py', '-v'])
-    subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'python', 'backend.py', '--export-module-to="build/model.pt"'])
+    subprocess.run([*os.environ['CONDA_ENV_RUN'].split(), 'python', 'test_custom_backend.py', '-v'])
+    subprocess.run([*os.environ['CONDA_ENV_RUN'].split(), 'python', 'backend.py', '--export-module-to="build/model.pt"'])
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
