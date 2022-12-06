@@ -534,8 +534,8 @@ def _post_backward_hook(
                 unsharded_grad = param.grad.data  # already padded
                 param.grad = None
                 p_assert(
-                    unsharded_grad.shape == handle.flat_param._unsharded_size,
-                    f"Expects gradient to have shape {handle.flat_param._unsharded_size} "
+                    unsharded_grad.shape == handle.flat_param._unsharded_size_for_comp,
+                    f"Expects gradient to have shape {handle.flat_param._unsharded_size_for_comp} "
                     f"but got {unsharded_grad.shape}",
                 )
                 chunks = list(unsharded_grad.chunk(state.world_size))

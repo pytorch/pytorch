@@ -1042,7 +1042,9 @@ class FlatParamHandle:
         dist.all_gather_into_tensor(
             padded_unsharded_grad, sharded_grad, self.process_group
         )
-        flat_param.grad = padded_unsharded_grad
+        flat_param.grad = padded_unsharded_grad[
+            : flat_param._unpadded_unsharded_size.numel()
+        ]
         self._use_unsharded_grad_views()
 
     def reshard_grad(self):
@@ -1455,7 +1457,10 @@ class FlatParamHandle:
                 param.grad = None
             return
         self._check_unsharded(self.flat_param.grad)
-        views = self._get_unflat_views(self.flat_param, self.flat_param.grad)
+        views = self._get_unflat_views(
+            self.flat_param,
+            self.flat_param.grad[: self.flat_param._unpadded_unsharded_size.numel()],
+        )
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
