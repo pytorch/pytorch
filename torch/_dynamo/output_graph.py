@@ -580,6 +580,8 @@ class OutputGraph(fx.Tracer):
             )
             if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
