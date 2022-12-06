@@ -41,7 +41,7 @@ from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
-from functorch._src.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp
 
 aten = torch.ops.aten
 
@@ -1188,7 +1188,6 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
-        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),
