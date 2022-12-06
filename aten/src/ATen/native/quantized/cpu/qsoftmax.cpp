@@ -81,8 +81,6 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
 
   initQNNPACK();
   pytorch_qnnp_operator_t softargmax = nullptr;
-  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> softmax_op(
-      softargmax);
 
   pytorch_qnnp_status status = pytorch_qnnp_create_softargmax_nc_q8(
       channels,
@@ -95,6 +93,9 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
       status == pytorch_qnnp_status_success,
       "failed to create QNNPACK Softmax operator");
   TORCH_CHECK_NOTNULL(softargmax);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> softmax_op(
+    softargmax);
 
   status = pytorch_qnnp_setup_softargmax_nc_q8(
       softargmax, batch_size, input, input_stride, output, output_stride);

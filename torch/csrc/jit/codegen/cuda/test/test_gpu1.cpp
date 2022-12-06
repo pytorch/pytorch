@@ -7177,9 +7177,6 @@ TEST_F(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9794,9 +9791,6 @@ TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
