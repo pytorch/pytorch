@@ -67,7 +67,6 @@ jobs:
       build-environment: linux-focal-py3.7-gcc7-pch
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-
   linux-focal-py3_7-clang7-asan-build:
     name: linux-focal-py3.7-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
