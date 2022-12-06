@@ -1032,9 +1032,7 @@ Tensor take_backward(
     const Tensor& self,
     const Tensor& indices);
 
-Tensor to_sparse_backward(
-    const Tensor& grad,
-    const Tensor& self);
+Tensor to_sparse_backward(const Tensor& grad, const Tensor& self);
 
 } // namespace details
 } // namespace generated
