@@ -103,7 +103,7 @@ with pushd('.'):
 # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
 
 try:
-    subprocess.run([*'conda run -n test_env'.split(), 'pip', 'install', "ninja==1.10.0.post1", 'future',
+    subprocess.run(['conda', 'install', '-n', 'test_env', 'pip', 'install', "ninja==1.10.0.post1", 'future',
         "hypothesis==5.35.1", "expecttest==0.1.3", "librosa>=0.6.2", "scipy==1.6.3",
             'psutil', 'pillow', "unittest-xml-reporting<=3.2.0,>=2.0.0", 'pytest',
                 'pytest-xdist', 'pytest-shard', 'pytest-rerunfailures', 'sympy',

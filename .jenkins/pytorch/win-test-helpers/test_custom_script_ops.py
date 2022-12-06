@@ -46,13 +46,13 @@ with pushd('build'):
 
 try:
     # Run tests Python-side and export a script module.
-    subprocess.run([*'conda run -n test_env'.split(), 'python', 'test_custom_ops.py', '-v'])
+    subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'test_custom_ops.py', '-v'])
 
     # TODO: fix and re-enable this test
     # See https://github.com/pytorch/pytorch/issues/25155
     # subprocess.run(['python', 'test_custom_classes.py', '-v'])
 
-    subprocess.run([*'conda run -n test_env'.split(), 'python', 'module.py', '--export-script-module="build/model.pt"'])
+    subprocess.run(['conda', 'install', '-n', 'test_env', 'python', 'module.py', '--export-script-module="build/model.pt"'])
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
