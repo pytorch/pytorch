@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: distributed"]
+s  # Owner(s): ["oncall: distributed"]
 
 import os
 from copy import deepcopy
@@ -100,6 +100,13 @@ class ReplicateTest(MultiProcessTestCase):
         replicate(replicate_model.fc1)
         replicate(replicate_model.fc2)
         replicate(replicate_model.fc3)
+        self._compare_module(model, replicate_model)
+
+    def test_replicate_with_kwargs(self):
+        model = Net()
+        replicate_model = replicate(
+            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
+        )
         self._compare_module(model, replicate_model)
 
 
