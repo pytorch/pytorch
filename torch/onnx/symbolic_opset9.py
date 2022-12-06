@@ -527,6 +527,30 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
     tensors = symbolic_helper._unpack_list(tensor_list)
+    # torch.cat ignores empty tensors such as `torch.Tensor([])`
+    # These needs to be removed as input from ONNX's concat too, otherwise shape inference
+    # will likely fail due to inputs with different ranks (0 for empty tensor, > 0 for anything else)
+    nonempty_tensors = []
+    for t in tensors:
+        if symbolic_helper._is_constant(t) and not symbolic_helper._get_tensor_dim_size(
+            t, 0
+        ):
+            continue
+        nonempty_tensors.append(t)
+    assert len(nonempty_tensors) > 0
+    assert all(
+        [
+            symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t)
+            == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
+            for t in nonempty_tensors
+        ]
+    )
+    tensor_list.node().removeAllInputs()
+    for t in nonempty_tensors:
+        tensor_list.node().addInput(t)
+
+    tensors = symbolic_helper._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
 
@@ -894,7 +918,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         self_t = self_t.to(torch.double)
         dims = []
         for d in range(self_t.dim()):
-            if (self_t.mean(d).unsqueeze(d).expand_as(self_t) == self_t).all():
+            if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
                 dims.append(d)
                 self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
 
