@@ -2031,17 +2031,17 @@
 
 - func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
 
-- func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
+- func: embedding(Tensor weight, Tensor indices, SymInt padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: embedding
+    CompositeExplicitAutograd: embedding_symint
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_embedding
   autogen: embedding.out
 
-- func: embedding_backward(Tensor grad, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
+- func: embedding_backward(Tensor grad, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
   dispatch:
     CompositeImplicitAutograd: embedding_backward_symint
 
-- func: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+- func: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, SymInt padding_idx, bool scale_grad_by_freq) -> Tensor
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
@@ -2938,7 +2938,9 @@
 
 - func: kthvalue.dimname_out(Tensor self, int k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
+- func: layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: layer_norm_symint
 
 - func: native_layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -3810,6 +3812,35 @@
     CUDA: batch_norm_cuda_out
     MPS: batch_norm_mps_out
     CPU: batch_norm_cpu_out
+
+# TODO: In 2 weeks, we should make native_batch_norm composite implicit so that this correct schema percolates correctly through our dispatching
+- func: _native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _batch_norm_legit_cpu
+    CUDA: _batch_norm_legit_cuda
+    MPS: _batch_norm_legit_mps
+    MkldnnCPU: _mkldnn_batch_norm_legit
+  autogen: _native_batch_norm_legit_functional
+
+- func: _native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
+  dispatch:
+    CPU: _batch_norm_legit_cpu_out
+    CUDA: _batch_norm_legit_cuda_out
+    MPS: _batch_norm_legit_mps_out
+
+- func: _native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: _batch_norm_legit_no_stats_cpu
+    CUDA: _batch_norm_legit_no_stats_cuda
+    MPS: _batch_norm_legit_no_stats_mps
+    MkldnnCPU: _mkldnn_batch_norm_legit_no_stats
+  tags: canonical
+
+- func: _native_batch_norm_legit.no_stats_out(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  dispatch:
+    CPU: _batch_norm_legit_no_stats_cpu_out
+    CUDA: _batch_norm_legit_no_stats_cuda_out
+    MPS: _batch_norm_legit_no_stats_mps_out
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
   dispatch:
@@ -5741,6 +5772,7 @@
   dispatch:
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda
+    Meta: _efficientzerotensor_meta
   autogen: _efficientzerotensor.out
 
 - func: zeros(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6542,10 +6574,11 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.sparse_dim_out
 
-- func: to_sparse(Tensor self) -> Tensor
+- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
+    SparseCPU, SparseCUDA: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
   autogen: to_sparse.out
 
@@ -6587,7 +6620,7 @@
     CPU: dense_to_mkldnn
   autogen: to_mkldnn.out
 
-- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
+- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
@@ -12889,6 +12922,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: select_copy_symint
+    SparseCsrCPU, SparseCsrCUDA: select_copy_sparse_csr
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor
