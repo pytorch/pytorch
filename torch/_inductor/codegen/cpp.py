@@ -790,7 +790,8 @@ class CppVecKernel(CppKernel):
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
-                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
+                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
                 self.loads.writeline(
                     f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
                 )
