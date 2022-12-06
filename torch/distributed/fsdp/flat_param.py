@@ -1263,7 +1263,7 @@ class FlatParamHandle:
     def _get_unflat_views(
         flat_param: FlatParameter,
         tensor: Optional[torch.Tensor] = None,
-    ) -> List[Tensor]:
+    ) -> Iterator[Tensor]:
         """
         Returns unflattened ``Tensor`` views into ``tensor`` if it is not
         ``None`` or ``flat_param`` otherwise, where the unflattening is based
@@ -1318,8 +1318,8 @@ class FlatParamHandle:
         )
         if numel_to_pad > 0:
             # Exclude the dummy entry since it has served its purpose
-            return views[:-1]
-        return views
+            return iter(views[:-1])
+        return iter(views)
 
     def _use_unsharded_views(self, as_params: bool) -> None:
         """
