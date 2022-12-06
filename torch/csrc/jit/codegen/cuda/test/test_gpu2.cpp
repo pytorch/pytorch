@@ -2605,9 +2605,6 @@ TEST_F(NVFuserTest, FusionWelfordOp_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionBlockWelfordOp_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6308,9 +6305,6 @@ TEST_F(NVFuserTest, FusionWelfordOuterPersistence_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionSegmentIslands_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 

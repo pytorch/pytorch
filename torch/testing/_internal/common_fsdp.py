@@ -617,13 +617,8 @@ class MixtureOfExperts(NestedWrappedModule):
                     )
                     return orig_reshard(*args, **kwargs)
 
-                # The first patch covers any `from torch... import _reshard`
-                # uses in `fully_sharded_data_parallel.py`, and the second
-                # patch covers any `import torch..._reshard` uses in general.
+                # This patch covers any `import torch..._reshard` uses.
                 with mock.patch(
-                    "torch.distributed.fsdp.fully_sharded_data_parallel._reshard",
-                    _delayed_reshard,
-                ), mock.patch(
                     "torch.distributed.fsdp._runtime_utils._reshard", _delayed_reshard
                 ):
                     return self.module(x)
@@ -1034,7 +1029,7 @@ class FSDPTest(MultiProcessTestCase):
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is not None:
+        if mixed_precision is None:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,

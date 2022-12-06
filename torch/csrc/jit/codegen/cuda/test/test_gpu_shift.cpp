@@ -2626,9 +2626,6 @@ TEST_F(NVFuserTest, FusionGather4_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionGather5_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
