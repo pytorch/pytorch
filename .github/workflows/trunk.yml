@@ -265,22 +265,32 @@ jobs:
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   win-vs2019-cuda11_6-py3-build:
-    name: win-vs2019-cuda11.6-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2019-cuda11.6-py3
-      cuda-version: "11.6"
-      sync-tag: win-cuda-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
-        ]}
+    steps:
+        - name: win-vs2019-cuda11.6-py3
+          uses: ./.github/workflows/_win-build.yml
+          with:
+            build-environment: win-vs2019-cuda11.6-py3
+            cuda-version: "11.6"
+            sync-tag: win-cuda-build
+            test-matrix: |
+                { include: [
+                { config: "default", shard: 1, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "default", shard: 2, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "default", shard: 3, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "default", shard: 4, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "default", shard: 5, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "functorch", shard: 1, num_shards: 1, runner: "windows.8xlarge.nvidia.gpu" },
+                { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+                ]}
+        - name: Notify Windows channel 
+           if: always()
+           uses: ravsamhq/notify-slack-action@v1
+           with:
+             message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+             status: ${{ job.status }}
+             notify_when: 'failure'
+          env:
+             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
 
   win-vs2019-cuda11_6-py3-test:
     name: win-vs2019-cuda11.6-py3

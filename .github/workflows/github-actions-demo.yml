@@ -24,7 +24,6 @@ jobs:
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
   Explore-GitHub-Actions2:
-  
     runs-on: ubuntu-latest
     steps:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
@@ -48,7 +47,7 @@ jobs:
             status: ${{ job.status }}
             notify_when: 'failure'
         env:
-            SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}  
+            SLACK_WEBHOOK_URL: ${{ "https://hooks.slack.com/services/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" }}  
             
   Explore-GitHub-Actions3:
     runs-on: ubuntu-latest
