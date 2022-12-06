@@ -41,6 +41,7 @@ from ..utils import (
     global_key_name,
     is_namedtuple,
     is_numpy_int_type,
+    is_tracing,
     is_typing,
     istensor,
     istype,
@@ -420,6 +421,10 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif value == is_tracing:
+            return UserFunctionVariable(
+                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif (
             istype(value, (type, types.FunctionType))
