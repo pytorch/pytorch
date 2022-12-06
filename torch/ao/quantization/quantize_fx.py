@@ -17,7 +17,6 @@ from .fx.custom_config import (
     FuseCustomConfig,
     PrepareCustomConfig,
 )
-from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
