@@ -154,8 +154,8 @@ def check_device_dtype(a: Tensor, b: Tensor):
     return (
         a.is_cuda
         and b.is_cuda
-        and a.dtype == torch.float32
-        and b.dtype == torch.float32
+        and a.dtype in (torch.float32, torch.float16, torch.bfloat16)
+        and b.dtype in (torch.float32, torch.float16, torch.bfloat16)
     )
 
 
@@ -210,6 +210,9 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
+    assert utils.has_triton()
+    from triton.testing import do_bench
+
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m_padded_length = get_padded_length(mat1.shape[0])
@@ -230,13 +233,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         warmup = 5
         rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-            ori_time = utils.do_bench(
+            ori_time = do_bench(
                 lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
             )[0]
         else:
             if input is not None:
                 input = torch.randn_like(input)
-            ori_time = utils.do_bench(
+            ori_time = do_bench(
                 lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
             )[0]
 
@@ -248,14 +251,14 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 input_pad = input.new_empty(
                     [get_padded_length(i) + i for i in input.shape]
                 )
-            pad_time = utils.do_bench(
+            pad_time = do_bench(
                 lambda: op(input_pad, mat1_pad, mat2_pad),
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
             )[0]
         else:
-            pad_time = utils.do_bench(
+            pad_time = do_bench(
                 lambda: op(mat1_pad, mat2_pad), warmup=warmup, rep=rep, fast_flush=True
             )[0]
 
