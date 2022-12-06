@@ -583,14 +583,31 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
         # and reconstruct `out.view(-1)` as a fresh output.
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-    view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    return [view]""")
+    view = torch.ops.aten.view.default(mul, [-1])
+    return [view, mul]""")
+
+    def test_output_aliases_intermediate_no_grad(self):
+        def f(a, b):
+            out = torch.mul(a, 3)
+            # First output is an alias of an intermediate that doesn't require grad
+            return out.view(-1), b.add(1)
+        inp = [torch.ones(3, 3), torch.ones(3, 3, requires_grad=True)]
+
+        # important bit: we don't bother generating an intermediate base as an output in the graph,
+        # because the intermediate base itself didn't require gradients.
+        # (the only problematic case is when both the base and the aliasesed output require gradients).
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    view = torch.ops.aten.view.default(mul, [-1])
+    view_1 = torch.ops.aten.view.default(mul, [-1])
+    return [view, view_1, mul]""")
 
     def test_output_aliases_intermediate_multiple(self):
         def f(a):
@@ -600,13 +617,13 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1])
-    view_1 = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    return [view, view_1]""")
+    view_1 = torch.ops.aten.view.default(mul, [-1])
+    return [view, view_1, mul]""")
 
     def test_output_aliases_intermediate_and_returned(self):
         def f(a):
@@ -617,7 +634,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -633,7 +650,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -649,7 +666,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -667,15 +684,15 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1])
-    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
-    transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0);  mul = None
-    return [view, transpose, transpose_1]""")
+    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0)
+    transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
+    return [view, transpose, transpose_1, mul, mul_1]""")
 
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
@@ -686,13 +703,9 @@ def forward(self, primals_1):
         def f(a):
             a.transpose_(1, 0)
             tmp = a.mul(2)
-            # TODO: update this test with the more complicated return
-            # when intermediate view handling is done
-            return a.unsqueeze(0)
-            # return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
+            return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
         inp = [torch.ones(1, 2, 4, requires_grad=True)]
 
-        # TODO: enable mutation
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -700,8 +713,11 @@ def forward(self, primals_1):
 def forward(self, primals_1):
     view = torch.ops.aten.view.default(primals_1, [1, 2, 4]);  primals_1 = None
     transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
+    mul = torch.ops.aten.mul.Tensor(transpose, 2)
+    squeeze = torch.ops.aten.squeeze.default(mul)
+    transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
     unsqueeze = torch.ops.aten.unsqueeze.default(transpose, 0)
-    return [transpose, unsqueeze]""")
+    return [transpose, squeeze, transpose_1, unsqueeze, mul]""")
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -1023,9 +1039,6 @@ def forward(self, primals_1, primals_2, primals_3):
             c.mul_(2)  # mutates c
             b.t_()  # metadata mutate b
             tmp = a + c
-            # TODO: this test doesn't test "alias of an intermediate" yet,
-            # delete this line later and get that to be tested
-            return tmp, b.t(), a
             out1 = tmp.view(-1)
             out2 = b.t()
             out3 = out1.unsqueeze(0)
@@ -1059,9 +1072,11 @@ def forward(self, primals_1, primals_2):
     t = torch.ops.aten.t.default(view);  view = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
     as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_4, mul)
+    add = torch.ops.aten.add.Tensor(as_strided_4, mul);  as_strided_4 = None
+    view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
-    return [t, mul, add, t_1, as_strided_4]""")
+    unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
+    return [t, mul, view_1, t_1, unsqueeze, add]""")
 
     def test_no_grad_input_output(self):
         def f(a, b):
