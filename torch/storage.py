@@ -739,8 +739,8 @@ class TypedStorage:
     def _pickle_storage_type(self):
         try:
             return _dtype_to_storage_type_map()[self.dtype]
-        except KeyError:
-            raise KeyError(f'dtype {self.dtype} is not recognized')
+        except KeyError as e:
+            raise KeyError(f'dtype {self.dtype} is not recognized') from e
 
     def __reduce__(self):
         b = io.BytesIO()
@@ -997,6 +997,6 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:
         return _storage_type_to_dtype_map()[pickle_storage_type]
-    except KeyError:
+    except KeyError as e:
         raise KeyError(
-            f'pickle storage type "{pickle_storage_type}" is not recognized')
+            f'pickle storage type "{pickle_storage_type}" is not recognized') from e

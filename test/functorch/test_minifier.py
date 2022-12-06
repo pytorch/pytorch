@@ -2,7 +2,7 @@
 
 import torch
 from functorch.compile import minifier
-from functorch._src.compile_utils import get_placeholders, get_outputs
+from torch._functorch.compile_utils import get_placeholders, get_outputs
 from functorch import make_fx
 from torch.testing._internal.common_utils import TestCase, run_tests
 
