@@ -164,26 +164,14 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.minimum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.maximum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
     def where(a, b, c):
-        if not config.triton.simple_where:
-            # wonkyness to work around https://github.com/openai/triton/issues/532
-            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-            a = ops.identity(a)
-            b = ops.identity(b)
-            c = ops.identity(c)
-            a = ops.identity(
-                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-            )
-            a = ops.identity(
-                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
@@ -241,6 +229,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def rsqrt(x):
         return f"tl.libdevice.rsqrt({x})"
+
+    @staticmethod
+    def log1p(x):
+        return f"tl.libdevice.log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.libdevice.expm1({x})"
 
     @staticmethod
     def sigmoid(x):
@@ -1025,14 +1021,14 @@ class TritonKernel(Kernel):
 
         argdefs, _, signature = self.args.python_argdefs()
 
-        mutated_args = []
+        mutated_args = set()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
-                mutated_args.append(self.args.input_buffers[mutation])
+                mutated_args.add(self.args.input_buffers[mutation])
             if mutation in self.args.inplace_buffers:
-                mutated_args.append(self.args.inplace_buffers[mutation])
+                mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
-                mutated_args.append(self.args.output_buffers[mutation])
+                mutated_args.add(self.args.output_buffers[mutation])
 
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
@@ -1339,13 +1335,14 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = (
-                "triton_"
-                + get_fused_kernel_name(node_schedule)
-                + wrapper.next_kernel_suffix()
+            fused_name = (
+                get_fused_kernel_name(node_schedule)
+                if config.triton.descriptive_kernel_names
+                else ""
             )
+            kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
-            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
