@@ -41,6 +41,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(_batch_norm_impl_index);
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(arctan2);
+  OP_DECOMPOSE(argsort);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
@@ -66,15 +67,18 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
+  OP_DECOMPOSE(chunk);
   OP_DECOMPOSE(clip);
   OP_DECOMPOSE2(clip, Tensor );
   OP_DECOMPOSE(concat);
   OP_DECOMPOSE(conj_physical);
+  OP_DECOMPOSE(contiguous);
   OP_DECOMPOSE(combinations);
   OP_DECOMPOSE(corrcoef);
   OP_DECOMPOSE(cosine_embedding_loss);
   OP_DECOMPOSE(cosine_similarity);
   OP_DECOMPOSE(cov);
+  OP_DECOMPOSE(cross);
   m.impl("cross_entropy_loss", native::cross_entropy_loss_symint);
   OP_DECOMPOSE2(cumulative_trapezoid, x);
   OP_DECOMPOSE2(cumulative_trapezoid, dx);
@@ -82,6 +86,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
   OP_DECOMPOSE(diff);
+  OP_DECOMPOSE(diag);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
@@ -109,6 +114,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(flipud);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
+  OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(ger);
   OP_DECOMPOSE2(gradient, scalarint);
   OP_DECOMPOSE2(gradient, scalararray);
@@ -200,6 +206,22 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(special_multigammaln);
   OP_DECOMPOSE(special_polygamma);
   OP_DECOMPOSE(special_softmax);
+  OP_DECOMPOSE(special_digamma);
+  OP_DECOMPOSE(special_erf);
+  OP_DECOMPOSE(special_erfc);
+  OP_DECOMPOSE(special_erfinv);
+  OP_DECOMPOSE(special_exp2);
+  OP_DECOMPOSE(special_expm1);
+  OP_DECOMPOSE(special_expit);
+  OP_DECOMPOSE(special_gammaln);
+  OP_DECOMPOSE(special_i0);
+  OP_DECOMPOSE(special_log1p);
+  OP_DECOMPOSE(special_ndtr);
+  OP_DECOMPOSE(special_psi);
+  OP_DECOMPOSE(special_round);
+  OP_DECOMPOSE(special_sinc);
+
+
   m.impl("split.sizes", native::split_symint);
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);

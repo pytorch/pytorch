@@ -201,7 +201,7 @@ class Interpreter:
                 if len(args) > 0:
                     return args[0]
                 else:
-                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!')
+                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!') from si
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
