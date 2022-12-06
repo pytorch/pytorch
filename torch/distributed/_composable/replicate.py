@@ -12,9 +12,8 @@ class _ReplicateState:
         self.modules: List[nn.Module] = []
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()
-        self.kwargs: dict = {}
 
-    def mark_modules(self, *modules: nn.Module, **kwargs) -> None:
+    def mark_modules(self, *modules: nn.Module) -> None:
         for module in modules:
             self.modules.append(module)
             replicate.state(module)._distributed_state = self
@@ -22,7 +21,6 @@ class _ReplicateState:
             module.register_forward_pre_hook(self.forward_pre_hook)
             # TODO(@yhcharles): fix type error
             module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
-        self.kwargs = kwargs
 
     def _recursive_collect_params(self, module: nn.Module) -> None:
         # TODO: skip if managed by other APIs
@@ -41,7 +39,7 @@ class _ReplicateState:
         for child in module.children():
             self._recursive_collect_params(child)
 
-    def init_helper(self) -> None:
+    def init_helper(self):
         if self.has_initialized:
             return
 
@@ -49,9 +47,7 @@ class _ReplicateState:
         for module in self.modules:
             self._recursive_collect_params(module)
 
-        self._ddp = _ddp.DistributedDataParallel(
-            self._param_list, **self.kwargs
-        )
+        self._ddp = _ddp.DistributedDataParallel(self._param_list)
 
     def forward_pre_hook(
         self, module: nn.Module, input: Tuple[torch.Tensor]
@@ -71,7 +67,6 @@ class _ReplicateState:
 @contract
 def replicate(
     module: nn.Module,  # NOTE: contract now supports single module only
-    **kwargs,
 ) -> nn.Module:
     r"""Replicates module(s)
 
@@ -82,5 +77,5 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
-    _ReplicateState().mark_modules(module, **kwargs)
+    _ReplicateState().mark_modules(module)
     return module
