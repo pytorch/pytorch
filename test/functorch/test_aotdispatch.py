@@ -1768,10 +1768,11 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
+        self.assertRaisesRegex(
+            AssertionError,
             """Unexpected fake param linear.weight"""
-        )
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
 
 
 # entries in here don't work and need to be fixed.
