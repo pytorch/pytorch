@@ -12,7 +12,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple, Set
 from unittest.mock import patch
 
 import torch
@@ -115,6 +115,15 @@ class InstructionTranslatorGraphState(NamedTuple):
     next_instruction: Optional[Instruction]
     lineno: int
 
+    def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
+        for k in self._fields:
+            if k == 'output':
+                return self.output.diff(other.output, prefix=f"{k}.")
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{k} mismatch: {sv} != {ov}"
+        return None
 
 def stack_op(fn: typing.Callable[..., object]):
     nargs = len(inspect.signature(fn).parameters)
@@ -1585,6 +1594,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        mutated_closure_cell_contents: Set[str],
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1601,6 +1611,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.one_graph: bool = one_graph
         self.export = export
+        self.mutated_closure_cell_contents = mutated_closure_cell_contents
         if self.export:
             assert (
                 self.one_graph
@@ -1849,14 +1860,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
+            maybe_cell = self.symbolic_locals.get(inst.argval)
             if isinstance(
-                self.symbolic_locals.get(inst.argval),
+                maybe_cell,
                 variables.NewCellVariable,
             ):
                 self.output.side_effects.store_cell(
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
+                if maybe_cell is not None and maybe_cell.source.name() not in self.parent.mutated_closure_cell_contents:
+                    self.parent.mutated_closure_cell_contents.add(maybe_cell.source.name())
+                    raise exc.RestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):

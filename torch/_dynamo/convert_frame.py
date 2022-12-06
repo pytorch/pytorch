@@ -25,6 +25,7 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, Guard, GuardedCode
 from .output_graph import CompilerFn, OutputGraph
+from .source import GetItemSource
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -364,6 +365,8 @@ def _compile(
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
+    # This is shared across restarts
+    mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -378,6 +381,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            mutated_closure_cell_contents,
         )
         tracer.run()
         output = tracer.output

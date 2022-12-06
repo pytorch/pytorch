@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import inspect
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch.nn
 
@@ -74,6 +74,25 @@ class SideEffects:
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
+
+    def __eq__(self, other: "SideEffects") -> bool:
+        # NB: do NOT test keepalive
+        return (
+            self.id_to_variable == other.id_to_variable and
+            self.store_attr_mutations == other.store_attr_mutations
+        )
+
+    def diff(self, other: "SideEffects") -> Optional[str]:
+        if self.id_to_variable != other.id_to_variable:
+            sk_itv = self.id_to_variable.keys()
+            ok_itv = other.id_to_variable.keys()
+            if sk_itv != ok_itv:
+                return f"id_to_variable keys: {sk_itv} != {ok_itv}"
+            return "id_to_variable"
+        elif self.store_attr_mutations != other.store_attr_mutations:
+            return "store_attr_mutations"
+        else:
+            return None
 
     def clone(self):
         """Create a shallow copy"""
