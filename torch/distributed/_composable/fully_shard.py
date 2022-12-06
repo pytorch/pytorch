@@ -34,6 +34,7 @@ def fully_shard(
     *,
     process_group: Optional[dist.ProcessGroup] = None,
     policy: Optional[_FSDPPolicy] = None,
+    strategy: Optional[ShardingStrategy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -56,7 +57,7 @@ def fully_shard(
     forward_prefetch_limit = 1
     state = _init_core_state(
         state,
-        ShardingStrategy.FULL_SHARD,
+        strategy or ShardingStrategy.FULL_SHARD,
         mixed_precision,
         cpu_offload,
         limit_all_gathers,
