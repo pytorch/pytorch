@@ -881,7 +881,7 @@ def init_process_group(
             )
 
         default_pg = _new_process_group_helper(
-            -1, -1, [], Backend.MPI, None, group_name=group_name, timeout=timeout
+            -1, -1, [], backend, None, backend_config=backend_config, group_name=group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
     else:
@@ -978,12 +978,12 @@ def _new_process_group_helper(
     base_pg_options._timeout = timeout
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
 
-    for device, backend in backend_config.get_device_backend_map().items():
+    for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
         prefix_store = PrefixStore(f"{device}/", prefix_store)
 
-        if backend == Backend.MPI:
+        if backend_str == Backend.MPI:
             if not is_mpi_available():
                 raise RuntimeError(
                     "Distributed package doesn't have MPI built in."
@@ -995,13 +995,13 @@ def _new_process_group_helper(
             if not backend_pg:
                 return GroupMember.NON_GROUP_MEMBER
 
-        if backend == Backend.GLOO:
+        if backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
             backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
             backend_pg_type = ProcessGroup.BackendType.GLOO
-        elif backend == Backend.NCCL:
+        elif backend_str == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL " "built in")
             if pg_options is not None:
@@ -1016,7 +1016,7 @@ def _new_process_group_helper(
 
             backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
             backend_pg_type = ProcessGroup.BackendType.NCCL
-        elif backend == Backend.UCC and is_ucc_available():
+        elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
             # is_ucc_available() from above elif-condition and raise
             # RuntimeError if is_ucc_available() returns false.
@@ -1024,11 +1024,11 @@ def _new_process_group_helper(
             backend_pg = ProcessGroupUCC(prefix_store, group_rank, group_size, timeout=timeout)
             backend_pg_type = ProcessGroup.BackendType.UCC
         else:
-            assert backend.upper() in Backend._plugins, (
-                f"Unknown c10d backend type {backend.upper()}"
+            assert backend_str.upper() in Backend._plugins, (
+                f"Unknown c10d backend type {backend_str.upper()}"
             )
 
-            backend_plugin = Backend._plugins[backend.upper()]
+            backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
 
@@ -1046,7 +1046,7 @@ def _new_process_group_helper(
                 backend_pg = creator_fn(dist_backend_opts, pg_options)
 
         # Set sequence numbers for gloo and nccl backends.
-        if backend in [Backend.GLOO, Backend.NCCL]:
+        if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_pg._set_sequence_number_for_group()
 
         # If the type is a sublcass of ProcessGroup then return this process group immediately
@@ -1057,7 +1057,7 @@ def _new_process_group_helper(
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debuggability.
             if get_debug_level() == DebugLevel.DETAIL:

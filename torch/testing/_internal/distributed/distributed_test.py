@@ -1210,16 +1210,11 @@ class DistributedTest:
                     # No model averaging, so the parameters are not updated.
                     self.assertEqual(param.data, tensor)
 
-        # TODO figure out why this test uses send/recv from itself, is it even supported?
-        # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
             self._barrier()
-            # Ensure the process group has been fully initialized (needed by
-            # the first sub-group batch_isend_irecv call)
-            dist.barrier()
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1254,9 +1249,6 @@ class DistributedTest:
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_ring_exchange_nccl(self):
             self._barrier()
-            # Ensure the process group has been fully initialized (needed by
-            # the first sub-group batch_isend_irecv call)
-            dist.barrier()
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1284,16 +1276,12 @@ class DistributedTest:
             dist.barrier()
             rank = dist.get_rank()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            print(rank_to_GPU)
             device_id = rank_to_GPU[rank][0]
-            print(device_id)
             p2p_op_list = []
 
             if rank == 0:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
-                # TODO figure out why this test uses send/recv from itself, is it even supported?
-                # When using NCCL_DEBUG=INFO, [0] enqueue.cc:638 NCCL WARN Trying to recv to self without a matching send
                 recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
                 p2p_op_list.append(recv_op)
                 send_op = dist.P2POp(dist.isend, send_tensor, 0)
@@ -6142,7 +6130,6 @@ class DistributedTest:
             default = _get_default_group()
             backend = dist.get_backend(default)
             subgroup = dist.new_group(backend=backend)
-            print(subgroup)
             return self._test_allgather_object(subgroup=subgroup)
 
         def _test_gather_object(self, pg=None):
