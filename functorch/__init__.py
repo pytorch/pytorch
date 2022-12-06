@@ -14,7 +14,7 @@ from . import _C
 
 # functorch transforms
 from torch._functorch.vmap import vmap
-from torch._functorch.eager_transforms import (
+from torch.func import (
     grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian, functionalize
 )
 from torch._functorch.python_key import make_fx

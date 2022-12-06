@@ -39,9 +39,9 @@ from common_utils import (
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from functorch import grad, vjp, vmap, jacrev, jacfwd
+from torch.func import grad, vjp, vmap, jacrev, jacfwd, jvp
 import torch.autograd.forward_ad as fwAD
-from torch._functorch.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple
 
 aten = torch.ops.aten
 

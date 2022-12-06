@@ -27,10 +27,12 @@ from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
 import functorch
+from torch.func import (
+    grad, vjp, jacrev, jacfwd, grad_and_value, hessian, jvp,
+)
 from functorch import (
-    grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
-    jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx
+    make_functional, make_functional_with_buffers,
+    combine_state_for_ensemble, make_fx, vmap,
 )
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
@@ -1771,7 +1773,7 @@ class TestJvp(TestCase):
         tx = torch.randn(2, 3, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "strict"):
-            jvp(f, (x,), (tx,), strict=True)
+            torch._functorch.eager_transforms.jvp(f, (x,), (tx,), strict=True)
 
     def test_multiple_outputs(self, device):
         x = torch.randn(2, 3, device=device)
