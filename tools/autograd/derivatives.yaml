@@ -1666,7 +1666,23 @@
   self: grad.to_dense()
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+  # TODO: grad.to_dense() is better be replaced with
+  # self: to_sparse_backward(grad, self)
+  # This change, however, is BC-breaking since
+  # to_sparse_backward(grad, self).layout == self.layout
   self: grad.to_dense()
+
+- name: to_sparse_csr(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self)
+
+- name: to_sparse_csc(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self)
+
+- name: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self)
+
+- name: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self)
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)

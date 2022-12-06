@@ -6769,6 +6769,23 @@ Tensor take_backward(
   return grad_self.put_(indices, grad, true);
 }
 
+Tensor to_sparse_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  const auto self_layout = self.layout();
+  // Path for strided and nested
+  if (self_layout == c10::kStrided) {
+    return grad.to_dense();
+  }
+  else if (self_layout == c10::kSparseBsr || self_layout == c10::kSparseBsc) {
+    const auto blocksize = at::sparse_csr::getBlockSize(self);
+    return grad.to_sparse(self_layout, blocksize);
+  }
+  else {
+    return grad.to_sparse(self_layout);
+  }
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
