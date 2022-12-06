@@ -55,12 +55,6 @@ class TORCH_API MetricData {
     return repr_fn_(value);
   }
 
-  void Reset();
-
-  bool IsValid() const {
-    return TotalSamples() > 0;
-  }
-
  private:
   mutable std::mutex lock_;
   MetricReprFn repr_fn_;
@@ -87,10 +81,6 @@ class TORCH_API CounterData {
     value_ = 0;
   }
 
-  bool IsValid() const {
-    return value_ > 0;
-  }
-
  private:
   std::atomic<int64_t> value_;
 };
@@ -99,8 +89,7 @@ class TORCH_API MetricsArena {
  public:
   static MetricsArena* Get();
 
-  void ResetCounters();
-  void ResetMetrics();
+  void Reset();
 
   // Registers a new metric in the global arena.
   void RegisterMetric(

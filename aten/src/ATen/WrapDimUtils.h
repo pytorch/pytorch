@@ -38,29 +38,14 @@ inline int64_t maybe_wrap_dim(
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
-// Given an array of dimensions `dims` of length `ndims`, this function "Wraps"
-// each dim in-place for a tensor of rank `dim_post_expr`, allowing dims to be
-// specified using negative indices.
-//
-// Additionally, if `wrap_scalar` is true then scalar tensors with rank 0, will
-// allow dimensions in the range [-1, 0]. Otherwise, an IndexError is raised for
-// dimensions not in the range [-dim_post_expr, dim_post_expr).
+// wrap each dim in the dims array, taking dim_post_expr as the true number of
+// dimensions
 inline void maybe_wrap_dims_n(
     int64_t* dims,
     int64_t ndims,
-    int64_t dim_post_expr,
-    bool wrap_scalars = true) {
+    int64_t dim_post_expr) {
   if (dim_post_expr <= 0) {
-    if (wrap_scalars) {
-      dim_post_expr = 1; // this will make range [-1, 0]
-    } else {
-      TORCH_CHECK_INDEX(
-          ndims == 0,
-          "Dimension specified as ",
-          dims[0],
-          " but tensor has no dimensions");
-      return;
-    }
+    dim_post_expr = 1; // this will make range [-1, 0]
   }
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
@@ -82,20 +67,11 @@ inline void maybe_wrap_dims_n(
   }
 }
 
-// Given a contiguous container of dimensions `dims`, this function "Wraps"
-// each dim in-place for a tensor of rank `dim_post_expr`, allowing dims to be
-// specified using negative indices.
-//
-// Additionally, if `wrap_scalar` is true then scalar tensors with rank 0, will
-// allow dimensions in the range [-1, 0]. Otherwise, an IndexError is raised for
-// dimensions not in the range [-dim_post_expr, dim_post_expr).
+// Wrap each dim in a contiguous container, taking dim_post_expr as the true
+// number of dimensions E.g. could also be std::array or c10::SmallVector
 template <typename Container>
-inline void maybe_wrap_dims(
-    Container& dims,
-    int64_t dim_post_expr,
-    bool wrap_scalars = true) {
-  return maybe_wrap_dims_n(
-      dims.data(), dims.size(), dim_post_expr, wrap_scalars);
+inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
+  return maybe_wrap_dims_n(dims.data(), dims.size(), dim_post_expr);
 }
 
 // previously, size [0] tensors were the only possible empty tensors; thus, it

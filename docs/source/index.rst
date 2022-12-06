@@ -43,21 +43,6 @@ Features described in this documentation are classified by release status:
    notes/*
 
 .. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: torch.compile
-   :hidden:
-
-   dynamo/index
-   dynamo/installation
-   dynamo/get-started
-   dynamo/guards-overview
-   dynamo/custom-backends
-   dynamo/deep-dive
-   dynamo/troubleshooting
-   dynamo/faq
-
-.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
@@ -66,8 +51,7 @@ Features described in this documentation are classified by release status:
    torch::deploy <deploy>
 
 .. toctree::
-   :glob:
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Python API
 
    torch
@@ -86,10 +70,8 @@ Features described in this documentation are classified by release status:
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
-   torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
-   torch._dynamo <_dynamo>
    torch.fft <fft>
    futures
    fx

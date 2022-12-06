@@ -3,10 +3,11 @@ from typing import Iterable, Tuple, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames
+from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, _deprecation_warning
 
 __all__ = [
     "FileOpenerIterDataPipe",
+    "FileLoaderIterDataPipe",
 ]
 
 
@@ -70,3 +71,19 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         if self.length == -1:
             raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
         return self.length
+
+
+class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
+
+    def __new__(
+            cls,
+            datapipe: Iterable[str],
+            mode: str = 'b',
+            length: int = -1):
+        _deprecation_warning(
+            cls.__name__,
+            deprecation_version="1.12",
+            removal_version="1.13",
+            new_class_name="FileOpener",
+        )
+        return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)

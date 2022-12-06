@@ -617,8 +617,13 @@ class MixtureOfExperts(NestedWrappedModule):
                     )
                     return orig_reshard(*args, **kwargs)
 
-                # This patch covers any `import torch..._reshard` uses.
+                # The first patch covers any `from torch... import _reshard`
+                # uses in `fully_sharded_data_parallel.py`, and the second
+                # patch covers any `import torch..._reshard` uses in general.
                 with mock.patch(
+                    "torch.distributed.fsdp.fully_sharded_data_parallel._reshard",
+                    _delayed_reshard,
+                ), mock.patch(
                     "torch.distributed.fsdp._runtime_utils._reshard", _delayed_reshard
                 ):
                     return self.module(x)

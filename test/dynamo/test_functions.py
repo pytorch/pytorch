@@ -5,7 +5,6 @@ import functools
 import inspect
 import itertools
 import operator
-import unittest
 from typing import Any
 from unittest.mock import patch
 
@@ -67,12 +66,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_add(a, b):
         return a + b
-
-    @make_test
-    def test_addcdiv(a, b, c):
-        # dynamo decomposes this to avoid a graph break when
-        # the value kwarg is populated
-        return torch.addcdiv(a, b, c, value=5.0)
 
     @make_test
     def test_is_not_null(a, b):
@@ -225,17 +218,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.unsqueeze(a, 0)[:, 2:]
 
     @make_test
-    def test_range1(a):
-        return torch.tensor(range(a.size(0)))
-
-    @make_test
-    def test_range2(x, y):
-        r = x + y
-        for i in range(x.size(0) + 2):
-            r = r / y
-        return r
-
-    @make_test
     def test_unpack1(a):
         a, b = a[:5], a[5:]
         return a - b
@@ -341,17 +323,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_device(x):
         if not x.is_cuda:
             return x + 1
-
-    @make_test
-    def test_tensor_type(a, b):
-        m = a.to(torch.float16)
-        return b.type(m.type())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    @make_test
-    def test_tensor_type2(a, b):
-        m = a.to("cuda")
-        return m + b.type(m.type())
 
     @make_test
     def test_ndim(x):

@@ -122,6 +122,16 @@ FILENAME_ALLOWLIST = {
     torch.set_rng_state.__code__.co_filename,
 }
 
+# Include optimizer code for tracing
+FILENAME_ALLOWLIST |= set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+
+FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
@@ -133,6 +143,7 @@ if HAS_PRIMS_REFS:
         torch._refs.nn.functional.__file__,
     }
 
+FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 SKIP_DIRS_RE = None
 

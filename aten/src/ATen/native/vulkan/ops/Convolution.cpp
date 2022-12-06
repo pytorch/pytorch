@@ -320,16 +320,6 @@ static api::ShaderSource get_shader(
       break;
     case Conv2dDepthwise:
       shader = VK_SHADER(conv2d_dw);
-      if (kernel_size.size() == 4 && kernel_size[2] == 3 &&
-          kernel_size[3] == 3) {
-        // 1x1 refers to the output tile size
-        shader = VK_SHADER(conv2d_dw_3x3);
-      }
-      if (kernel_size.size() == 4 && kernel_size[2] == 5 &&
-          kernel_size[3] == 5) {
-        // 1x1 refers to the output tile size
-        shader = VK_SHADER(conv2d_dw_5x5);
-      }
       break;
     case Conv2dPointwise:
       shader = VK_SHADER(conv2d_pw_2x2);
@@ -552,14 +542,14 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      bias_rearranged.options(),
+      weight.options(),
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
     v_bias.set_is_quantized();
-    v_bias.set_scale(bias_rearranged.q_scale());
-    v_bias.set_zero_point(bias_rearranged.q_zero_point());
+    v_bias.set_scale(weight.q_scale());
+    v_bias.set_zero_point(weight.q_zero_point());
   }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);

@@ -17,8 +17,6 @@ except ImportError:
     from common import timed
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
 
-log = logging.getLogger(__name__)
-
 
 def torchviz_model(args, model, inputs, rank):
     from torchviz import make_dot
@@ -81,11 +79,8 @@ def run_model(args, model, inputs, key):
         if args.verbose:
             dynamo.config.verbose = True
             dynamo.config.log_level = logging.DEBUG
-        if args.dynamo_no_optimize_ddp:
-            dynamo.config.optimize_ddp = False
-        if args.dynamo == "inductor" and args.fsdp:
-            torch._inductor.config.triton.cudagraphs = False
-            log.warn("disabling inductor cudagraphs for compatibility with FSDP")
+        if args.dynamo_optimize_ddp:
+            dynamo.config.optimize_ddp = True
 
         def print_compile(gm, ex):
             print(
@@ -129,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument("--trace_file", default="profile.json", help="Run the profiler")
     parser.add_argument("--repeat", default=10, help="Repeats for timing run")
     parser.add_argument(
-        "--dynamo_no_optimize_ddp",
+        "--dynamo_optimize_ddp",
         action="store_true",
         help="Enable dynamo's ddp optimizer",
     )

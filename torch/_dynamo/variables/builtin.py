@@ -273,9 +273,7 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return wrap_fx_proxy_cls(
@@ -335,6 +333,7 @@ class BuiltinVariable(VariableTracker):
                     fn_,
                     (args[0].as_proxy(),),
                     {},
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -394,6 +393,7 @@ class BuiltinVariable(VariableTracker):
                         "call_function",
                         self.fn,
                         *proxy_args_kwargs([a, b], {}),
+                        current_tx=tx,
                     ),
                     **VariableTracker.propagate(self, [a, b]),
                 )
@@ -468,19 +468,28 @@ class BuiltinVariable(VariableTracker):
     call_min = _call_min_max
     call_max = _call_min_max
 
-    def call_range(self, tx, *args):
-        if self.unspec_python_args(*args) or self.constant_args(*args):
-            args, _ = specialize_args_kwargs(tx, args, {})
-            return variables.RangeVariable(args)
-        elif self._dynamic_args(*args):
+    def call_range(self, tx, *args, **kwargs):
+        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
+            *args, **kwargs
+        ):
+            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
+            return variables.RangeVariable(
+                value=range(
+                    *[x.value for x in args],
+                    **{k: v.value for k, v in kwargs.items()},
+                ),
+            )
+        elif self._dynamic_args(*args, **kwargs):
+            assert len(kwargs) == 0
 
             def guard_if_dyn(arg):
                 if isinstance(arg, DynamicShapeVariable):
                     return arg.evaluate_expr(tx.output)
                 return arg
 
-            args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
-            return variables.RangeVariable(args)
+            args = [guard_if_dyn(arg) for arg in args]
+            value = self.fn(*args)
+            return variables.RangeVariable(value=value)
         # None no-ops this handler and lets the driving function proceed
         return None
 

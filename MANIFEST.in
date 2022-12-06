@@ -1,6 +1,6 @@
 include MANIFEST.in
 include CMakeLists.txt
-include CITATION.cff
+include CITATION
 include LICENSE
 include NOTICE
 include .gitmodules

@@ -4,9 +4,9 @@ import logging
 import os
 import traceback
 import types
+import typing
 import weakref
-from traceback import FrameSummary
-from typing import Callable, cast, Dict, List, Optional, Set
+from typing import Callable
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -15,7 +15,12 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
-from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
+from .eval_frame import (
+    always_optimize_code_objects,
+    skip_code,
+    TorchPatcher,
+    WrapperBackend,
+)
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
@@ -23,8 +28,7 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
-from .guards import CheckFunctionManager, Guard, GuardedCode
-from .output_graph import CompilerFn, OutputGraph
+from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -82,6 +86,18 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
+def wrap_compiler_fn(compiler_fn):
+    """WrapperBackend if config.verify_correctness is True"""
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
+
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
+        return wrapper_backend_compiler_fn
+
+    return compiler_fn
+
+
 def wrap_convert_context(fn):
     """
     Context manager to:
@@ -107,7 +123,7 @@ def wrap_convert_context(fn):
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
-    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+    _fn._torchdynamo_orig_callable = fn
     return _fn
 
 
@@ -124,7 +140,7 @@ def has_tensor_in_frame(frame):
             if is_allowed(frame.f_globals[co_name]):
                 return True
 
-    seen_ids: Dict[int, bool] = dict()
+    seen_ids = dict()
 
     def has_tensor(obj):
         """Recursively check if the obj has a tensor"""
@@ -195,7 +211,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
             msg += "".join(
                 traceback.format_list(
-                    stack_above_dynamo + list(reversed(get_real_stack(exc)))
+                    stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
             msg += "\n"
@@ -208,18 +224,13 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     return msg
 
 
-def get_real_stack(exc) -> List[FrameSummary]:
-    assert hasattr(exc, "real_stack")
-    return cast(List[FrameSummary], exc.real_stack)
-
-
 def augment_exc_message(exc, msg="\n"):
     if (
         hasattr(exc, "real_stack")
         and len(exc.real_stack) > 0
         and not (config.verbose and config.suppress_errors)
     ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack[0:2])))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
@@ -265,13 +276,12 @@ def exception_handler(e, code, frame=None):
 
 
 def convert_frame_assert(
-    compiler_fn: CompilerFn,
-    guard_export_fn=None,
-    one_graph: bool = True,
-    export: bool = False,
+    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
+
+    compiler_fn = wrap_compiler_fn(compiler_fn)
 
     @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
@@ -353,17 +363,17 @@ def convert_frame_assert(
 
 
 def _compile(
-    code: types.CodeType,
-    globals: Dict[str, object],
-    locals: Dict[str, object],
-    builtins: Dict[str, object],
-    compiler_fn: CompilerFn,
-    one_graph: bool,
-    export: bool,
-    guard_export_fn: Optional[Callable[[Set[Guard]], None]] = None,
-    frame: Optional[types.FrameType] = None,
-) -> Optional[GuardedCode]:
-    output: Optional[OutputGraph] = None
+    code,
+    globals,
+    locals,
+    builtins,
+    compiler_fn,
+    one_graph,
+    export,
+    guard_export_fn=None,
+    frame=None,
+):
+    output = None
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -381,7 +391,6 @@ def _compile(
         )
         tracer.run()
         output = tracer.output
-        assert output is not None
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
@@ -410,7 +419,7 @@ def _compile(
         output_codes.add(out_code)
 
         log.log(
-            logging.CODE,  # type: ignore[attr-defined]
+            logging.CODE,
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
@@ -420,7 +429,7 @@ def _compile(
             ),
         )
         log.log(
-            logging.CODE,  # type: ignore[attr-defined]
+            logging.CODE,
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
@@ -430,7 +439,6 @@ def _compile(
             ),
         )
 
-        assert output is not None
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(output, output.guards, locals, globals)
@@ -439,7 +447,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(logging.CODE, guard_str)  # type: ignore[attr-defined]
+        log.log(logging.CODE, guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)
@@ -458,7 +466,7 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None):
+def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
 
@@ -475,7 +483,7 @@ def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None):
                 raise
         return None
 
-    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+    _convert_frame._torchdynamo_orig_callable = compiler_fn
     return _convert_frame
 
 
@@ -499,10 +507,10 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
-            one_graph=False,
-            export=False,
-            guard_export_fn=None,
-            frame=None,
+            False,  # one_graph
+            None,  # export_fn
+            None,  # frame
+            False,  # Export
         )
     except Exception:
         pass

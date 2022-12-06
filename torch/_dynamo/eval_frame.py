@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import functools
 import inspect
 import logging
@@ -9,9 +10,7 @@ import threading
 import traceback
 import types
 import warnings
-from enum import Enum
 from importlib import import_module
-from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -19,44 +18,31 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-if TYPE_CHECKING:
-    from torch._C._dynamo.eval_frame import (  # noqa: F401
-        reset_code,
-        set_eval_frame,
-        set_guard_error_hook,
-        set_guard_fail_hook,
-        skip_code,
-        unsupported,
-    )
-else:
-    for name in dir(torch._C._dynamo.eval_frame):
-        if name.startswith("__"):
-            continue
-        globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
-
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
-from .types import DynamoCallback
-from .utils import compile_times
+from .optimizations.distributed import DDPOptimizer
+from .utils import checkpoint_params, clone_inputs, compile_times, same
 
 log = logging.getLogger(__name__)
 
-from torch.fx.experimental import proxy_tensor
+try:
+    from torch.fx.experimental import proxy_tensor
+except ImportError:
+    proxy_tensor = None
 
+_eval_frame = torch._C._dynamo.eval_frame
+set_eval_frame = _eval_frame.set_eval_frame
+reset_code = _eval_frame.reset_code
+unsupported = _eval_frame.unsupported
+skip_code = _eval_frame.skip_code
+set_guard_fail_hook = _eval_frame.set_guard_fail_hook
+set_guard_error_hook = _eval_frame.set_guard_error_hook
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
-
-# See https://github.com/python/typing/pull/240
-class Unset(Enum):
-    token = 0
-
-
-unset = Unset.token
-
+unset = object()
 compile_lock = threading.RLock()
-most_recent_backend: Optional[CompilerFn] = None
+most_recent_backend = None
 
 
 class OptimizedModule(torch.nn.Module):
@@ -120,7 +106,7 @@ def enable_dynamic(enable: bool = True):
         yield
         return
     with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
+        "functorch._src.config.use_dynamic_shapes", True
     ):
         yield
 
@@ -128,7 +114,7 @@ def enable_dynamic(enable: bool = True):
 class _TorchDynamoContext:
     def __init__(
         self,
-        callback: DynamoCallback,
+        callback,
         on_enter=nothing,
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
@@ -138,8 +124,8 @@ class _TorchDynamoContext:
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
-        self.callback: DynamoCallback = callback
-        self.prior: Union[Unset, DynamoCallback] = unset
+        self.callback = callback
+        self.prior = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
@@ -161,7 +147,6 @@ class _TorchDynamoContext:
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self.prior is not unset
         set_eval_frame(self.prior)
         self.prior = unset
         # TODO: This is totally not the right way to chain contexts manually
@@ -214,13 +199,13 @@ class _TorchDynamoContext:
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
-            _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
+            _fn._torchdynamo_disable = True
         else:
-            _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
+            _fn._torchdynamo_inline = fn
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_orig_callable = fn
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -300,11 +285,7 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
-        if (
-            frame.f_lasti >= 0
-            or skipfiles.check(frame.f_code.co_filename)
-            or config.disable
-        ):
+        if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
@@ -314,8 +295,6 @@ def catch_errors_wrapper(callback):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
-
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
@@ -328,7 +307,7 @@ def catch_errors_wrapper(callback):
         with compile_lock:
             return callback(frame, cache_size)
 
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+    catch_errors._torchdynamo_orig_callable = callback
     return catch_errors
 
 
@@ -339,6 +318,47 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=Fa
         first_ctx=True,
         dynamic=dynamic,
     )
+
+
+class WrapperBackend:
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            raise RuntimeError(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            raise
+        finally:
+            self.restore()
 
 
 def get_compiler_fn(compiler_fn):
@@ -371,7 +391,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
+class _NullDecorator(contextlib.nullcontext):
     def __call__(self, fn):
         assert callable(fn)
         return fn
@@ -403,7 +423,7 @@ def optimize(
         disable: If True, turn this decorator into a no-op
         dynamic: If True, turn on dynamic shapes support
 
-    Example Usage::
+    Example Usage:
 
         @torch._dynamo.optimize()
         def toy_example(a, b):
@@ -532,7 +552,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
-    graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    graph_captured_result = None
 
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
@@ -581,7 +601,6 @@ def export(
             nonlocal graph_captured_input
 
             graph_captured_input = graph_inputs
-            assert graph is not None
             graph_captured_result = graph(*graph_inputs)
             return graph_captured_result
 
@@ -608,7 +627,6 @@ def export(
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
-    assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
@@ -734,7 +752,8 @@ class TorchPatcher:
         torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
+        if proxy_tensor is not None:
+            proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
 
         optimizers = [
             opt
@@ -754,10 +773,6 @@ class TorchPatcher:
                 opt._cuda_graph_capture_health_check
             )
             opt.zero_grad = disable(opt.zero_grad)
-
-            if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
-
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook

@@ -413,10 +413,9 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
         "Shouldn't still be traversing in fallback mode if a merge was found.");
   }
 
-  std::vector<bool> can_merge(neighbors.size(), true);
+  std::vector<bool> can_merge(true, neighbors.size());
 
-  // Find neighbors with a level that is only 1 different than this group's
-  // level
+  // Find neighbors with a level that is only 1 differant than this groups level
   for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i]->payload()->level - payload()->level) > 1) {
       can_merge[i] = false;

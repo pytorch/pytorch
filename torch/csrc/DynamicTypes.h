@@ -9,7 +9,6 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
-#include <torch/csrc/Export.h>
 
 #include <memory>
 #include <string>
@@ -25,7 +24,7 @@ namespace torch {
 void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
-TORCH_PYTHON_API PyObject* createPyObject(const at::Storage& storage);
+PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
 at::Storage createStorageGetType(
     PyObject* obj,

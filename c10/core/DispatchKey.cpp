@@ -189,8 +189,6 @@ const char* toString(DispatchKey t) {
       return "CompositeExplicitAutograd";
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return "CompositeExplicitAutogradNonFunctional";
-    case DispatchKey::FuncTorchBatchedDecomposition:
-      return "FuncTorchBatchedDecomposition";
 
       // Per-backend dispatch keys
 
@@ -343,8 +341,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::CompositeExplicitAutograd},
       {"CompositeExplicitAutogradNonFunctional",
        c10::DispatchKey::CompositeExplicitAutogradNonFunctional},
-      {"FuncTorchBatchedDecomposition",
-       c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
