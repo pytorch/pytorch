@@ -5,6 +5,8 @@ from .utils import expand_tuples
 from .variadic import Variadic, isvariadic
 import itertools as itl
 
+__all__ = ["MDNotImplementedError", "ambiguity_warn", "halt_ordering", "restart_ordering", "variadic_signature_matches_iter",
+           "variadic_signature_matches", "Dispatcher", "source", "MethodDispatcher", "str_signature", "warning_text"]
 
 class MDNotImplementedError(NotImplementedError):
     """ A NotImplementedError for multiple dispatch """
@@ -249,17 +251,17 @@ class Dispatcher(object):
         types = tuple([type(arg) for arg in args])
         try:
             func = self._cache[types]
-        except KeyError:
+        except KeyError as e:
             func = self.dispatch(*types)
             if not func:
                 raise NotImplementedError(
                     'Could not find signature for %s: <%s>' %
-                    (self.name, str_signature(types)))
+                    (self.name, str_signature(types))) from e
             self._cache[types] = func
         try:
             return func(*args, **kwargs)
 
-        except MDNotImplementedError:
+        except MDNotImplementedError as e:
             funcs = self.dispatch_iter(*types)
             next(funcs)  # burn first
             for func in funcs:
@@ -271,7 +273,7 @@ class Dispatcher(object):
             raise NotImplementedError(
                 "Matching functions for "
                 "%s: <%s> found, but none completed successfully" % (
-                    self.name, str_signature(types),),)
+                    self.name, str_signature(types),),) from e
 
     def __str__(self):
         return "<dispatched %s>" % self.name

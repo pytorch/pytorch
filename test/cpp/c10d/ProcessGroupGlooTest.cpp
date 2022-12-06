@@ -17,8 +17,8 @@
 #include <torch/cuda.h>
 
 #include <c10/util/irange.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "TestUtils.hpp"
 
 using namespace c10d::test;

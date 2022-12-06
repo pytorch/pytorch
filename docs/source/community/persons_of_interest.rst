@@ -7,7 +7,7 @@ Responsibilities
 * Triage and fix high priority issues assigned to the module or library
 * Triage, review, and land high priority pull requests assigned to the module or library
 * Answer module or library questions on `discuss.pytorch.org <https://discuss.pytorch.org/>`__
-  and `dev-discuss.pytorch.org <dev-discuss.pytorch.org>`__
+  and `dev-discuss.pytorch.org <https://dev-discuss.pytorch.org/>`__
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
@@ -103,7 +103,7 @@ Linear Algebra (torch.linalg)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
--  Mario Lezcano (`Lezcano <https://github.com/Lezcano>`__)
+-  Mario Lezcano (`lezcano <https://github.com/lezcano>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
@@ -114,6 +114,23 @@ Sparse (torch.sparse)
 -  Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Andrew James (`amjames <https://github.com/amjames>`__)
+
+NestedTensor (torch.nested)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Driss Guessous (`drisspg <https://github.com/drisspg>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+
+MaskedTensor (torch.masked)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) George Qi (`george-qi <https://github.com/george-qi>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -228,10 +245,11 @@ Mobile / Edge
 
 Model Compression & Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--  Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
+-  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
 -  Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
+-  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
 
 Windows
@@ -287,6 +305,11 @@ TorchVision
 
 -  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
 -  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
+-  Nicolas Hug (`NicolasHug <https://github.com/NicolasHug>`__)
+-  Yosua Michael Maranatha (`YosuaMichael <https://github.com/YosuaMichael>`__)
+-  Joao Gomes (`jdsgomes <https://github.com/jdsgomes>`__)
+-  Philip Meier (`pmeier <https://github.com/pmeier>`__)
+-  Victor Fomin (`vfdev-5 <https://github.com/vfdev-5>`__)
 
 TorchText
 ~~~~~~~~~
@@ -300,6 +323,11 @@ TorchAudio
 ~~~~~~~~~~
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  Jeff Hwang (`hwangjeff <https://github.com/hwangjeff>`__)
+-  Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
+-  Xiaohui Zhang (`xiaohui-zhang <https://github.com/xiaohui-zhang>`__)
+-  Zhaoheng Ni (`nateanl <https://github.com/nateanl>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
 
 TorchRec

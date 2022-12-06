@@ -10,12 +10,21 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, jit_utils
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
-# TODO(#78694): Refactor the patching process to make it more transparent to users.
+# TODO(#78694): Remove this file after PyTorch 1.14.
+# All functions in this file are deprecated and should not be used
+
+
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'g.op()' is to be removed from torch.Graph. Please open a"
+    " GitHub issue if you need this functionality.",
+)
 @_beartype.beartype
 def _graph_op(
     g: _C.Graph,
@@ -61,7 +70,7 @@ def _graph_op(
     args = [_const_if_tensor(g, arg) for arg in raw_args]
 
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -87,6 +96,12 @@ def _const_if_tensor(g: _C.Graph, arg):
     return _graph_op(g, "Constant", value_z=arg)
 
 
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'g.at()' is to be removed from torch.Graph. Please open a"
+    " GitHub issue if you need this functionality.",
+)
 # Generate an ONNX ATen op node.
 @_beartype.beartype
 def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
@@ -100,10 +115,16 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
     )
 
 
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'b.op()' is to be removed from torch.Block. Please open a"
+    " GitHub issue if you need this functionality.",
+)
 @_beartype.beartype
 def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname

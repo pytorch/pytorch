@@ -39,10 +39,6 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0

@@ -1,7 +1,7 @@
 #include <unistd.h>
 
 #include <c10/util/irange.h>
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 
 #include <cstdlib>
 #include <iostream>

@@ -350,6 +350,7 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastXPU,
+  AutocastHPU,
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
@@ -443,6 +444,15 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+
+  // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from
+  // all
+  // other alias keysets
+  // and so precedence order doesn't matter
+  FuncTorchBatchedDecomposition, // registered at
+  // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
+  // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
+  // disjoint from all other alias keysets
   CompositeImplicitAutogradNestedTensor, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at

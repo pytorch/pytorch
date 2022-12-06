@@ -122,8 +122,10 @@ static id<MTLLibrary> compileBitwiseOpsLibrary(id<MTLDevice> device,
     return it->second;
   }
   NSError *error = nil;
+  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion: MTLLanguageVersion2_3];
   auto rc  = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(BITWISE_OPS_TEMPLATE, t1, t2, t3).c_str()]
-                                  options:nil
+                                  options:options
                                     error:&error];
  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
  libMap[key] = rc;
@@ -170,6 +172,9 @@ void handle_tensor_tensor_binary_op(const at::Tensor& self, const at::Tensor& ot
                                                      getMetalType(other),
                                                      kernel_name);
   uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
@@ -200,6 +205,9 @@ void handle_tensor_scalar_binary_op(const at::Tensor& self, const at::Scalar& ot
                                                      kernel_name);
   uint64_t sval = other.to<int64_t>();
   uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
@@ -294,6 +302,10 @@ at::Tensor& bitwise_not_out_mps (const at::Tensor& self, at::Tensor& output_) {
     }
     return output_;
   }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return output_;
+  }
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(MPSDevice::getInstance()->device(),
@@ -301,7 +313,6 @@ at::Tensor& bitwise_not_out_mps (const at::Tensor& self, at::Tensor& output_) {
                                                      getMetalType(self),
                                                      getMetalType(self),
                                                      "bitwise_not");
-  uint32_t length = output.numel();
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];

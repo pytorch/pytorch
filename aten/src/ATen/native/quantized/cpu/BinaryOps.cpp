@@ -1,14 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec/vec.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/relu_native.h>
+#endif
+
+#include <algorithm>
 
 namespace at {
 namespace native {
@@ -23,10 +36,10 @@ namespace {
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine,
-      "Only per tensor quantization is suported in Add.");
+      "Only per tensor quantization is supported in Add.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
-      "Both inputs to Add must have the same quantization shceme.");
+      "Both inputs to Add must have the same quantization scheme.");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");

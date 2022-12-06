@@ -4,6 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
+from torch.fx import Node
 from torch.ao.quantization.quant_type import QuantType
 from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
@@ -11,10 +12,22 @@ from collections import OrderedDict
 from inspect import signature
 from inspect import getfullargspec
 
+NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
+NodePattern.__module__ = "torch.ao.quantization.utils"
+
+# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
+# Define separately to prevent circular imports.
+# TODO(future PR): improve this.
+# make this public once fixed (can't be public as is because setting the module directly
+# doesn't work)
+QuantizerCls = Any
+
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern = Union[
+    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
+]
 Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
@@ -127,6 +140,17 @@ def getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
+def to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
+
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
@@ -185,19 +209,21 @@ def weight_dtype(qconfig):
 
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
-    quantized or not, this includes quantizing to quint8, qint8 and float16
+    quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return (
+        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+        and (not activation_is_dynamically_quantized(qconfig))
+    )
 
 def activation_is_dynamically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     dynamically quantized or not, this includes dynamically quantizing to
     quint8, qint8 and float16
     """
-    activation_dtype, _, activation_compute_dtype = \
+    activation_dtype, _, activation_is_dynamic = \
         get_qconfig_dtypes(qconfig)
-    return activation_dtype == torch.float and \
-        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+    return activation_is_dynamic
 
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -227,40 +253,40 @@ def op_is_int8_dynamically_quantized(qconfig) -> bool:
     """ Given a qconfig, returns True if this op is using int8 dynamic
     quantization
     """
-    activation_dtype, weight_dtype, activation_compute_dtype = \
+    activation_dtype, weight_dtype, activation_is_dynamic = \
         get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.float and
+        activation_dtype is torch.quint8 and
         # for now, the lines below assume fbgemm or qnnpack
         weight_dtype is torch.qint8 and
-        activation_compute_dtype is torch.quint8
+        activation_is_dynamic
     )
 
 def get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
-    (activation_dtype, weight_dtype, activation_compute_dtype)
+    (activation_dtype, weight_dtype, activation_is_dynamic)
     """
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    compute_dtype = activation.compute_dtype if hasattr(activation, 'compute_dtype') else None
-    return (activation.dtype, weight.dtype, compute_dtype)
+    act_is_dynamic = activation.is_dynamic if hasattr(activation, 'is_dynamic') else False
+    return (activation.dtype, weight.dtype, act_is_dynamic)
 
 def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]
     if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
+        if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
+        elif activation.dtype in static_dtypes:
+            return QuantType.STATIC
         else:
             return QuantType.WEIGHT_ONLY
 
     if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
+        if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
@@ -519,8 +545,96 @@ def get_fqn_to_example_inputs(
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
 
+def _get_lstm_with_individually_observed_parts(
+    float_lstm: torch.nn.LSTM,
+    # Use Callable instead of _PartialWrapper here to avoid circular dependencies
+    linear_output_obs_ctr: Optional[Callable] = None,
+    sigmoid_obs_ctr: Optional[Callable] = None,
+    tanh_obs_ctr: Optional[Callable] = None,
+    cell_state_obs_ctr: Optional[Callable] = None,
+    hidden_state_obs_ctr: Optional[Callable] = None,
+) -> torch.ao.nn.quantizable.LSTM:
+    """
+    Return an observed `torch.ao.nn.quantizable.LSTM` created from a `torch.nn.LSTM`
+    with specific observers or fake quantizes assigned to the inner ops or submodules.
+
+    In both eager and FX graph mode quantization, `torch.ao.nn.quantizable.LSTM` is
+    used as an observed custom module, which is responsible for inserting its own
+    observers. By default, all inner ops inherit the parent custom module's QConfig.
+    Users who wish to override this behavior may extend `torch.ao.nn.quantizable.LSTM`
+    and use this helper function to customize the observer insertion logic.
+
+    Args:
+        `float_lstm`: The float LSTM module
+        `linear_output_obs_ctr`: observer or fake quantize for linear outputs Wx + b,
+            where W is the weight matrix, b is the bias, and x is either the inputs
+            or the hidden state from the previous layer (if any)
+        `sigmoid_obs_ctr`: observer or fake quantize for sigmoid activations
+        `tanh_obs_ctr`: observer or fake quantize for tanh activations
+        `cell_state_obs_ctr`: observer or fake quantize for the cell state
+        `hidden_state_obs_ctr`: observer or fake quantize for the hidden state and
+            the output
+
+    Return:
+        A `torch.ao.nn.quantizable.LSTM` with the specified observers or fake quantizes
+        attached to the inner submodules.
+    """
+    def make_qconfig(obs_ctr: Callable) -> torch.ao.quantization.QConfig:
+        """
+        Make a QConfig with fixed qparams observers or fake quantizes.
+        """
+        if isinstance(obs_ctr(), torch.ao.quantization.FakeQuantizeBase):
+            weight = torch.ao.quantization.default_weight_fake_quant
+        else:
+            weight = torch.ao.quantization.default_weight_observer
+        return torch.ao.quantization.QConfig(activation=obs_ctr, weight=weight)
+
+    observed_lstm = torch.ao.nn.quantizable.LSTM(
+        float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
+        float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
+
+    # Assign QConfigs with fixed qparams to all inner submodules
+    # Module hierarchy: LSTM > _LSTMLayer > _LSTMSingleLayer (forward or backward) > LSTMCell
+    for layer in observed_lstm.layers:
+        inner_layers = [layer.layer_fw]
+        if float_lstm.bidirectional:
+            inner_layers.append(layer.layer_bw)
+        for inner_layer in inner_layers:
+            cell = inner_layer.cell
+            if linear_output_obs_ctr is not None:
+                qconfig = make_qconfig(linear_output_obs_ctr)
+                cell.igates.qconfig = qconfig
+                cell.hgates.qconfig = qconfig
+            if sigmoid_obs_ctr is not None:
+                qconfig = make_qconfig(sigmoid_obs_ctr)
+                cell.input_gate.qconfig = qconfig
+                cell.forget_gate.qconfig = qconfig
+                cell.output_gate.qconfig = qconfig
+            if tanh_obs_ctr is not None:
+                cell.cell_gate.qconfig = make_qconfig(tanh_obs_ctr)
+            if cell_state_obs_ctr is not None:
+                cell.fgate_cx_igate_cgate.qconfig = make_qconfig(cell_state_obs_ctr)
+                obs = cell_state_obs_ctr()
+                if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
+                    cell.initial_cell_state_qparams = (obs.scale, obs.zero_point)
+                cell.cell_state_dtype = obs.dtype
+            if hidden_state_obs_ctr is not None:
+                cell.ogate_cy.qconfig = make_qconfig(hidden_state_obs_ctr)
+                obs = hidden_state_obs_ctr()
+                if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
+                    cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
+                cell.hidden_state_dtype = obs.dtype
+
+    # Insert the observers based on the previously attached QConfigs
+    # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
+    torch.ao.quantization.add_observer_(
+        observed_lstm,
+        non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
+    )
+    return observed_lstm
 
 __all__ = [
+    "NodePattern",
     "Pattern",
     "MatchAllNode",
     "check_node",
@@ -545,4 +659,5 @@ __all__ = [
     "calculate_qmin_qmax",
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
+    "to_underlying_dtype",
 ]

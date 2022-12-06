@@ -21,7 +21,7 @@ from .backend_config import BackendConfig, DTypeConfig
 
 # weighted op int8 dtype config
 # this is config for ops that has quantized weights, like linear, conv
-weighted_op_int8_dtype_config = DTypeConfig(
+weighted_op_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.quint8,
     weight_dtype=torch.qint8,
@@ -91,20 +91,20 @@ def get_test_only_legacy_native_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack) with various additional fp16 ops.
     """
-    conv_dtype_configs = [weighted_op_int8_dtype_config]
+    conv_dtype_configs = [weighted_op_quint8_dtype_config]
     linear_dtype_configs = [
-        weighted_op_int8_dtype_config,
+        weighted_op_quint8_dtype_config,
         default_dynamic_int8_dtype_config,
         default_dynamic_float16_dtype_config,
         default_op_fp16_dtype_config,
     ]
     binary_op_dtype_configs = [
-        weighted_op_int8_dtype_config,
+        default_op_quint8_dtype_config,
         default_op_fp16_dtype_config,
     ]
     default_op_dtype_configs = [default_op_quint8_dtype_config]
     fixed_qparams_op_dtype_configs = [
-        weighted_op_int8_dtype_config,
+        default_op_quint8_dtype_config,
         default_op_fp16_dtype_config,
     ]
     share_qparams_op_dtype_configs = [
@@ -138,15 +138,15 @@ def get_native_backend_config() -> BackendConfig:
     Return the `BackendConfig` for PyTorch Native backend (fbgemm/qnnpack).
     """
     # TODO: express this BackendConfig as a union of the FBGEMM and QNNPACK BackendConfigs
-    conv_dtype_configs = [weighted_op_int8_dtype_config]
+    conv_dtype_configs = [weighted_op_quint8_dtype_config]
     linear_dtype_configs = [
-        weighted_op_int8_dtype_config,
+        weighted_op_quint8_dtype_config,
         default_dynamic_int8_dtype_config,
         default_dynamic_float16_dtype_config,
     ]
-    binary_op_dtype_configs = [weighted_op_int8_dtype_config]
+    binary_op_dtype_configs = [default_op_quint8_dtype_config]
     default_op_dtype_configs = [default_op_quint8_dtype_config]
-    fixed_qparams_op_dtype_configs = [weighted_op_int8_dtype_config]
+    fixed_qparams_op_dtype_configs = [default_op_quint8_dtype_config]
     share_qparams_op_dtype_configs = [default_op_quint8_dtype_config]
     rnn_op_dtype_configs = [
         default_dynamic_int8_dtype_config,
@@ -185,7 +185,14 @@ def get_test_only_legacy_native_backend_config_dict():
 
 __all__ = [
     "get_test_only_legacy_native_backend_config",
-    "get_test_only_legacy_native_backend_config_dict",
+    "default_op_quint8_dtype_config",
+    "default_op_fp16_dtype_config",
+    "default_dynamic_int8_dtype_config",
+    "default_dynamic_float16_dtype_config",
+    "input_output_only_quint8_dtype_config",
+    "weight_only_quint8_dtype_config",
+    "weight_only_quint4x2_dtype_config",
     "get_native_backend_config",
     "get_native_backend_config_dict",
+    "get_test_only_legacy_native_backend_config_dict",
 ]

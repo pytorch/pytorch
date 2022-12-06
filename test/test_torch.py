@@ -30,14 +30,14 @@ from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -113,6 +113,8 @@ class TestVitalSignsCuda(TestCase):
         with torch_vital_set('ON'):
             self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
+
+is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
@@ -356,7 +358,7 @@ class TestTorchDeviceType(TestCase):
             s0.tolist()
 
         with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
@@ -1234,6 +1236,48 @@ else:
             lambda: res.backward(grad, retain_graph=True),
             'fractional_max_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool1d(3, 1)
+        input = torch.randn(1, 1, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool2d(3, 1)
+        input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool3d(3, 1)
+        input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling3d_forward_out')
 
     @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
@@ -2270,8 +2314,9 @@ else:
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
         res2 = torch.tensor([]).to(device)
-        torch.cumprod(x, 1, out=res2)
-        self.assertEqual(res1, res2)
+        if not TEST_WITH_TORCHINDUCTOR:
+            torch.cumprod(x, 1, out=res2)
+            self.assertEqual(res1, res2)
         x.cumprod_(1)
         self.assertEqual(res1, x)
 
@@ -2917,10 +2962,9 @@ else:
                     dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
                     src_size = size[:dim] + (num_src,) + size[dim + 1:]
                     src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
-                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if index_noncontig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        idx = torch.testing.make_non_contiguous(idx)
+                    idx = torch.testing.make_tensor(
+                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
+                    )
                     expected = dest.clone()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
@@ -3872,7 +3916,7 @@ else:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
     @onlyCUDA
-    @largeTensorTest('10GB', device='cpu')
+    @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -3882,7 +3926,8 @@ else:
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
         actual_gpu = torch.pdist(x.to(device), p=2)         # 5 GB on GPU
-        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU
+        # Workaround for large memory overhead of self.assertTrue (see #84944)
+        self.assertTrue(torch.allclose(expected_cpu, actual_gpu.cpu()))
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
@@ -3987,6 +4032,7 @@ else:
             doubles, sz, lambda input, out: out.copy_(input))
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4003,6 +4049,7 @@ else:
             ind.index_add_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_copy_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4019,6 +4066,7 @@ else:
             ind.index_copy_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
@@ -4043,6 +4091,7 @@ else:
             x[:-1] >>= x[1:]
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
@@ -4055,10 +4104,9 @@ else:
         p = torch.rand(6, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.bernoulli_(p=p)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.bernoulli(torch.rand_like(x), out=x)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
@@ -4080,6 +4128,7 @@ else:
             ind.put_(ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
@@ -4101,6 +4150,7 @@ else:
             ind.index_put_((ind.clone(),), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
@@ -4117,6 +4167,7 @@ else:
             mask[1:].masked_fill_(mask[:-1], False)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
@@ -4128,6 +4179,7 @@ else:
             x.masked_scatter_(mask, src)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4600,6 +4652,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -4987,47 +5040,6 @@ else:
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid(self, device):
-        def test(probs):
-            with self.assertRaisesRegex(RuntimeError,
-                                        'probability tensor contains either `inf`, `nan` or element < 0'):
-                out = torch.multinomial(probs.to(device), 2)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        test(torch.tensor([1., -1., 1.]))
-        test(torch.tensor([1., inf, 1.]))
-        test(torch.tensor([1., -inf, 1.]))
-        test(torch.tensor([1., 1., nan]))
-
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid_distribution(self, device):
-        def test(probs, replacement):
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
-                out = torch.multinomial(probs, 2, replacement)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        x = torch.zeros(3, device=device)
-        y = torch.zeros(3, 3, device=device)
-        z = torch.zeros(3, 3, device=device)
-        z[1, :] = 1
-
-        test(x, False)
-        test(y, False)
-        test(z, False)
-
-        # Verify only for CPU as replacement=True
-        # throws device side assert triggered.
-        if self.device_type == 'cpu':
-            test(x, True)
-            test(y, True)
-            test(z, True)
-
     # FIXME: move to test distributions
     def _test_multinomial_empty(self, device, replacement, num_samples):
         probs = torch.ones(0, 3, device=device)
@@ -5110,6 +5122,14 @@ else:
 
                 check_equal(condition, x, y)
                 check_equal(condition, y, x)
+                if self.device_type == "cuda":
+                    check_equal(condition, torch.tensor(x), y)
+                    check_equal(condition, y, torch.tensor(x))
+                    if not isinstance(y, torch.Tensor):
+                        check_equal(condition, torch.tensor(y), torch.tensor(x))
+                    if isinstance(y, torch.Tensor) and y.ndim > 0:
+                        check_equal(torch.tensor(True), x, y)
+                        check_equal(torch.tensor(True), y, x)
 
 
     def test_hook_remove(self, device):
@@ -5572,10 +5592,10 @@ class TestTorch(TestCase):
                             dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
                         src = torch.randn(num_copy, *other_sizes, device=device)
                         if not src_contig:
-                            src = torch.testing.make_non_contiguous(src)
+                            src = noncontiguous_like(src)
                         idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                         if not index_contig:
-                            idx = torch.testing.make_non_contiguous(idx)
+                            idx = noncontiguous_like(idx)
                         # index_add_ without alpha argument
                         dest2 = dest.clone()
                         dest.index_add_(0, idx, src)
@@ -5684,10 +5704,10 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
-        nt1 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
-        nt2 = torch.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
-        nt3 = torch.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
-        nt4 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt1 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt2 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
+        nt3 = torch.nested.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
+        nt4 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
 
         self.assertFalse(nt1.is_same_size(nt2))
         self.assertFalse(nt1.is_same_size(nt3))
@@ -6152,7 +6172,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError,
                           lambda: torch.isclose(x, x, torch.tensor(1.5), torch.tensor(1., requires_grad=True)).all())
 
-    @skipIfTorchDynamo("requires https://github.com/pytorch/pytorch/pull/83567")
     def test_parsing_intlist(self):
         #  parse with integer variables
         self.assertEqual(torch.Size([3, 4]), torch.ones((torch.tensor(3), torch.tensor(4))).shape)
@@ -6413,6 +6432,127 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
+
+    # Test that internal versions of functions related to TypedStorage do not
+    # produce a deprecation warning
+    def test_typed_storage_internal_no_warning(self):
+        s0 = torch.FloatStorage(10)
+        s0_untyped = s0.untyped()
+        t0 = torch.randn(10)
+
+        funcs = [
+            lambda: torch.FloatStorage(_internal=True),
+            lambda: torch.TypedStorage(
+                dtype=torch.float,
+                device='cpu',
+                _internal=True),
+            lambda: torch.TypedStorage(
+                wrap_storage=s0_untyped,
+                dtype=s0.dtype,
+                _internal=True),
+            lambda: torch.FloatStorage._dtype,
+            lambda: s0._resize_(20),
+            lambda: s0._size(),
+            lambda: s0._untyped_storage,
+            lambda: s0._is_shared(),
+            lambda: s0._share_memory_(),
+            lambda: s0._pickle_storage_type(),
+            lambda: s0._setitem(slice(0, s0._size()), 1),
+            lambda: s0._element_size(),
+            lambda: s0._deepcopy({}),
+            lambda: s0._data_ptr(),
+            lambda: s0._nbytes(),
+            lambda: t0._typed_storage(),
+        ]
+
+        if torch.cuda.is_available():
+            s1 = torch.cuda.FloatStorage(10)
+            s1_untyped = s1.untyped()
+            t1 = torch.randn(10, device='cuda')
+
+            funcs += [
+                lambda: torch.cuda.FloatStorage(_internal=True),
+                lambda: torch.TypedStorage(
+                    dtype=torch.float,
+                    device='cuda',
+                    _internal=True),
+                lambda: torch.TypedStorage(
+                    wrap_storage=s1_untyped,
+                    dtype=s1.dtype,
+                    _internal=True),
+                lambda: torch.cuda.FloatStorage._dtype,
+                lambda: s1._resize_(20),
+                lambda: s1._size(),
+                lambda: s1._untyped_storage,
+                lambda: s1._is_shared(),
+                lambda: s1._share_memory_(),
+                lambda: s1._pickle_storage_type(),
+                lambda: s1._setitem(slice(0, s1._size()), 1),
+                lambda: s1._element_size(),
+                lambda: s1._deepcopy({}),
+                lambda: s1._data_ptr(),
+                lambda: s1._nbytes(),
+                lambda: t1._typed_storage(),
+            ]
+
+        # Check that each of the TypedStorage internal function calls do not
+        # produce a deprecation warning
+        for f in funcs:
+            with warnings.catch_warnings():
+                warnings.filterwarnings('error', "TypedStorage is deprecated")
+                f()
+
+    # Test that public functions related to TypedStorage produce a deprecation
+    # warning
+    def test_typed_storage_deprecation_warning(self):
+        s0 = torch.FloatStorage(10)
+        funcs = [
+            lambda: torch.FloatStorage(),
+            lambda: torch.FloatStorage.dtype,
+            lambda: s0.fill_(0),
+            lambda: s0.is_cuda,
+            lambda: s0.untyped(),
+            lambda: len(s0),
+            lambda: s0[0],
+        ]
+
+        if torch.cuda.is_available():
+            s1 = torch.cuda.FloatStorage(10)
+            funcs += [
+                lambda: torch.cuda.FloatStorage(),
+                lambda: torch.cuda.FloatStorage.dtype,
+                lambda: s1.fill_(0),
+                lambda: s1.is_cuda,
+                lambda: s1.untyped(),
+                lambda: len(s1),
+                lambda: s1[0],
+            ]
+
+        # Check that each of the TypedStorage function calls produce a warning
+        # if warnings are reset between each
+        for f in funcs:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                f()
+                self.assertEqual(len(w), 1)
+                warning = w[0].message
+                self.assertTrue(warning, DeprecationWarning)
+                self.assertTrue(re.search(
+                    '^TypedStorage is deprecated',
+                    str(warning)))
+
+        # Check that only one warning is raised from calling multiple
+        # TypedStorage functions if warnings are not reset between each
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            for f in funcs:
+                f()
+            self.assertEqual(len(w), 1)
+            warning = w[0].message
+            self.assertTrue(warning, DeprecationWarning)
+            self.assertTrue(re.search(
+                '^TypedStorage is deprecated',
+                str(warning)))
 
     def test_from_file(self):
         def assert_with_filename(filename):
@@ -6779,6 +6919,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -6845,7 +6986,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIsInstance(x[:-1], torch.Size)
         self.assertIsInstance(x + x, torch.Size)
 
-    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_Size_scalar(self):
         three = torch.tensor(3)
         two = torch.tensor(2)
@@ -7523,6 +7663,51 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
+
+    def test_copy_float16(self):
+        # Check that fbgemm code no longer reads memory out of bounds, see
+        # copy_impl and fbgemm::Float16ToFloat_ref.
+        # https://github.com/pytorch/pytorch/issues/88543
+
+        # Types to test different code paths in copy_impl.
+        dtypes = (
+            # out_dtype, src_dtype
+            (torch.float32, torch.float16),  # fbgemm
+            (torch.float16, torch.float32),  # fbgemm
+            (torch.float32, torch.float32),  # TensorIterator
+        )
+
+        cases = (
+            # out_shape, src_shape, is_ok
+            # These cases used to crash with fbgemm, make sure these also raise
+            # exceptions with TensorIterator.
+            ((1, 2, 3), (0, 2, 3), False),  # same strides, not allowed by TI
+            ((1, 5, 6), (4, 5, 6), False),  # same strides, not allowed by TI
+            (1, (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (1, 2, 3), False),  # different strides
+            ((4, 5, 6), (6, 5, 4), False),  # same numel
+
+            # These cases should pass with fbgemm and TensorIterator.
+            ((4, 5, 6), (1, 5, 6), True),  # same strides
+            ((4, 5, 6), (4, 5, 6), True),  # same strides
+            ((0, 2, 3), 1, True),  # different strides, allowed by TI
+            ((4, 5, 6), (4, 5, 1), True),  # different strides, allowed by TI
+        )
+
+        for (out_shape, src_shape, is_ok), (out_dtype, src_dtype) in itertools.product(cases, dtypes):
+            out = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cpu'))
+            src = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cpu'))
+            if is_ok:
+                if torch.cuda.is_available():
+                    out_cuda = out.cuda()
+                    src_cuda = src.cuda()
+                res = out.copy_(src)
+                if torch.cuda.is_available():
+                    res_cuda = out_cuda.copy_(src_cuda)
+                    self.assertEqual(res, res_cuda)
+            else:
+                self.assertRaises(RuntimeError, lambda: out.copy_(src))
 
     # FIXME: Port to a more appropriate test suite
     def _test_to_with_layout(self, layout):
@@ -8292,6 +8477,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         y2 = y1.imag
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
+
+    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
+    def test_no_cuda_monkeypatch(self):
+        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
+        # is not available.
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+            torch.cuda.Stream()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+            torch.cuda.Event()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+            torch.cuda.graphs.CUDAGraph()
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

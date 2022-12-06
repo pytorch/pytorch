@@ -7,6 +7,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
@@ -313,33 +314,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::index_put, aten_index_put, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor")) ||
+      n->matches(torch::schema(
           "aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
-      const auto& indices = p_node->Input(1).toOptionalTensorList();
+      const auto& indices =
+          at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
       const auto& values = p_node->Input(2).toTensor();
       const auto accumulate = p_node->Input(3).toBool();
       p_node->Output(0) =
           at::native::index_put(self, indices, values, accumulate);
-    };
-  }
-
-  if (n->matches(torch::schema(
-          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto indices = p_node->Input(1).toTensorList();
-
-      c10::List<c10::optional<at::Tensor>> opt_list_indices;
-      opt_list_indices.reserve(indices.size());
-      for (const auto& ten : indices) {
-        opt_list_indices.push_back(ten);
-      }
-
-      const auto& values = p_node->Input(2).toTensor();
-      const auto accumulate = p_node->Input(3).toBool();
-      p_node->Output(0) =
-          at::native::index_put(self, opt_list_indices, values, accumulate);
     };
   }
 
@@ -885,9 +870,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node*
           "aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
     return [](ProcessedNode* pnode) {
       const auto& a = pnode->Input(0).toTensor();
-      const auto b = pnode->Input(1).toInt();
+      const auto b = pnode->Input(1).toSymInt();
       const auto c = pnode->Input(2).toInt();
-      pnode->Output(0) = at::native::tensor_split(a, b, c);
+      pnode->Output(0) = at::native::tensor_split_sections_symint(a, b, c);
     };
   }
 
@@ -991,7 +976,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
-            if (!output.isTuple()) {
+            // If we are returning a tuple, we are either returning
+            // multiple unpacked values or all of the values wrapped
+            // in a single tuple. The second condition handles the
+            // the latter case.
+            if (!output.isTuple() || p_node->num_outputs() == 1) {
               p_node->Output(0) = std::move(output);
               return;
             }

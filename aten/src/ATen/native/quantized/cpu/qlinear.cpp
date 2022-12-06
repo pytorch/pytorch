@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -8,8 +10,19 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-#include <torch/custom_class.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>         // for _empty_affine_q...
+#include <ATen/ops/_empty_affine_quantized_native.h>  // for empty_affine_qu...
+#include <ATen/ops/empty.h>                           // for empty
+#include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
+#include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -608,11 +621,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_relu(
 #endif // USE_PYTORCH_QNNPACK
 
 #if AT_MKLDNN_ENABLED()
-template <bool ReluFused>
+template <PostOps post_op>
 at::Tensor PackedLinearWeightsOnednn::apply_impl(
     at::Tensor input,
     double output_scale,
-    int64_t output_zero_point) {
+    int64_t output_zero_point,
+    torch::List<at::Scalar> post_op_args) {
   const int64_t dim = input.dim();
   TORCH_CHECK(
       dim != 0,
@@ -626,13 +640,21 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto input_dims = {M, K};
   auto input_data_type = dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
-  ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (post_op == Relu) {
+    op_attr = ideep::attr_t::fuse_relu();
+  } else if (post_op == LeakyRelu) {
+    op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
+  }
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
   auto dst_dims = {M, N};
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input.q_scale());
+  double input_scale = input.q_scale();
+  int64_t input_zero_point = input.q_zero_point();
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
   const ideep::scale_t& weights_scales = w.get_scale();
-  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale); // Scales of ONEDNN and PyTorch are reciprocal
-  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input.q_zero_point());
+  // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale);
+  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input_zero_point);
   const ideep::zero_point_t& dst_zero_point = ideep::zero_point_t(1, output_zero_point);
   // Compute: Use ideep::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
@@ -644,20 +666,39 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8,
+                   {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
-  if (bias_.has_value()) {
+  bool with_bias = bias_.has_value();
+  if (with_bias) {
     // Bias might be modified outside (e.g. by quantization bias correction).
     // If so, update the prepacked bias as well.
     if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
-    const auto& b = bias_.value();
-    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
-                                      src_zero_point, dst_zero_point, op_attr);
+  }
+  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  // Primitive cache is initialized when called for the first time
+  // and won't be updated afterwards.
+  int num_threads = at::get_num_threads();
+  PrimitiveCacheKey cache_key = std::make_tuple(
+      input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads);
+  c10::call_once(*cache_initialized_flag, [&](){
+      LinearParams params;
+      ideep::matmul_forward::prepare</*is_dynamic=*/false>(
+          params, x, w, b, y, 1.0f, 1.0f,
+          src_scales, weights_scales, dst_scales,
+          src_zero_point, dst_zero_point, op_attr);
+      get_cache() = LinearPrimitiveCache(cache_key, params);
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+  });
+  if (get_cache().hit(cache_key)) {
+    LinearParams& params = get_cache().get_param();
+    ideep::matmul_forward::compute(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute_v2(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
-                                      src_zero_point, dst_zero_point, op_attr);
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+                                      dst_scales, src_zero_point, dst_zero_point, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
@@ -670,14 +711,27 @@ at::Tensor PackedLinearWeightsOnednn::apply(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(std::move(input), output_scale, output_zero_point);
+  return apply_impl<NoPostOp>(
+      std::move(input), output_scale, output_zero_point);
 }
 
 at::Tensor PackedLinearWeightsOnednn::apply_relu(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(std::move(input), output_scale, output_zero_point);
+  return apply_impl<Relu>(
+      std::move(input), output_scale, output_zero_point);
+}
+
+at::Tensor PackedLinearWeightsOnednn:: apply_leaky_relu(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point,
+    double negative_slope) {
+  torch::List<at::Scalar> post_op_args =
+      {at::Scalar(negative_slope)};
+  return apply_impl<LeakyRelu>(
+      std::move(input), output_scale, output_zero_point, post_op_args);
 }
 
 #endif // #if AT_MKLDNN_ENABLED()
@@ -704,9 +758,32 @@ class QLinearInt8 final {
   }
 };
 
+class QLinearLeakyReluInt8 final {
+ public:
+  static at::Tensor run(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point,
+      double negative_slope) {
+    auto& ctx = at::globalContext();
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
+          std::move(input), output_scale, output_zero_point, negative_slope);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_leaky_relu ",
+        toString(ctx.qEngine()));
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {

@@ -130,6 +130,9 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -409,6 +412,30 @@ class TestPoolingNNDeviceType(NNTestCase):
         inp = torch.rand([16, 50, 32, 32], device=device)
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 2], device=device)
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[1, 1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 50, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
 
     @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
@@ -708,17 +735,11 @@ torch.cuda.synchronize()
             self.assertEqual(model(x), expected)
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check([[]], (1, None, 0, 1, False, False), [[]])
-        check([[[]]], (1, None, 0, 1, False, False), [[[]]])
-        check([[[]]], (2, 1, 1, 2, False, True), [[[]]])
         check([[1]], (1, None, 0, 1, False, False), [[1]])
         check([[1]], (2, None, 1, 2, False, False), [[float('-inf')]])
         check([[1], [1]], (2, None, 1, 2, False, False), [[float('-inf')], [float('-inf')]])
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
-
-        empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
-        check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -1086,24 +1107,24 @@ torch.cuda.synchronize()
         self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, device="cpu", dtype=torch.float):
-        def expected_indices(dim):
+        def expected_indices(dim, dtype):
             if dim == 1:
-                return torch.tensor([1, 3], dtype=torch.double).repeat(2, 2, 1)
+                return torch.tensor([1, 3], dtype=dtype).repeat(2, 2, 1)
             if dim == 2:
-                return torch.tensor([[5, 7], [13, 15]], dtype=torch.double).repeat(2, 2, 1, 1)
+                return torch.tensor([[5, 7], [13, 15]], dtype=dtype).repeat(2, 2, 1, 1)
 
-        def expected_grad(dim):
+        def expected_grad(dim, dtype):
             if dim == 1:
-                return torch.tensor([0, 1, 0, 1], dtype=torch.double).repeat(2, 2, 1)
-            grad = expected_grad(dim - 1)
-            zero = torch.zeros(grad.size())
+                return torch.tensor([0, 1, 0, 1], dtype=dtype).repeat(2, 2, 1)
+            grad = expected_grad(dim - 1, dtype=dtype)
+            zero = torch.zeros(grad.size(), dtype=dtype)
             return torch.stack((zero, grad, zero, grad), 2)
 
-        def expected_output(dim):
+        def expected_output(dim, dtype):
             if dim == 1:
-                return torch.arange(2, 17, 2).view(2, 2, 2)
+                return torch.arange(2, 17, 2, dtype=dtype).view(2, 2, 2)
             if dim == 2:
-                col = torch.arange(6, 63, 8)
+                col = torch.arange(6, 63, 8, dtype=dtype)
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
@@ -1119,22 +1140,19 @@ torch.cuda.synchronize()
         # Check forward
         output, indices = module(input_var)
         if num_dim != 3:
-            expected_indices = expected_indices(num_dim)
-            expected_output = expected_output(num_dim)
+            expected_indices = expected_indices(num_dim, dtype=indices.data.dtype)
+            expected_output = expected_output(num_dim, dtype=output.data.dtype)
             self.assertEqual(indices.dim(), input.dim())
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(indices.data.squeeze(), expected_indices)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(output.data.squeeze(), expected_output)
+            self.assertEqual(indices.data.squeeze(), expected_indices)
+            self.assertEqual(output.data.squeeze(), expected_output)
         self.assertTrue(output.requires_grad)
         self.assertFalse(indices.requires_grad)
 
         # Make sure backward works
         grad_output = torch.ones(output.size(), device=device, dtype=dtype)
         output.backward(grad_output, retain_graph=True)
-        expected_grad = expected_grad(num_dim)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(input_var.grad.data, expected_grad.view_as(input))
+        expected_grad = expected_grad(num_dim, dtype=input_var.grad.data.dtype)
+        self.assertEqual(input_var.grad.data, expected_grad.view_as(input))
 
         # Make sure backward after changing indices will result in an error
         indices.add_(1)

@@ -27,6 +27,13 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
+  void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_op_registration_trampoline);
+  }
+
   void python_dispatcher(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
@@ -34,8 +41,15 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(python_dispatcher);
   }
 
-  bool is_contiguous(const TensorImpl* self) const override {
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
     PANIC(is_contiguous);
+  }
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+      const override {
+    PANIC(is_strides_like);
+  }
+  bool is_non_overlapping_and_dense(const TensorImpl* self) const override {
+    PANIC(is_non_overlapping_and_dense);
   }
   c10::Device device(const TensorImpl* self) const override {
     PANIC(device);

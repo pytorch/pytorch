@@ -14,7 +14,7 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
     'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig',
-    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
+    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
     'linalg_svd', '_linalg_svd', 'linalg_slogdet', '_linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
@@ -79,7 +79,6 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['symeig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
-            op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),

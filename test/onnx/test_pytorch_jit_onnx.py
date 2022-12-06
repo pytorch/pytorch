@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
+import pytorch_test_common
 
 import torch
 from pytorch_test_common import skipIfNoCuda
@@ -171,7 +172,7 @@ def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
         str(name),
-        (common_utils.TestCase,),
+        (pytorch_test_common.ExportTestCase,),
         dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
     )
 

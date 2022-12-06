@@ -1,9 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import torch
-from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
 from enum import Enum
 
@@ -12,6 +11,7 @@ __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
+    "DTypeWithConstraints",
     "ObservationType",
 ]
 
@@ -41,8 +41,7 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
-OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
-OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
+
 
 # TODO: maybe rename this to something that's not related to observer
 # e.g. QParamsType
@@ -63,32 +62,128 @@ class ObservationType(Enum):
     example: torch.cat, maxpool
     """
 
+
+@dataclass
+class DTypeWithConstraints:
+    """
+    Config for specifying additional constraints for a given dtype, such as quantization
+    value ranges, scale value ranges, and fixed quantization params, to be used in
+    :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
+    """
+    dtype: Optional[torch.dtype] = None
+    quant_min_lower_bound: Union[int, float, None] = None
+    quant_max_upper_bound: Union[int, float, None] = None
+    scale_min_lower_bound: Union[int, float, None] = None
+    scale_max_upper_bound: Union[int, float, None] = None
+    scale_exact_match: Optional[float] = None
+    zero_point_exact_match: Optional[int] = None
+
+
 @dataclass
 class DTypeConfig:
     """
     Config for the set of supported input/output activation, weight, and bias data types for the
     patterns defined in :class:`~torch.ao.quantization.backend_config.BackendConfig`.
+
+    Example usage::
+
+        >>> dtype_config1 = DTypeConfig(
+        ...     input_dtype=torch.quint8,
+        ...     output_dtype=torch.quint8,
+        ...     weight_dtype=torch.qint8,
+        ...     bias_dtype=torch.float)
+
+        >>> dtype_config2 = DTypeConfig(
+        ...     input_dtype=DTypeWithConstraints(
+        ...         dtype=torch.quint8,
+        ...         quant_min_lower_bound=0,
+        ...         quant_max_upper_bound=255,
+        ...     ),
+        ...     output_dtype=DTypeWithConstraints(
+        ...         dtype=torch.quint8,
+        ...         quant_min_lower_bound=0,
+        ...         quant_max_upper_bound=255,
+        ...     ),
+        ...     weight_dtype=DTypeWithConstraints(
+        ...         dtype=torch.qint8,
+        ...         quant_min_lower_bound=-128,
+        ...         quant_max_upper_bound=127,
+        ...     ),
+        ...     bias_dtype=torch.float)
+
+        >>> dtype_config1.input_dtype
+        torch.quint8
+
+        >>> dtype_config2.input_dtype
+        torch.quint8
+
+        >>> dtype_config2.input_dtype_with_constraints
+        DTypeWithConstraints(dtype=torch.quint8, quant_min_lower_bound=0, quant_max_upper_bound=255, \
+scale_min_lower_bound=None, scale_max_upper_bound=None)
     """
-    input_dtype: Optional[torch.dtype] = None
-    output_dtype: Optional[torch.dtype] = None
-    weight_dtype: Optional[torch.dtype] = None
-    bias_dtype: Optional[torch.dtype] = None
-    is_dynamic: Optional[bool] = None
+    input_dtype_with_constraints: DTypeWithConstraints
+    output_dtype_with_constraints: DTypeWithConstraints
+    weight_dtype_with_constraints: DTypeWithConstraints
+    bias_dtype: Optional[torch.dtype]
+    is_dynamic: Optional[bool]
+
+    def __init__(
+        self,
+        input_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
+        output_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
+        weight_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
+        bias_dtype: Optional[torch.dtype] = None,
+        is_dynamic: Optional[bool] = None,
+    ):
+        if isinstance(input_dtype, DTypeWithConstraints):
+            self.input_dtype_with_constraints = input_dtype
+        else:
+            self.input_dtype_with_constraints = DTypeWithConstraints(dtype=input_dtype)
+
+        if isinstance(output_dtype, DTypeWithConstraints):
+            self.output_dtype_with_constraints = output_dtype
+        else:
+            self.output_dtype_with_constraints = DTypeWithConstraints(dtype=output_dtype)
+
+        if isinstance(weight_dtype, DTypeWithConstraints):
+            self.weight_dtype_with_constraints = weight_dtype
+        else:
+            self.weight_dtype_with_constraints = DTypeWithConstraints(dtype=weight_dtype)
+
+        self.bias_dtype = bias_dtype
+        self.is_dynamic = is_dynamic
+
+    @property
+    def input_dtype(self) -> Optional[torch.dtype]:
+        return self.input_dtype_with_constraints.dtype
+
+    @property
+    def output_dtype(self) -> Optional[torch.dtype]:
+        return self.output_dtype_with_constraints.dtype
+
+    @property
+    def weight_dtype(self) -> Optional[torch.dtype]:
+        return self.weight_dtype_with_constraints.dtype
 
     @classmethod
     def from_dict(cls, dtype_config_dict: Dict[str, Any]) -> DTypeConfig:
         """
         Create a ``DTypeConfig`` from a dictionary with the following items (all optional):
-
-            "input_dtype": torch.dtype
-            "output_dtype": torch.dtype
-            "weight_dtype": torch.dtype
+            "input_dtype": torch.dtype or ``DTypeWithConstraints``
+            "output_dtype": torch.dtype or ``DTypeWithConstraints``
+            "weight_dtype": torch.dtype or ``DTypeWithConstraints``
             "bias_type": torch.dtype
             "is_dynamic": bool
         """
         input_dtype = dtype_config_dict.get(INPUT_DTYPE_DICT_KEY, None)
+        if input_dtype is not None and not isinstance(input_dtype, (torch.dtype, DTypeWithConstraints)):
+            raise ValueError("Expected input_dtype to be a torch.dtype or DTypeWithConstraints")
         output_dtype = dtype_config_dict.get(OUTPUT_DTYPE_DICT_KEY, None)
+        if output_dtype is not None and not isinstance(output_dtype, (torch.dtype, DTypeWithConstraints)):
+            raise ValueError("Expected output_dtype to be a torch.dtype or DTypeWithConstraints")
         weight_dtype = dtype_config_dict.get(WEIGHT_DTYPE_DICT_KEY, None)
+        if weight_dtype is not None and not isinstance(weight_dtype, (torch.dtype, DTypeWithConstraints)):
+            raise ValueError("Expected weight_dtype to be a torch.dtype or DTypeWithConstraints")
         bias_dtype = dtype_config_dict.get(BIAS_DTYPE_DICT_KEY, None)
         is_dynamic = dtype_config_dict.get(IS_DYNAMIC_DICT_KEY, None)
         return cls(input_dtype, output_dtype, weight_dtype, bias_dtype, is_dynamic)
@@ -100,11 +195,11 @@ class DTypeConfig:
         """
         dtype_config_dict: Dict[str, Any] = {}
         if self.input_dtype is not None:
-            dtype_config_dict[INPUT_DTYPE_DICT_KEY] = self.input_dtype
+            dtype_config_dict[INPUT_DTYPE_DICT_KEY] = self.input_dtype_with_constraints
         if self.output_dtype is not None:
-            dtype_config_dict[OUTPUT_DTYPE_DICT_KEY] = self.output_dtype
+            dtype_config_dict[OUTPUT_DTYPE_DICT_KEY] = self.output_dtype_with_constraints
         if self.weight_dtype is not None:
-            dtype_config_dict[WEIGHT_DTYPE_DICT_KEY] = self.weight_dtype
+            dtype_config_dict[WEIGHT_DTYPE_DICT_KEY] = self.weight_dtype_with_constraints
         if self.bias_dtype is not None:
             dtype_config_dict[BIAS_DTYPE_DICT_KEY] = self.bias_dtype
         if self.is_dynamic is not None:
@@ -133,31 +228,49 @@ class BackendConfig:
     Example usage::
 
         import torch
-        from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-        from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+        from torch.ao.quantization.backend_config import (
+            BackendConfig,
+            BackendPatternConfig,
+            DTypeConfig,
+            ObservationType,
+        )
 
         weighted_int8_dtype_config = DTypeConfig(
             input_dtype=torch.quint8,
             output_dtype=torch.quint8,
             weight_dtype=torch.qint8,
-            bias_type=torch.float)
+            bias_dtype=torch.float)
 
+        def fuse_conv2d_relu(is_qat, relu, conv):
+            return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
+
+        # For quantizing Linear
         linear_config = BackendPatternConfig(torch.nn.Linear) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
             .set_root_module(torch.nn.Linear) \
-            .set_qat_module(torch.nn.qat.Linear) \
-            .set_reference_quantized_module(torch.nn.quantized._reference.Linear)
+            .set_qat_module(torch.ao.nn.qat.Linear) \
+            .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
+        # For fusing Conv2d + ReLU into ConvReLU2d
         conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
-            .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
-            .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
+            .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
+            .set_fuser_method(fuse_conv2d_relu)
+
+        # For quantizing ConvReLU2d
+        fused_conv_relu_config = BackendPatternConfig(torch.ao.nn.intrinsic.ConvReLU2d) \
+            .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
+            .add_dtype_config(weighted_int8_dtype_config) \
+            .set_root_module(torch.nn.Conv2d) \
+            .set_qat_module(torch.ao.nn.intrinsic.qat.ConvReLU2d) \
+            .set_reference_quantized_module(torch.ao.nn.quantized.reference.Conv2d)
 
         backend_config = BackendConfig("my_backend") \
             .set_backend_pattern_config(linear_config) \
-            .set_backend_pattern_config(conv_relu_config)
+            .set_backend_pattern_config(conv_relu_config) \
+            .set_backend_pattern_config(fused_conv_relu_config)
 
     """
     def __init__(self, name: str = ""):
@@ -241,14 +354,20 @@ class BackendPatternConfig:
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
-        self._overwrite_output_fake_quantize: Optional[_PartialWrapper] = None
-        self._overwrite_output_observer: Optional[_PartialWrapper] = None
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
-        Set how observers should be inserted for this pattern.
-        See :class:`~torch.ao.quantization.backend_config.ObservationType` for details
+        Set how observers should be inserted in the graph for this pattern.
+        There are two observation types:
 
+            `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` (default): the output observer instance will be
+            different from the input. This is the most common observation type.
+
+            `OUTPUT_SHARE_OBSERVER_WITH_INPUT`: the output observer instance will be the same as the input.
+            This is useful for operators like `cat`.
+
+        Note: This will be renamed in the near future, since we will soon insert QuantDeQuantStubs with
+        observers (and fake quantizes) attached instead of observers themselves.
         """
         self.observation_type = observation_type
         return self
@@ -300,6 +419,11 @@ class BackendPatternConfig:
     def set_fuser_method(self, fuser_method: Callable) -> BackendPatternConfig:
         """
         Set the function that specifies how to fuse the pattern for this pattern.
+
+        The first argument of this function should be `is_qat`, and the rest of the arguments
+        should be the items in the tuple pattern, e.g. (`torch.nn.ReLU`, `torch.nn.Linear`)
+        will have a function with three arguments, `is_qat`, `relu`, and `linear`.
+        The return value of this function should be the resulting fused module.
         """
         self.fuser_method = fuser_method
         return self
@@ -323,14 +447,6 @@ class BackendPatternConfig:
 
     def _set_input_output_observed(self, input_output_observed: bool) -> BackendPatternConfig:
         self._input_output_observed = input_output_observed
-        return self
-
-    def _set_overwrite_output_fake_quantize(self, overwrite_output_fake_quantize: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_fake_quantize = overwrite_output_fake_quantize
-        return self
-
-    def _set_overwrite_output_observer(self, overwrite_output_observer: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_observer = overwrite_output_observer
         return self
 
     @classmethod
@@ -379,8 +495,6 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_overwrite_output_fake_quantize(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY, None))
-        conf._set_overwrite_output_observer(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_OBSERVER_DICT_KEY, None))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -413,8 +527,4 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
-        if self._overwrite_output_fake_quantize is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY] = self._overwrite_output_fake_quantize
-        if self._overwrite_output_observer is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_OBSERVER_DICT_KEY] = self._overwrite_output_observer
         return backend_pattern_config_dict

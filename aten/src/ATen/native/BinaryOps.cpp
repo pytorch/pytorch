@@ -1,15 +1,149 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
 #include <type_traits>
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/MemoryOverlap.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorMeta.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/RedispatchFunctions.h>
-#include <torch/library.h>
+#else
+#include <ATen/ops/_add_relu_native.h>
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_test_serialization_subcmul_native.h>
+#include <ATen/ops/_to_copy.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/add_ops.h>
+#include <ATen/ops/and_native.h>
+#include <ATen/ops/arctan2_native.h>
+#include <ATen/ops/atan2.h>
+#include <ATen/ops/atan2_native.h>
+#include <ATen/ops/bitwise_and.h>
+#include <ATen/ops/bitwise_and_native.h>
+#include <ATen/ops/bitwise_left_shift.h>
+#include <ATen/ops/bitwise_left_shift_native.h>
+#include <ATen/ops/bitwise_or.h>
+#include <ATen/ops/bitwise_or_native.h>
+#include <ATen/ops/bitwise_right_shift.h>
+#include <ATen/ops/bitwise_right_shift_native.h>
+#include <ATen/ops/bitwise_xor.h>
+#include <ATen/ops/bitwise_xor_native.h>
+#include <ATen/ops/copysign.h>
+#include <ATen/ops/copysign_native.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/div_ops.h>
+#include <ATen/ops/divide_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/eq_native.h>
+#include <ATen/ops/floor_divide.h>
+#include <ATen/ops/floor_divide_native.h>
+#include <ATen/ops/fmax_native.h>
+#include <ATen/ops/fmin_native.h>
+#include <ATen/ops/fmod.h>
+#include <ATen/ops/fmod_native.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/gcd_native.h>
+#include <ATen/ops/ge.h>
+#include <ATen/ops/ge_native.h>
+#include <ATen/ops/greater_equal_native.h>
+#include <ATen/ops/greater_native.h>
+#include <ATen/ops/gt.h>
+#include <ATen/ops/gt_native.h>
+#include <ATen/ops/heaviside_native.h>
+#include <ATen/ops/hypot_native.h>
+#include <ATen/ops/igamma.h>
+#include <ATen/ops/igamma_native.h>
+#include <ATen/ops/igammac.h>
+#include <ATen/ops/igammac_native.h>
+#include <ATen/ops/lcm_native.h>
+#include <ATen/ops/ldexp.h>
+#include <ATen/ops/ldexp_native.h>
+#include <ATen/ops/le.h>
+#include <ATen/ops/le_native.h>
+#include <ATen/ops/less_equal_native.h>
+#include <ATen/ops/less_native.h>
+#include <ATen/ops/linalg_cross_native.h>
+#include <ATen/ops/linalg_cross_ops.h>
+#include <ATen/ops/logaddexp2_native.h>
+#include <ATen/ops/logaddexp_native.h>
+#include <ATen/ops/logical_and.h>
+#include <ATen/ops/logical_and_native.h>
+#include <ATen/ops/logical_or.h>
+#include <ATen/ops/logical_or_native.h>
+#include <ATen/ops/logical_xor.h>
+#include <ATen/ops/logical_xor_native.h>
+#include <ATen/ops/logit_backward_native.h>
+#include <ATen/ops/lshift_native.h>
+#include <ATen/ops/lt.h>
+#include <ATen/ops/lt_native.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/maximum.h>
+#include <ATen/ops/maximum_native.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/minimum.h>
+#include <ATen/ops/minimum_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/mul_ops.h>
+#include <ATen/ops/multiply_native.h>
+#include <ATen/ops/ne.h>
+#include <ATen/ops/ne_native.h>
+#include <ATen/ops/nextafter_native.h>
+#include <ATen/ops/not_equal_native.h>
+#include <ATen/ops/or_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/remainder.h>
+#include <ATen/ops/remainder_native.h>
+#include <ATen/ops/rshift_native.h>
+#include <ATen/ops/rsub_native.h>
+#include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_t.h>
+#include <ATen/ops/special_chebyshev_polynomial_t_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_u.h>
+#include <ATen/ops/special_chebyshev_polynomial_u_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_v.h>
+#include <ATen/ops/special_chebyshev_polynomial_v_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_w.h>
+#include <ATen/ops/special_chebyshev_polynomial_w_native.h>
+#include <ATen/ops/special_gammainc_native.h>
+#include <ATen/ops/special_gammaincc_native.h>
+#include <ATen/ops/special_hermite_polynomial_h.h>
+#include <ATen/ops/special_hermite_polynomial_h_native.h>
+#include <ATen/ops/special_hermite_polynomial_he.h>
+#include <ATen/ops/special_hermite_polynomial_he_native.h>
+#include <ATen/ops/special_laguerre_polynomial_l.h>
+#include <ATen/ops/special_laguerre_polynomial_l_native.h>
+#include <ATen/ops/special_legendre_polynomial_p.h>
+#include <ATen/ops/special_legendre_polynomial_p_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_t.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_t_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_u.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_u_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_v.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_v_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_w.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_w_native.h>
+#include <ATen/ops/special_xlog1py.h>
+#include <ATen/ops/special_xlog1py_native.h>
+#include <ATen/ops/special_xlogy_native.h>
+#include <ATen/ops/special_zeta.h>
+#include <ATen/ops/special_zeta_native.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/subtract_native.h>
+#include <ATen/ops/tanh_backward_native.h>
+#include <ATen/ops/true_divide_native.h>
+#include <ATen/ops/xlogy.h>
+#include <ATen/ops/xlogy_native.h>
+#include <ATen/ops/xor_native.h>
+#endif
 
 namespace at {
 
@@ -880,7 +1014,8 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
@@ -888,7 +1023,8 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::div(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
@@ -916,7 +1052,9 @@ Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::add(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::add_Tensor::redispatch(
+      meta_dks, self.to(device_), other.to(device_), alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
@@ -951,7 +1089,7 @@ Tensor linalg_cross_zerotensor(
   // hack to use the TensorIterator to get the correct broadcasting and type
   // promotion logic (see add_zerotensor)
   auto device = Device(DeviceType::Meta);
-  auto meta_out = at::redispatch::linalg_cross(
+  auto meta_out = at::_ops::linalg_cross::redispatch(
     c10::DispatchKeySet(at::DispatchKey::Meta),
     input.to(device),
     other.to(device),

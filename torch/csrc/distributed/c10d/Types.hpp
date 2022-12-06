@@ -1,11 +1,14 @@
 #pragma once
 
+#include <torch/csrc/distributed/c10d/Store.hpp>
+
 #include <chrono>
 #include <cstdint>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
@@ -19,14 +22,17 @@ struct TORCH_API _SupplementBase : torch::CustomClassHolder {
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
-  std::vector<at::Tensor> tensor_factors;
+  at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
+  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+    TORCH_CHECK_EQ(tensor_factor.numel(), 1);
+  }
 };
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
 struct TORCH_API ReduceOp : torch::CustomClassHolder {
+  // note(crcrpar): RedOpType could be defined outside of `ReduceOp`
   enum RedOpType : uint8_t {
     SUM = 0,
     AVG = 1,
@@ -44,7 +50,9 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(RedOpType op) : op_(op) {
     TORCH_INTERNAL_ASSERT(
-      op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
+      op_ != PREMUL_SUM,
+      "Use `torch.distributed._make_nccl_premul_sum` to create an instance of ReduceOp with PREMUL_SUM"
+    );
   }
 
   ReduceOp(RedOpType op, c10::intrusive_ptr<_SupplementBase> optional_supplement) {
@@ -55,7 +63,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     }
   }
 
-  // The heap resource supplement_, if it exists, is managed by a shared_ptr,
+  // The heap resource supplement_, if it exists, is managed by a c10::intrusive_ptr,
   // so constructors and operator= can be simple
   ReduceOp(const ReduceOp& other) :
     op_(other.op_), supplement_(other.supplement_) {}
@@ -77,6 +85,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     return *this == static_cast<std::uint8_t>(other);
   }
 
+  // todo(crcrpar): Handle `RedOpType::PREMUL_SUM` with its scaling factor.
   bool operator==(const ReduceOp& other) {
     return *this == other.op_;
   }
@@ -147,6 +156,15 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
+struct DistributedBackendOptions {
+  c10::intrusive_ptr<::c10d::Store> store;
+  int group_rank;
+  int group_size;
+  std::chrono::duration<float> timeout;
+  std::string group_id;
+  std::vector<int64_t> global_ranks_in_group;
 };
 
 } // namespace c10d

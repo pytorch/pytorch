@@ -4,7 +4,14 @@ import os
 import yaml
 import json
 from unittest import TestCase, main, mock
-from filter_test_configs import get_labels, filter, PREFIX, VALID_TEST_CONFIG_LABELS
+from filter_test_configs import (
+    get_labels,
+    filter,
+    set_periodic_modes,
+    PREFIX,
+    VALID_TEST_CONFIG_LABELS,
+    SUPPORTED_PERIODICAL_MODES
+)
 import requests
 from requests.models import Response
 from typing import Any, Dict
@@ -27,6 +34,8 @@ class TestConfigFilter(TestCase):
 
     def setUp(self) -> None:
         os.environ["GITHUB_TOKEN"] = "GITHUB_TOKEN"
+        if os.getenv("GITHUB_OUTPUT"):
+            del os.environ["GITHUB_OUTPUT"]
 
     @mock.patch("filter_test_configs.requests.get", side_effect=mocked_gh_get_labels)
     def test_get_labels(self, mocked_gh: Any) -> None:
@@ -82,6 +91,27 @@ class TestConfigFilter(TestCase):
         for case in testcases:
             filtered_test_matrix = filter(yaml.safe_load(case["test_matrix"]), mocked_labels)
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+
+    def test_set_periodic_modes(self) -> None:
+        testcases = [
+            {
+                "test_matrix": "{include: []}",
+                "description": "Empty test matrix",
+            },
+            {
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Replicate each periodic mode in a different config",
+            },
+        ]
+
+        for case in testcases:
+            test_matrix = yaml.safe_load(case["test_matrix"])
+            scheduled_test_matrix = set_periodic_modes(test_matrix)
+            self.assertEqual(
+                len(test_matrix["include"]) * len(SUPPORTED_PERIODICAL_MODES),
+                len(scheduled_test_matrix["include"])
+            )
 
 
 if __name__ == '__main__':

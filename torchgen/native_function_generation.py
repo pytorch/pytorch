@@ -57,6 +57,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nested_tensor_from_mask_left_aligned",  # returns a boolean
     "_nnz",  # returns an int
     "_use_cudnn_ctc_loss",  # returns a boolean
+    "_use_cudnn_ctc_loss.Tensor",  # returns a boolean
     "_validate_compressed_sparse_indices",  # no return
     "allclose",  # returns a boolean
     "dense_dim",  # returns an int
@@ -74,6 +75,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nested_tensor_offsets",  # returns a vector of ints
     "cusparselt_spmma", # return a float
     "cusparselt_spmma2", # return a float
+    "_fused_sdp_choice",  # returns an int
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [

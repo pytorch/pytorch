@@ -1,11 +1,16 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/clone.h>
+#endif
 
 namespace at {
 namespace native {
