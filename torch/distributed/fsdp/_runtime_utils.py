@@ -542,6 +542,10 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
+                p_assert(
+                    numel_to_pad == 0,
+                    f"Expects no padding needed but requires {numel_to_pad} numel",
+                )
                 padded_unsharded_grad = (
                     F.pad(unsharded_grad, [0, numel_to_pad])
                     if numel_to_pad > 0
