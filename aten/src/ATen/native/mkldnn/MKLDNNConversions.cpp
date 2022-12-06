@@ -15,6 +15,7 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
+#include <ATen/ops/mkldnn_reorder_conv_transpose2d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
 #endif
 
@@ -133,7 +134,6 @@ Tensor mkldnn_reorder_conv2d_weight(
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);
-
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
@@ -168,6 +168,98 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
+
+ideep::tensor::desc get_conv_transpose_expected_weights_desc(
+    const ideep::tensor::dims& weights_dims,
+    ideep::tensor::data_type w_dtype,
+    const ideep::tensor::dims& strides,
+    const ideep::tensor::dims& padding_l,
+    const ideep::tensor::dims& padding_r,
+    const ideep::tensor::dims& dilates,
+    int groups,
+    bool channels_last,
+    ideep::algorithm aalgorithm,
+    ideep::data_type x_dtype,
+    const ideep::dims& src_dims) {
+  if (channels_last) {
+    return ideep::convolution_transpose_forward::expected_weights_desc<true>(
+        weights_dims,
+        w_dtype,
+        strides,
+        padding_l,
+        padding_r,
+        dilates,
+        groups,
+        aalgorithm,
+        ideep::prop_kind::forward,
+        src_dims);
+  } else {
+    return ideep::convolution_transpose_forward::expected_weights_desc<false>(
+        weights_dims,
+        w_dtype,
+        strides,
+        padding_l,
+        padding_r,
+        dilates,
+        groups,
+        aalgorithm,
+        ideep::prop_kind::forward,
+        src_dims);
+  }
+}
+
+
+Tensor mkldnn_reorder_conv_transpose2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    IntArrayRef output_padding,
+    c10::OptionalArrayRef<int64_t> input_size) {
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  ideep::tensor w = itensor_from_tensor(self);
+
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+  }
+
+  auto expected_desc = get_conv_transpose_expected_weights_desc(
+      w.get_dims(),
+      w.get_data_type(),
+      stride.vec(),
+      padding.vec(),
+      padding_r(padding, output_padding),
+      dilation.vec(),
+      groups,
+      is_channels_last,
+      ideep::algorithm::deconvolution_direct,
+      w.get_data_type(),
+      src_dims);
+  
+  if (groups > 1) {
+    expected_desc = expected_desc.transpose(1, 2);
+  } else {
+    expected_desc = expected_desc.transpose(0, 1);
+  }
+
+  ideep::tensor result;
+  result.init(expected_desc);
+  w.transpose_(0, 1);
+  result.feed_from(w, /*is_deconv_weights*/true);
+  
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
@@ -195,6 +287,17 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef dilation,
     int64_t groups) {
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
+}
+
+Tensor mkldnn_reorder_conv_transpose2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    IntArrayRef output_padding,
+    c10::OptionalArrayRef<int64_t> input_size) {
+  TORCH_CHECK(false, "mkldnn_reorder_conv_transpose2d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

@@ -411,6 +411,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
         self,
         conv_transpose: nn.Module,
         unary: nn.Module,
+        input_size: list,
     ):
         super(ConvTransposeUnary2d, self).__init__(
             conv_transpose.in_channels,
@@ -426,12 +427,25 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
             conv_transpose.weight.device,
             conv_transpose.weight.dtype,
         )
-        self._update_module_params(conv_transpose, unary)
+        self._update_module_params(conv_transpose, unary, input_size)
 
-    def _update_module_params(self, conv_transpose, unary):
+    def _update_module_params(self, conv_transpose, unary, input_size):
         self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
         self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
             unary
+        )
+        packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
+                self.weight.to_mkldnn(),
+                self.padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                self.output_padding,
+                input_size,
+            )
+        self.weight = torch.nn.Parameter(
+            packed_weight,
+            requires_grad=self.weight.requires_grad,            
         )
 
     def _conv_transpose_forward(self, input, weight, bias):
@@ -551,6 +565,7 @@ def fused_conv_transpose_unary_eval(
     return ConvTransposeUnary2d(
         conv_transpose,
         unary,
+        input_size,
     )
 
 
