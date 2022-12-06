@@ -714,8 +714,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.assertTrue(is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):
-        """ test matching constant
-        """
         class M(torch.nn.Module):
             def forward(self, x):
                 x, _ = torch.ops.aten.max_pool2d_with_indices.default(x)
