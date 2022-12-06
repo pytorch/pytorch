@@ -1776,7 +1776,7 @@ aot_autograd_failures = {
     xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
-    xfail('as_strided', 'partial_views'),
+    skip('as_strided', 'partial_views'), # flaky
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
