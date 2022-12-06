@@ -9,7 +9,7 @@ import operator
 import re
 import types
 from abc import ABCMeta
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -108,8 +108,13 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
+    fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
     def __post_init__(self):
+        if isinstance(self.example, torch.Tensor):
+            assert isinstance(
+                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
+            )
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -118,6 +123,13 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
+
+    def get_fake_examples(self):
+        if self.fake_tensor is not None:
+            assert isinstance(
+                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
+            )
+            return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -523,7 +535,9 @@ class VariableBuilder:
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), value, False, None)
+            )
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
@@ -593,7 +607,14 @@ class VariableBuilder:
             ignore_subclass=ignore_subclass,
         )
 
-        self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+        # TODO: I think the result is guaranteed to be fake with
+        # ignore_subclass changes
+        fake_tensor_value = None
+        example_value = tensor_variable.proxy.node.meta["example_value"]
+        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+            fake_tensor_value = example_value
+
+        self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False, fake_tensor_value))
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -623,10 +644,6 @@ class VariableBuilder:
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
-            if not is_constant_source(self.get_source()):
-                self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True)
-                )
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
@@ -657,6 +674,14 @@ class VariableBuilder:
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
+            if not is_constant_source(self.get_source()):
+                fake_tensor_value = None
+                example_value = unspec_var.proxy.node.meta["example_value"]
+                if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+                    fake_tensor_value = example_value
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
+                )
             return unspec_var
 
 
@@ -717,23 +742,27 @@ def wrap_fx_proxy_cls(
     with preserve_rng_state():
         if example_value is None:
             example_value = get_fake_value(proxy.node, tx)
-
         else:
-            # We shouldn't be doing this at all, see
-            # https://github.com/pytorch/torchdynamo/issues/1950
-            # But assuming we're doing it, the legacy behavior for
-            # subclasses was to perform a clone WITHOUT preserving
-            # the subclass.  It's not clear to me that's what you actually
-            # want, but whatever, I wouldn't have this cache at all.
-            with torch._C.DisableTorchFunction():
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-            # NB: If we're ignoring subclass, then the expectation is you will
-            # take the returned TensorVariable and wrap it into a more
-            # accurate TensorVariable that is able to track subclass-ness;
-            # otherwise this is wrong!
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, ignore_subclass=ignore_subclass
-            )
+            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
+            # TODO(voz): Find all the callsites and burn this down.
+            # Flipping it to an assert fails dozens of tests.
+            # TODO(ezyang): should attempt this burndown again
+            if not isinstance(example_value, torch._subclasses.FakeTensor):
+                # We shouldn't be doing this at all, see
+                # https://github.com/pytorch/torchdynamo/issues/1950
+                # But assuming we're doing it, the legacy behavior for
+                # subclasses was to perform a clone WITHOUT preserving
+                # the subclass.  It's not clear to me that's what you actually
+                # want, but whatever, I wouldn't have this cache at all.
+                with torch._C.DisableTorchFunction():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                # NB: If we're ignoring subclass, then the expectation is you will
+                # take the returned TensorVariable and wrap it into a more
+                # accurate TensorVariable that is able to track subclass-ness;
+                # otherwise this is wrong!
+                example_value = wrap_to_fake_tensor_and_record(
+                    example_value, tx=tx, ignore_subclass=ignore_subclass
+                )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
