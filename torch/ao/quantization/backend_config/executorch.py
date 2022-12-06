@@ -5,7 +5,13 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
+from .backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    DTypeWithConstraints,
+    ObservationType,
+)
 from ._common_operator_config_utils import _Conv2dMetadata
 from ..fuser_method_mappings import _reverse_sequential_wrapper2
 
