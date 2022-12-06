@@ -45,8 +45,13 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         assert spec is not None and isinstance(
             spec, tuple
         ), f"output spec does not match with output! Expected tuple, got {spec}"
+
+        # NOTE: local results might return Optional Tensor from ATen op, so we need to
+        # handle that case and make sure we don't wrap None with DTensor.
+        # (i.e. native_layer_norm.backward)
         return tuple(
             dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
+            if e is not None and s is not None else None
             for e, s in zip(res, spec)
         )
     else:
