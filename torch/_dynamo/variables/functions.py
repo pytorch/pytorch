@@ -169,7 +169,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             cell.cell_contents
                         )
 
-                        if closure_cell_contents.name() not in tx.mutated_closure_cell_contents:
+                        if (
+                            closure_cell_contents.name()
+                            not in tx.mutated_closure_cell_contents
+                        ):
                             # Optimistically don't allocate the cell, to
                             # reduce the number of side effects.  This is
                             # important for cond, as without it, any accesses

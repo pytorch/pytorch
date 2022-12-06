@@ -25,7 +25,6 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, Guard, GuardedCode
 from .output_graph import CompilerFn, OutputGraph
-from .source import GetItemSource
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (

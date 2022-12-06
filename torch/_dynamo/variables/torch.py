@@ -3,15 +3,15 @@ import logging
 import math
 import re
 import types
-from typing import Dict, List
 from collections import OrderedDict
+from typing import Dict, List
 
 import numpy
 
 import torch._C
+import torch.fx
 import torch.nn
 import torch.onnx.operators
-import torch.fx
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -29,7 +29,6 @@ from ..utils import (
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, NullContextVariable
-from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -639,7 +638,12 @@ class TorchPyOperator(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ListVariable, TensorVariable, UserFunctionVariable, NestedUserFunctionVariable
+        from . import (
+            ListVariable,
+            NestedUserFunctionVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
         from .builder import wrap_fx_proxy
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
@@ -672,12 +676,19 @@ class TorchPyOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-            from .. import config
 
             assert len(args) == 4
             assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
-            assert isinstance(args[1], (UserFunctionVariable, NestedUserFunctionVariable)), str(type(args[1]))  # true_fn
-            assert isinstance(args[2], (UserFunctionVariable, NestedUserFunctionVariable)), str(type(args[2]))  # false_fn
+            assert isinstance(
+                args[1], (UserFunctionVariable, NestedUserFunctionVariable)
+            ), str(
+                type(args[1])
+            )  # true_fn
+            assert isinstance(
+                args[2], (UserFunctionVariable, NestedUserFunctionVariable)
+            ), str(
+                type(args[2])
+            )  # false_fn
             assert type(args[3]) is ListVariable, str(type(args[3]))  # args
 
             # Our strategy for tracing the true/false branches of cond
@@ -732,16 +743,18 @@ class TorchPyOperator(VariableTracker):
 
                 # Nub out bits of state that we don't require to be
                 # equal
-                comparable_state = state._replace(output=state.output._replace(
-                    guards=set(),
-                    nn_modules=None,
-                    # Timestamp is monotonically increasing so we don't
-                    # care about divergence
-                    timestamp=0,
-                    # Meh (problem is the nodes don't compare equal;
-                    # maybe nub out outputs only)
-                    name_to_input=OrderedDict(),
-                ))
+                comparable_state = state._replace(
+                    output=state.output._replace(
+                        guards=set(),
+                        nn_modules=None,
+                        # Timestamp is monotonically increasing so we don't
+                        # care about divergence
+                        timestamp=0,
+                        # Meh (problem is the nodes don't compare equal;
+                        # maybe nub out outputs only)
+                        name_to_input=OrderedDict(),
+                    )
+                )
 
                 graph = tx.output.graph
                 tx.output.graph = graph_checkpoint
@@ -749,8 +762,20 @@ class TorchPyOperator(VariableTracker):
 
                 return output, graph, guards, nn_modules, comparable_state
 
-            true_r, true_graph, true_guards, true_nn_modules, true_cmp = speculate_branch(True)
-            false_r, false_graph, false_guards, false_nn_modules, false_cmp = speculate_branch(False)
+            (
+                true_r,
+                true_graph,
+                true_guards,
+                true_nn_modules,
+                true_cmp,
+            ) = speculate_branch(True)
+            (
+                false_r,
+                false_graph,
+                false_guards,
+                false_nn_modules,
+                false_cmp,
+            ) = speculate_branch(False)
 
             if true_cmp != false_cmp:
                 unimplemented(true_cmp.diff(false_cmp))
@@ -759,8 +784,12 @@ class TorchPyOperator(VariableTracker):
             tx.output.guards |= false_guards
             tx.output.guards |= true_guards
 
-            true_name = add_subgraph("true", torch.fx.GraphModule(true_nn_modules, true_graph))
-            false_name = add_subgraph("false", torch.fx.GraphModule(false_nn_modules, false_graph))
+            true_name = add_subgraph(
+                "true", torch.fx.GraphModule(true_nn_modules, true_graph)
+            )
+            false_name = add_subgraph(
+                "false", torch.fx.GraphModule(false_nn_modules, false_graph)
+            )
 
             # Apply side effects (guaranteed to be equal)
             tx.output.side_effects = true_cmp.output.side_effects
@@ -768,7 +797,12 @@ class TorchPyOperator(VariableTracker):
             true_node = make_attr(true_name)
             false_node = make_attr(false_name)
 
-            p_args = (args[0].as_proxy(), true_node, false_node, tuple(a.as_proxy() for a in sub_args))
+            p_args = (
+                args[0].as_proxy(),
+                true_node,
+                false_node,
+                tuple(a.as_proxy() for a in sub_args),
+            )
             # TODO: assert that the true/false return values are
             # consistent
             example_value = true_r.as_proxy().node.meta["example_value"]

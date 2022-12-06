@@ -12,7 +12,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple, Set
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 from unittest.mock import patch
 
 import torch
@@ -117,13 +117,14 @@ class InstructionTranslatorGraphState(NamedTuple):
 
     def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
         for k in self._fields:
-            if k == 'output':
+            if k == "output":
                 return self.output.diff(other.output, prefix=f"{k}.")
             sv = getattr(self, k)
             ov = getattr(other, k)
             if sv != ov:
                 return f"{k} mismatch: {sv} != {ov}"
         return None
+
 
 def stack_op(fn: typing.Callable[..., object]):
     nargs = len(inspect.signature(fn).parameters)
@@ -373,6 +374,7 @@ class InstructionTranslatorBase(object):
     next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
+    mutated_closure_cell_contents: Set[str]
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -1873,8 +1875,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
-                if maybe_cell is not None and maybe_cell.source.name() not in self.parent.mutated_closure_cell_contents:
-                    self.parent.mutated_closure_cell_contents.add(maybe_cell.source.name())
+                if (
+                    maybe_cell is not None
+                    and maybe_cell.source.name()
+                    not in self.parent.mutated_closure_cell_contents
+                ):
+                    self.parent.mutated_closure_cell_contents.add(
+                        maybe_cell.source.name()
+                    )
                     raise exc.RestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 

@@ -1448,6 +1448,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 def false_fn(val):
                     return self.linear(val) * torch.tensor(-1)
+
                 return cond(pred, true_fn, false_fn, [x])
 
         mod = Module()

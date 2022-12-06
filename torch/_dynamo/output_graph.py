@@ -90,7 +90,6 @@ class OutputGraphState(NamedTuple):
         return None
 
 
-
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -196,7 +195,8 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self._current_tx = []
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+        self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
@@ -552,7 +552,7 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.CODE:
+            if config.log_level <= logging.CODE:  # type: ignore[attr-defined]
                 graph_str = (
                     gm.print_readable()
                     if config.output_graph_code

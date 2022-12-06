@@ -75,11 +75,12 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
 
-    def __eq__(self, other: "SideEffects") -> bool:
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, SideEffects)
         # NB: do NOT test keepalive
         return (
-            self.id_to_variable == other.id_to_variable and
-            self.store_attr_mutations == other.store_attr_mutations
+            self.id_to_variable == other.id_to_variable
+            and self.store_attr_mutations == other.store_attr_mutations
         )
 
     def diff(self, other: "SideEffects") -> Optional[str]:
