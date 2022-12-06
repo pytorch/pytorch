@@ -69,6 +69,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b
 
     @make_test
+    def test_addcdiv(a, b, c):
+        # dynamo decomposes this to avoid a graph break when
+        # the value kwarg is populated
+        return torch.addcdiv(a, b, c, value=5.0)
+
+    @make_test
     def test_is_not_null(a, b):
         if a is not None and b is not None:
             return a + b
