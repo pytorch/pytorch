@@ -150,7 +150,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     Return all configs related to binary ops.
     """
     dtype_configs = [
-        executorch_default_op_qint8_symmetric_dtype_config,
+        qnnpack_default_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config
     ]
     num_tensor_args_to_observation_type_mapping = {
