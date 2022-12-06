@@ -17,7 +17,7 @@ os.environ['INSTALL_FRESH_CONDA'] = '1'
 install_fresh_conda = '1'
 
 
-if not os.environ['CONDA_ENV_RUN'] in os.environ:
+if not 'CONDA_ENV_RUN' in os.environ:
     os.environ['INSTALL_FRESH_CONDA'] = '1'
     install_fresh_conda = '1'
 
