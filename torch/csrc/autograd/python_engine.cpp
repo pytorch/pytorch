@@ -1,6 +1,6 @@
 #include <torch/csrc/autograd/python_engine.h>
 
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>

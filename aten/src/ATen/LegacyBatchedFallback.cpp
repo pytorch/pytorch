@@ -1,5 +1,5 @@
 #include <ATen/Context.h>
-#include <ATen/BatchedFallback.h>
+#include <ATen/LegacyBatchedFallback.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/LegacyVmapTransforms.h>
 #include <ATen/core/dispatch/Dispatcher.h>

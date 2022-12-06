@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapTransforms.h>
 #include <c10/util/irange.h>
 
