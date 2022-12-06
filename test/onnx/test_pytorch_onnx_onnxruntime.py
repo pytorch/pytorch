@@ -3950,6 +3950,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 [torch.ones((2, 5)), torch.tensor([[0, 1, 2, 0, 0], [1, 0, 2, 1, 2]])],
                 name="src_indices_dynamic_combination2",
             ),
+            common_utils.subtest(
+                [torch.ones((3, 5)), torch.tensor([[0, 1, 2, 0, 0], [1, 0, 2, 1, 2]])],
+                name="src_indices_dynamic_combination3",
+            ),
+            common_utils.subtest(
+                [torch.ones((3, 5)), torch.tensor([[0, 1, 2, 0], [1, 0, 2, 1]])],
+                name="src_indices_dynamic_combination4",
+            ),
         ],
     )
     @skipIfUnsupportedMinOpsetVersion(16)
@@ -3959,9 +3967,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return input.scatter_add(0, indices, src)
 
         input = torch.zeros(3, 5, dtype=src.dtype)
-        # NOTE: Although index and src are set with different dynamic axes and name,
-        # they are required to be the same shape on all axes. In static shape, converter
-        # can apply Slice op to accommodate.
         self.run_test(
             ScatterModel(),
             input_args=(input, indices, src),
