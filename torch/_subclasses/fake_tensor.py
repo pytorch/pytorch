@@ -355,21 +355,6 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     return constructors(fake_mode, func, *args, **kwargs)
 
 
-# _to_copy fails when run with FakeTensors to cuda device
-# TODO: debug
-@register_op_impl(aten._to_copy.default)
-def to_copy(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    input_device = new_kwargs.pop("device", None)
-    out_device = input_device if input_device else new_kwargs["input"].device
-    with in_kernel_invocation_manager(fake_mode):
-        input = new_kwargs.pop("input").to("meta")
-        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
-
-
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]

@@ -324,7 +324,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -357,7 +356,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=example_value,
                 **options,
@@ -376,9 +374,23 @@ class TorchVariable(VariableTracker):
                     "call_method",
                     "numel",
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
+            )
+        elif (
+            self.value == torch.addcdiv
+            and len(args) == 3
+            and "value" in kwargs
+            and len(kwargs) == 1
+        ):
+            # decompose addcdiv into constituent ops, prevents a graph break due to converting
+            # value to a scalar
+            result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return TorchVariable(torch.add, **options).call_function(
+                tx, [args[0], result], {}
             )
         else:
             any_symints_or_symfloats = any(
@@ -434,7 +446,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     fn_,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -506,7 +517,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -572,7 +582,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ],
                         {},
                     ),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -712,6 +721,23 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
 
+            # The current recursive export() implementation will
+            # not "see" any side effect updates from the enclosing
+            # context, which can result in possibly incorrect
+            # export.  This assert ensures that there were no
+            # outstanding side effects at the time cond() was called.
+            #
+            # TODO: This assert may be too aggressive; I'm landing it
+            # to see if it is or not.
+            assert tx.output.side_effects.is_empty(), (
+                "Handling a cond operator when there are outstanding "
+                "side effects in the trace is not currently supported.  "
+                "Please file a bug to PyTorch requesting this functionality.  "
+                "You may be able to unblock by removing side effects (e.g., "
+                "mutating Python variables/data structures/etc) from your "
+                "model."
+            )
+
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
             assert type(p_args[1]) is UserFunctionVariable  # true_fn
@@ -745,7 +771,6 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
-                current_tx=tx,
             ),
             example_value=self.value(*u_args),
         )
