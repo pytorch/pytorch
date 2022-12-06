@@ -373,6 +373,7 @@ class Optimizer(object):
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
+                tmp_group = []
                 for p in group['params']:
                     if p.grad is not None:
                         if set_to_none:
@@ -383,9 +384,11 @@ class Optimizer(object):
                             else:
                                 p.grad.requires_grad_(False)
                             if (not foreach or p.grad.is_sparse):
-                                p.grad.zero_()
+                                tmp_group.append(p)
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+                if tmp_group:
+                    torch._foreach_zero_(tmp_group)
             if foreach:
                 for _, per_dtype_grads in per_device_and_dtype_grads.items():
                     for grads in per_dtype_grads.values():
