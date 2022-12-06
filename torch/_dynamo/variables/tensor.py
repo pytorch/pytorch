@@ -170,17 +170,16 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def unpack_var_sequence(self, tx):
-        options = VariableTracker.propagate(self)
-        if self.size:
-            return [
-                variables.BuiltinVariable(operator.getitem, **options).call_function(
-                    tx, [self, variables.ConstantVariable(i)], {}
-                )
-                for i in range(self.size[0])
-            ]
+    def unpack_var_sequence(self, tx, idxes=None):
+        from .builder import wrap_fx_proxy
 
-        return super(TensorVariable, self).unpack_var_sequence(tx)
+        if idxes is None:
+            if self.size:
+                idxes = range(self.size[0])
+            else:
+                return super(TensorVariable, self).unpack_var_sequence(tx)
+        options = VariableTracker.propagate(self)
+        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def call_method(
         self,
@@ -206,7 +205,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -274,7 +272,10 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
+                        "call_method",
+                        "item",
+                        (self.as_proxy(),),
+                        {},
                     ),
                     example_value=example_value,
                     **options,
@@ -289,7 +290,10 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
+                        "call_function",
+                        len,
+                        (self.as_proxy(),),
+                        {},
                     ),
                     **options,
                 )
@@ -299,7 +303,6 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + list(args), kwargs),
-                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         elif name in ("resize_", "resize_as_"):
@@ -331,7 +334,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -351,7 +353,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -407,7 +408,6 @@ class DynamicShapeVariable(VariableTracker):
                 "call_method",
                 name,
                 *proxy_args_kwargs([self] + list(args), kwargs),
-                current_tx=tx,
             ),
             **options,
         )

@@ -273,7 +273,9 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
+                    "call_function",
+                    fn,
+                    *proxy_args_kwargs(args, kwargs),
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return wrap_fx_proxy_cls(
@@ -333,7 +335,6 @@ class BuiltinVariable(VariableTracker):
                     fn_,
                     (args[0].as_proxy(),),
                     {},
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -393,7 +394,6 @@ class BuiltinVariable(VariableTracker):
                         "call_function",
                         self.fn,
                         *proxy_args_kwargs([a, b], {}),
-                        current_tx=tx,
                     ),
                     **VariableTracker.propagate(self, [a, b]),
                 )
