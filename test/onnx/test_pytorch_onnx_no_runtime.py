@@ -18,7 +18,7 @@ from torch import Tensor
 from torch.onnx import OperatorExportTypes, symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
-from torch.testing._internal import common_utils, common_quantization
+from torch.testing._internal import common_quantization, common_utils
 
 
 def export_to_onnx(
