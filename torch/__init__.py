@@ -1147,7 +1147,6 @@ def compile(model: Optional[Callable] = None, *,
             return torch.sin(x) + torch.cos(x)
 
     """
-    from . import _C
     _C._log_api_usage_once("torch.compile")
     # Decorator mode
     if model is None:
