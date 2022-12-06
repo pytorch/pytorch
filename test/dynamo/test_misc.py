@@ -2968,7 +2968,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_torch_cudnn_is_acceptable(self):
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_torch_cudnn_is_acceptable_dynamic_shapes(self):
+        def fn(x):
+            if torch.backends.cudnn.is_acceptable(x):
+                return x.relu()
+            return x
+
+        x = torch.rand(4).cuda()
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
+    def test_torch_cudnn_is_acceptable_no_dynamic_shapes(self):
         def fn(x):
             if torch.backends.cudnn.is_acceptable(x):
                 return x.relu()

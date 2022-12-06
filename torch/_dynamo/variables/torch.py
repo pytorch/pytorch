@@ -170,6 +170,9 @@ class TorchVariable(VariableTracker):
             return True
         return getattr(self.value, "__module__", None) == "math"
 
+    def unsupported_scalar_return(self):
+        return self.value in (torch.backends.cudnn.is_acceptable,)
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -306,9 +309,9 @@ class TorchVariable(VariableTracker):
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
-        elif self.value is torch.backends.cudnn.is_acceptable:
+        elif self.unsupported_scalar_return() and not config.dynamic_shapes:
             unimplemented(
-                "torch.backends.cudnn.is_acceptable not supported yet due to returning a bool"
+                f"{self.value} returns a scalar and dynamic shapes is not enabled"
             )
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
