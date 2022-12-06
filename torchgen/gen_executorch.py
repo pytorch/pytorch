@@ -342,8 +342,8 @@ def translate_native_yaml(
         None
     """
     if use_aten_lib:
-        with open(native_yaml_path, "r") as native_yaml:
-            out_file.writelines(native_yaml.readlines())
+        with open(aten_yaml_path, "r") as aten_yaml:
+            out_file.writelines(aten_yaml.readlines())
         return
     aten_parsed_yaml = parse_native_yaml(
         aten_yaml_path,

@@ -28,4 +28,4 @@
 #include <tuple>
 #include <vector>
 
-${NativeFunctions_declarations}
+${nativeFunctions_declarations}

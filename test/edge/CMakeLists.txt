@@ -2,22 +2,26 @@ cmake_minimum_required(VERSION 3.1)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
+set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build/out)
 
+find_package(Python COMPONENTS Interpreter)
+set(PYTHONINTERP_FOUND ${Python_Interpreter_FOUND})
+set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
 
 # Generate unboxing kernels
 set(GEN_COMMAND
         "${PYTHON_EXECUTABLE}" -m torchgen.gen_executorch
-        --source-path=${TEST_ROOT}/templates
-        --install_dir=${CMAKE_BINARY_DIR}/edge
-        --tags-path=${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
-        --aten_yaml_path=${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        --source-path=${TEST_ROOT}
+        --install_dir=${OUTPUT_DIRECTORY}
+        --tags-path=${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
+        --aten_yaml_path=${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
         --use_aten_lib
         --op_selection_yaml_path=${TEST_ROOT}/selected_operators.yaml
         )
 set(GEN_COMMAND_sources
-        ${CMAKE_BINARY_DIR}/edge/RegisterCodegenUnboxedKernelsEverything.cpp
-        ${CMAKE_BINARY_DIR}/edge/Functions.h
-        ${CMAKE_BINARY_DIR}/edge/NativeFunctions.h
+        ${OUTPUT_DIRECTORY}/RegisterCodegenUnboxedKernelsEverything.cpp
+        ${OUTPUT_DIRECTORY}/Functions.h
+        ${OUTPUT_DIRECTORY}/NativeFunctions.h
         )
 message(STATUS "Generating sources for unboxing kernels ${GEN_COMMAND}")
 add_custom_command(
@@ -25,8 +29,8 @@ add_custom_command(
         OUTPUT ${GEN_COMMAND_sources}
         COMMAND ${GEN_COMMAND}
         DEPENDS
-        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        ${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
+        ${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
         ${TEST_ROOT}/templates/Functions.h
         ${TEST_ROOT}/templates/NativeFunctions.h
         ${TEST_ROOT}/templates/RegisterCodegenUnboxedKernels.h
