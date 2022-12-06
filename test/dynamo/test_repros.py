@@ -2127,14 +2127,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_dynamic_shapes_right_side(self):
         def f(x):
-            return torch.ones(5*x.shape[0])
+            return torch.ones(5 * x.shape[0])
 
-        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic")
-        self.assertEqual(gm(torch.randn(6, 5)).shape, f(torch.randn(6, 5)).shape)
+        inp = torch.randn(6, 5)
 
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+        self.assertEqual(gm(inp).shape, f(inp).shape)
 
 
 if __name__ == "__main__":
