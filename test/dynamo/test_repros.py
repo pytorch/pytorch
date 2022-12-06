@@ -2126,7 +2126,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             # Assert running_mean/var
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
-
+    
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_dynamic_shapes_right_side(self):
         def f(x):
             return torch.ones(5 * x.shape[0])
