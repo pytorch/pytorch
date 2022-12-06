@@ -385,7 +385,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
   BINARY_POINTWISE(floor_divide);
-  UNARY_POINTWISE2(floor_divide, Scalar);
 
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
