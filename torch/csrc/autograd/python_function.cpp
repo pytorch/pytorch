@@ -40,7 +40,6 @@
 
 using namespace torch;
 using namespace torch::autograd;
-using namespace torch::jit;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
@@ -600,6 +599,7 @@ static void _append_subgraph(
     torch::jit::Graph* graph,
     std::vector<torch::jit::Value*> trace_outputs,
     bool unpack_output) {
+  using Value = torch::jit::Value;
   node->g_(
       torch::jit::attr::Subgraph,
       std::make_shared<torch::jit::Graph>(graph->current_scope()));
@@ -692,8 +692,8 @@ static void _trace_post_record(
   node->addOutput();
   auto old_node = node;
   if (!unpack_output) {
-    std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
-    TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    std::vector<at::TypePtr> tuple_values(num_outputs, at::TensorType::get());
+    auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
     node->output()->setType(tuple_type);
@@ -705,7 +705,7 @@ static void _trace_post_record(
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
-      Value* value = node->outputs()[i];
+      auto value = node->outputs()[i];
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
@@ -723,12 +723,12 @@ static void _trace_post_record(
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.
   if (!unpack_output) {
-    std::vector<TypePtr> new_tuple_values;
+    std::vector<at::TypePtr> new_tuple_values;
     for (const auto i : c10::irange(num_outputs)) {
-      TypePtr ptr = node->outputs()[i]->type();
+      auto ptr = node->outputs()[i]->type();
       new_tuple_values.push_back(ptr);
     }
-    TypePtr tuple_type = TupleType::create(std::move(new_tuple_values));
+    auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
     // shape.
     old_node->output()->setType(tuple_type);
