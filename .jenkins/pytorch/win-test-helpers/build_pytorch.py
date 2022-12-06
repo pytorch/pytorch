@@ -91,8 +91,7 @@ except Exception as e:
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
-    subprocess.run([*'conda run -n test_env'.split(), 'pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses', \
-        'typing_extensions', "expecttest==0.1.3"])
+    subprocess.run([*'conda run -n test_env'.split(), 'pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses', 'typing_extensions', "expecttest==0.1.3"])
 
 # Override VS env here
 with pushd('.'):
