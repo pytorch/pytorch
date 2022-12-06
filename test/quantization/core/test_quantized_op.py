@@ -3693,7 +3693,7 @@ class TestQuantizedLinear(TestCase):
             nptype = np_dtype[dtype]
             qlinear_prepack = torch.ops.quantized.linear_prepack
             if use_relu:
-                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_output_fp32_relu
+                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_relu_output_fp32
             else:
                 qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_output_fp32
             if use_multi_dim_input:

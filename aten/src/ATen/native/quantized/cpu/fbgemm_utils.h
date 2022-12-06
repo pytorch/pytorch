@@ -68,7 +68,7 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
       double input_scale,
       int64_t input_zero_point) override;
 
-  at::Tensor apply_with_input_q_dq_qweight_dq_output_fp32_relu(
+  at::Tensor apply_with_input_q_dq_qweight_dq_relu_output_fp32(
       at::Tensor input,
       double input_scale,
       int64_t input_zero_point) override;
