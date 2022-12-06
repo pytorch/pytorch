@@ -113,8 +113,6 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   };
 
   std::vector<NextHop> path_;
-  TensorView* reference_;
-  std::shared_ptr<Information> reference_info_;
   Selector* selector_;
 
   void compute_spanning_tree();
@@ -123,15 +121,18 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   virtual std::shared_ptr<Information> computeInfoC2P(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const = 0;
+      std::shared_ptr<Information> from_info) = 0;
   virtual std::shared_ptr<Information> computeInfoP2C(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const = 0;
+      std::shared_ptr<Information> from_info) = 0;
   virtual std::shared_ptr<Information> computeInfoSibling(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const = 0;
+      std::shared_ptr<Information> from_info) = 0;
+
+  TensorView* reference_;
+  std::shared_ptr<Information> reference_info_;
 
  public:
   MaxInfoSpanningTree(
@@ -206,15 +207,15 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
   virtual std::shared_ptr<Information> computeInfoC2P(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const override;
+      std::shared_ptr<Information> from_info) override;
   virtual std::shared_ptr<Information> computeInfoP2C(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const override;
+      std::shared_ptr<Information> from_info) override;
   virtual std::shared_ptr<Information> computeInfoSibling(
       TensorView* from,
       TensorView* to,
-      std::shared_ptr<Information> from_info) const override;
+      std::shared_ptr<Information> from_info) override;
 
  private:
   static std::shared_ptr<RootDomainInfo> getReferenceRootIDInfo(TensorView* tv);

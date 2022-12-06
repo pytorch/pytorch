@@ -895,6 +895,17 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
 
   auto& unrollable_inputs_outputs = unrollable_inputs_outputs_entry.get();
 
+  // Create maps to all inputs and outputs based on largest_out (starting at all
+  // positions of largest_out) to see how much of those dimensions map to inputs
+  // and outputs in a way that could be vectorized.
+  auto vectorize_maps_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
+          data_cache, [&first_red_tv]() {
+            return std::make_unique<
+                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
+                vectorize_helper::getAllVectorizedMapsOf(first_red_tv));
+          });
+
   // Vectorize as much as we can
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
@@ -909,8 +920,8 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
-  vectorize_factor = vectorize_helper::expandVectorizationToContigMergedDomains(
-      fusion,
+  vectorize_factor = vectorize_helper::getExpandedVectorization(
+      vectorize_maps_entry.get(),
       runtime_info,
       vectorizable_inputs_outputs,
       first_red_tv,
@@ -1053,10 +1064,8 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
       reference_tv,
       reduction_tvs,
       cached_inputs,
-      cached_outputs);
-  for (auto output : dummy_outputs) {
-    fusion->removeOutput(output);
-  }
+      cached_outputs,
+      dummy_outputs);
 }
 
 } // namespace cuda

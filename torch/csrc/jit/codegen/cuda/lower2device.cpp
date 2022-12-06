@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_vectorize_welford.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 
 #include <list>
@@ -317,6 +318,10 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   dumpExprsIfEnabled(fusion_->exprs(), "Before validateGroupedReductions");
   validateGroupedReductions(fusion_);
 
+  // all of the lookup TVs are fusion inputs
+  dumpExprsIfEnabled(fusion_->exprs(), "Before validateLookupTV");
+  validateLookupTV(fusion_);
+
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   dumpExprsIfEnabled(fusion_->exprs(), "Before SyncMap");
@@ -337,7 +342,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Detects all exprssions that don't need predicates. Depends on
   // nonDivisibleSplitInfo.
   dumpExprsIfEnabled(fusion_->exprs(), "Before build predicateElimination");
-  predicateElimination().build(fusion_);
+  pred_elimination_ = std::make_unique<PredicateElimination>(fusion_);
 
   dumpExprsIfEnabled(fusion_->exprs(), "Before build doubleBufferInfo");
   doubleBufferInfo().build(fusion_);
@@ -412,11 +417,19 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_common_index_allocated =
       allocateCommonIndices(exprs_conditional_loops);
 
+  std::vector<Expr*> exprs_welford_vectorized;
+  if (!isOptionDisabled(DisableOption::WelfordVectorization)) {
+    dumpExprsIfEnabled(exprs_common_index_allocated, "Before vectorizeWelford");
+    exprs_welford_vectorized = vectorizeWelford(exprs_common_index_allocated);
+  } else {
+    exprs_welford_vectorized = exprs_common_index_allocated;
+  }
+
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse
   dumpExprsIfEnabled(exprs_common_index_allocated, "Before insertMagicZero");
   const auto exprs_register_adjusted =
-      insertMagicZero(exprs_common_index_allocated);
+      insertMagicZero(exprs_welford_vectorized);
 
   dumpExprsIfEnabled(exprs_register_adjusted, "Before KIRCleaner");
   const auto exprs_cleaned_up_loops =
@@ -447,7 +460,7 @@ bool GpuLower::hasCurrent() {
 }
 
 void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
-  pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
+  predicateElimination().propagateRemovalInfo(old_expr, new_expr);
   if (old_expr->isA<kir::Allocate>()) {
     auto alloc_info_it =
         localAllocationInfoMap().find(old_expr->as<kir::Allocate>());

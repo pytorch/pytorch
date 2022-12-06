@@ -350,12 +350,20 @@ class TORCH_CUDA_CU_API Scope {
     return exprs_.size();
   }
 
+  auto& at(size_t i) {
+    return exprs_.at(i);
+  }
+
+  auto& at(size_t i) const {
+    return exprs_.at(i);
+  }
+
   auto& operator[](size_t i) {
-    return exprs_[i];
+    return at(i);
   }
 
   auto& operator[](size_t i) const {
-    return exprs_[i];
+    return at(i);
   }
 
   // Insert expr before expression at pos
@@ -893,6 +901,43 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
     auto result = shallowCopy()->as<GroupedGridWelford>();
     result->threadPredicate() = thread_predicate;
     return result;
+  }
+};
+
+//! Represents a WelfordOp with the division by count is hoisted out
+//! of an innermost loop
+class TORCH_CUDA_CU_API VectorizedWelfordOp final : public WelfordOp {
+ public:
+  using WelfordOp::WelfordOp;
+
+  VectorizedWelfordOp(
+      IrBuilderPasskey,
+      const WelfordTriplet& output,
+      const WelfordTriplet& input,
+      const WelfordTriplet& init,
+      Val* count,
+      Val* reciprocal_of_count,
+      Bool* hoisted_predicate);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "VectorizedWelfordOp";
+  }
+
+  //! New count that should be set to outN
+  Val* count() const {
+    return attributeVal(WelfordOp::kNumAttrs);
+  }
+
+  //! Reciprocal of count
+  Val* reciprocalOfCount() const {
+    return attributeVal(WelfordOp::kNumAttrs + 1);
+  }
+
+  //! Predicate of this expression hoisted out of an innermost loop
+  Bool* hoistedPredicate() const {
+    return attributeVal(WelfordOp::kNumAttrs + 2)->as<Bool>();
   }
 };
 

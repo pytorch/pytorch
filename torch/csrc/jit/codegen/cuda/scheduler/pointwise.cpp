@@ -128,6 +128,17 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     n_elems *= elem_counts[ref_i];
   }
 
+  // Create maps to all inputs and outputs based on largest_out (starting at all
+  // positions of largest_out) to see how much of those dimensions map to inputs
+  // and outputs in a way that could be vectorized.
+  auto vectorize_maps_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<
+                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
+                vectorize_helper::getAllVectorizedMapsOf(largest_out));
+          });
+
   // If zero dimensional or zero size, return default parameters
   if (TensorDomain::noReductions(
           TensorDomain::noBroadcasts(largest_out->domain()->domain()))
@@ -144,6 +155,10 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
       return std::make_unique<scheduler_utils::BroadcastMultipleInformation>();
     });
     broadcast_info.get();
+
+    // All cache entries that are expected to be generated in the pointwise
+    // scheduler by registry.cpp::HeuristicSummary::validate() must be created
+    // before hitting this return.
     return std::make_shared<PointwiseParams>("Pointwise heuristics");
   }
 
@@ -242,6 +257,8 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     if (n_elems * 2 > device_multiprocessor_count * kThreadX) {
       int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
 
+      // Don't check the inner most dimension, scheduler assumes there's always
+      // an rhs
       for (const auto break_point_i : c10::irange(ref_root.size())) {
         // If break point is incoherent with view, don't consider breaking here.
         if (!scheduler_utils::breakIsDisjoint(
@@ -344,17 +361,13 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 
-  // Try expanding vectorization to contig merged domains
-  // TODO: This is an expensive function that shouldn't be in heuristics without
-  // caching.
-  auto expanded_vector_word_size =
-      vectorize_helper::expandVectorizationToContigMergedDomains(
-          fusion,
-          runtime_info,
-          vectorizable_inputs_outputs,
-          largest_out,
-          break_point,
-          vectorize_factor);
+  auto expanded_vector_word_size = vectorize_helper::getExpandedVectorization(
+      vectorize_maps_entry.get(),
+      runtime_info,
+      vectorizable_inputs_outputs,
+      largest_out,
+      break_point,
+      vectorize_factor);
 
   expanded_vector_word_size = std::min(
       static_cast<size_t>(max_unroll_factor), expanded_vector_word_size);
@@ -527,6 +540,9 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
           rhs_all_vals_set.count(lhs_val) == 0,
           "Error in pointwise scheduler. LHS and RHS of the 2D scheduler are not disjoint.");
     }
+    TORCH_INTERNAL_ASSERT(
+        rhs_all_vals.size() > 0,
+        "Expecting at least one dimension in the RHS of the pointwise scheduler.");
 
     // Merge rhs, then lhs.
     IterDomain* rhs_id = nullptr;

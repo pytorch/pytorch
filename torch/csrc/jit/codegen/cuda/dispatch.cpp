@@ -120,6 +120,10 @@ void Expr::dispatch(T handler, Expr* expr) {
     ptr(handler)->handle(expr->as<SelectOp>());
     return;
   }
+  if (expr->isStrictlyA<IndexSelectOp>()) {
+    ptr(handler)->handle(expr->as<IndexSelectOp>());
+    return;
+  }
   if (expr->isStrictlyA<RNGOp>()) {
     ptr(handler)->handle(expr->as<RNGOp>());
     return;
@@ -246,6 +250,10 @@ void Expr::dispatch(T handler, Expr* expr) {
   }
   if (expr->isStrictlyA<kir::GroupedGridWelford>()) {
     ptr(handler)->handle(expr->as<kir::GroupedGridWelford>());
+    return;
+  }
+  if (expr->isStrictlyA<kir::VectorizedWelfordOp>()) {
+    ptr(handler)->handle(expr->as<kir::VectorizedWelfordOp>());
     return;
   }
   if (expr->isStrictlyA<kir::AllocateFusedReduction>()) {
@@ -349,6 +357,10 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     ptr(handler)->handle(expr->as<SelectOp>());
     return;
   }
+  if (expr->isStrictlyA<IndexSelectOp>()) {
+    ptr(handler)->handle(expr->as<IndexSelectOp>());
+    return;
+  }
   if (expr->isStrictlyA<RNGOp>()) {
     ptr(handler)->handle(expr->as<RNGOp>());
     return;
@@ -475,6 +487,10 @@ void Expr::constDispatch(T handler, const Expr* expr) {
   }
   if (expr->isStrictlyA<kir::GroupedGridWelford>()) {
     ptr(handler)->handle(expr->as<kir::GroupedGridWelford>());
+    return;
+  }
+  if (expr->isStrictlyA<kir::VectorizedWelfordOp>()) {
+    ptr(handler)->handle(expr->as<kir::VectorizedWelfordOp>());
     return;
   }
   if (expr->isStrictlyA<kir::AllocateFusedReduction>()) {
@@ -713,6 +729,9 @@ void OptOutConstDispatch::handle(const TernaryOp* stmt) {
 void OptOutConstDispatch::handle(const SelectOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const IndexSelectOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const RNGOp* stmt) {
   unhandled(stmt);
 }
@@ -811,6 +830,9 @@ void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
 void OptOutConstDispatch::handle(const kir::GroupedGridWelford* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::VectorizedWelfordOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
@@ -870,6 +892,9 @@ void OptOutDispatch::handle(TernaryOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(SelectOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(IndexSelectOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(RNGOp* stmt) {
@@ -968,6 +993,9 @@ void OptOutDispatch::handle(kir::GridWelford* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GroupedGridWelford* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::VectorizedWelfordOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {

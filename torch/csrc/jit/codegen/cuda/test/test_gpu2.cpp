@@ -4496,7 +4496,9 @@ TEST_F(NVFuserTest, FusionVectorization2_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
+// TODO: Re-enable once vectorization validation is fixed
 TEST_F(NVFuserTest, FusionVectorization3_CUDA) {
+  GTEST_SKIP();
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4559,9 +4561,9 @@ TEST_F(NVFuserTest, FusionVectorizationRFactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto tv0 = makeSymbolicTensor(2);
+  auto tv0 = makeContigTensor(2);
 
-  auto tv1 = makeSymbolicTensor(2);
+  auto tv1 = makeContigTensor(2);
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
@@ -7200,6 +7202,82 @@ TEST_F(NVFuserTest, FusionPredicateElimination7_CUDA) {
   auto ref = t0 + 3;
 
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of failing to eliminate predicates due to
+// unarySetOpInserter. See PR #2136.
+TEST_F(NVFuserTest, FusionPredicateElimination8_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  const int64_t channel_size = 16;
+  const int64_t batch_size = 8;
+  const int64_t hw_size = 56;
+
+  std::vector<int64_t> bcast_size = {batch_size, channel_size, 1, 1};
+  std::vector<int64_t> full_size = {batch_size, channel_size, hw_size, hw_size};
+
+  auto tv0 = makeContigConcreteTensor(bcast_size);
+  auto tv1 = makeContigConcreteTensor(full_size);
+  auto tv2 = makeContigConcreteTensor(bcast_size);
+  auto tv3 = makeContigConcreteTensor(full_size);
+  auto tv4 = makeContigConcreteTensor({channel_size});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+  fusion.addInput(tv3);
+  fusion.addInput(tv4);
+
+  std::vector<int> reduction_axes = {0, 2, 3};
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(tv1->getMaybeRFactorDomain()).size();
+  Val* num_features = IrBuilder::create<Double>(tv1->container(), 1);
+  for (const auto dim : reduction_axes) {
+    num_features = mul(num_features, tv1->domain()->domain()[dim]->extent());
+  }
+
+  auto tv5 = mul(tv1, tv0);
+  auto tv6 = expand(
+      tv2,
+      {IrBuilder::create<Int>(batch_size),
+       IrBuilder::create<Int>(channel_size),
+       IrBuilder::create<Int>(hw_size),
+       IrBuilder::create<Int>(hw_size)});
+  auto tv7 = div(tv6, IrBuilder::create<Double>(3136));
+  auto tv8 = add(tv5, tv7);
+  auto tv9 = sum(tv8, reduction_axes);
+  auto tv10 = broadcast(tv4, {true, false, true, true});
+  auto tv11 = sub(tv3, tv10);
+  auto tv12 = mul(tv8, tv11);
+  auto tv13 = sum(tv12, reduction_axes);
+  auto tv14 = mul(tv13, reciprocal(num_features));
+  auto tv15 = sub(tv3, tv10);
+
+  fusion.addOutput(tv9);
+  fusion.addOutput(tv13);
+  fusion.addOutput(tv8);
+  fusion.addOutput(tv14);
+  fusion.addOutput(tv15);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_t0 = at::randn(bcast_size, options); // tv8 - 0
+  at::Tensor aten_t1 = at::randn(full_size, options); // tv7 - 1
+  at::Tensor aten_t2 = at::randn(bcast_size, options); // tv6 - 2
+  at::Tensor aten_t3 = at::randn(full_size, options); // tv0 - 3
+  at::Tensor aten_t4 = at::randn({channel_size}, options); // tv4 - 4
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs =
+      fec.runFusionWithInputs({aten_t0, aten_t1, aten_t2, aten_t3, aten_t4});
+
+  const auto& compiled_executors =
+      fec.getMostRecentKernelRuntime()->executors();
+  TORCH_CHECK(compiled_executors.size() == 1, "Unexpected scheduling");
+  TORCH_CHECK(
+      !PredicatedChecker::isPredicated(tv6, compiled_executors.at(0).kernel()),
+      "T6 should not be predicated");
 }
 
 TEST_F(NVFuserTest, FusionForceFp16Simple_CUDA) {

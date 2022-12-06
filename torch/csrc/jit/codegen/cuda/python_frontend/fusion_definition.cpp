@@ -38,6 +38,29 @@ const char* dtypeToPyString(Nvf::DataType t) {
   return nullptr;
 }
 
+bool State::operator==(const State& other) const {
+  return (index == other.index) && (stype == other.stype);
+}
+
+bool State::operator!=(const State& other) const {
+  return (index != other.index) || (stype != other.stype);
+}
+
+// Generalized printing of State
+std::ostream& operator<<(std::ostream& os, const State& state) {
+  if (state.stype == StateType::Scalar) {
+    os << "S";
+  } else if (state.stype == StateType::Tensor) {
+    os << "T";
+  } else if (state.stype == StateType::None) {
+    os << "None";
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
+  }
+  os << state.index;
+  return os;
+}
+
 FusionDefinition::FusionDefinition(FusionInterface* fusion, size_t max_length)
     : max_length_(max_length),
       fusion_(fusion),
@@ -118,7 +141,7 @@ void FusionDefinition::print(std::ostream& os) const {
     rec->print(os);
     os << "\n";
   }
-  os << "\n";
+  os << std::endl;
 }
 
 Scalar FusionDefinition::defineScalar() {
@@ -128,9 +151,9 @@ Scalar FusionDefinition::defineScalar() {
   return out;
 }
 
-Tensor FusionDefinition::defineTensor() {
+Tensor FusionDefinition::defineTensor(size_t dims) {
   FUSER_PERF_SCOPE("FusionDefinition::defineTensor");
-  Tensor out(recording_state_.size());
+  Tensor out(recording_state_.size(), dims);
   recording_state_.emplace_back(out(), StateType::Tensor);
   return out;
 }

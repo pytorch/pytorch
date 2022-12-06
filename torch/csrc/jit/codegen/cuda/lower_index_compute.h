@@ -72,7 +72,7 @@ IndexFromIdGraph getPredicateIndexingFromIdGraph(
 //!
 //! This information is crtiical in resolving indexing associated with complex
 //! broadcast patterns. Check FusionComplexBCast* test cases as well as
-//! FusionAdvancedIndexing* for examples where resolving indices from IterDomain
+//! Indexing* tests for examples where resolving indices from IterDomain
 //! transformations can be challenging.
 //!
 //! The source of this challenge is due to inling patterns where the IterDomains

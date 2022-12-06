@@ -411,7 +411,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto def = pred->definition();
     const bool has_alloc = alloc_map_.find(pred) != alloc_map_.end();
     if (def != nullptr && !has_alloc) {
-      code_ << "(" << gen(def) << ")";
+      code_ << "(" << genInline(def) << ")";
     } else if (pred->isConst()) {
       code_ << (*pred->value() ? "true" : "false");
     } else {
@@ -423,7 +423,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto def = d->definition();
     const bool has_alloc = alloc_map_.find(d) != alloc_map_.end();
     if (def != nullptr && !has_alloc) {
-      code_ << "(" << gen(def) << ")";
+      code_ << "(" << genInline(def) << ")";
     } else if (d->isConst()) {
       auto val = *d->value();
       // note: default inf/nan doesn't work and should be replaced with macros
@@ -469,7 +469,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto def = c->definition();
     const bool has_alloc = alloc_map_.find(c) != alloc_map_.end();
     if (def != nullptr && !has_alloc) {
-      code_ << "(" << gen(def) << ")";
+      code_ << "(" << genInline(def) << ")";
     } else if (c->isConst()) {
       code_ << "std::complex<double>" << *c->value();
     } else {
@@ -1061,6 +1061,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const IndexSelectOp* sop) final {
+    // generate code
+    if (!print_inline_) {
+      indent() << gen(sop->output(0));
+      if (!sop->output(0)->isScalar()) {
+        code_ << "\n";
+        indent() << kTab;
+      }
+      code_ << " = ";
+    }
+
+    code_ << gen(sop->input(0)) << ";\n";
+  }
+
   std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
     if (isVolta(macro)) {
@@ -1438,6 +1452,41 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       }
       indent() << kTab << data_type << "(0));\n";
     }
+  }
+
+  void handle(const kir::VectorizedWelfordOp* wop) final {
+    const auto out_var = wop->outVar();
+    const auto out_avg = wop->outAvg();
+    const auto out_N = wop->outN();
+    const auto in_avg = wop->inAvg();
+
+    bool output_gmem =
+        std::any_of(wop->outputs().begin(), wop->outputs().end(), [](Val* out) {
+          return out->as<kir::TensorIndex>()->view()->getMemoryType() ==
+              MemoryType::Global;
+        });
+
+    auto pred_bool = wop->hoistedPredicate()->getBool();
+    bool is_predicated = !(pred_bool.has_value() && pred_bool.value());
+
+    ArgumentBuilder func_args;
+    func_args.arg(gen(out_avg));
+    func_args.arg(gen(out_var));
+    func_args.arg(gen(out_N));
+    func_args.arg(gen(in_avg));
+    func_args.arg(gen(wop->reciprocalOfCount()));
+    func_args.arg(gen(wop->count()));
+    if (is_predicated) {
+      func_args.arg(gen(wop->hoistedPredicate()));
+    }
+
+    ArgumentBuilder template_args;
+    template_args.arg(out_avg->getDataType().value());
+    if (is_predicated) {
+      template_args.arg(output_gmem);
+    }
+
+    indent() << genCall("welfordVectorized", template_args, func_args) << ";\n";
   }
 
   // Support ReductionOp and WelfordOp

@@ -173,7 +173,7 @@ std::vector<Expr*> replaceInputsInExpr(
 //
 // For example two expressions may have domains: [I0], [I1] Yet we
 // won't know the ordering unless we see a domain with: [I0, I1]. This happened
-// in advancedIndexing9 (also see AdvancedLowering6) test when merging T5 with
+// in Indexing9 (also see Indexing17) test when merging T5 with
 // the group containing T10 (cache of T5, which is post broadcasted output) and
 // T6(pre broadcasted output).
 // T5 had the domain [0, 1, 2, 3, 4] produce at 3

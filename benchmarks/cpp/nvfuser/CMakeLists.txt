@@ -23,6 +23,7 @@ if(USE_CUDA)
     transpose.cpp
     matmul.cpp
     timm.cpp
+    indexselect.cpp
     utils.cpp
     main.cpp)
 

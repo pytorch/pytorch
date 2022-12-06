@@ -72,9 +72,12 @@ void mapMaybeSwizzleOp(
     IterDomain* id) {
   if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
     // Map each input to its corresponding output on the given
-    //  disjoint set.
-    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
-    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+    // disjoint set if this is a loop swizzle. Loop swizzles don't impact
+    // indexing, only iteration order.
+    if (swizzle_2d->swizzleMode() == SwizzleMode::Loop) {
+      disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+      disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+    }
   }
 }
 
@@ -399,20 +402,28 @@ void IterDomainGraph::build(Fusion* fusion) {
             c_tv->domain()->domain(),
             c2f_root_map);
 
-        auto c2f_map = replay_FasC.getReplay();
-
         // Map the entire replay map between the multiple
-        // consumers even for the Parallel map as they share the same
-        // loop.
-        for (auto c_id : getSortedKeys(c2f_map, Statement::lessThan)) {
-          auto f_id = c2f_map.at(c_id);
-          // Map the id's together
-          permissive_nodes_.mapEntries(f_id, c_id);
-          exact_nodes_.mapEntries(f_id, c_id);
-          if (idIsALeafDomain(f_id, first_output_tv)) {
-            loop_nodes_.mapEntries(f_id, c_id);
+        // consumers
+        auto c2f_disjoint_sets = replay_FasC.getIterDomainEquivalence();
+        for (auto disjoint_set : c2f_disjoint_sets.disjointSets()) {
+          if (disjoint_set->empty()) {
+            continue;
           }
-          sibling_sets_.mapEntries(f_id, c_id);
+          auto id0 = *disjoint_set->begin();
+          for (auto id1 : disjoint_set->vector()) {
+            permissive_nodes_.mapEntries(id0, id1);
+            exact_nodes_.mapEntries(id0, id1);
+            sibling_sets_.mapEntries(id0, id1);
+          }
+        }
+
+        // Map all entries for the Loop map as they share the same loops.
+        for (auto f_id : first_output_tv->domain()->domain()) {
+          auto disjoint_set = c2f_disjoint_sets.getDisjointSetOf(f_id);
+          auto id0 = *(disjoint_set.begin());
+          for (auto id1 : disjoint_set) {
+            loop_nodes_.mapEntries(id0, id1);
+          }
         }
       }
 

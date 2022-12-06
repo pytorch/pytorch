@@ -1,6 +1,7 @@
 #pragma once
-#include <c10/macros/Export.h>
+#include <iostream>
 
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 
 //! nvFuser Fusion IR namespace abbreviation
@@ -26,14 +27,21 @@ enum class StateType {
   None,
 };
 
-struct State {
+struct TORCH_CUDA_CU_API State {
   State(size_t _index, StateType _stype) : index(_index), stype(_stype) {}
+
+  bool operator==(const State& other) const;
+  bool operator!=(const State& other) const;
 
   //! A unique index to identifiy each recorded state item.
   size_t index;
   //! StateType is either: Tensor or Scalar
   StateType stype;
 };
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const State& state);
 
 //! The Tensor and Scalar classes are used to define separate function signtures
 //! in the FusionDefintion to identify the appropriate Operator function.
@@ -43,8 +51,8 @@ struct State {
 //!   add(Tensor* arg1, Tensor* arg2) -> Tensor*
 //!   add(Tensor* arg1, Scalar* arg2) -> Tensor*
 //!   add(Scalar* arg1, Scalar* arg2) -> Scalar*
-struct Tensor {
-  Tensor(size_t _index) : index(_index) {}
+struct TORCH_CUDA_CU_API Tensor {
+  Tensor(size_t _index, size_t _dims) : index(_index), dims(_dims) {}
 
   size_t operator()() const {
     return index;
@@ -52,9 +60,10 @@ struct Tensor {
 
   //! A unique index to identifiy each recorded state item.
   size_t index;
+  size_t dims;
 };
 
-struct Scalar {
+struct TORCH_CUDA_CU_API Scalar {
   Scalar(size_t _index) : index(_index) {}
 
   size_t operator()() const {
@@ -103,7 +112,7 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! Defines a Scalar State Record
   Scalar defineScalar();
   //! Defines a Tensor State Record
-  Tensor defineTensor();
+  Tensor defineTensor(size_t dims);
   //! Defines a Record that records the operation required to
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);

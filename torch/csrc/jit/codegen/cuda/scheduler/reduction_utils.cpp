@@ -221,7 +221,8 @@ void multiReductionInliner(
     TensorView* reference_tv,
     std::vector<TensorView*> reduction_tvs,
     std::vector<TensorView*> cached_inputs,
-    std::vector<std::pair<TensorView*, TensorView*>> cached_outputs) {
+    std::vector<std::pair<TensorView*, TensorView*>> cached_outputs,
+    std::vector<TensorView*> dummy_outputs) {
   // Propagate transformations before we rfactor the other reductions
   TransformPropagator propagator(reference_tv);
   MaxRootDomainInfoSpanningTree(reference_tv).traverse(&propagator);
@@ -331,6 +332,11 @@ void multiReductionInliner(
         }
       }
     }
+  }
+
+  // Remove dummy outputs as they can inadvertently affect CA positions
+  for (auto output : dummy_outputs) {
+    fusion->removeOutput(output);
   }
 
   // Inline the schedule

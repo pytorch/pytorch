@@ -90,8 +90,13 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   }
 
   IterDomain* selected_id = nullptr;
+  IterDomain* idx_selected_id = nullptr;
   if (SelectOp* sop = dynamic_cast<SelectOp*>(consumer_tv_->definition())) {
     selected_id = sop->getSelectAxis();
+  } else if (
+      IndexSelectOp* sop =
+          dynamic_cast<IndexSelectOp*>(consumer_tv_->definition())) {
+    idx_selected_id = sop->getSelectAxis();
   }
 
   std::unordered_map<IterDomain*, IterDomain*> dom_map;
@@ -107,6 +112,10 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     // mapping for it.
     if (producer_id == selected_id) {
       itp++;
+      continue;
+    } else if (producer_id == idx_selected_id) {
+      itp++;
+      itc++;
       continue;
     }
 

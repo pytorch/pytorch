@@ -77,6 +77,32 @@ class TORCH_CUDA_CU_API SelectOp : public Expr {
   }
 };
 
+class TORCH_CUDA_CU_API IndexSelectOp : public Expr {
+ public:
+  using Expr::Expr;
+
+  IndexSelectOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in1,
+      int dim,
+      IterDomain* select_id,
+      Val* in3);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "IndexSelectOp";
+  }
+
+  IterDomain* getSelectAxis() const {
+    return attribute(0)->as<IterDomain>();
+  }
+  int dim() const {
+    return attribute(1)->as<Attribute<int>>()->value;
+  }
+};
+
 class TORCH_CUDA_CU_API ARangeOp : public Expr {
  public:
   using Expr::Expr;
@@ -646,6 +672,7 @@ class TORCH_CUDA_CU_API WelfordTriplet {
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   using Expr::Expr;
+  static constexpr int kNumAttrs = 4;
 
   WelfordOp(
       IrBuilderPasskey,

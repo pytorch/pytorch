@@ -220,101 +220,101 @@ TensorDomain* TransformReplay::fullSelfReplay(
 std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     const TensorView* producer,
     const TensorView* consumer,
-    int consumer_compute_at_axis,
+    int consumer_pos,
     const RootDomainMap& root_map,
     bool replay_swizzle) {
   FUSER_PERF_SCOPE("TransformReplay::replayPasC");
-
-  // If this is a reduction operation, we may call transform_replay on the
-  // tensor view. When this happens, just return thet target view.
   if (producer == consumer) {
     return {producer->domain(), producer->nDims()};
   }
 
-  if (consumer_compute_at_axis < 0) {
-    consumer_compute_at_axis += (int)consumer->nDims() + 1;
+  if (consumer_pos < 0) {
+    consumer_pos += (int)consumer->nDims() + 1;
   }
 
   TORCH_INTERNAL_ASSERT(
-      consumer_compute_at_axis >= 0 &&
-          (unsigned int)consumer_compute_at_axis <= consumer->nDims(),
+      consumer_pos >= 0 && (unsigned int)consumer_pos <= consumer->nDims(),
       "Invalid axis in transform replayPasC.");
 
   // consumer ids we need to match in producer
-  std::vector<IterDomain*> consumer_CA_ids(
+  std::vector<IterDomain*> target_consumer_ids(
       consumer->domain()->domain().begin(),
-      consumer->domain()->domain().begin() + consumer_compute_at_axis);
+      consumer->domain()->domain().begin() + consumer_pos);
 
   // Instead of replaying from the root, lets try to play forward the history of
   // producer if they match ops on consumer. Enforce if we modify an rfactor
   // axis that those ops must match.
+  //
   // Swizzles should not be skipped in the BestEffortReplay matching in this
-  //  case. If a swizzle mismatch is found, by default BestEffortReplay forwards
-  //  the mapping to the swizzle outputs, which would help in the case of CaMap
-  //  build but in the case of transform replay, would need to do the replay
-  //  from the inputs of the swizzles instead of the outputs, and therefore
-  //  should not skip swizzles in here.
+  // case. If a swizzle mismatch is found, by default BestEffortReplay forwards
+  // the mapping to the swizzle outputs, which would help in the case of CaMap
+  // build but in the case of transform replay, would need to do the replay from
+  // the inputs of the swizzles instead of the outputs, and therefore should not
+  // skip swizzles in here.
   auto forward_replay = BestEffortReplay::replayPasC(
-      producer,
-      consumer,
-      consumer_compute_at_axis,
-      root_map,
-      false,
-      !replay_swizzle);
+      producer, consumer, consumer_pos, root_map, false, !replay_swizzle);
 
   // Make a new map based on all the leaves resulting from best effort replay
   id_map forwarded_replay_map;
-  auto forward_dangling_leaves = forward_replay.getUnorderedLeafIDs();
+  auto forwarded_replay_leaves = forward_replay.getUnorderedLeafIDs();
   for (auto entry : forward_replay.getReplay()) {
-    if (forward_dangling_leaves.find(entry.second) !=
-        forward_dangling_leaves.end()) {
+    if (forwarded_replay_leaves.find(entry.second) !=
+        forwarded_replay_leaves.end()) {
       forwarded_replay_map[entry.first] = entry.second;
-      forward_dangling_leaves.erase(entry.second);
+      forwarded_replay_leaves.erase(entry.second);
     }
   }
 
   // Replay producer dimensions.
   ReplayTransformations replay_PasC(
-      consumer_CA_ids, forwarded_replay_map, false, replay_swizzle);
+      target_consumer_ids, forwarded_replay_map, false, replay_swizzle);
 
-  auto leaf_ids(replay_PasC.getUnorderedLeafIDs());
+  auto producer_leaf_ids(replay_PasC.getUnorderedLeafIDs());
 
-  // Remove all ids that map to the compute at axis, we're going to replay the
-  // rest, track all dims needed to match consumer CA dims
-  std::vector<IterDomain*> needed_dims;
-  for (auto c_id : consumer_CA_ids) {
+  // Remove all ids from producer_leaf_ids that map within the consumer
+  // position, we're going to try to further replay the rest of the producer
+  // dimensions based on the producers original transformations. Save all dims
+  // that mapped to target_consumer_ids.
+  std::vector<IterDomain*> dims_mapped2target;
+  for (auto c_id : target_consumer_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
+      // check if c_id depends on selected domain
+      auto selected_domain =
+          ir_utils::getSelectedDomainIfTvIsIndexSelectOutput(consumer);
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() || c_id->isVectorComponent(),
+          c_id->isBroadcast() || c_id->isGather() ||
+              c_id->isVectorComponent() ||
+              (selected_domain &&
+               DependencyCheck::isDependencyOf(selected_domain, c_id)),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
       continue;
     }
     TORCH_INTERNAL_ASSERT(
-        leaf_ids.find(it->second) != leaf_ids.end(),
+        producer_leaf_ids.find(it->second) != producer_leaf_ids.end(),
         "Replayed id to match consumer id ",
         c_id,
         " should be a leaf in replay map.");
-    leaf_ids.erase(it->second);
-    needed_dims.push_back(it->second);
+    producer_leaf_ids.erase(it->second);
+    dims_mapped2target.push_back(it->second);
   }
 
-  // leaf_ids now contains all producer ID products that are not used to satisfy
-  // the computeAt Turn into a  map so we can play forward these IDs in producer
-  // (if possible):
+  // producer_leaf_ids now contains all producer ID products that are not used
+  // to satisfy the computeAt. Put them in a replay map so we can play forward
+  // these IDs in producer (if possible):
   id_map producer_self_replay_map;
-  for (auto entry : leaf_ids) {
+  for (auto entry : producer_leaf_ids) {
     producer_self_replay_map[entry.first] = entry.first;
   }
 
-  for (auto entry : forward_dangling_leaves) {
+  for (auto entry : forwarded_replay_leaves) {
     producer_self_replay_map[entry.first] = entry.first;
   }
 
-  // Check which root domains were used to produce the leaf_ids. We may have
-  // picked up extra roots in consumer because of broadcast forwarding.
+  // Check which root domains were used to produce the producer_leaf_ids. We may
+  // have picked up extra roots in consumer because of broadcast forwarding.
   std::vector<Val*> unordered_non_root_leaf_vals;
   for (auto leaf_id : replay_PasC.getUnorderedLeafIDs()) {
     if (leaf_id.first->definition() == nullptr) {
@@ -344,8 +344,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   // the map to forward their transformations.
   for (auto producer_root_id : producer_root) {
     if (all_processed_ids.find(producer_root_id) == all_processed_ids.end() &&
-        std::find(needed_dims.begin(), needed_dims.end(), producer_root_id) ==
-            needed_dims.end()) {
+        std::find(
+            dims_mapped2target.begin(),
+            dims_mapped2target.end(),
+            producer_root_id) == dims_mapped2target.end()) {
       producer_self_replay_map[producer_root_id] = producer_root_id;
     }
   }
@@ -381,11 +383,17 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   std::vector<IterDomain*> new_IDs;
   std::unordered_set<IterDomain*> used_IDs;
   // Add axes in (1)
-  for (auto c_id : consumer_CA_ids) {
+  for (auto c_id : target_consumer_ids) {
     auto it = replay_PasC.getReplay().find(c_id);
     if (it == replay_PasC.getReplay().end()) {
+      // check if c_id depends on selected domain
+      auto selected_domain =
+          ir_utils::getSelectedDomainIfTvIsIndexSelectOutput(consumer);
       TORCH_INTERNAL_ASSERT(
-          c_id->isBroadcast() || c_id->isGather() || c_id->isVectorComponent(),
+          c_id->isBroadcast() || c_id->isGather() ||
+              c_id->isVectorComponent() ||
+              (selected_domain &&
+               DependencyCheck::isDependencyOf(selected_domain, c_id)),
           "Could not find axis, ",
           c_id,
           ", requested in replay.");
@@ -395,7 +403,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     used_IDs.emplace(it->second);
   }
 
-  unsigned int producer_compute_at_axis = new_IDs.size();
+  unsigned int producer_pos = new_IDs.size();
 
   // Add axes in (2)
   for (auto c_id : consumer->domain()->domain()) {
@@ -439,13 +447,13 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
       new_IDs,
       producer->domain()->contiguity());
 
-  return {replayed, producer_compute_at_axis};
+  return {replayed, producer_pos};
 }
 
 std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     const TensorView* consumer,
     const TensorView* producer,
-    int producer_compute_at_axis,
+    int producer_pos,
     const RootDomainMap& root_map,
     bool replay_swizzle) {
   FUSER_PERF_SCOPE("TransformReplay::replayCasP");
@@ -455,62 +463,56 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   if (consumer == producer)
     return {consumer->domain(), consumer->nDims()};
 
-  if (producer_compute_at_axis < 0) {
-    producer_compute_at_axis += (int)producer->nDims() + 1;
+  if (producer_pos < 0) {
+    producer_pos += (int)producer->nDims() + 1;
   }
 
   TORCH_INTERNAL_ASSERT(
-      producer_compute_at_axis >= 0 &&
-          (unsigned int)producer_compute_at_axis <= producer->nDims(),
+      producer_pos >= 0 && (unsigned int)producer_pos <= producer->nDims(),
       "Invalid axis in transform replayCasP. Consumer: ",
       consumer->toString(),
       " Producer: ",
       producer->toString());
 
   // producer ids we need to match in consumer
-  std::vector<IterDomain*> producer_CA_ids(
+  std::vector<IterDomain*> target_producer_ids(
       producer->domain()->domain().begin(),
-      producer->domain()->domain().begin() + producer_compute_at_axis);
-  producer_CA_ids = TensorDomain::noReductions(producer_CA_ids);
+      producer->domain()->domain().begin() + producer_pos);
+  target_producer_ids = TensorDomain::noReductions(target_producer_ids);
 
   // Instead of replaying from the root, lets try to forward the history of
   // consumer if they match ops on producer. Enforce if we modify an rfactor
   // axis that those ops match.
-  // Note on skip_swizzles:
-  //  Similar constraints apply in replayPasC. See the corresponding
-  // notes there on not skipping swizzles in the matching here.
+  //
+  // Note on skip_swizzles: Similar constraints apply in replayPasC. See the
+  // corresponding notes there on not skipping swizzles in the matching here.
   BestEffortReplay forward_replay = BestEffortReplay::replayCasP(
-      consumer,
-      producer,
-      producer_compute_at_axis,
-      root_map,
-      false,
-      !replay_swizzle);
+      consumer, producer, producer_pos, root_map, false, !replay_swizzle);
 
   // Track dangling leaves which can be produced in
   // BestEffortReplay::replayCasP these don't have any equivalent in producer
   // so they're not in the map. We will simply map them to themselves so we
   // don't lose them.
   id_map forwarded_replay_map;
-  auto forward_dangling_leaves = forward_replay.getUnorderedLeafIDs();
+  auto forwarded_replay_leaves = forward_replay.getUnorderedLeafIDs();
   for (auto entry : forward_replay.getReplay()) {
-    if (forward_dangling_leaves.find(entry.second) !=
-        forward_dangling_leaves.end()) {
+    if (forwarded_replay_leaves.find(entry.second) !=
+        forwarded_replay_leaves.end()) {
       forwarded_replay_map[entry.first] = entry.second;
-      forward_dangling_leaves.erase(entry.second);
+      forwarded_replay_leaves.erase(entry.second);
     }
   }
 
   // Replay producer dimensions.
   ReplayTransformations replay_CasP(
-      producer_CA_ids, forwarded_replay_map, replay_swizzle);
+      target_producer_ids, forwarded_replay_map, replay_swizzle);
 
-  auto leaf_ids(replay_CasP.getUnorderedLeafIDs());
+  auto consumer_leaf_ids(replay_CasP.getUnorderedLeafIDs());
 
   // Remove all ids that map to the compute at axis, we're going to replay the
   // rest, track all dims that are needed to match producer CA dims
-  std::vector<IterDomain*> needed_dims;
-  for (auto p_id : producer_CA_ids) {
+  std::vector<IterDomain*> dims_mapped2target;
+  for (auto p_id : target_producer_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
     if (it == replay_CasP.getReplay().end()) {
       // skip squeezed broadcast
@@ -525,28 +527,28 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
       continue;
     }
     TORCH_INTERNAL_ASSERT(
-        leaf_ids.find(it->second) != leaf_ids.end(),
+        consumer_leaf_ids.find(it->second) != consumer_leaf_ids.end(),
         "Replayed id to match producer id ",
         p_id,
         " should be a leaf in replay map.");
-    leaf_ids.erase(it->second);
-    needed_dims.push_back(it->second);
+    consumer_leaf_ids.erase(it->second);
+    dims_mapped2target.push_back(it->second);
   }
 
-  // leaf_ids now contains all consumer ID products that are not used to satisfy
-  // the computeAt. Turn into a  map so we can play forward these IDs in
-  // consumer (if possible):
+  // consumer_leaf_ids now contains all consumer ID products that are not used
+  // to satisfy the computeAt. Turn into a  map so we can play forward these IDs
+  // in consumer (if possible):
   id_map consumer_self_replay_map;
-  for (auto entry : leaf_ids) {
+  for (auto entry : consumer_leaf_ids) {
     consumer_self_replay_map[entry.first] = entry.first;
   }
 
-  for (auto entry : forward_dangling_leaves) {
+  for (auto entry : forwarded_replay_leaves) {
     consumer_self_replay_map[entry.first] = entry.first;
   }
 
-  // Check which root domains were used to produce the leaf_ids. We may have
-  // picked up extra roots in consumer because of broadcast forwarding.
+  // Check which root domains were used to produce the consumer_leaf_ids. We may
+  // have picked up extra roots in consumer because of broadcast forwarding.
   std::vector<Val*> unordered_non_root_leaf_vals;
   for (auto leaf_id : replay_CasP.getUnorderedLeafIDs()) {
     if (leaf_id.first->definition() == nullptr) {
@@ -567,8 +569,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
             processed_roots.begin(), processed_roots.end(), consumer_root_id) ==
             processed_roots.end() &&
         // Don't re-add roots that may have directly mapped in the replay
-        std::find(needed_dims.begin(), needed_dims.end(), consumer_root_id) ==
-            needed_dims.end()) {
+        std::find(
+            dims_mapped2target.begin(),
+            dims_mapped2target.end(),
+            consumer_root_id) == dims_mapped2target.end()) {
       consumer_self_replay_map[consumer_root_id] = consumer_root_id;
     }
   }
@@ -605,7 +609,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   std::vector<IterDomain*> new_IDs;
   std::unordered_set<IterDomain*> used_IDs;
   // Add axes in (1)
-  for (auto p_id : producer_CA_ids) {
+  for (auto p_id : target_producer_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
     if (it == replay_CasP.getReplay().end()) {
       // skip squeezed broadcast
@@ -638,7 +642,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     }
   }
 
-  unsigned int consumer_compute_at_axis = new_IDs.size();
+  unsigned int consumer_pos = new_IDs.size();
 
   // Add axes in (3)
   for (auto id : consumer->domain()->domain()) {
@@ -665,7 +669,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
       new_IDs,
       consumer->domain()->contiguity());
 
-  return {replayed, consumer_compute_at_axis};
+  return {replayed, consumer_pos};
 }
 
 // replay Producer as Consumer

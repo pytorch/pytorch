@@ -414,20 +414,22 @@ void validateKernelOutputs(
 
 namespace {
 
-// Finds a fusion input or output tensor to validate its stides
-// for vectorization.
-// Returns a pair consisting of a flag indicating it's a fusion input
-// and an integer position within in the input or output tensor list.
+// Finds a fusion input or output tensor, this function is used to grab tensors
+// to validate the strides of the tensors for vectorization.
+//
+// Returns a pair consisting of a flag indicating if it's a fusion input (else
+// is output) and an integer position within in the input or output tensor list.
 std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
     TensorView* producer_tv,
     TensorView* consumer_tv,
     Fusion* fusion) {
-  std::vector<std::pair<bool, int>> vectorized_input_output;
+  std::vector<std::pair<bool, int>> input_output;
 
-  // When the producer is a fusion input, validate only the producer
-  // and assume the consumer to be vectorizable. Similarly, when the
-  // consumer is a fusion output, validate the consumer and assume the
-  // producer is vectorizable.
+  // When the producer is a fusion input, only return the producer
+  // (vectorization validation assumes consumer of input is vectorizable).
+  // Similarly, when the consumer is a fusion output, only return the consumer
+  // (vectorization validation assumes producer of output is vectorizable). If
+  // producer is input and consumer is output, return both.
 
   if (producer_tv->isFusionInput()) {
     auto producer_it = std::find(
@@ -438,7 +440,7 @@ std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
         producer_tv,
         " in fusion inputs.");
     auto pos = std::distance(fusion->inputs().begin(), producer_it);
-    vectorized_input_output.push_back(
+    input_output.push_back(
         std::make_pair<bool, int>(true, static_cast<int>(pos)));
   }
 
@@ -451,11 +453,11 @@ std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
         consumer_tv,
         " in fusion outputs.");
     auto pos = std::distance(fusion->outputs().begin(), consumer_it);
-    vectorized_input_output.push_back(
+    input_output.push_back(
         std::make_pair<bool, int>(false, static_cast<int>(pos)));
   }
 
-  return vectorized_input_output;
+  return input_output;
 }
 
 //! Returns the information of vectorized input/output tensors
@@ -559,14 +561,22 @@ void validateAlignedVectorizeExtents(
     vectorized_merged_domain_extent *= extent_val->as<int64_t>();
   }
 
-  TORCH_INTERNAL_ASSERT(
-      vectorized_merged_domain_extent % info.word_size == 0,
-      "Error vectorizing, ",
-      info.consumer_tv->toString(),
-      " as the extent of the indexed domain, ",
-      vectorized_merged_domain_extent,
-      ", is not divisible by vector word size ",
-      info.word_size);
+  // TODO: Rewrite validation of the vectorized dimension, we can't just used a
+  // single merged extent because we could be splitting a dimension then merging
+  // it in order to the right of it. Contig merged index simply isn't exactly
+  // what we need to validate for vectorization, and we're relying on better
+  // vectorization support than that would offer. This validation needs to be
+  // rewritten based on updated indexing logic that traverses loop->rfactor
+  // domains and tracks partial mappings like scheduler/vectorize_helper.cpp
+  //
+  // TORCH_INTERNAL_ASSERT(
+  //     vectorized_merged_domain_extent % info.word_size == 0,
+  //     "Error vectorizing, ",
+  //     info.consumer_tv->toString(),
+  //     " as the extent of the indexed domain, ",
+  //     vectorized_merged_domain_extent,
+  //     ", is not divisible by vector word size ",
+  //     info.word_size);
 }
 
 void validateAlignedVectorizedFusionInputOutput(
@@ -780,12 +790,11 @@ void validateVectorizedTensors(
 
 namespace {
 
-template <typename EXPR_EVALUATOR>
 void bindInputForExprEvaluation(
     Val* val,
     const ArgAbstract* arg,
     bool check_consistency,
-    EXPR_EVALUATOR& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   if (val->getValType() == ValType::TensorView) {
     TensorView* cg_tensor = val->as<TensorView>();
     auto root_domain =
@@ -877,11 +886,11 @@ void bindInputForExprEvaluation(
 
 } // namespace
 
-ExpressionEvaluator bindKernelInputs(
+ExpressionEvaluator bindInputs(
     const KernelArgumentHolder& args,
-    kir::Kernel* kernel,
+    Fusion* kernel,
     bool check_consistency) {
-  FUSER_PERF_SCOPE("executor_utils::BindKernelInputs");
+  FUSER_PERF_SCOPE("executor_utils::bindInputs");
 
   TORCH_INTERNAL_ASSERT(
       kernel->inputs().size() == args.size(),
@@ -893,30 +902,6 @@ ExpressionEvaluator bindKernelInputs(
   for (const auto i : c10::irange(inputs.size())) {
     bindInputForExprEvaluation(
         inputs[i], args[i], check_consistency, expr_eval);
-  }
-  return expr_eval;
-}
-
-ExpressionEvaluator bindFusionInputs(
-    const KernelArgumentHolder& args,
-    Fusion* fusion) {
-  FUSER_PERF_SCOPE("executor_utils::BindFusionInputs");
-
-  auto inputs = fusion->inputs();
-  TORCH_INTERNAL_ASSERT(
-      inputs.size() == args.size(),
-      "Something went wrong configuring launch. Inputs do not match.\n",
-      "inputs: ",
-      ir_utils::toString(inputs),
-      " args size: ",
-      args.size());
-
-  ExpressionEvaluator expr_eval;
-
-  // This should probably move to EvaluationContext as we may want to bind
-  // input values frequently. Bind fusion input values to runtime values.
-  for (const auto i : c10::irange(inputs.size())) {
-    bindInputForExprEvaluation(inputs[i], args[i], true, expr_eval);
   }
   return expr_eval;
 }

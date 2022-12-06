@@ -23,13 +23,10 @@ bool hasMatchingTransformations(TensorView* ref, TensorView* other) {
   auto replay =
       BestEffortReplay(
           other->domain()->domain(), ref->domain()->domain(), ref_2_other)
-          .getReplay();
+          .getIterDomainEquivalence();
 
   for (const auto i : c10::irange(ref->nDims())) {
-    auto ref_id = ref->axis(i);
-    auto other_id = other->axis(i);
-    auto it = replay.find(ref_id);
-    if (it == replay.end() || it->second != other_id) {
+    if (!replay.permissiveAreMapped(ref->axis(i), other->axis(i))) {
       return false;
     }
   }

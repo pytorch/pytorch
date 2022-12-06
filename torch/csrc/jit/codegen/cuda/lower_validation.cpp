@@ -72,23 +72,21 @@ class ValidateSiblings : public IterVisitor {
         id_map[ref_root[i]] = sibling->getRootDomain().at(i);
       }
 
-      BestEffortReplay replay(
-          sibling->domain()->domain(), ref_output->domain()->domain(), id_map);
+      auto replay = BestEffortReplay(
+                        sibling->domain()->domain(),
+                        ref_output->domain()->domain(),
+                        id_map)
+                        .getIterDomainEquivalence();
+
       for (const auto i : c10::irange(ref_ndims)) {
-        auto it = replay.getReplay().find(ref_output->axis(i));
         TORCH_INTERNAL_ASSERT(
-            it != replay.getReplay().end(),
+            replay.strictAreMapped(ref_output->axis(i), sibling->axis(i)),
             "Matching sibling ID not found. Expr: ",
             expr->toString(),
             "Ref ID: ",
-            ref_output->axis(i)->toString());
-        auto sibling_id = it->second;
-        TORCH_INTERNAL_ASSERT(
-            sibling->axis(i) == sibling_id,
-            "Invalid matching sibling ID detected. Expr: ",
-            expr->toString(),
+            ref_output->axis(i)->toString(),
             "Sibling ID: ",
-            sibling_id->toString());
+            sibling->axis(i)->toString());
       }
     }
   }
@@ -1308,6 +1306,17 @@ void validateGroupedReductions(Fusion* fusion) {
           ". Up to ",
           kMaxNumGroupedReductions,
           " reductions are allowed.");
+    }
+  }
+}
+
+void validateLookupTV(Fusion* fusion) {
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<SelectOp>() || expr->isA<IndexSelectOp>()) {
+      TORCH_CHECK(
+          expr->input(0)->isFusionInput(),
+          "Lookup input must be a fusion input: ",
+          expr->toString());
     }
   }
 }

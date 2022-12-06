@@ -22,6 +22,45 @@ __inline__ __device__ void welfordCombine(
   a_N = ab_N;
 }
 
+template <typename T, bool OutputGmem>
+__inline__ __device__ void welfordVectorized(
+    T& a_avg,
+    T& a_M2,
+    nvfuser_index_t& a_N,
+    const T b_avg,
+    const T b_N_div_ab_N,
+    const nvfuser_index_t ab_N,
+    const bool pred) {
+  // Want only predicated statements and don't want to have
+  // "if", but for gmem output writes can be illegal, so needs to
+  // bail out here.
+  if (OutputGmem && !pred) {
+    return;
+  }
+  T predicated_b_avg = pred ? b_avg : a_avg;
+  T delta0 = predicated_b_avg - a_avg;
+  a_avg += delta0 * b_N_div_ab_N;
+  T delta1 = predicated_b_avg - a_avg;
+  a_M2 += delta0 * delta1;
+  a_N = ab_N;
+}
+
+// Non predicated version
+template <typename T>
+__inline__ __device__ void welfordVectorized(
+    T& a_avg,
+    T& a_M2,
+    nvfuser_index_t& a_N,
+    const T b_avg,
+    const T b_N_div_ab_N,
+    const nvfuser_index_t ab_N) {
+  T delta0 = b_avg - a_avg;
+  a_avg += delta0 * b_N_div_ab_N;
+  T delta1 = b_avg - a_avg;
+  a_M2 += delta0 * delta1;
+  a_N = ab_N;
+}
+
 // [Z,Y,X]_THREADS is the number of participating threads in the z, y, x
 // dimension of the block.
 template <

@@ -113,8 +113,8 @@ void clearL2Cache() {
   torch::Tensor t1 = torch::clone(t0);
 };
 
-TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
-  auto used_tvs = ir_utils::allTvs(gpulw.kernel()->as<Fusion>());
+TensorView* loweredTv(TensorView* tv, kir::Kernel* kernel) {
+  auto used_tvs = ir_utils::allTvs(kernel);
   TensorView* matching_tv = nullptr;
   for (auto lowered_tv : used_tvs) {
     if (lowered_tv->name() == tv->name()) {
@@ -125,12 +125,21 @@ TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
   return matching_tv;
 }
 
+TensorView* loweredTv(TensorView* tv, GpuLower& gpulw) {
+  return loweredTv(tv, gpulw.kernel());
+}
+
 class PredicatedChecker : public kir::IrVisitor {
  public:
   // Checks if the provided tv is written to within a non-trivial conditional
   static bool isPredicated(TensorView* tv, GpuLower& gpulw) {
     PredicatedChecker checker(
         loweredTv(tv, gpulw), gpulw.kernel()->topLevelExprs());
+    return checker.is_predicated_;
+  }
+
+  static bool isPredicated(TensorView* tv, kir::Kernel* kernel) {
+    PredicatedChecker checker(loweredTv(tv, kernel), kernel->topLevelExprs());
     return checker.is_predicated_;
   }
 
@@ -328,6 +337,29 @@ struct TransformPropagatorWithCheck : public TransformPropagator {
     TORCH_CHECK(TransformReplay::fullSelfMatching(from, to));
   }
   using TransformPropagator::TransformPropagator;
+};
+
+class KernelExprVisitor : private kir::IrVisitor {
+ public:
+  static std::vector<Expr*> getAllExprs(const kir::Kernel* kernel) {
+    KernelExprVisitor visitor(kernel);
+    return visitor.all_exprs_;
+  }
+
+ private:
+  KernelExprVisitor(const kir::Kernel* kernel) {
+    handle(kernel->topLevelExprs());
+  }
+
+  using kir::IrVisitor::handle;
+
+  void handle(Expr* expr) final {
+    all_exprs_.push_back(expr);
+    kir::IrVisitor::handle(expr);
+  }
+
+ private:
+  std::vector<Expr*> all_exprs_;
 };
 
 } // namespace

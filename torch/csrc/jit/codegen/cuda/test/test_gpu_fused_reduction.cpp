@@ -48,29 +48,6 @@ using namespace at::indexing;
 
 namespace {
 
-class KernelExprVisitor : private kir::IrVisitor {
- public:
-  static std::vector<Expr*> getAllExprs(const kir::Kernel* kernel) {
-    KernelExprVisitor visitor(kernel);
-    return visitor.all_exprs_;
-  }
-
- private:
-  KernelExprVisitor(const kir::Kernel* kernel) {
-    handle(kernel->topLevelExprs());
-  }
-
-  using kir::IrVisitor::handle;
-
-  void handle(Expr* expr) final {
-    all_exprs_.push_back(expr);
-    kir::IrVisitor::handle(expr);
-  }
-
- private:
-  std::vector<Expr*> all_exprs_;
-};
-
 void validateNoParallelBroadcastExist(kir::Kernel* kernel) {
   for (auto expr : KernelExprVisitor::getAllExprs(kernel)) {
     BroadcastOp* bc = dynamic_cast<BroadcastOp*>(expr);
@@ -369,7 +346,7 @@ TEST_F(NVFuserTest, FusionGridAllreduce6_CUDA) {
     GTEST_SKIP() << "Not enough SMs to run this test";
   }
 
-  auto tv0 = makeSymbolicTensor(2);
+  auto tv0 = makeContigTensor(2);
   fusion.addInput(tv0);
 
   auto tv1 = set(tv0);

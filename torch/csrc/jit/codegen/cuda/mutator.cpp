@@ -38,7 +38,7 @@ void OptOutMutator::registerMutation(Val* val, Val* mutation) {
       ", ",
       mutation->dtype(),
       ")");
-  mutations[val] = mutation;
+  mutations_[val] = mutation;
 }
 
 void OptOutMutator::mutate(Bool* b) {}
@@ -173,13 +173,16 @@ void OptOutMutator::mutate(Expr* op) {
 
   auto container = op->container();
   auto newObjectFunc = op->newObjectFunc();
-  container->removeExpr(op);
-  newObjectFunc(container, mutated_inputs, mutated_outputs, mutated_attrs);
+  removeExpr(container, op);
+  auto new_expr =
+      newObjectFunc(container, mutated_inputs, mutated_outputs, mutated_attrs);
+  registerNewExpr(new_expr);
 }
 
-void OptOutMutator::removeExpr(IrContainer* container, Expr* expr) {
+void OptOutMutator::removeExpr(IrContainer* container, Expr* expr) const {
   container->removeExpr(expr);
 }
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

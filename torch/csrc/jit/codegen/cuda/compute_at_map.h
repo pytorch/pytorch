@@ -319,7 +319,7 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   // If another expression is already in the set where inputs and outputs
   // exactly match with the expression to add along with the other parameters of
   // the transformation (like split's factor, or swizzles types) then the
-  // expression will not be added as it would be an "duplicate" transformation.
+  // expression will not be added as it would be a "duplicate" transformation.
   std::unordered_map<
       std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
       std::vector<Expr*>>

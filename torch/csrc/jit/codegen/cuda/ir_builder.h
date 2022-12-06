@@ -77,8 +77,9 @@ class TORCH_CUDA_CU_API IrBuilder {
   // Ternary operations
   static Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 
+  static Val* newScalar(DataType dtype);
+
  private:
-  static Val* newResult(DataType dtype);
   static Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
   static Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 };
@@ -106,9 +107,14 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
   static Val* mulExpr(Val* lhs, Int::ScalarType rhs);
   static Val* mulExpr(Int* lhs, Int* rhs);
   static Val* mulExpr(Val* lhs, Val* rhs);
+  static Val* divExpr(Val* lhs, Val* rhs);
+  static Val* ceilDivExpr(Val* lhs, Val* rhs);
+  static Val* modExpr(Val* lhs, Val* rhs);
   static Val* andExpr(Val* lhs, Val* rhs);
   static Val* maxExpr(Val* lhs, Val* rhs);
   static Val* minExpr(Val* lhs, Val* rhs);
+
+  static Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 };
 
 template <typename T>

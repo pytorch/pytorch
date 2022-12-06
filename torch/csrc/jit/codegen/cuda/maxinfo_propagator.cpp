@@ -19,9 +19,9 @@ MaxInfoSpanningTree::MaxInfoSpanningTree(
     TensorView* reference,
     std::shared_ptr<Information> reference_info,
     Selector* selector)
-    : reference_(reference),
-      reference_info_(reference_info),
-      selector_(selector) {}
+    : selector_(selector),
+      reference_(reference),
+      reference_info_(reference_info) {}
 
 void MaxInfoSpanningTree::compute_spanning_tree() {
   // A set that allows us to quickly tell if a tensor has been replayed. If yes,
@@ -236,7 +236,7 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
     computeInfoP2C(
         TensorView* from,
         TensorView* to,
-        std::shared_ptr<Information> from_info) const {
+        std::shared_ptr<Information> from_info) {
   RootDomainInfo result;
 
   TensorView* producer = from;
@@ -293,7 +293,7 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
     computeInfoC2P(
         TensorView* from,
         TensorView* to,
-        std::shared_ptr<Information> from_info) const {
+        std::shared_ptr<Information> from_info) {
   RootDomainInfo result;
 
   TensorView* producer = to;
@@ -407,7 +407,7 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
     computeInfoSibling(
         TensorView* from,
         TensorView* to,
-        std::shared_ptr<Information> from_info) const {
+        std::shared_ptr<Information> from_info) {
   RootDomainInfo result;
 
   const auto& from_root_id_info =

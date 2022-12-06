@@ -65,7 +65,7 @@ TensorIndex::TensorIndex(
       std::all_of(
           indices.begin(),
           indices.end(),
-          [](Val* v) { return v->dtype() == DataType::Int; }),
+          [](Val* v) { return isIntegralType(v->dtype()); }),
       "Cannot index with a value other than an int.");
   indices_.erase(
       std::remove_if(
@@ -641,6 +641,22 @@ GroupedGridWelford::GroupedGridWelford(
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedGridWelford)
+
+VectorizedWelfordOp::VectorizedWelfordOp(
+    IrBuilderPasskey passkey,
+    const WelfordTriplet& output,
+    const WelfordTriplet& input,
+    const WelfordTriplet& init,
+    Val* count,
+    Val* reciprocal_of_count,
+    Bool* hoisted_predicate)
+    : WelfordOp(passkey, output, input, init, false) {
+  addAttribute(count);
+  addAttribute(reciprocal_of_count);
+  addAttribute(hoisted_predicate);
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(VectorizedWelfordOp)
 
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,

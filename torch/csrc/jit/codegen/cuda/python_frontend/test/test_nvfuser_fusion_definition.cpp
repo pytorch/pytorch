@@ -57,7 +57,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
              << e.what();
     }
 
-    auto t0 = fd.defineTensor();
+    auto t0 = fd.defineTensor(2);
     try {
       fd.defineRecord(new TensorRecord(
           {fd.recordingState(t0())}, {3}, {true}, Nvf::DataType::Float));
@@ -75,7 +75,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
       FAIL() << "Unexpected assert during Scalar Record creation! " << e.what();
     }
 
-    auto t2 = fd.defineTensor();
+    auto t2 = fd.defineTensor(2);
     try {
       fd.defineRecord(
           new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
@@ -141,7 +141,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
              << e.what();
     }
 
-    auto t0 = fd.defineTensor();
+    auto t0 = fd.defineTensor(2);
     try {
       fd.defineRecord(new TensorRecord(
           {fd.recordingState(t0())}, {3}, {true}, Nvf::DataType::Float));
@@ -159,7 +159,7 @@ TEST_F(NVFuserTest, FusionDefinition_CUDA) {
       FAIL() << "Unexpected assert during Scalar Record creation! " << e.what();
     }
 
-    auto t2 = fd.defineTensor();
+    auto t2 = fd.defineTensor(2);
     try {
       fd.defineRecord(
           new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(

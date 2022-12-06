@@ -78,11 +78,11 @@ class PredicateAnalyzer : public OptOutDispatch {
     }
 
     auto pairwise_map = PairwiseRootDomainMap(producer, consumer);
-    auto c2p =
+    DisjointSets<IterDomain*> disjoint_c2p_ids =
         BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
-            .getReplay();
+            .getIterDomainEquivalence();
 
-    PredicateAnalyzer analyzer(c2p);
+    PredicateAnalyzer analyzer(disjoint_c2p_ids);
 
     for (auto id : consumer->domain()->domain()) {
       if (analyzer.needsPredicate(id)) {
@@ -94,8 +94,8 @@ class PredicateAnalyzer : public OptOutDispatch {
   }
 
  private:
-  PredicateAnalyzer(const std::unordered_map<IterDomain*, IterDomain*>& c2p_map)
-      : c2p_map_(c2p_map) {}
+  PredicateAnalyzer(const DisjointSets<IterDomain*>& disjoint_c2p_ids)
+      : disjoint_c2p_ids_(disjoint_c2p_ids) {}
 
   // Returns true if no out-of-bound accesses could occur with a
   // producer
@@ -117,7 +117,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 
     // If the producer has a matching domain, it should not cause
     // out-of-bound accesses
-    if (c2p_map_.find(consumer_id) != c2p_map_.end()) {
+    if (disjoint_c2p_ids_.mappingExists(consumer_id)) {
       return;
     }
 
@@ -160,7 +160,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 
  private:
   //! BestEffort map from consumer IDs to producer IDs
-  const std::unordered_map<IterDomain*, IterDomain*>& c2p_map_;
+  const DisjointSets<IterDomain*>& disjoint_c2p_ids_;
   bool needs_predicate_ = false;
 };
 
@@ -168,19 +168,20 @@ class PredicateChcker : public IterVisitor {
  public:
   static bool needsPredicate(
       Expr* expr,
-      const std::unordered_set<const Expr*>& non_predicated_exprs) {
+      const PredicateElimination& pred_elimination) {
     if (!ir_utils::isTvOp(expr)) {
       return false;
     }
 
-    PredicateChcker checker(non_predicated_exprs);
+    PredicateChcker checker(pred_elimination);
     checker.handle(expr);
     return checker.needs_predicate_;
   }
 
  private:
-  PredicateChcker(const std::unordered_set<const Expr*>& non_predicated_exprs)
-      : non_predicated_exprs_(non_predicated_exprs) {}
+  PredicateChcker(const PredicateElimination& pred_elimination)
+      : pred_elimination_(pred_elimination),
+        non_predicated_exprs_(pred_elimination.getNonPredicatedExprs()) {}
 
   using IterVisitor::handle;
 
@@ -785,8 +786,7 @@ class PredicateChcker : public IterVisitor {
         //  predicate. In fact this is the only way we can
         //  use mma at the moment since we could not predicate
         //  mma ops without guaranteeing warp uniform results.
-        auto input_init =
-            GpuLower::current()->predicateElimination().getInitValue(input);
+        auto input_init = pred_elimination_.getInitValue(input);
 
         // TODO:
         //   clean up this to support more generic prolog fusion.
@@ -819,14 +819,19 @@ class PredicateChcker : public IterVisitor {
   }
 
  private:
+  const PredicateElimination& pred_elimination_;
   const std::unordered_set<const Expr*>& non_predicated_exprs_;
   bool needs_predicate_ = false;
 };
 
 } // namespace
 
+PredicateElimination::PredicateElimination(Fusion* fusion) {
+  traverseTo(fusion, fusion->outputs());
+}
+
 bool PredicateElimination::needsPredicate(Expr* expr) const {
-  return PredicateChcker::needsPredicate(expr, non_predicated_exprs_);
+  return PredicateChcker::needsPredicate(expr, *this);
 }
 
 void PredicateElimination::handle(Expr* expr) {
@@ -988,10 +993,6 @@ Val* PredicateElimination::getInitValue(TensorView* tv) const {
   } else {
     return init_val;
   }
-}
-
-void PredicateElimination::build(Fusion* fusion) {
-  traverseTo(fusion, fusion->outputs());
 }
 
 std::string PredicateElimination::toString() const {

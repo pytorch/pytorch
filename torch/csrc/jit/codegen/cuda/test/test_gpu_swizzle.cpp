@@ -178,7 +178,7 @@ TEST_F(NVFuserTest, FusionSwizzleMapping_CUDA) {
   //[O, 4, 4]
 
   tv2->computeAt(tv3, 1);
-  tv2->swizzle(Swizzle2DType::ZShape, -2, -1);
+  tv2->swizzle(Swizzle2DType::ZShape, -2, -1, SwizzleMode::Loop);
 
   // Inlining a producer into a swizzled consumer is ok
   tv1->computeAt(tv2, -1);
@@ -189,45 +189,44 @@ TEST_F(NVFuserTest, FusionSwizzleMapping_CUDA) {
   // Check producer to consumer map,
   //  i.e. unswizzled tensor to swizzled tensor map
   //----------------------------------------------------------
-  auto p2c = BestEffortReplay::replayCasP(tv2, tv1, -1, root_map).getReplay();
-  auto swizzle_x_it0 = p2c.find(tv1->axis(-2));
-  auto swizzle_y_it0 = p2c.find(tv1->axis(-1));
+  auto p2c_disjoint_id_map =
+      BestEffortReplay::replayCasP(tv2, tv1, -1, root_map)
+          .getIterDomainEquivalence();
   // P2C map should exist and both the x and y map should
   //  map to the output of the swizzle op.
   TORCH_INTERNAL_ASSERT(
-      swizzle_x_it0 != p2c.end() && swizzle_y_it0 != p2c.end());
+      p2c_disjoint_id_map.mappingExists(tv1->axis(-2)) &&
+      p2c_disjoint_id_map.mappingExists(tv1->axis(-1)));
+
   TORCH_INTERNAL_ASSERT(
-      swizzle_x_it0->second == tv2->axis(-2) &&
-      swizzle_y_it0->second == tv2->axis(-1));
+      p2c_disjoint_id_map.strictAreMapped(tv1->axis(-2), tv2->axis(-2)) &&
+      p2c_disjoint_id_map.strictAreMapped(tv1->axis(-1), tv2->axis(-1)));
 
   // Check consumer to producer map,
   //  i.e. swizzled tensor to unswizzled tensor map
   //----------------------------------------------------------
-  auto c2p = BestEffortReplay::replayPasC(tv1, tv2, -1, root_map).getReplay();
+  auto c2p_disjoint_id_map =
+      BestEffortReplay::replayPasC(tv1, tv2, -1, root_map)
+          .getIterDomainEquivalence();
 
   auto swizzle_op = tv2->axis(-1)->definition()->as<Swizzle2D>();
-
-  // Find mapping for swizzle inputs
-  auto swizzle_x_it1 = c2p.find(swizzle_op->inX());
-  auto swizzle_y_it1 = c2p.find(swizzle_op->inY());
-
-  // Find mapping for swizzle outputs
-  auto swizzle_x_it2 = c2p.find(swizzle_op->outX());
-  auto swizzle_y_it2 = c2p.find(swizzle_op->outY());
 
   // Input of swizzle ops will not be mapped to any
   //  by BestEffortReplay, as BestEffortReplay has to be
   //  one to one. IdGraph will further map them together.
   TORCH_INTERNAL_ASSERT(
-      swizzle_x_it1 == c2p.end() && swizzle_y_it1 == c2p.end());
+      !p2c_disjoint_id_map.mappingExists(swizzle_op->inX()) &&
+      !p2c_disjoint_id_map.mappingExists(swizzle_op->inY()));
 
   // Mapping for swizzle outputs should be mapped and should
   //  also map to the corresponding axes on the unswizzled tensor.
   TORCH_INTERNAL_ASSERT(
-      swizzle_x_it2 != c2p.end() && swizzle_y_it2 != c2p.end());
+      p2c_disjoint_id_map.mappingExists(swizzle_op->outX()) &&
+      p2c_disjoint_id_map.mappingExists(swizzle_op->outY()));
+
   TORCH_INTERNAL_ASSERT(
-      swizzle_x_it2->second == tv1->axis(-2) &&
-      swizzle_y_it2->second == tv1->axis(-1));
+      p2c_disjoint_id_map.strictAreMapped(swizzle_op->outX(), tv1->axis(-2)) &&
+      p2c_disjoint_id_map.strictAreMapped(swizzle_op->outY(), tv1->axis(-1)));
 
   // Check id graph behavior
   //----------------------------------------------------------

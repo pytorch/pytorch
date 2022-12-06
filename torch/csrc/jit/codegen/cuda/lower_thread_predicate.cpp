@@ -85,17 +85,16 @@ ParallelTypeBitmap avoidRedundantWrites(const TensorView* out_tv) {
   // For now this is enabled for shared memory buffers, global memory buffers
   // undergoing a reduction, and global memory buffers with terminating outputs.
   // This could be extended to all global memory buffer transactions, but in the
-  // test AdvancedIndexing11 there's a case where an intermediate global buffer
-  // is set and used to perform a broadcast. At the moment a grid sync is not
-  // being inserted here, and it's generally safe since it's just a set. We
-  // could enable this more generally for global memory buffers, but would have
-  // to insert a sync or a grid broadcast in that example. For now the
-  // approach is to only do this on a grid buffer (not undergoing a reduction)
-  // if there are no other uses in the kernel.
+  // test Indexing11 there's a case where an intermediate global buffer is set
+  // and used to perform a broadcast. At the moment a grid sync is not being
+  // inserted here, and it's generally safe since it's just a set. We could
+  // enable this more generally for global memory buffers, but would have to
+  // insert a sync or a grid broadcast in that example. For now the approach is
+  // to only do this on a grid buffer (not undergoing a reduction) if there are
+  // no other uses in the kernel.
   //
-  // TODO: Revisit if something like AdvancedIndexing11 could be happening at
-  // the same time of a global reduction in a way that could produce an
-  // incorrect result.
+  // TODO: Revisit if something like Indexing11 could be happening at the same
+  // time of a global reduction in a way that could produce an incorrect result.
   const bool is_reduction = ir_utils::isReductionOp(out_tv->definition());
   if (!(out_tv->getMemoryType() == MemoryType::Shared ||
         (out_tv->getMemoryType() == MemoryType::Global && is_reduction) ||

@@ -7,6 +7,7 @@
 
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <typeinfo>
 
 namespace torch {
@@ -65,7 +66,8 @@ enum class DebugDumpOption {
   Ptx, //! Dump compiled PTX
   BankConflictInfo, //! Dump bank confliction info
   SyncMap, //! RAW dependency info
-  LowerVerbose // Print all passes' transform in GpuLower::lower
+  LowerVerbose, //! Print all passes' transform in GpuLower::lower
+  EndOfOption //! Placeholder for counting the number of elements
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
@@ -82,7 +84,9 @@ enum class DisableOption {
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
   Nvtx, //! Disable NVTX instrumentation
-  PredicateElimination //! Disable predicate elimination
+  PredicateElimination, //! Disable predicate elimination
+  WelfordVectorization, //! Disable vectorizaton of Welford ops
+  EndOfOption //! Placeholder for counting the number of elements
 };
 
 TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);
@@ -96,6 +100,8 @@ enum class EnableOption {
   KernelProfile, //! Enable intra-kernel performance profiling
   LinearDecomposition, //! Enable linear-bias decomposition
   ConvDecomposition, //! Enable conv-bias decomposition
+  GraphOp, //! Enable graphOps(index_select/gather/scatter)
+  EndOfOption //! Placeholder for counting the number of elements
 };
 
 TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);
@@ -280,6 +286,7 @@ struct Printer<T> {
 
 SPECIALIZE_PRINTER(bool);
 SPECIALIZE_PRINTER(int);
+SPECIALIZE_PRINTER(std::string);
 SPECIALIZE_PRINTER(int64_t);
 SPECIALIZE_PRINTER(DataType);
 SPECIALIZE_PRINTER(MemoryType);
@@ -295,7 +302,32 @@ SPECIALIZE_PRINTER(std::vector<int64_t>);
 
 #undef SPECIALIZE_PRINTER
 
-#endif
+#endif // if 0
+
+// Stringification with delimiter
+template <typename Iterator>
+std::string toDelimitedString(
+    Iterator first,
+    Iterator last,
+    std::string delim = ", ") {
+  std::stringstream ss;
+  bool first_val = true;
+  for (auto it = first; it != last; ++it) {
+    if (!first_val) {
+      ss << delim;
+    }
+    ss << *it;
+    first_val = false;
+  }
+  return ss.str();
+}
+
+template <typename Printable>
+std::string toDelimitedString(
+    const std::vector<Printable>& vec,
+    std::string delim = ", ") {
+  return toDelimitedString(vec.begin(), vec.end(), delim);
+}
 
 } // namespace cuda
 } // namespace fuser

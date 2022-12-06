@@ -458,6 +458,7 @@ class NaiveTypePropagator {
       case prim::t_copy:
       case prim::transpose_copy:
       case prim::unsqueeze_copy:
+      case aten::index_select:
       case prim::view_copy: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         copyScalarTypeAndDeviceToOutput(out_type, node);

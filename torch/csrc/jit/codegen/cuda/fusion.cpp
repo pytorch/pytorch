@@ -126,7 +126,10 @@ Fusion::~Fusion() {
 }
 
 void Fusion::clear() noexcept {
-  FUSER_PERF_SCOPE("Fusion clear");
+  // Perf scope isn't safe here as this function could be called by
+  // the Fusion destructor and the scope initializer could call the
+  // constructor of Trace, which could throw an exception.
+  // FUSER_PERF_SCOPE("Fusion clear");
 
   IrContainer::clear();
 

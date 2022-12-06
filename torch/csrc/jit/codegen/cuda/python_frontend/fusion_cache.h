@@ -11,8 +11,6 @@ namespace Nvf = torch::jit::fuser::cuda;
 
 namespace nvfuser {
 
-struct RecordFunctor;
-
 //! \struct FusionCacheEntry
 //! \brief Is the container for a Node in the cache contained in the
 //! FusionCache that is organized as a prefix tree.

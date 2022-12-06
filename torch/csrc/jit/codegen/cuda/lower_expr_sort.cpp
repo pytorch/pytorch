@@ -326,7 +326,7 @@ class ExprSegmentationSorter {
   // can segmenet all combinations we haven't previously looked at.
   bool fallback_mode_enabled_ = false;
 
-  // We need to track ID resolution, see AdvancedLowering6. For loops need
+  // We need to track ID resolution, see Indexing17 test. For loops need
   // to be resolved from inner most to outer most. We therefore track
   // loop dependencies where inner most loops need to be fully resolved before
   // we can resolve the next outer loop. We track this by looking at all tensor
@@ -424,7 +424,7 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   // level
   for (const auto i : c10::irange(neighbors.size())) {
     if (std::abs(neighbors[i]->payload()->level - payload()->level) > 1) {
-      can_merge[i] = false;
+      can_merge.at(i) = false;
     }
   }
 
@@ -432,37 +432,37 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   // with another node, make sure the resulting edge wouldn't have a level
   // difference of 1
   for (const auto i : c10::irange(neighbors.size())) {
-    if (!can_merge[i]) {
+    if (!can_merge.at(i)) {
       continue;
     }
 
-    for (auto neighbor_neighbor : neighbors[i]->getNeighbors()) {
+    for (auto neighbor_neighbor : neighbors.at(i)->getNeighbors()) {
       // Don't check self
-      if (neighbor_neighbor == neighbors[i]) {
+      if (neighbor_neighbor == neighbors.at(i)) {
         continue;
       }
       if (neighbor_neighbor->payload()->merged) {
         // check neighbor_neighbor level
         if (std::abs(neighbor_neighbor->payload()->level - payload()->level) <=
             1) {
-          can_merge[i] = false;
+          can_merge.at(i) = false;
         }
         if (std::abs(
                 neighbor_neighbor->payload()->level -
-                neighbors[i]->payload()->level) <= 1) {
-          can_merge[i] = false;
+                neighbors.at(i)->payload()->level) <= 1) {
+          can_merge.at(i) = false;
         }
 
         // check neighbor_neighber->merged->level
         if (std::abs(
                 neighbor_neighbor->payload()->merge_with->payload()->level -
                 payload()->level) <= 1) {
-          can_merge[i] = false;
+          can_merge.at(i) = false;
         }
         if (std::abs(
                 neighbor_neighbor->payload()->merge_with->payload()->level -
-                neighbors[i]->payload()->level) <= 1) {
-          can_merge[i] = false;
+                neighbors.at(i)->payload()->level) <= 1) {
+          can_merge.at(i) = false;
         }
       }
     }
@@ -470,9 +470,9 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
 
   std::vector<ExprGroup*> merge_candidates;
   for (const auto i : c10::irange(neighbors.size())) {
-    if ((can_merge[i] && !fallback_mode_enabled) ||
-        (!can_merge[i] && fallback_mode_enabled)) {
-      merge_candidates.push_back(neighbors[i]);
+    if ((can_merge.at(i) && !fallback_mode_enabled) ||
+        (!can_merge.at(i) && fallback_mode_enabled)) {
+      merge_candidates.push_back(neighbors.at(i));
     }
   }
   return merge_candidates;

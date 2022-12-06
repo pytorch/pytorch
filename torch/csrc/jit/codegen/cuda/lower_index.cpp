@@ -196,6 +196,31 @@ void IndexLowering::handle(const TernaryOp* top) {
   GpuLower::current()->propagateExprInfo(top, back());
 }
 
+void IndexLowering::handle(const IndexSelectOp* sop) {
+  auto lowered_index = lowerSrcIndex(sop->input(1), sop->output(0));
+  auto lowered_index_cast = lowered_index;
+
+  // If the type of the index tensor is different from the kernel
+  // index type, promote it to the kernel index type
+  if (GpuLower::current()->kernel()->indexType() !=
+      sop->input(1)->getDataType().value()) {
+    lowered_index_cast =
+        IrBuilder::newScalar(GpuLower::current()->kernel()->indexType());
+    IrBuilder::create<UnaryOp>(
+        UnaryOpType::Cast, lowered_index_cast, lowered_index);
+  }
+
+  const std::unordered_map<IterDomain*, Val*> override_index = {
+      {sop->getSelectAxis(), lowered_index_cast}};
+  const auto lookup =
+      lowerSrcIndex(sop->input(0), sop->output(0), override_index);
+
+  const auto out = lowerDstIndex(sop->output(0));
+  pushBack(IrBuilder::create<IndexSelectOp>(
+      out, lookup, sop->dim(), sop->getSelectAxis(), lowered_index));
+  GpuLower::current()->propagateExprInfo(sop, back());
+}
+
 void IndexLowering::handle(const SelectOp* sop) {
   const auto input = lowerSrcIndex(
       sop->input(0), sop->output(0), sop->getIndexOverridingMap());

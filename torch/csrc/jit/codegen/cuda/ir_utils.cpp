@@ -155,397 +155,31 @@ std::vector<int> normalizeOld2New(
 namespace ValReplacement {
 // Create New Expr given producer - [an input for the expression]
 // Creates a new Expr substituting current with producer
-struct SubstituteInExpr : public OptInDispatch {
+struct SubstituteInExpr : public OptOutMutator {
  public:
   static Expr* subsitute(Expr* expr, Val* reference, Val* substitute) {
     TORCH_INTERNAL_ASSERT(
         expr != nullptr && reference != nullptr && substitute != nullptr,
         "Nullptr arg found.");
     SubstituteInExpr sie(reference, substitute);
-    sie.handle(expr);
-    TORCH_INTERNAL_ASSERT(
-        sie.expr_ != nullptr,
-        "Substitution failed of ",
-        reference,
-        " with ",
-        substitute);
-    return sie.expr_;
+    sie.mutate(expr);
+    // if nothing substituted, then return the original expr
+    return sie.expr_ == nullptr ? expr : sie.expr_;
+  }
+
+ protected:
+  virtual void removeExpr(IrContainer*, Expr*) const override {}
+
+  virtual void registerNewExpr(Expr* expr) override {
+    expr_ = expr;
   }
 
  private:
-  explicit SubstituteInExpr(Val* reference, Val* substitute)
-      : reference_(reference), substitute_(substitute) {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
-  void handle(FullOp* full_expr) final {
-    auto out = reference_->sameAs(full_expr->output(0)) ? substitute_
-                                                        : full_expr->output(0);
-    expr_ = IrBuilder::create<FullOp>(
-        full_expr->container(),
-        out,
-        full_expr->getFillValue(),
-        full_expr->dtype());
-  }
-
-  void handle(ARangeOp* arange_expr) final {
-    auto start = reference_->sameAs(arange_expr->start())
-        ? substitute_
-        : arange_expr->start();
-    auto end = reference_->sameAs(arange_expr->end()) ? substitute_
-                                                      : arange_expr->end();
-    auto step = reference_->sameAs(arange_expr->step()) ? substitute_
-                                                        : arange_expr->step();
-    auto out = reference_->sameAs(arange_expr->output(0))
-        ? substitute_
-        : arange_expr->output(0);
-    expr_ = IrBuilder::create<ARangeOp>(
-        arange_expr->container(),
-        out,
-        start,
-        end,
-        step,
-        arange_expr->dtype(),
-        arange_expr->getLinearLogicalIndex());
-  }
-
-  void handle(EyeOp* eye_expr) final {
-    auto out = reference_->sameAs(eye_expr->output(0)) ? substitute_
-                                                       : eye_expr->output(0);
-    expr_ = IrBuilder::create<EyeOp>(
-        eye_expr->container(),
-        out,
-        eye_expr->dtype(),
-        eye_expr->getIndex1(),
-        eye_expr->getIndex2());
-  }
-
-  void handle(UnaryOp* unary_expr) final {
-    auto in =
-        reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();
-    auto out =
-        reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
-    expr_ = IrBuilder::create<UnaryOp>(
-        unary_expr->container(), unary_expr->getUnaryOpType(), out, in);
-  }
-
-  void handle(BinaryOp* binary_expr) final {
-    auto lhs = reference_->sameAs(binary_expr->lhs()) ? substitute_
-                                                      : binary_expr->lhs();
-    auto rhs = reference_->sameAs(binary_expr->rhs()) ? substitute_
-                                                      : binary_expr->rhs();
-    auto out = reference_->sameAs(binary_expr->out()) ? substitute_
-                                                      : binary_expr->out();
-
-    expr_ = IrBuilder::create<BinaryOp>(
-        binary_expr->container(),
-        binary_expr->getBinaryOpType(),
-        out,
-        lhs,
-        rhs);
-  }
-
-  void handle(TernaryOp* ternary_expr) final {
-    auto in1 = reference_->sameAs(ternary_expr->in1()) ? substitute_
-                                                       : ternary_expr->in1();
-    auto in2 = reference_->sameAs(ternary_expr->in2()) ? substitute_
-                                                       : ternary_expr->in2();
-    auto in3 = reference_->sameAs(ternary_expr->in3()) ? substitute_
-                                                       : ternary_expr->in3();
-    auto out = reference_->sameAs(ternary_expr->out()) ? substitute_
-                                                       : ternary_expr->out();
-    expr_ = IrBuilder::create<TernaryOp>(
-        ternary_expr->container(),
-        ternary_expr->getTernaryOpType(),
-        out,
-        in1,
-        in2,
-        in3);
-  }
-
-  void handle(SelectOp* select_expr) final {
-    auto input = reference_->sameAs(select_expr->input(0))
-        ? substitute_
-        : select_expr->input(0);
-    auto index = reference_->sameAs(select_expr->input(1))
-        ? substitute_
-        : select_expr->input(1);
-    auto out = reference_->sameAs(select_expr->output(0))
-        ? substitute_
-        : select_expr->output(0);
-    expr_ = IrBuilder::create<SelectOp>(
-        select_expr->container(),
-        out,
-        input,
-        select_expr->getSelectAxis(),
-        index);
-  }
-
-  void handle(RNGOp* rng_expr) final {
-    std::vector<Val*> subsituted_params;
-    for (auto v : rng_expr->getParameters()) {
-      subsituted_params.emplace_back(reference_->sameAs(v) ? substitute_ : v);
-    }
-    auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
-                                                       : rng_expr->output(0);
-    expr_ = IrBuilder::create<RNGOp>(
-        rng_expr->container(),
-        rng_expr->getRNGOpType(),
-        out,
-        rng_expr->dtype(),
-        subsituted_params,
-        rng_expr->getRNGOffset(),
-        rng_expr->getPhiloxIndex());
-  }
-
-  void handle(ReductionOp* reduction_expr) final {
-    auto init = reference_->sameAs(reduction_expr->init())
-        ? substitute_
-        : reduction_expr->init();
-    auto out = reference_->sameAs(reduction_expr->out())
-        ? substitute_
-        : reduction_expr->out();
-    auto in = reference_->sameAs(reduction_expr->in()) ? substitute_
-                                                       : reduction_expr->in();
-
-    expr_ = IrBuilder::create<ReductionOp>(
-        reduction_expr->container(),
-        reduction_expr->getReductionOpType(),
-        init,
-        out,
-        in);
-  }
-
-  void handle(GroupedReductionOp* grouped_reduction_expr) final {
-    std::vector<Val*> outputs;
-    std::transform(
-        grouped_reduction_expr->outputs().begin(),
-        grouped_reduction_expr->outputs().end(),
-        std::back_inserter(outputs),
-        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
-
-    std::vector<Val*> inputs;
-    std::transform(
-        grouped_reduction_expr->inputs().begin(),
-        grouped_reduction_expr->inputs().end(),
-        std::back_inserter(inputs),
-        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
-
-    std::vector<Val*> init_vals;
-    std::transform(
-        grouped_reduction_expr->initVals().begin(),
-        grouped_reduction_expr->initVals().end(),
-        std::back_inserter(init_vals),
-        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
-
-    expr_ = IrBuilder::create<GroupedReductionOp>(
-        grouped_reduction_expr->container(),
-        grouped_reduction_expr->getReductionOpTypes(),
-        init_vals,
-        outputs,
-        inputs);
-  }
-
-  void handle(BroadcastOp* broadcast_expr) final {
-    auto out = reference_->sameAs(broadcast_expr->out())
-        ? substitute_
-        : broadcast_expr->out();
-    auto in = reference_->sameAs(broadcast_expr->in()) ? substitute_
-                                                       : broadcast_expr->in();
-
-    expr_ = IrBuilder::create<BroadcastOp>(
-        broadcast_expr->container(),
-        out,
-        in,
-        broadcast_expr->getBroadcastDimFlags());
-  }
-
-  void handle(SqueezeOp* squeeze_expr) final {
-    auto out = reference_->sameAs(squeeze_expr->out()) ? substitute_
-                                                       : squeeze_expr->out();
-    auto in = reference_->sameAs(squeeze_expr->in()) ? substitute_
-                                                     : squeeze_expr->in();
-
-    expr_ = IrBuilder::create<SqueezeOp>(
-        squeeze_expr->container(), out, in, squeeze_expr->getSqueezeDimFlags());
-  }
-
-  void handle(TransposeOp* transpose_expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to transpose must be tensor view, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto out = reference_->sameAs(transpose_expr->out())
-        ? substitute_->as<TensorView>()
-        : transpose_expr->out();
-    auto in = reference_->sameAs(transpose_expr->in())
-        ? substitute_->as<TensorView>()
-        : transpose_expr->in();
-    expr_ = IrBuilder::create<TransposeOp>(
-        transpose_expr->container(), out, in, transpose_expr->new2old());
-  }
-
-  void handle(ExpandOp* expand_expr) final {
-    auto out = reference_->sameAs(expand_expr->out())
-        ? substitute_->as<TensorView>()
-        : expand_expr->out();
-    auto in = reference_->sameAs(expand_expr->in())
-        ? substitute_->as<TensorView>()
-        : expand_expr->in();
-
-    auto expanded_extents = expand_expr->expanded_extents();
-    if (substitute_->isA<Int>()) {
-      for (auto i : c10::irange(expanded_extents.size())) {
-        if (!expanded_extents[i]->sameAs(substitute_)) {
-          expanded_extents[i] = substitute_;
-        }
-      }
-    }
-    expr_ = IrBuilder::create<ExpandOp>(
-        expand_expr->container(), out, in, expanded_extents);
-  }
-
-  void handle(ShiftOp* shift_expr) final {
-    auto out =
-        reference_->sameAs(shift_expr->out()) ? substitute_ : shift_expr->out();
-    auto in =
-        reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
-
-    expr_ = IrBuilder::create<ShiftOp>(
-        shift_expr->container(),
-        out,
-        in,
-        shift_expr->offsets(),
-        shift_expr->padWidth());
-  }
-
-  void handle(GatherOp* gather_expr) final {
-    auto out = reference_->sameAs(gather_expr->out()) ? substitute_
-                                                      : gather_expr->out();
-    auto in =
-        reference_->sameAs(gather_expr->in()) ? substitute_ : gather_expr->in();
-
-    expr_ = IrBuilder::create<GatherOp>(
-        gather_expr->container(),
-        out,
-        in,
-        gather_expr->windowShape(),
-        gather_expr->padWidth());
-  }
-
-  void handle(ViewAsScalar* expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto in = reference_->sameAs(expr->in()) ? substitute_->as<TensorView>()
-                                             : expr->in();
-    auto out = reference_->sameAs(expr->out()) ? substitute_->as<TensorView>()
-                                               : expr->out();
-    expr_ = IrBuilder::create<ViewAsScalar>(
-        expr->container(), out, in, expr->vector_id(), expr->index());
-  }
-
-  void handle(ViewOp* view_expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto in = reference_->sameAs(view_expr->in())
-        ? substitute_->as<TensorView>()
-        : view_expr->in();
-    auto out = reference_->sameAs(view_expr->out())
-        ? substitute_->as<TensorView>()
-        : view_expr->out();
-    expr_ = IrBuilder::create<ViewOp>(view_expr->container(), out, in);
-  }
-
-  void handle(WelfordOp* welford_expr) final {
-    auto out_avg = reference_->sameAs(welford_expr->outAvg())
-        ? substitute_->as<TensorView>()
-        : welford_expr->outAvg();
-    auto out_var = reference_->sameAs(welford_expr->outVar())
-        ? substitute_->as<TensorView>()
-        : welford_expr->outVar();
-    auto out_N = reference_->sameAs(welford_expr->outN())
-        ? substitute_->as<TensorView>()
-        : welford_expr->outN();
-    auto in_avg = reference_->sameAs(welford_expr->inAvg())
-        ? substitute_->as<TensorView>()
-        : welford_expr->inAvg();
-    auto in_var =
-        welford_expr->inVar() && reference_->sameAs(welford_expr->inVar())
-        ? substitute_->as<TensorView>()
-        : welford_expr->inVar();
-    auto in_N = reference_->sameAs(welford_expr->inN()) ? substitute_
-                                                        : welford_expr->inN();
-    auto init_avg =
-        welford_expr->initAvg() && reference_->sameAs(welford_expr->initAvg())
-        ? substitute_->as<TensorView>()
-        : welford_expr->initAvg();
-    auto init_var =
-        welford_expr->initVar() && reference_->sameAs(welford_expr->initVar())
-        ? substitute_->as<TensorView>()
-        : welford_expr->initVar();
-    auto init_N =
-        welford_expr->initN() && reference_->sameAs(welford_expr->initN())
-        ? substitute_
-        : welford_expr->initN();
-    expr_ = IrBuilder::create<WelfordOp>(
-        welford_expr->container(),
-        out_avg,
-        out_var,
-        out_N,
-        in_avg,
-        in_var,
-        in_N,
-        init_avg,
-        init_var,
-        init_N,
-        welford_expr->isAllreduce());
-  }
-
-  void handle(LoadStoreOp* ldst_expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto in = reference_->sameAs(ldst_expr->in())
-        ? substitute_->as<TensorView>()
-        : ldst_expr->in();
-    auto out = reference_->sameAs(ldst_expr->out())
-        ? substitute_->as<TensorView>()
-        : ldst_expr->out();
-    expr_ = IrBuilder::create<LoadStoreOp>(
-        ldst_expr->container(), ldst_expr->opType(), out, in);
-  }
-
-  void handle(MmaOp* mma_expr) final {
-    TORCH_INTERNAL_ASSERT(
-        substitute_->isA<TensorView>(),
-        "All args to MmaOp must be TensorView, but received a non-TensorView for replacement: ",
-        substitute_);
-    auto in_a = reference_->sameAs(mma_expr->inA())
-        ? substitute_->as<TensorView>()
-        : mma_expr->inA();
-    auto in_b = reference_->sameAs(mma_expr->inB())
-        ? substitute_->as<TensorView>()
-        : mma_expr->inB();
-    auto out = reference_->sameAs(mma_expr->out())
-        ? substitute_->as<TensorView>()
-        : mma_expr->out();
-    auto init = reference_->sameAs(mma_expr->init())
-        ? substitute_->as<TensorView>()
-        : mma_expr->init();
-    expr_ = IrBuilder::create<MmaOp>(
-        mma_expr->container(), out, in_a, in_b, init, mma_expr->options());
+  explicit SubstituteInExpr(Val* reference, Val* substitute) {
+    mutations_[reference] = substitute;
   }
 
  private:
-  Val* reference_ = nullptr;
-  Val* substitute_ = nullptr;
   Expr* expr_ = nullptr;
 };
 
@@ -762,6 +396,18 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
   }
 
   return red_ops;
+}
+
+std::vector<IndexSelectOp*> getIndexSelectOps(Fusion* fusion) {
+  std::vector<IndexSelectOp*> idx_sel_ops;
+
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<IndexSelectOp>()) {
+      idx_sel_ops.push_back(expr->as<IndexSelectOp>());
+    }
+  }
+
+  return idx_sel_ops;
 }
 
 std::vector<SelectOp*> getSelectOps(Fusion* fusion) {
@@ -1081,6 +727,48 @@ bool isSelectInput(TensorView* tv) {
     }
   }
   return false;
+}
+
+bool isIndexSelectLookupTv(const TensorView* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<IndexSelectOp>()) {
+      auto idx_sel = expr->as<IndexSelectOp>();
+      if (idx_sel->input(0) == tv) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isIndexSelectIndicesTv(const TensorView* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<IndexSelectOp>()) {
+      auto idx_sel = expr->as<IndexSelectOp>();
+      if (idx_sel->input(1) == tv) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(const TensorView* tv) {
+  auto tv_def = tv->definition();
+  if (tv_def != nullptr) {
+    if (tv_def->isA<IndexSelectOp>()) {
+      auto idx_sel = tv_def->as<IndexSelectOp>();
+      auto dim = idx_sel->dim();
+      TORCH_INTERNAL_ASSERT(
+          dim < tv->domain()->getRootDomain().size(),
+          "Expect dim of index select is smaller than its output root domain size. But got dim = ",
+          dim,
+          " size = ",
+          tv->domain()->getRootDomain().size());
+      return tv->domain()->getRootDomain()[dim];
+    }
+  }
+  return nullptr;
 }
 
 } // namespace ir_utils
