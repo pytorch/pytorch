@@ -324,7 +324,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -357,7 +356,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=example_value,
                 **options,
@@ -376,7 +374,6 @@ class TorchVariable(VariableTracker):
                     "call_method",
                     "numel",
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -434,7 +431,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     fn_,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -506,7 +502,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -572,7 +567,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ],
                         {},
                     ),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -745,7 +739,6 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
-                current_tx=tx,
             ),
             example_value=self.value(*u_args),
         )
