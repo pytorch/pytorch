@@ -12,13 +12,8 @@ from contextlib import contextmanager
 
 import torch
 import torch.distributed as dist
+import torch.distributed.rpc
 from torch.autograd import Function, Variable
-from torch.distributed.algorithms.join import (
-    Join,
-    Joinable,
-    JoinHook,
-)
-
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
@@ -129,69 +124,7 @@ class _DDPSink(Function):
         return (None, None, *grad_outputs)
 
 
-class _DDPJoinHook(JoinHook):
-    def __init__(self, ddp, divide_by_initial_world_size):
-        """
-        Sets config variables for internal usage.
-        """
-        assert isinstance(ddp, DistributedDataParallel), (
-            "DDP join hook requires passing in a DistributedDataParallel "
-            "instance as the state"
-        )
-        assert ddp.logger is not None
-        ddp.logger._set_uneven_input_join()
-        self.ddp = ddp
-        self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
-        super().__init__()
-
-    def main_hook(self):
-        """
-        Shadows the DDP collective communication operations in the forward and
-        backward passes.
-        """
-        ddp = self.ddp
-        # Buckets are rebuilt only once during a training period
-        ddp.reducer._rebuild_buckets()
-
-        # Schedule a broadcast if we are syncing module buffers in the
-        # forward pass
-        # TODO: make DDP uneven inputs context manager support buffer
-        # comm hook (https://github.com/pytorch/pytorch/issues/65436)
-        ddp._check_and_sync_module_buffers()
-
-        # Check if need to sync in the backward pass
-        work = ddp._check_global_requires_backward_grad_sync(
-            is_joined_rank=True
-        )
-        work.wait()
-        should_sync_backwards = work.result()[0].item() != 0
-        # Forward parameter sync is disabled in the next iteration if we
-        # are skipping gradient sync this iteration, so set
-        # `require_forward_param_sync` accordingly
-        ddp.require_forward_param_sync = should_sync_backwards
-        if not should_sync_backwards:
-            return
-
-        # Schedule one allreduce per gradient bucket to match the backward
-        # pass allreduce
-        ddp._match_all_reduce_for_bwd_pass()
-
-        # Check if we need to allreduce locally unused parameters
-        if ddp.find_unused_parameters:
-            ddp._match_unused_params_allreduce()
-
-        # Rebuilt parameters are pushed only once during a training period
-        ddp.reducer._push_all_rebuilt_params()
-
-    def post_hook(self, is_last_joiner: bool):
-        """
-        Syncs the final model to ensure that the model is the same across all
-        processes.
-        """
-        self.ddp._sync_final_model(is_last_joiner)
-
-
-class DistributedDataParallel(Module, Joinable):
+class DistributedDataParallel(Module):
     # used to track whether the given thread is inside ddp forward for torchdynamo purposes
     _active_ddp_module = None
 
@@ -211,7 +144,6 @@ class DistributedDataParallel(Module, Joinable):
     ):
 
         super(DistributedDataParallel, self).__init__()
-        Joinable.__init__(self)
         self.logger: Optional[dist.Logger] = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -724,14 +656,6 @@ class DistributedDataParallel(Module, Joinable):
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
 
-            # Notify the join context that this process has not joined, if
-            # needed
-            work = Join.notify_join_context(self)
-            if work:
-                self.reducer._set_forward_pass_work_handle(
-                    work, self._divide_by_initial_world_size  # type: ignore[arg-type]
-                )
-
             # Calling _rebuild_buckets before forward compuation,
             # It may allocate new buckets before deallocating old buckets
             # inside _rebuild_buckets. To save peak memory usage,
@@ -748,12 +672,6 @@ class DistributedDataParallel(Module, Joinable):
             # specified as part of hook, if hook was specified.
             if self._check_sync_bufs_pre_fwd():
                 self._sync_buffers()
-
-            if self._join_config.enable:
-                # Notify joined ranks whether they should sync in backwards pass or not.
-                self._check_global_requires_backward_grad_sync(
-                    is_joined_rank=False
-                )
 
     def post_forward(self, output):
         with torch.autograd.profiler.record_function(
@@ -917,155 +835,6 @@ class DistributedDataParallel(Module, Joinable):
     def _match_unused_params_allreduce(self):
         locally_used_param_map = self.reducer._get_local_used_map()
         self.process_group.allreduce(locally_used_param_map)
-
-    def join(
-        self,
-        divide_by_initial_world_size: bool = True,
-        enable: bool = True,
-        throw_on_early_termination: bool = False,
-    ):
-        r"""
-        A context manager to be used in conjunction with an instance of
-        :class:`torch.nn.parallel.DistributedDataParallel` to be
-        able to train with uneven inputs across participating processes.
-
-        This context manager will keep track of already-joined DDP processes,
-        and "shadow" the forward and backward passes by inserting collective
-        communication operations to match with the ones created by non-joined
-        DDP processes. This will ensure each collective call has a corresponding
-        call by already-joined DDP processes, preventing hangs or errors that
-        would otherwise happen when training with uneven inputs across
-        processes. Alternatively, if the flag ``throw_on_early_termination`` is
-        specified to be ``True``, all trainers will throw an error once one rank
-        runs out of inputs, allowing these errors to be caught and handled
-        according to application logic.
-
-        Once all DDP processes have joined, the context manager will broadcast
-        the model corresponding to the last joined process to all processes to
-        ensure the model is the same across all processes
-        (which is guaranteed by DDP).
-
-        To use this to enable training with uneven inputs across processes,
-        simply wrap this context manager around your training loop. No further
-        modifications to the model or data loading is required.
-
-        .. warning::
-            If the model or training loop this context manager is wrapped around
-            has additional distributed collective operations, such as
-            ``SyncBatchNorm`` in the model's forward pass, then the flag
-            ``throw_on_early_termination`` must be enabled. This is because this
-            context manager is not aware of non-DDP collective communication.
-            This flag will cause all ranks to throw when any one rank
-            exhausts inputs, allowing these errors to be caught and recovered
-            from across all ranks.
-
-        Args:
-            divide_by_initial_world_size (bool): If ``True``, will divide
-                gradients by the initial ``world_size`` DDP training was launched
-                with. If ``False``, will compute the effective world size
-                (number of ranks that have not depleted their inputs yet) and
-                divide gradients by that during allreduce. Set
-                ``divide_by_initial_world_size=True`` to ensure every input
-                sample including the uneven inputs have equal weight in terms of
-                how much they contribute to the global gradient. This is
-                achieved by always dividing the gradient by the initial
-                ``world_size`` even when we encounter uneven inputs. If you set
-                this to ``False``, we divide the gradient by the remaining
-                number of nodes. This ensures parity with training on a smaller
-                ``world_size`` although it also means the uneven inputs would
-                contribute more towards the global gradient. Typically, you
-                would want to set this to ``True`` for cases where the last few
-                inputs of your training job are uneven. In extreme cases, where
-                there is a large discrepancy in the number of inputs, setting
-                this to ``False`` might provide better results.
-            enable (bool): Whether to enable uneven input detection or not. Pass
-                in ``enable=False`` to disable in cases where you know that
-                inputs are even across participating processes. Default is
-                ``True``.
-            throw_on_early_termination (bool): Whether to throw an error
-                or continue training when at least one rank has exhausted
-                inputs. If ``True``, will throw upon the first rank reaching end
-                of data. If ``False``, will continue training with a smaller
-                effective world size until all ranks are joined. Note that if
-                this flag is specified, then the flag
-                ``divide_by_initial_world_size`` would be ignored. Default
-                is ``False``.
-
-
-        Example::
-
-            >>> import torch
-            >>> import torch.distributed as dist
-            >>> import os
-            >>> import torch.multiprocessing as mp
-            >>> import torch.nn as nn
-            >>> # On each spawned worker
-            >>> def worker(rank):
-            >>>     dist.init_process_group("nccl", rank=rank, world_size=2)
-            >>>     torch.cuda.set_device(rank)
-            >>>     model = nn.Linear(1, 1, bias=False).to(rank)
-            >>>     model = torch.nn.parallel.DistributedDataParallel(
-            >>>         model, device_ids=[rank], output_device=rank
-            >>>     )
-            >>>     # Rank 1 gets one more input than rank 0.
-            >>>     inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
-            >>>     with model.join():
-            >>>         for _ in range(5):
-            >>>             for inp in inputs:
-            >>>                 loss = model(inp).sum()
-            >>>                 loss.backward()
-            >>>     # Without the join() API, the below synchronization will hang
-            >>>     # blocking for rank 1's allreduce to complete.
-            >>>     torch.cuda.synchronize(device=rank)
-        """
-        return Join(
-            [self],
-            enable,
-            throw_on_early_termination,
-            divide_by_initial_world_size=divide_by_initial_world_size,
-        )
-
-    def join_hook(
-        self,
-        **kwargs,
-    ):
-        r"""
-        Returns the DDP join hook, which enables training on uneven inputs by
-        shadowing the collective communications in the forward and backward
-        passes.
-
-        Arguments:
-            kwargs (dict): a :class:`dict` containing any keyword arguments
-                to modify the behavior of the join hook at run time; all
-                :class:`Joinable` instances sharing the same join context
-                manager are forwarded the same value for ``kwargs``.
-
-        The hook supports the following keyword arguments:
-            divide_by_initial_world_size (bool, optional):
-                If ``True``, then gradients are divided by the initial world
-                size that DDP was launched with.
-                If ``False``, then gradients are divided by the effective world
-                size (i.e. the number of non-joined processes), meaning that
-                the uneven inputs contribute more toward the global gradient.
-                Typically, this should be set to ``True`` if the degree of
-                unevenness is small but can be set to ``False`` in extreme
-                cases for possibly better results.
-                Default is ``True``.
-        """
-        divide_by_initial_world_size = kwargs.get(
-            "divide_by_initial_world_size", True
-        )
-        return _DDPJoinHook(
-            self, divide_by_initial_world_size=divide_by_initial_world_size
-        )
-
-    @property
-    def join_device(self):
-        return self.device
-
-    @property
-    def join_process_group(self):
-        return self.process_group
 
     def _register_buffer_comm_hook(
         self,
@@ -1352,16 +1121,8 @@ class DistributedDataParallel(Module, Joinable):
         with torch.no_grad():
             # module buffer sync
             # Synchronize buffers across processes.
-            # If we are running DDP with the join manager, we have to agree
-            # upon a rank to sync module buffers from, since rank 0 may
-            # already have been joined and have stale module buffers.
-            if self._join_config.enable:
-                authoritative_rank = self._find_common_rank(
-                    self._distributed_rank, True
-                )
-            else:
-                # The process with rank 0 is considered the authoritative copy.
-                authoritative_rank = 0
+            # The process with rank 0 is considered the authoritative copy.
+            authoritative_rank = 0
             # Update self.modules_buffers incase any buffers were
             # reassigned.
             self._assign_modules_buffers()
