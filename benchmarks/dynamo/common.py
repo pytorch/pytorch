@@ -1094,7 +1094,7 @@ class BenchmarkRunner:
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
-                model = FSDP(model)
+                model = FSDP(model, use_orig_params=True)
                 torch._inductor.config.triton.cudagraphs = False
                 log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
