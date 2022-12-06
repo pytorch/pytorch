@@ -48,13 +48,7 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import (
-    counters,
-    fake_tensors_available,
-    graph_break_dup_warning_checker,
-    istype,
-    proxy_args_kwargs,
-)
+from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -214,7 +208,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 "call_function",
                 torch._assert,
                 *proxy_args_kwargs((value, error_msg), {}),
-                current_tx=self,
             )
             self.jump(inst)
             return
@@ -484,6 +477,7 @@ class InstructionTranslatorBase(object):
 
     def run(self):
         try:
+            self.output.push_tx(self)
             while (
                 self.instruction_pointer is not None
                 and not self.output.should_exit
@@ -497,6 +491,7 @@ class InstructionTranslatorBase(object):
                 e.exec_record = self.exec_recorder.get_record()
             raise
         finally:
+            self.output.pop_tx()
             # Cleanup the outputGraph to delete the held tensors. We perform the
             # cleanup only for InstructionTranslator and not
             # InliningInstructionTranslator. The InliningInstructionTranslator
@@ -1121,10 +1116,20 @@ class InstructionTranslatorBase(object):
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
+                recursively_contains=new_rec_contains,
+                regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
         )
@@ -1164,30 +1169,24 @@ class InstructionTranslatorBase(object):
         )
 
     def UNPACK_SEQUENCE(self, inst):
-        # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
-        options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
-            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
-            for i in reversed(seq.items):
-                self.push(i)
+            val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.as_python_constant()
-            assert len(val) == inst.argval
-            for i in reversed(val):
-                self.push(ConstantVariable(i, **options))
+            val = seq.unpack_var_sequence(self)
         elif isinstance(seq, TensorVariable):
-            proxy = seq.as_proxy()
-            for i in reversed(range(inst.argval)):
-                self.push(wrap_fx_proxy(self, proxy[i], **options))
+            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
-            for i in reversed(range(inst.argval)):
-                self.push(wrap_fx_proxy(self, proxy[i], **options))
+            options = VariableTracker.propagate(self)
+            val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
+        assert len(val) == inst.argval
+        for i in reversed(val):
+            self.push(i)
 
     def UNPACK_EX(self, inst):
         assert 0 <= inst.argval <= 0xFFFF
@@ -1493,7 +1492,7 @@ class InstructionTranslatorBase(object):
         self.current_instruction: Instruction = create_instruction("NOP")
         self.next_instruction: typing.Optional[Instruction] = None
         self.block_stack: List[BlockStackEntry] = []
-        self.lineno: int = code_options.get("co_firstlineno")
+        self.lineno: int = code_options["co_firstlineno"]
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -1513,13 +1512,10 @@ class InstructionTranslatorBase(object):
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True,
-                shape_env=output.shape_env,
-            ) as fake_mode:
-                pass
-            self._fake_mode = fake_mode
+        self._fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=output.shape_env,
+        )
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []
