@@ -89,6 +89,8 @@ assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 SKIP = {
+    # Difficult to setup accuracy test because .eval() not supported
+    "Reformer",
     # Fails deepcopy
     "BlenderbotForConditionalGeneration",
     "GPTNeoForCausalLM",
@@ -124,7 +126,7 @@ BATCH_SIZE_DIVISORS = {
     "GPT2ForSequenceClassification": 2,
     # "GPTJForCausalLM" : 2,
     # "GPTJForQuestionAnswering" : 2,
-    # "GPTNeoForCausalLM" : 2,
+    # "GPTNeoForCausalLM" : 32,
     # "GPTNeoForSequenceClassification" : 2,
     "GoogleFnet": 2,
     "LayoutLMForMaskedLM": 2,
@@ -151,6 +153,13 @@ BATCH_SIZE_DIVISORS = {
     "XGLMForCausalLM": 4,
     "XLNetLMHeadModel": 2,
     "YituTechConvBert": 2,
+}
+
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine.
+    "DebertaV2ForMaskedLM",
+    "BlenderbotForCausalLM",
 }
 
 
@@ -445,6 +454,12 @@ class HuggingfaceRunner(BenchmarkRunner):
                 continue
             yield model_name
 
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
+
     def pick_grad(self, name, is_training):
         if is_training:
             return torch.enable_grad()
@@ -465,7 +480,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)

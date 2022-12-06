@@ -275,14 +275,14 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Ten
   return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, int64_t index) {
+std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select(dim, index), nullopt);
+    return std::make_tuple(self.select_symint(dim, index), nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);
   auto dim_physical = getPhysicalDim(_self, true, dim);
-  auto result = _self.select(dim_physical, index);
+  auto result = _self.select_symint(dim_physical, index);
   return std::make_tuple(result, 0);
 }
 
@@ -402,7 +402,7 @@ std::tuple<Tensor, optional<int64_t>> permute_batching_rule(
 
 std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    SymIntArrayRef input_sizes, int64_t dim, int64_t index) {
+    c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank + 1) + 1;
@@ -437,6 +437,19 @@ std::tuple<Tensor, optional<int64_t>> view_batching_rule(
   std::copy(sym_size.cbegin(), sym_size.cend(), size_.begin() + 1);
   return std::make_tuple(self_.view_symint(size_), 0);
 }
+
+std::tuple<Tensor,optional<int64_t>> view_copy_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    c10::SymIntArrayRef size) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  SymDimVector view_size(size.size() + 1);
+  view_size[0] = self_.size(0);
+  std::copy(size.cbegin(), size.cend(), view_size.begin() + 1);
+
+  return std::make_tuple(at::view_copy_symint(self_, view_size), 0);
+}
+
 
 template <typename F, F Func>
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
@@ -522,8 +535,6 @@ Tensor trace_decomp(const Tensor& tensor) {
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  VMAP_SUPPORT(diag, diag_batch_rule);
-  VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
@@ -544,6 +555,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(select_backward, select_backward_batch_rule);
   VMAP_SUPPORT(slice_backward, slice_backward_batch_rule);
   VMAP_SUPPORT(view, view_batching_rule);
+  VMAP_SUPPORT(view_copy, view_copy_batch_rule);
   VMAP_SUPPORT(expand, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand)), &ATEN_FN(expand)>));
   VMAP_SUPPORT(expand_copy, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand_copy)), &ATEN_FN(expand_copy)>));
   VMAP_SUPPORT(unfold, unfold_batch_rule);
