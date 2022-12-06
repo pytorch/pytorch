@@ -449,66 +449,123 @@ void test_quantize_per_tensor_and_dequantize(
     const at::IntArrayRef input_shape,
     const double input_scale,
     const int input_zero_point,
-    const float tolerance = 0) {
-  at::Tensor input = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8) {
+  at::Tensor input = produce_random_tensor(input_shape);
 
   // quantize tensors
   at::Tensor out_q_cpu = at::quantize_per_tensor(
-    input, input_scale, input_zero_point, c10::ScalarType::QUInt8);
+    input, input_scale, input_zero_point, dtype);
   at::Tensor out_q_vk = at::quantize_per_tensor(
-    input.vulkan(), input_scale, input_zero_point, c10::ScalarType::QUInt8);
+    input.vulkan(), input_scale, input_zero_point, dtype);
 
   // dequantize tensors
   const auto out_cpu_deq = at::dequantize(out_q_cpu);
   const auto out_vk_deq = at::dequantize(out_q_vk);
+  const auto out_vk_deq_cpu = out_vk_deq.cpu();
 
   // check dequantized tensor are equal
-  const auto check = almostEqual(out_cpu_deq, out_vk_deq.cpu(), tolerance);
+  const float tolerance = input_scale;
+  // tolerated error = scale, to allow for precision differences after dividing
+  // by random scale, which could result on a difference of 1 unit in the
+  // quantized result.
+  const auto check = almostEqual(out_cpu_deq, out_vk_deq_cpu, tolerance);
 
   if (!check) {
+    const auto error = at::abs(out_vk_deq_cpu - out_cpu_deq).max().item<float>();
     std::cout
       << "Quantize and Dequantize failed with input shape: " << input_shape
       << " scale: " << input_scale << " and zero point: " << input_zero_point
     << std::endl;
+    std::cout << "Error: " << error << std::endl;
   }
   ASSERT_TRUE(check);
 }
 
-void test_quantize_per_tensor_and_dequantize_random() {
-  const double scale = 0.0001 + (double)rand() / (double)RAND_MAX;
-  const int zero_point = int((double)rand() / (double)RAND_MAX * 255);
-  const int n = 1 + int((double)rand() / (double)RAND_MAX * 30);
-  const int c = 1 + int((double)rand() / (double)RAND_MAX * 30);
-  const int h = 1 + int((double)rand() / (double)RAND_MAX * 100);
-  const int w = 1 + int((double)rand() / (double)RAND_MAX * 100);
-  // tolerated error = scale, to allow for precision differences after dividing
-  // by random scale, which could result on a difference of 1 unit in the
-  // quantized result.
-  test_quantize_per_tensor_and_dequantize({n, c, h, w}, scale, zero_point, scale);
+void test_quantize_per_tensor_and_dequantize_random(
+    const c10::ScalarType dtype) {
+  const double scale = produce_random_scale();
+  const int64_t zero_point = produce_random_zero_point(dtype);
+  const at::IntArrayRef tensor_shape =
+    {rand_pos_int(30), rand_pos_int(30), rand_pos_int(100), rand_pos_int(100)};
+  test_quantize_per_tensor_and_dequantize(
+    tensor_shape, scale, zero_point, dtype);
 }
 
-TEST_F(VulkanAPITest, quantize_per_tensor_and_dequantize) {
-  test_quantize_per_tensor_and_dequantize({1, 1, 1, 1}, 0.13, 21);
-  test_quantize_per_tensor_and_dequantize({1, 1, 1, 4}, 0.3, 87);
-  test_quantize_per_tensor_and_dequantize({1, 1, 4, 1}, 0.2, 120);
-  test_quantize_per_tensor_and_dequantize({1, 1, 7, 7}, 0.3, 87);
-  test_quantize_per_tensor_and_dequantize({1, 1, 8, 8}, 0.1, 10);
-  test_quantize_per_tensor_and_dequantize({3, 5, 8, 8}, 0.04, 97);
-  test_quantize_per_tensor_and_dequantize({1, 1, 11, 17}, 0.07, 15);
-  test_quantize_per_tensor_and_dequantize({1, 1, 12, 17}, 0.1, 10);
-  test_quantize_per_tensor_and_dequantize({3, 5, 12, 17}, 0.1, 10);
-  test_quantize_per_tensor_and_dequantize({1, 1, 17, 12}, 0.1, 10);
-  test_quantize_per_tensor_and_dequantize({2, 4, 17, 12}, 0.1, 10);
-  test_quantize_per_tensor_and_dequantize({1, 1, 10, 14}, 0.0001, 101);
-  test_quantize_per_tensor_and_dequantize({3, 5, 10, 14}, 0.009, 43);
-  test_quantize_per_tensor_and_dequantize({3, 5, 10, 15}, 0.1, 19);
-  test_quantize_per_tensor_and_dequantize({4, 4, 9, 17}, 0.1, 19);
-  test_quantize_per_tensor_and_dequantize({3, 5, 25, 29}, 0.1, 19);
-  test_quantize_per_tensor_and_dequantize({4, 4, 25, 29}, 0.1, 19);
-  test_quantize_per_tensor_and_dequantize({11, 17, 25, 29}, 0.027, 89);
+TEST_F(VulkanAPITest, quantize_per_tensor_and_dequantize_quint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QUInt8;
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 1}, 0.13, 21, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 4, 1}, 0.2, 120, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 8, 8}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 11, 17}, 0.07, 15, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({2, 4, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 10, 14}, 0.001, 101, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 14}, 0.009, 43, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 9, 17}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
 
   for (int i = 0; i < 20; i += 1) {
-    test_quantize_per_tensor_and_dequantize_random();
+    test_quantize_per_tensor_and_dequantize_random(dtype);
+  }
+}
+
+TEST_F(VulkanAPITest, quantize_per_tensor_and_dequantize_qint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt8;
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 1}, 0.13, -21, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 4, 1}, 0.2, -120, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 8, 8}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 11, 17}, 0.07, -15, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 12, 17}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_dequantize({2, 4, 17, 12}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 10, 14}, 0.001, 101, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 14}, 0.009, -43, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 9, 17}, 0.1, -19, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 25, 29}, 0.1, -19, dtype);
+  test_quantize_per_tensor_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_quantize_per_tensor_and_dequantize_random(dtype);
+  }
+}
+
+TEST_F(VulkanAPITest, quantize_per_tensor_and_dequantize_qint32) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt32;
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 1}, 0.13, -21123, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 1, 4}, 0.339, 8734, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 4, 1}, 0.228, -12023, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 7, 7}, 0.338, 8723, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 8, 8}, 0.193, -1023, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 8, 8}, 0.0449, 972, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 11, 17}, 0.073, -15, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 12, 17}, 0.1572, 102, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 12, 17}, 0.147, -156, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 17, 12}, 0.129, 10448, dtype);
+  test_quantize_per_tensor_and_dequantize({2, 4, 17, 12}, 0.137, -10, dtype);
+  test_quantize_per_tensor_and_dequantize({1, 1, 10, 14}, 0.001, 101, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 14}, 0.009, -43267, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 10, 15}, 0.1243, 19, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 9, 17}, 0.1889, -19784, dtype);
+  test_quantize_per_tensor_and_dequantize({3, 5, 25, 29}, 0.1345, 196, dtype);
+  test_quantize_per_tensor_and_dequantize({4, 4, 25, 29}, 0.129, -19489, dtype);
+  test_quantize_per_tensor_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_quantize_per_tensor_and_dequantize_random(dtype);
   }
 }
 
