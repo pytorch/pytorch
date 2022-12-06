@@ -2977,7 +2977,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(4).cuda()
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 

@@ -310,6 +310,8 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.unsupported_scalar_return() and not config.dynamic_shapes:
+            # wrap_fx_proxy can only support certain function types; functions that return scalars
+            # are not supported when dynamic shapes are not enabled.
             unimplemented(
                 f"{self.value} returns a scalar and dynamic shapes is not enabled"
             )
