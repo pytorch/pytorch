@@ -22,7 +22,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
-from functorch._src.aot_autograd import aot_module_simplified
+from torch._functorch.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
@@ -254,7 +254,6 @@ class TestAOTAutograd(AOTTestCase):
         inp: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
-        return_fw_graph: bool = False,
         decompositions: Optional[Dict] = None,
     ):
         # Some tests pass in a callable for inp, to generate the inputs
@@ -323,9 +322,8 @@ class TestAOTAutograd(AOTTestCase):
         for ref_i, test_i in zip(inp, inp_copy):
             if isinstance(ref_i, torch.Tensor):
                 self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
-                self.assertEqual(ref_i, test_i)
-        if return_fw_graph:
-            return fw_graph_cell[0]
+            self.assertEqual(ref_i, test_i)
+        return fw_graph_cell[0]
 
     def test_single_output(self):
         def f(a, b):
@@ -351,7 +349,7 @@ class TestAOTAutograd(AOTTestCase):
             return a * 3
         inp = [torch.ones(3, 3, requires_grad=True)]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # Things to note:
         # - the extra clone is because we need to pass the pre-mutated input to grad(),
         #   but autograd operates above functionalization so we need to manually clone.
@@ -370,7 +368,7 @@ def forward(self, primals_1):
             return a
         inp = [torch.ones(3, 3, requires_grad=True)]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -389,7 +387,7 @@ def forward(self, primals_1):
             torch.ones(3, 3, requires_grad=True),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -409,7 +407,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ones(3, 3, requires_grad=True),
         ]
 
-        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_metadata2(self):
         def f(a):
@@ -418,7 +416,7 @@ def forward(self, primals_1, primals_2, primals_3):
             return a + 1
         inp = [torch.ones(3, 3, requires_grad=True)]
 
-        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_resize_smaller(self):
         def f(a, b):
@@ -430,7 +428,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ones(2, 2, requires_grad=True),
         ]
 
-        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_batchnorm(self):
         def f(inpt, weight, bias, running_mean, running_var):
@@ -453,7 +451,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ops.aten._native_batch_norm_legit_functional,
             torch.ops.aten.native_batch_norm_backward,
         ])
-        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True, decompositions=decompositions)
+        self.verify_aot_autograd(f, inp, test_mutation=True, decompositions=decompositions)
 
     def test_input_output_view_simple(self):
         def f(a):
@@ -462,7 +460,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # Outputs that alias inputs are pulled out of the graph entirely, so we don't compile anything here
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
@@ -480,7 +478,7 @@ def forward(self, primals_1):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # The original function returned two outputs, both of which aliased inputs.
         # We expect two outputs in the functional graph, a_updated and c_updated.
         # The actual aliased outputs themselves aren't in the compiled forward graph;
@@ -506,7 +504,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # Important thing to check here: of the three inputs:
         # Only the b.mul_(3) should show up in the graph (we functionalize it and return it).
         # Everything else that does not show up in the graph includes:
@@ -531,7 +529,7 @@ def forward(self, primals_1, primals_2, primals_3):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # Here, total # of outputs is 1 because:
         # - num_mutated_inps = 1 (a_updated)
         # - num_fw_outputs = 0 (the output is an alias of the input, so we move it outside the compiled fw)
@@ -555,7 +553,7 @@ def forward(self, primals_1):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, primals_4):
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
@@ -574,7 +572,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
         # and reconstruct `out.view(-1)` as a fresh output.
         self.assertExpectedInline(fw_graph.code.strip(), """\
@@ -591,7 +589,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -608,7 +606,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -624,7 +622,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -640,7 +638,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -658,7 +656,7 @@ def forward(self, primals_1):
         inp = [torch.ones(3, 3, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3)
@@ -684,7 +682,7 @@ def forward(self, primals_1):
         inp = [torch.ones(1, 2, 4, requires_grad=True)]
 
         # TODO: enable mutation
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
         self.assertExpectedInline(fw_graph.code.strip(), """\
@@ -701,7 +699,7 @@ def forward(self, primals_1):
             return a.view(a.shape)
         inp = [torch.ones(3, 3, requires_grad=True)]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -725,7 +723,7 @@ def forward(self, primals_1):
             torch.ones(3, 3, requires_grad=True)
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
@@ -743,7 +741,7 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
         ]
 
-        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_inplace_requires_grad_true(self):
         def f(a, b):
@@ -755,7 +753,7 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
         ]
 
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
@@ -782,7 +780,7 @@ def forward(self, primals_1, primals_2):
             inp2 = x[1]
             return [base], [inp1, inp2]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # Important parts of the graph:
         # - the compiled graph takes in a base, and we generate a and b (the views) off of the base
         # - clone() is still in the graph, because we need to call grad() on the original (non-mutated) inputs
@@ -796,7 +794,7 @@ def forward(self, primals_1):
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
     t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, t_1)
-    return [mul, t_1, mul_1, mul, t_1]""")
+    return [mul, t_1, mul_1, t_1, mul]""")
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
@@ -827,7 +825,7 @@ def forward(self, primals_1):
             inp2 = x[1]
             return [base], [inp1, inp2]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # Important parts of the graph:
         # - the compiled graph takes in a base, and we generate a and b (the views) off of the base
         # - clone() is still in the graph, because we need to call grad() on the original (non-mutated) inputs
@@ -855,7 +853,7 @@ def forward(self, primals_1):
             inp2 = x
             return [base], [inp1, inp2]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -879,7 +877,7 @@ def forward(self, primals_1):
             x = base.add(1)
             return [base], [x.view(-1), x.view(-1)]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -907,7 +905,7 @@ def forward(self, primals_1):
             y = base2.add(1)
             return [base1, base2], [x.view(-1), y, x.view(-1)]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -932,7 +930,7 @@ def forward(self, primals_1, primals_2):
             x = base.add(1)
             return [base], [x.view(-1), x.view(-1)]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # Expectation: fwd() takes in 2 args, and we don't construct a synthetic base.
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
@@ -954,7 +952,7 @@ def forward(self, primals_1, primals_2):
             x = base.add(1)
             return [base, c_arg], [x.view(-1), x.view(-1), c_arg]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
@@ -985,7 +983,7 @@ def forward(self, primals_1, primals_2):
             # a and c alias, b and d alias
             return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # 3 graph inputs: (b_d_base, a, c)
         # 2 returns: (b_updated, a+c+d)
         # (there are 2 original fw outs, but one is a view of b so it's not part of the graph)
@@ -1035,7 +1033,7 @@ def forward(self, primals_1, primals_2, primals_3):
             c = base1_.view(-1)
             return [base1, base2], [a, b, c]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # Expected:
         # - 2 inputs in the forward: synthetic_base_a_c, b
         # - 1 output in the forward: "tmp"
@@ -1131,8 +1129,10 @@ def forward(self, primals_1, primals_2):
                 new_d[k] = x[k] * 2
             return new_d
 
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
         def inp_callable():
-            inps = [{'a': torch.randn(3, requires_grad=True), 'b': torch.randn(3, requires_grad=True)}]
+            inps = [{'a': a, 'b': b}]
             return inps, inps
 
         self.verify_aot_autograd(f, inp_callable)
@@ -1167,7 +1167,7 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
-    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     def test_compilation_context(self, counter):
         def f(x):
             return x.sin().sin()
@@ -1192,15 +1192,48 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
 
-    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
-    @patch("functorch._src.config.debug_assert", True)
+    def test_dupe_arg_torture(self):
+        def f(x, y):
+            x.t_()
+            y.t_()
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        self.verify_aot_autograd(f, [x, x])
+
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_invalid_dupe_left_bias(self, counter):
+        # This test checks that, just because only the first
+        # argument did a metadata mutation, we still correctly
+        # switch to strategy 2 (deduplicate)
+        # See: https://github.com/pytorch/pytorch/pull/89896#discussion_r1036224447
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                x.t_()
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True)
+        self.verify_aot_autograd(F(), [x, x])
+
+        fxx = aot_module_simplified(F(), (x, x), nop)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
+                x.t_()
+                y.t_()
                 return (x + y,)
 
-        x = torch.randn(3, 3, requires_grad=True)
-        y = torch.randn(3, 3, requires_grad=True)
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
 
         fxy = aot_module_simplified(F(), (x, y), nop)
         fxy(x, y)
@@ -1213,8 +1246,8 @@ def forward(self, primals_1, primals_2):
             """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
-    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
-    @patch("functorch._src.config.debug_assert", True)
+    @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_requires_grad(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
@@ -1794,8 +1827,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         res[0].sum().backward()
 
         self.assertExpectedInline(shape_env.format_guards(), """\
- - Eq(s1, 20)
- - Eq(s2, 30)""")
+ - Eq(s3, 20)
+ - Eq(s9, 30)""")
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)

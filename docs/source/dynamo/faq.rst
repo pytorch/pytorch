@@ -373,4 +373,4 @@ order and then open an issue on Github so we can solve the root problem
 1. If you’re using dynamic shapes try disabling them, we’ve disabled
 them by default: ``env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`` 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
-them may alleviate some OOM issues: ``torch._inductor.config = False``.
+them may alleviate some OOM issues: ``torch._inductor.config.triton.cudagraphs = False``.
