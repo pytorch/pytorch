@@ -161,6 +161,7 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
+        self._current_tx = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
@@ -185,6 +186,16 @@ class OutputGraph(fx.Tracer):
     @property
     def fake_mode(self):
         return self.root_tx.fake_mode
+
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
@@ -504,10 +515,15 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= logging.CODE:
+                graph_str = (
+                    gm.print_readable()
+                    if config.output_graph_code
+                    else format_graph_tabular(gm.graph)
+                )
                 log.log(
                     logging.CODE,  # type: ignore[attr-defined]
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(
@@ -659,14 +675,13 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
-        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
