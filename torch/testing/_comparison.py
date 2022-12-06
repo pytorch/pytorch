@@ -1205,7 +1205,7 @@ def originate_pairs(
             )
 
 
-def are_equal(
+def not_close_error_metas(
     actual: Any,
     expected: Any,
     *,
@@ -1244,12 +1244,12 @@ def are_equal(
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None
 
-    comparison_error_metas: List[ErrorMeta] = []
+    error_metas: List[ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()
         except ErrorMeta as error_meta:
-            comparison_error_metas.append(error_meta)
+            error_metas.append(error_meta)
         # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
         # about what happened. If applicable, the exception should be expected in the future.
         except Exception as error:
@@ -1263,7 +1263,7 @@ def are_equal(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    return comparison_error_metas
+    return error_metas
 
 
 def assert_close(
@@ -1512,7 +1512,7 @@ def assert_close(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    comparison_error_metas = are_equal(
+    error_metas = not_close_error_metas(
         actual,
         expected,
         pair_types=(
@@ -1532,9 +1532,9 @@ def assert_close(
         msg=msg,
     )
 
-    if comparison_error_metas:
+    if error_metas:
         # TODO: compose all metas into one AssertionError
-        raise comparison_error_metas[0].to_error(msg)
+        raise error_metas[0].to_error(msg)
 
 
 def assert_allclose(
