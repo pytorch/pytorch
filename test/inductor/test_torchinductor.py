@@ -1647,13 +1647,13 @@ class CommonTemplate:
             def __init__(
                 self,
                 binary_fn,
+                unary_fn,
                 in_channels,
                 out_channels,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 **kwargs,
             ):
                 super(M, self).__init__()
@@ -1678,17 +1678,17 @@ class CommonTemplate:
                     )
                 )
                 self.binary_fn = binary_fn
-                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
+                self.unary_fn = unary_fn
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.relu(self.binary_fn(x1, x2))
+                return self.unary_fn(self.binary_fn(x1, x2))
 
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             binary_list,
-            [True, False],
+            unary_list[:2],
             [True, False],
             [1, 3],
             [1, 2],
@@ -1699,7 +1699,7 @@ class CommonTemplate:
 
         for (
             binary_fn,
-            has_relu,
+            unary_fn,
             bias,
             kernel_size,
             dilation,
@@ -1712,13 +1712,13 @@ class CommonTemplate:
             x_shape = (1, iC, 112, 112)
             mod = M(
                 binary_fn,
+                unary_fn,
                 iC,
                 oC,
                 dilation,
                 groups,
                 padding,
                 bias,
-                has_relu,
                 kernel_size=kernel_size,
             ).eval()
             mod = mod.to(memory_format=memory_format)
