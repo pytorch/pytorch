@@ -392,31 +392,26 @@ class TestPoolingNNDeviceType(NNTestCase):
         input = make_arg((1, 64, 10, 9))
         output_size = 0
 
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_avg_pool2d(input, output_size)
-            res.sum().backward()
+        fns = (
+            nn.functional.adaptive_avg_pool2d,
+            nn.functional.adaptive_avg_pool3d,
+            nn.functional.adaptive_max_pool2d,
+            nn.functional.adaptive_max_pool3d,
+        )
 
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_avg_pool3d(input, output_size)
-            res.sum().backward()
+        for fn in fns:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input, output_size).sum().backward()
 
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_max_pool2d(input, output_size)
-            res.sum().backward()
+        fns2 = (
+            nn.functional.adaptive_avg_pool1d,
+            nn.functional.adaptive_max_pool1d,
+        )
+        input2 = make_arg((1, 64))
 
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_max_pool3d(input, output_size)
-            res.sum().backward()
-
-        input_2 = make_arg((1, 64))
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_avg_pool1d(input_2, output_size)
-            res.sum().backward()
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            res = nn.functional.adaptive_max_pool1d(input_2, output_size)
-            res.sum().backward()
+        for fn in fns2:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input2, output_size).sum().backward()
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
