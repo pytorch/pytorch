@@ -79,7 +79,7 @@ class OpSchema(object):
         # if this is an inplace/out variant, it might not
         # be entirely correct, but it's good enough for now.
         self.is_inplace = self.func_schema.name[-1] == "_"
-        self.is_out_variant = self.func_schema.overload_name == "out"
+        self.is_out_variant = "out" in self.func_schema.overload_name
 
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
