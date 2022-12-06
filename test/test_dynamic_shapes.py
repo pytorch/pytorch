@@ -122,11 +122,11 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env):
-    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg)
+    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg, name)
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
-    return shape_env.create_symintnode(shape_env.create_symbol(i))
+    return shape_env.create_symintnode(shape_env.create_symbol(i, sname="__testing_only{len(shape_env.var_to_val)}"))
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -179,7 +179,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), SymInt))
 
-        y = create_symbolic_tensor("x", torch.randn(5, 4, 3)[1:], shape_env)
+        y = create_symbolic_tensor("y", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
         self.assertTrue(y.storage_offset() == 12)
 
@@ -195,7 +195,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[2] == 3)
 
         # broadcasting
-        y = create_symbolic_tensor("y", torch.randn(1, 4, 1), shape_env)
+        y = create_symbolic_tensor("y2", torch.randn(1, 4, 1), shape_env)
         z = x + y
         self.assertTrue(z.shape[0] == 5)
         self.assertTrue(z.shape[1] == 4)
@@ -311,7 +311,7 @@ class TestPySymInt(TestCase):
         torch.ops.aten.narrow_copy.default(x, 0, 0, x.shape[0])
 
         shape_env = ShapeEnv()
-        x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
+        x = create_symbolic_tensor("x2", torch.randn(5, 4, 3), shape_env)
         torch.ops.aten.expand.default(x, [x.shape[0], x.shape[1], x.shape[2]])
 
     def test_fx_trace_intlist(self):
