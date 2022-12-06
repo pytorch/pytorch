@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from copy import deepcopy
 from unittest.mock import patch
 
