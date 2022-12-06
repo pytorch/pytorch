@@ -49,7 +49,7 @@ import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
-from functorch._src.make_functional import functional_init_with_buffers
+from torch._functorch.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -3238,7 +3238,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
-        xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
         skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -3918,6 +3917,31 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
             return vmap(torch.linalg.multi_dot)(inputs)
 
+    def test_vmap_escaped_error(self):
+        escaped = None
+
+        def f(x):
+            nonlocal escaped
+            escaped = x
+            return x ** 2
+
+        x = torch.randn(3)
+        vmap(f)(x)
+
+        common_message = r"your tensor may have escaped from inside a function being vmapped.*{0}.*"
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing")):
+            escaped.sin()
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_tensor_inputs_batch_rule")):
+            escaped.sin_()
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_inplace_plumbing")):
+            escaped.mul_(1)
+
+        vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
+            torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
