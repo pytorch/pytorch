@@ -122,11 +122,11 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env):
-    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg, name)
+    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg, sname=name)
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
-    return shape_env.create_symintnode(shape_env.create_symbol(i, sname="__testing_only{len(shape_env.var_to_val)}"))
+    return shape_env.create_symintnode(shape_env.create_symbol(i, sname=f"__testing_only{len(shape_env.var_to_val)}"))
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -424,18 +424,18 @@ class TestPySymInt(TestCase):
 
         self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s1, s3], b_1: f32[s8, s3]):
+    def forward(self, a_1: f32[s1, s3], b_1: f32[s7, s3]):
         # No stacktrace found for following nodes
         sym_size: Sym(s1) = torch.ops.aten.sym_size(a_1, 0)
-        sym_size_1: Sym(s8) = torch.ops.aten.sym_size(b_1, 0)
-        add: Sym(s1 + s8) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
+        sym_size_1: Sym(s7) = torch.ops.aten.sym_size(b_1, 0)
+        add: Sym(s1 + s7) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
         sym_size_2: Sym(s3) = torch.ops.aten.sym_size(a_1, 1)
         sym_size_3: Sym(s3) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
         add_1: Sym(2*s3) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s1 + s8, 2*s3] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        new_empty: f32[s1 + s7, 2*s3] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s1 + s8, 2*s3] = native_dropout[0]
-        getitem_1: b8[s1 + s8, 2*s3] = native_dropout[1];  native_dropout = None
+        getitem: f32[s1 + s7, 2*s3] = native_dropout[0]
+        getitem_1: b8[s1 + s7, 2*s3] = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 # This environment variable controls whether or not we print expected failure
