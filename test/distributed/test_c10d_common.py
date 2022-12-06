@@ -1696,6 +1696,28 @@ class ReduceOpTest(TestCase):
             reduce_op = dist._make_nccl_premul_sum(scale)
             self.assertEqual(pickle.loads(pickle.dumps(reduce_op)), reduce_op)
 
+    # Ref: https://github.com/pytorch/pytorch/issues/90072
+    def test_reduceop_equal(self):
+        not_reduceop = "abc"
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            reduce_op_obj = c10d.ReduceOp(reduce_op)
+            # this calls `ReduceOp.__eq__(self, other)`
+            self.assertEqual(reduce_op_obj, reduce_op_obj)
+            self.assertEqual(reduce_op_obj, reduce_op)
+            self.assertNotEqual(reduce_op_obj, not_reduceop)
+            self.assertNotEqual(reduce_op, not_reduceop)
+            # TODO(crcrpar): This needs to be `assertEqual` for the associativity even though
+            # the comparison of `RedOpType` and `ReduceOp` sounds less likely to happen compared
+            # to that of `ReduceOp` and `RedOptype`.
+            # this calls `RedOpType.__eq__(self, other)`
+            self.assertNotEqual(reduce_op, reduce_op_obj)
+
+            self.assertFalse(None in (reduce_op, reduce_op_obj))
+            self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
+
 
 if __name__ == "__main__":
     assert (
