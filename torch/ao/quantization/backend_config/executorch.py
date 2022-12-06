@@ -13,9 +13,7 @@ from .backend_config import (
 )
 from .qnnpack import (
     qnnpack_weighted_op_qint8_symmetric_dtype_config,
-    qnnpack_default_op_qint8_symmetric_dtype_config,
-
-
+    qnnpack_default_op_qint8_symmetric_dtype_config
 )
 from ._common_operator_config_utils import _Conv2dMetadata
 from ..fuser_method_mappings import _reverse_sequential_wrapper2
