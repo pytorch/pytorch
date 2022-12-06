@@ -84,19 +84,9 @@ using MMAOp = cutlass::arch::OpClassTensorOp;
 // This code section describes CUDA SM architecture number
 using SmArch = cutlass::arch::Sm80;
 
-// This code section describes the tile size a thread block will compute
-// What should we these be for fp16 pyspeech shapse?
-// current settings are from fp16 cutlass sparse gemm unit test
-using ShapeMMAThreadBlock =
-    cutlass::gemm::GemmShape<128, 256, 64>;  // <- threadblock tile M = 128, N = 128, K = 256
-// This code section describes tile size a warp will compute
-// using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 64>;  // <- warp tile M = 64, N = 64, K = 256
-using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 64>;  // <- warp tile M = 64, N = 64, K = 256
-// This code section describes the size of MMA op
-using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 32>;  // <- MMA Op tile M = 16, N = 8, K = 128
 
 // This code section describes how threadblocks are scheduled on GPU
-using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;  // <- ??
+using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
 
 // This code section describes the epilogue part of the kernel
 using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
@@ -120,9 +110,9 @@ using Gemm = cutlass::gemm::device::SparseGemm<ElementInputA,
                                                ElementAccumulator,
                                                MMAOp,
                                                SmArch,
-                                               ShapeMMAThreadBlock,
-                                               ShapeMMAWarp,
-                                               ShapeMMAOp,
+                                               cutlass::gemm::GemmShape<64, 64, 64>,
+                                               cutlass::gemm::GemmShape<32, 32, 64>,
+                                               cutlass::gemm::GemmShape<16, 8, 32>,
                                                EpilogueOp,
                                                SwizzleThreadBlock,
                                                NumStages>;
