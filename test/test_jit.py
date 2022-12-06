@@ -11155,6 +11155,7 @@ dedent """
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(w.grad, w_ref.grad)
 
+    @skipIfTorchDynamo("TorchDynamo doesn't support profile")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():

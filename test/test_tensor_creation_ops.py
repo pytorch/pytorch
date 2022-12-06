@@ -2563,6 +2563,7 @@ class TestTensorCreation(TestCase):
         self._test_linspace_logspace_complex_helper(torch.linspace, np.linspace,
                                                     device, dtype)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypes(torch.complex64)
     def test_logspace_vs_numpy_complex(self, device, dtype):
         self._test_linspace_logspace_complex_helper(torch.logspace, np.logspace,
