@@ -244,7 +244,7 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
       ideep::algorithm::deconvolution_direct,
       w.get_data_type(),
       src_dims);
-  
+
   if (groups > 1) {
     expected_desc = expected_desc.transpose(1, 2);
   } else {
@@ -255,7 +255,7 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
   result.init(expected_desc);
   w.transpose_(0, 1);
   result.feed_from(w, /*is_deconv_weights*/true);
-  
+
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
