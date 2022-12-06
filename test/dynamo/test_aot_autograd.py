@@ -6,9 +6,9 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-import torch.utils._pytree as pytree
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
+from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
@@ -311,8 +311,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             failure_reason = failure[0][0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        compare(F(), fxy, (x, y))
-        compare(F(), fxy, (x, z))
+        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+        compare_equal_outs_and_grads(self, F(), fxy, (x, z))
         self.assertEqual(
             failure_reason,
             "tensor 'y' requires_grad mismatch. expected requires_grad=1",
@@ -327,8 +327,48 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         fxz = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        compare(F(), fxz, (x, z))
-        compare(F(), fxz, (x, z))
+        compare_equal_outs_and_grads(self, F(), fxz, (x, z))
+        compare_equal_outs_and_grads(self, F(), fxz, (x, z))
+        self.assertEqual(cc.frame_count, 1)
+        self.assertTrue(failure_reason is None)
+
+    @patch("torch._functorch.config.debug_assert", True)
+    def test_arg_dupe_via_dynamo_recompiles(self):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True).clone()
+        y = torch.randn(3, 3, requires_grad=True).clone()
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0][0]
+
+        fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+
+        self.assertTrue(failure_reason is None)
+
+        # Reset failure reason
+        failure_reason = None
+
+        self.assertEqual(cc.frame_count, 1)
+
+        torch._dynamo.reset()  # for new backend
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
+
+        compare_equal_outs_and_grads(self, F(), fxx, (x, x))
+        compare_equal_outs_and_grads(self, F(), fxx, (x, y))
+        compare_equal_outs_and_grads(self, F(), fxx, (y, y))
+
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
