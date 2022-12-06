@@ -1255,11 +1255,11 @@ class TestAutograd(TestCase):
                     self_to = getattr(self_from, to_to_attr)(*to_params)
                     grad_to = getattr(grad_strided, to_to_attr)(*to_params)
 
+                    # No gradcheck support for BSR/BSC, so the grads are checked explicitly
                     grad_res = torch.autograd.grad(self_to, self_from, grad_to)[0]
 
                     self.assertEqual(grad_res.layout, self_from.layout)
                     self.assertEqual(grad_res.to_dense(), grad_strided)
-                    self.assertEqual(grad_to.to_dense(), grad_strided)
 
     def test_sparse_mm_backward(self):
         size = (3, 3)
