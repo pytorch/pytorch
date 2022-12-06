@@ -28,7 +28,7 @@ except Exception as e:
 subprocess.run(['echo', 'Installing test dependencies'])
 
 try:
-    subprocess.run([*os.environ['CONDA_ENV_RUN'].split(), 'pip', 'install', 'networkx'])
+    subprocess.run([*'conda run -n test_env'.split(), 'pip', 'install', 'networkx'])
 
 except Exception as e:
 
@@ -42,7 +42,7 @@ subprocess.run(['echo', 'Test functorch'])
 try:
 
     with pushd('test'):
-        subprocess.run([*os.environ['CONDA_ENV_RUN'].split(), 'python', 'run_test.py', '--functorch', '--shard',
+        subprocess.run([*'conda run -n test_env'.split(), 'python', 'run_test.py', '--functorch', '--shard',
             os.environ['SHARD_NUMBER'], os.environ['NUM_TEST_SHARDS'], '--verbose'])
 
 except Exception as e:
