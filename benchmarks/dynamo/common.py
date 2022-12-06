@@ -23,13 +23,13 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
+from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
