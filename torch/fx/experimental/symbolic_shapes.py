@@ -3,7 +3,6 @@ import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import operator
-import itertools
 import builtins
 import math
 import functools
@@ -526,12 +525,14 @@ class ShapeEnv(object):
             # here in the smallest unbound stride case, but it's not
             # a big deal because the non-0/1 symbol immediately
             # evaporates from its duck-sizing simplification
+            s: sympy.Symbol
             if isinstance(stride_expr, SymbolWithSourceName):
                 s = stride_expr
             else:
-                s = self.create_symbol(val, simplify=False, sname=f"{sname}.stride({i})")
+                cs = self.create_symbol(val, simplify=False, sname=f"{sname}.stride({i})")
                 assert stride_expr is not None
-                assert isinstance(s, sympy.Symbol)
+                assert isinstance(cs, sympy.Symbol)
+                s = cs
                 self.replacements[s] = stride_expr
             sym_stride.append(self.create_symintnode(s))
         sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset(), sname=f"{sname}.storage_offset()"))
