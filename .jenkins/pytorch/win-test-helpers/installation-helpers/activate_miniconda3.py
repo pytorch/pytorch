@@ -51,8 +51,8 @@ if install_fresh_conda == '1':
 
 
 # Activate conda so that we can use its commands, i.e. conda, python, pip
-subprocess.run(['conda', 'create', '--prefix', conda_parent_dir + '\\Miniconda3\\test_env'])
-os.environ['CONDA_ENV_RUN'] = 'conda run -n ' + os.environ['CONDA_ENV_NAME']
+subprocess.run(['conda', 'create', '--prefix', conda_parent_dir + '\\Miniconda3\\test_env'], shell=True)
+os.environ['CONDA_ENV_RUN'] = 'conda run -n ' + conda_parent_dir + '\\Miniconda3\\test_env'
 
 
 if install_fresh_conda == '1':
