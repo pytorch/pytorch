@@ -115,12 +115,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   };
 
   virtual void startCoalescing() {
-    // no-op for backends that have not implemented startCoalescing
+    // only nccl has implemented startCoalescing so only execute for nccl backends
+    if (getBackendType() == BackendType::NCCL) {
+      getDefaultBackend()->startCoalescing();
+    }
   }
 
   virtual void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
-    // no-op for backends that have not implemented endCoalescing
+      std::vector<c10::intrusive_ptr<Work>>& reqs) {
+    // only nccl has implemented startCoalescing so only execute for nccl backends
+    if (getBackendType() == BackendType::NCCL) {
+      getDefaultBackend()->endCoalescing(reqs);
+    }
   }
 
   // Consider using ops in Ops.hpp instead of the below, which route things
