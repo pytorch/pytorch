@@ -1778,6 +1778,16 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
+    def test_conv_transpose2d_packed(self):
+        x_shape = (1, 3, 28, 28)
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_conv_transpose2d_unary(self):
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(

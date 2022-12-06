@@ -410,7 +410,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
     def __init__(
         self,
         conv_transpose: nn.Module,
-        unary: nn.Module,
+        unary: Optional[nn.Module],
         input_size: list,
     ):
         super(ConvTransposeUnary2d, self).__init__(
@@ -431,9 +431,10 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
 
     def _update_module_params(self, conv_transpose, unary, input_size):
         self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
+        self.attr, self.scalars, self.algorithm = (
+            unary_modules_map[unary.__class__](unary) if unary else ("none", [], "")
         )
+
         packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
                 self.weight.to_mkldnn(),
                 self.padding,
@@ -487,6 +488,15 @@ def packed_conv_eval(conv: nn.Module, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
+        None,
+        input_size,
+    )
+
+
+def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: list):
+    assert not (conv_transpose.training), "Fusion only for eval!"
+    return ConvTransposeUnary2d(
+        conv_transpose,
         None,
         input_size,
     )
@@ -1345,6 +1355,7 @@ computation_op_binary_op_fusion_inplace_map = {
 computation_op_packed_map = {
     nn.Linear: packed_linear_eval,
     nn.Conv2d: packed_conv_eval,
+    nn.ConvTranspose2d: packed_conv_transpose_eval,
 }
 
 
