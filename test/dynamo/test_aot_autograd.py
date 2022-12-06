@@ -302,23 +302,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3, requires_grad=True)
         z = torch.randn(3, 3, requires_grad=False)
 
-        def _outs_and_grads(fn, graph_inps, inps):
-            outs = fn(*graph_inps)
-            for out in pytree.tree_flatten(outs)[0]:
-                if isinstance(out, torch.Tensor) and out.requires_grad:
-                    out.sum().backward(retain_graph=True)
-            grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
-            for inp in pytree.tree_flatten(inps)[0]:
-                inp.grad = None
-            return outs, grads
-
-        # Non-mutating please!
-        def compare(m1, m2, inps):
-            r1, g1 = _outs_and_grads(m1, inps, inps)
-            r2, g2 = _outs_and_grads(m2, inps, inps)
-            self.assertEqual(r1, r2)
-            self.assertEqual(g1, g2)
-
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         failure_reason = None
