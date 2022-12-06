@@ -386,7 +386,7 @@ def emit_view_functionalization_body(
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
         {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      {{
+      if (compute_reference_meta) {{
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
