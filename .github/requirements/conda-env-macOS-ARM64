@@ -1,7 +1,7 @@
 numpy=1.22.3
 pyyaml=6.0
 setuptools=61.2.0
-cmake=3.22.1
+cmake=3.22.*
 cffi=1.15.1
 typing_extensions=4.3.0
 dataclasses=0.8
