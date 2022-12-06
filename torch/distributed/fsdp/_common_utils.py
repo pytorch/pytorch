@@ -47,6 +47,17 @@ class HandleTrainingState(Enum):
     SUMMON_FULL_PARAMS = auto()
 
 
+# Handle training states that correspond to FSDP-managed computation
+_computation_handle_training_states = {
+    HandleTrainingState.FORWARD,
+    HandleTrainingState.BACKWARD_PRE,
+    HandleTrainingState.BACKWARD_POST,
+    # Include `IDLE` to support prefetching, which is safe because the
+    # `FlatParameter`s are not exposed to the user
+    HandleTrainingState.IDLE,
+}
+
+
 def _is_composable(state: _FSDPState):
     # TODO: This is a temporary hack for differentiate between code paths.
     return not isinstance(state, nn.Module)
