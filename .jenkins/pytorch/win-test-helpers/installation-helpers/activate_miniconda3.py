@@ -59,8 +59,7 @@ if install_fresh_conda == '1':
 
     try:
 
-        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'install', '-y', '-q', 'numpy"<1.23"',
-            'cffi', 'pyyaml', 'boto3', 'libuv'])
+        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'install', '-y', '-q', 'numpy\"<1.23\"', 'cffi', 'pyyaml', 'boto3', 'libuv'])
 
         subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'install', '-y', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
 
