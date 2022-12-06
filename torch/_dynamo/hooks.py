@@ -1,6 +1,6 @@
 import dataclasses
 
-from typing import Callable, Set, Tuple, Optional
+from typing import Callable, Optional, Set, Tuple
 
 
 @dataclasses.dataclass

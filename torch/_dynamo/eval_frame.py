@@ -299,7 +299,7 @@ class DisableContext(_TorchDynamoContext):
         super().__init__(callback=None)
 
 
-def catch_errors_wrapper(callback):
+def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
         if (
@@ -329,15 +329,17 @@ def catch_errors_wrapper(callback):
                     return hijacked_callback(frame, cache_size)
 
         with compile_lock:
-            return callback(frame, cache_size)
+            return callback(frame, cache_size, hooks)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=False):
+def _optimize_catch_errors(
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn),
+        catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         dynamic=dynamic,
@@ -413,8 +415,11 @@ def optimize(
         def toy_example(a, b):
             ...
     """
-    # Note: This could be global for less plumbing, but then nested .optimize() calls
-    # have an annoying story and behavior.
+    # Note: The hooks object could be global instead of passed around, *however* that would make
+    # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
+    # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
+    # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
+    # easier to understand UX at the cost of a little more plumbing on our end.
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
@@ -444,7 +449,8 @@ def optimize(
             hooks=hooks,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend),
+        convert_frame.convert_frame(backend, hooks=hooks),
+        hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
     )
@@ -678,7 +684,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=None, export=False, dynamic=False):
+def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -688,7 +694,8 @@ def optimize_assert(backend, *, hooks=None, export=False, dynamic=False):
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, hooks, export=export),
+        convert_frame.convert_frame_assert(backend, export=export),
+        hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
     )

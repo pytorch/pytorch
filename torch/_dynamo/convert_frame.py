@@ -267,7 +267,6 @@ def exception_handler(e, code, frame=None):
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
-    hooks,
     one_graph: bool = True,
     export: bool = False,
 ):
@@ -275,7 +274,7 @@ def convert_frame_assert(
     init_logging()
 
     @dynamo_timed
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int):
+    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -448,7 +447,7 @@ def _compile(
 
         log.log(logging.CODE, guard_str)  # type: ignore[attr-defined]
 
-        if hooks and hooks.guard_export_fn is not None:
+        if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
 
         return guarded_code
@@ -467,12 +466,12 @@ def _compile(
 
 def convert_frame(compiler_fn: CompilerFn, hooks=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, hooks, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int):
+    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size)
+            result = inner_convert(frame, cache_size, hooks)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
@@ -506,9 +505,9 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
+            hooks,
             one_graph=False,
             export=False,
-            hooks=hooks,
             frame=None,
         )
     except Exception:
