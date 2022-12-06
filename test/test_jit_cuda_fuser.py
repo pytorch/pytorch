@@ -5252,12 +5252,16 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             # enables guard mode since tracing could change graph to violate guard.
             torch._C._jit_set_nvfuser_guard_mode(True)
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
+        self.nvfuser_enable_options = os.environ['PYTORCH_NVFUSER_ENABLE']
+        # TODO: remove this when index_select is fixed on opinfo tests
+        os.environ['PYTORCH_NVFUSER_ENABLE'] = ""
 
     def tearDown(self):
         if RUN_NVFUSER:
             self.cuda_fuser_options.restore()
 
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
+        os.environ['PYTORCH_NVFUSER_ENABLE'] = self.nvfuser_enable_options
 
         super(TestCudaFuserOpInfoParent, self).tearDown()
 
