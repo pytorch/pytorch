@@ -1620,7 +1620,7 @@ def _export(
                 try:
                     _C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise errors.CheckerError(e)
+                    raise errors.CheckerError(e) from e
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False

@@ -141,12 +141,12 @@ class ShapeProp(torch.fx.Interpreter):
                 result = super().run_node(n)
             finally:
                 self.module = self.real_module
-        except Exception:
+        except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
                 f"ShapeProp error for: node={n.format_node()} with "
                 f"meta={n.meta}"
-            )
+            ) from e
 
         found_tensor = False
 
