@@ -238,9 +238,10 @@ def _outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 
@@ -275,9 +276,12 @@ class TestAOTAutograd(AOTTestCase):
                     inp_copy.append(inp_copy[x_dupe_idx])
                 else:
                     dupes_map[x] = i
-                    x_copy = x.clone().detach().requires_grad_(x.requires_grad)
-                    if x.requires_grad and not x.is_leaf:
-                        x_copy = x_copy.clone()
+                    if not isinstance(x, torch.Tensor):
+                        x_copy = x
+                    else:
+                        x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+                        if x.requires_grad and not x.is_leaf:
+                            x_copy = x_copy.clone()
                     inp_copy.append(x_copy)
 
             if test_mutation:
@@ -324,6 +328,13 @@ class TestAOTAutograd(AOTTestCase):
                 self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
             self.assertEqual(ref_i, test_i)
         return fw_graph_cell[0]
+
+    def test_non_tensor_and_none_inputs(self):
+        # int, None, Tensor
+        def f(a, b, c):
+            return a * c
+        inp = [2, None, torch.ones(3, 3, dtype=torch.float32, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
 
     def test_single_output(self):
         def f(a, b):
@@ -1131,6 +1142,7 @@ def forward(self, primals_1, primals_2):
 
         a = torch.randn(3, requires_grad=True)
         b = torch.randn(3, requires_grad=True)
+
         def inp_callable():
             inps = [{'a': a, 'b': b}]
             return inps, inps

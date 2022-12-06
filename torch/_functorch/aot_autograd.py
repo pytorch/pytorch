@@ -60,7 +60,7 @@ aten = torch.ops.aten
 # may involve compiling multiple subgraphs; e.g., for forwards/backwards)
 AOT_COUNTER = itertools.count()
 
-KNOWN_TYPES = tuple([torch.Tensor, int, str, float, bool] + list(py_sym_types))
+KNOWN_TYPES = tuple([torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types))
 
 @contextmanager
 def preserve_rng_state():
@@ -263,26 +263,23 @@ def run_functionalized_fw_and_collect_metadata(f) -> Tuple[ViewAndMutationMeta, 
         return torch._from_functional_tensor(t)
 
     @wraps(f)
-    def inner(*args):
+    def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in args)
+        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
         input_requires_grad_info: List[bool] = []
         output_requires_grad_info: List[bool] = []
 
-        f_args = pytree.tree_map(to_fun, args)
+        flat_f_args = pytree.tree_map(to_fun, flat_args)
 
         torch._enable_functionalization(reapply_views=True)
         try:
-            f_outs = f(*f_args)
+            # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            flat_f_outs = f(*flat_f_args)
         finally:
             torch._disable_functionalization()
-
-        flat_args, _ = pytree.tree_flatten(args)
-        flat_f_args, _ = pytree.tree_flatten(f_args)
-        flat_f_outs, _ = pytree.tree_flatten(f_outs)
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
@@ -312,9 +309,13 @@ def run_functionalized_fw_and_collect_metadata(f) -> Tuple[ViewAndMutationMeta, 
         # to return to the user. Why? The backend compiler is free to (incorrectly) not set requires_grad
         # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
 
-        inp_storage_refs = {StorageWeakRef(inpt.storage()): idx for idx, inpt in enumerate(flat_f_args)}
+        inp_storage_refs = {
+            StorageWeakRef(inpt.storage()): idx
+            for idx, inpt in enumerate(flat_f_args) if isinstance(inpt, torch.Tensor)
+        }
         inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, torch.Tensor)}
-        for o in f_outs:
+        out_tensor_ids = {id(o) for o in flat_f_outs}
+        for o in flat_f_outs:
             is_input_tensor = False
             if isinstance(o, torch.Tensor) and StorageWeakRef(o.storage()) in inp_storage_refs:
                 output_type = OutputType.alias_of_input
@@ -342,7 +343,7 @@ def run_functionalized_fw_and_collect_metadata(f) -> Tuple[ViewAndMutationMeta, 
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
         f_input_tangents = [inp for inp, info in zip(flat_f_args, input_info) if is_data_mutation(info.mutation_type)]
-        f_output_tangents = [o for o, info in zip(f_outs, output_info) if info.output_type == OutputType.non_alias]
+        f_output_tangents = [o for o, info in zip(flat_f_outs, output_info) if info.output_type == OutputType.non_alias]
         f_tangents = f_input_tangents + f_output_tangents
 
         # pre-compute the indices of the inputs that are mutated
@@ -769,16 +770,18 @@ def same_dtype_views(view1, view2):
 #   f(c_base, b_base, a, d)
 def merge_view_inputs(
     fwd_inputs: List[Any],
-    mutated_input_info: List[MutationType]
+    mutated_input_info: List[InputAliasInfo]
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, Tuple[Any]]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
+    base_args = []
+    other_args = []
     for i, inpt in enumerate(fwd_inputs):
         if isinstance(inpt, Tensor):
             storage_ref = StorageWeakRef(inpt.storage())
             storage_ref_to_idx[storage_ref].append(i)
-    base_args = []
-    other_args = []
+        else:
+            other_args.append(inpt)
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
@@ -955,7 +958,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
     # or not
     try:
         with enable_python_dispatcher():
-            fw_metadata, _out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
                 flat_fn
             )(*flat_args)
     except RuntimeError as e:
@@ -982,7 +985,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
             if a not in args_set:
                 args_set.add(a)
                 leaf_flat_args.append(a)
-            elif fw_metadata.mutated_input_info[i] == MutationType.none:
+            elif fw_metadata.input_info[i].mutation_type == MutationType.none:
                 leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
             else:
                 ok = False
@@ -1119,7 +1122,7 @@ def describe_input(i, aot_config):
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
     with enable_python_dispatcher():
         _fw_metadata, out = run_functionalized_fw_and_collect_metadata(
@@ -1390,10 +1393,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
         if CompiledFunction.num_intermediate_bases > 0:
             outs = all_outs[:-CompiledFunction.num_intermediate_bases]
-            intermediate_bases = all_outs[-CompiledFunction.num_intermediate_bases:]
+            outs_and_intermediate_bases = all_outs
         else:
             outs = all_outs
-            intermediate_bases = []
+            outs_and_intermediate_bases = all_outs
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         if CompiledFunction.num_mutated_inputs > 0:
@@ -1455,8 +1458,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                     fw_outs_including_aliases.append(regenerated_out)
                 else:
                     assert info.output_type == OutputType.alias_of_intermediate
-                    aliased_base_tensor = intermediate_bases[info.base_idx]
-                    assert o._base is not None and o._base is aliased_base_tensor
+                    aliased_base_tensor = outs_and_intermediate_bases[info.base_idx]
+                    # TODO: can we... just directly return o? Might need to stop doing the TensorAlias thing for it
+                    assert o_._base is not None and o_._base is aliased_base_tensor
                     # TODO: handle the custom autograd function case here.
                     # We need a way to check whether a tensor came from a custom autograd fn from python,
                     # AND a way to replay that custom view fn.
@@ -1499,7 +1503,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
 @dynamo_timed
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -1575,13 +1579,13 @@ def create_aot_dispatcher_function(
             else:
                 return flat_args
 
-        fake_flat_tensor_args = process_inputs(flat_args)
+        fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = (
             any(
                 [
                     x.requires_grad
-                    for x in fake_flat_tensor_args
+                    for x in fake_flat_args
                     if isinstance(x, Tensor)
                 ]
             )
@@ -1597,7 +1601,7 @@ def create_aot_dispatcher_function(
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_tensor_args, aot_config)
+        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
 
         if not hasattr(compiled_fn, '_boxed_call'):
             compiled_fn = make_boxed_func(compiled_fn)
