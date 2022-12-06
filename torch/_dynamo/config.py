@@ -72,8 +72,22 @@ dynamic_propagation = True
 # run FX normalization passes in optimizer
 normalize_ir = False
 
-# If a tensor subclass type is in this set, torchdynamo will inline the
-# __torch_function__ logic of the subclass.
+# This feature doesn't really work.  We offer this flag for experimental
+# purposes / if you want to help us build out support.
+#
+# torchdynamo has very limited support for tensor subclasses that implement
+# __torch_function__.  Our current support is limited to tensor subclasses
+# that DO NOT store metadata on the tensor (in general, dynamo does not
+# support Python code that stores extra attributes on tensors at present).
+# If your tensor subclass purely changes function call behavior via
+# __torch_function__, you can allow torchdynamo to trace into it by
+# adding it to traceable_tensor_subclasses.  We don't do any safety checks,
+# so it is up to you to ensure that your subclass is well behaved.  See also
+# https://github.com/pytorch/torchdynamo/issues/1948
+#
+# We do NOT currently support __torch_dispatch__.  The implementation is
+# currently buggy, the main show stopper for nontrivial use is
+# https://github.com/pytorch/torchdynamo/issues/1952
 traceable_tensor_subclasses = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
