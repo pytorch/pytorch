@@ -103,6 +103,7 @@ class TestBaseStructuredSparsifier(TestCase):
         model1 = copy.deepcopy(model).to(device)
         pruner = SimplePruner(None)
         pruner.prepare(model1, None)
+        pruner.enable_mask_update = True
         for g in pruner.groups:
             module = g["module"]
             assert module.weight.device.type == device.type
@@ -176,6 +177,7 @@ class TestBaseStructuredSparsifier(TestCase):
         x = torch.ones(7, 7, device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, None)
+        pruner.enable_mask_update = True
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
@@ -196,6 +198,7 @@ class TestBaseStructuredSparsifier(TestCase):
         x = torch.ones((1, 1, 28, 28), device=device)
         pruner = SimplePruner(None)
         pruner.prepare(model, config)
+        pruner.enable_mask_update = True
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
@@ -240,6 +243,7 @@ class TestBaseStructuredSparsifier(TestCase):
 
         pruner = ImplementedPruner({"prune_bias": also_prune_bias})
         pruner.prepare(model, config)
+        pruner.enable_mask_update = True
         pruner.step()
 
         y_expected = model(x)
@@ -376,6 +380,7 @@ class TestBaseStructuredSparsifier(TestCase):
 
         pruner = ImplementedPruner({"prune_bias": also_prune_bias})
         pruner.prepare(model, config)
+        pruner.enable_mask_update = True
         pruner.step()
 
         y_expected = model(x)

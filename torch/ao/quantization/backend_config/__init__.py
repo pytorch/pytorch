@@ -16,6 +16,5 @@ __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
-    "DTypeWithConstraints",
     "ObservationType",
 ]
