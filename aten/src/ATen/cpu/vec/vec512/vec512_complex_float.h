@@ -753,7 +753,7 @@ public:
     return _mm512_div_ps(log(), log10_);
   }
   Vectorized<c10::complex<float>> log1p() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::log1p);
   }
   Vectorized<c10::complex<float>> asin() const {
     // asin(x)
