@@ -328,6 +328,8 @@ class StreamWrapper:
         return getattr(file_obj, name)
 
     def close(self, *args, **kwargs):
+        if self.closed:
+            return
         if StreamWrapper.debug_unclosed_streams:
             del StreamWrapper.session_streams[self]
         if hasattr(self, "parent_stream") and self.parent_stream is not None:
@@ -345,9 +347,9 @@ class StreamWrapper:
         Close steam if there is no children, or make it to be automatically closed as soon as
         all child streams are closed.
         """
+        self.close_on_last_child = True
         if self.child_counter == 0:
             self.close()
-        self.close_on_last_child = True
 
     def __dir__(self):
         attrs = list(self.__dict__.keys()) + list(StreamWrapper.__dict__.keys())
