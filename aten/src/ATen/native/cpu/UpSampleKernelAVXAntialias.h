@@ -222,6 +222,8 @@ int normalize_coeffs_8bpc(int outSize, int ksize, double* prekk) {
     } else {
       kk[x] = (int)(0.5 + prekk[x] * (1 << coefs_precision));
     }
+    //   std::cout << "(" << prekk[x] << ", " << kk[x] << ") ";
+    // std::cout << std::endl;
   }
   return coefs_precision;
 }
@@ -322,6 +324,8 @@ void ImagingResampleVertical_8bpc(
   // use the same buffer for normalized coefficients
   kk = (INT16*)prekk;
   coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
+    // std::cout << "BB " << coefs_precision << std::endl;
+
 
   for (yy = 0; yy < yout; yy++) {
     k = &kk[yy * ksize];

@@ -311,9 +311,14 @@ inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
     }
     output = (uint8_t) (output >> weights_precision);
 
+    // std::cout << "AA " << weights_precision << std::endl;
+
     *(uint8_t*)&dst[i * strides[0]] = output;
     //     interpolate_aa_single_dim_zero_strides<scalar_t, int64_t>(
     //         src + i * strides[1], &data[2], ids_stride);
+    // if (output == 108) {
+    //   std::cout << "108 " << n << " " << i << std::endl;
+    // }
   }
 }
 
@@ -1070,25 +1075,19 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     std::vector<Tensor> indices_weights;
 
-    float scale = area_pixel_compute_scale<float>(
+    // float scale = area_pixel_compute_scale<float>(
+    //     input_size, output_size, align_corners, opt_scale);
+    double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
     auto interp_size = HelperInterpLinear::interp_size;
 
-    // indices_weights = HelperInterpLinear::_compute_indices_weights_aa<float>(
-    //     input_size,
-    //     output_size,
-    //     stride,
-    //     ndims,
-    //     reshape_dim,
-    //     scale,
-    //     interp_size,
-    //     &HelperInterpLinear::aa_filter<float>);
-    // COPY-PASTE FROM _compute_indices_weights_aa
-
-    float support =
+    // float support =
+    //     (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+    double support =
         (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-    interp_size = (int)ceilf(support) * 2 + 1;
+    // interp_size = (int)ceilf(support) * 2 + 1;
+    interp_size = (int)ceil(support) * 2 + 1;
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
@@ -1104,7 +1103,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     {
       // Weights
       new_shape[reshape_dim] = output_size * interp_size;
-      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
+    //   auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
+      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<double>()));
       auto strides = wts.strides().vec();
       strides[reshape_dim] = 0;
       new_shape[reshape_dim] = output_size;
@@ -1118,7 +1118,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
     int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
     int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
-    float* wt_ptr = indices_weights[3].data_ptr<float>();
+    // float* wt_ptr = indices_weights[3].data_ptr<float>();
+    double* wt_ptr = indices_weights[3].data_ptr<double>();
     int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
 
     int64_t xmin, xmax;
@@ -1131,7 +1132,8 @@ struct HelperInterpLinear : public HelperInterpBase {
           support,
           wt_ptr + i * interp_size,
           interp_size,
-          HelperInterpLinear::aa_filter<float>,
+        //   HelperInterpLinear::aa_filter<float>,
+          HelperInterpLinear::aa_filter<double>,
           xmin,
           xmax);
 
@@ -1144,19 +1146,19 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f32 = indices_weights[3];
-    float * data_f32 = weights_f32.data_ptr<float>();
+    // float * data_f32 = weights_f32.data_ptr<float>();
+    double * data_f32 = weights_f32.data_ptr<double>();
     int64_t weights_f32_size = output_size * interp_size;
     // can't use weights_f32.max() here as tensor is restrided
-    float w_max = data_f32[0];
+    // float w_max = data_f32[0];
+    double w_max = data_f32[0];
     for (const auto i : c10::irange(weights_f32_size)) {
-        float v = data_f32[i];
+        // float v = data_f32[i];
+        double v = data_f32[i];
         if (w_max < v) {
             w_max = v;
         }
     }
-#ifdef VERBOSE
-    std::cout << "w_max: " << w_max << std::endl;
-#endif
 
     // Copied from PIL-SIMD, https://github.com/uploadcare/pillow-simd/blob/668aa48d12305b8f093958792a5e4f690c2583d6/src/libImaging/Resample.c
     for (weights_precision = 0; weights_precision < 22; weights_precision++) {
@@ -1165,32 +1167,23 @@ struct HelperInterpLinear : public HelperInterpBase {
             break;
     }
 
-#ifdef VERBOSE
-    std::cout << "weights_precision: " << weights_precision << std::endl;
-#endif
-
     // rescale float values to int16, we use the same buffer as PIL-SIMD
     // w_f32 -> w_i16 = int(w_f32 * 2^N + 0.5)
     // out_ui8 = int( (w_i16 * in_ui8) / 2^N + 0.5 )
 
     short * data_i16 = (short *) data_f32;
-#ifdef VERBOSE
-    std::cout << "weight (f32/u16): ";
-#endif
     for (const auto i : c10::irange(weights_f32_size)) {
-      float v = data_f32[i];
+    //   float v = data_f32[i];
+      double v = data_f32[i];
       if (v < 0) {
           data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
       } else {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
-#ifdef VERBOSE
-      std::cout << "(" << v << ", " << data_i16[i] << ") ";
-#endif
+    //   std::cout << "(" << v << ", " << data_i16[i] << ") ";
+    //   std::cout << std::endl;
+
     }
-#ifdef VERBOSE
-    std::cout << std::endl;
-#endif
     return indices_weights;
   }
 };
@@ -1814,9 +1807,12 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
-  if (input.dtype() == at::kByte) { // TODO: add more assumptions as needed
+  if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte)) { // TODO: add more assumptions as needed
+    input[0][0][0][0] = 0; // TODO: remove!!!
     beepidiboop(input, output);
+    // std::cout << "fast path" << std::endl;
   } else {
+    // std::cout << "slow path" << std::endl;
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
         output, input, align_corners, {scales_h, scales_w});
   }
