@@ -3399,6 +3399,70 @@ def _prepare_convolution_fusion_create(
     return inputs, constant_args, kernel_layout, req_stride_order
 
 
+def _prepare_convolution_transpose_fusion_create(
+    cls,
+    x: "TensorBox",
+    weight: "TensorBox",
+    bias: "TensorBox",
+    padding_: List[int],
+    stride_: List[int],
+    dilation_: List[int],
+    groups: int,
+    output_padding_: List[int],
+):
+    """
+    This function is a helper function to prepare inputs, layout and constant args
+    for convolution_transpose post-op fusion's create function, including deciding the output
+    layout (channels first or channels last), realizing inputs and make them etc. The
+    function only supports the CPU device since conv post-op fusion kernel is only
+    supported on CPU right now.
+    """
+    stride = tuple(stride_)
+    padding = tuple(padding_)
+    dilation = tuple(dilation_)
+    assert isinstance(groups, int)
+    output_padding = tuple(output_padding_)
+    with torch._subclasses.FakeTensorMode():
+        x_fake = ir_node_to_tensor(x, guard_shape=True)
+        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        bias_fake = (
+            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+        )
+        output = torch.ops.aten.convolution(
+            x_fake,
+            weight_fake,
+            bias_fake,
+            stride,
+            padding,
+            dilation,
+            True,
+            output_padding,
+            groups,
+        )
+        output_size = output.size()
+        req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
+        req_stride_order = [len(req_stride_order)] + req_stride_order
+        output_stride = make_channels_last_strides_for(output_size)
+
+    x = cls.require_stride_order(x, req_stride_order)
+    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    inputs = [x, weight]
+
+    kernel_layout = FixedLayout(
+        x.get_device(),
+        x.get_dtype(),
+        output.size(),
+        output_stride,
+    )
+    constant_args = [padding, stride, dilation, groups, output_padding]
+
+    if bias is not None:
+        inputs.append(bias)
+    else:
+        constant_args.insert(0, bias)
+    return inputs, constant_args, kernel_layout, req_stride_order
+
+
 class ConvolutionUnary(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn._convolution_pointwise"
 
@@ -3723,6 +3787,64 @@ class LinearBinary(ExternKernelAlloc):
 
     def apply_constraint(self):
         pass
+
+
+class ConvolutionTransposeUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups_: int,
+        output_padding_: List[int],
+        attr,
+        scalars,
+        algorithm,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_transpose_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups_, output_padding_
+        )
+        constant_args = constant_args + [attr, scalars, algorithm]
+        return ConvolutionTransposeUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
 @dataclasses.dataclass
