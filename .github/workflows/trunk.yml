@@ -283,14 +283,14 @@ jobs:
                 { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
                 ]}
         - name: Notify Windows channel 
-            if: always()
-            uses: ravsamhq/notify-slack-action@v1
-            with:
-              message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-              status: ${{ job.status }}
-              notify_when: 'failure'
-            env:
-              SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
+          if: always()
+          uses: ravsamhq/notify-slack-action@v1
+          with:
+            message_format: "{emoji} *{workflow}* {status_message} in <{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            status: ${{ job.status }}
+            notify_when: 'failure'
+          env:
+            SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
 
   win-vs2019-cuda11_6-py3-test:
     name: win-vs2019-cuda11.6-py3
