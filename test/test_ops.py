@@ -500,11 +500,6 @@ class TestCommon(TestCase):
                 noncontig_sample.kwargs,
             )
 
-            # Verifies sample input tensors should have no grad or history
-            sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
-            assert sample_tensor.grad is None
-            assert sample_tensor.grad_fn is None
-
             # validates forward
             expected = op(t_inp, *t_args, **t_kwargs)
             actual = op(n_inp, *n_args, **n_kwargs)
@@ -1579,7 +1574,7 @@ class TestMathBits(TestCase):
 def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
-    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm(_legit).out
     # which mutate not necessarily the first input.
     if isinstance(rs, torch.Tensor) and rs is input:
         unequal_size = rs.size() != input_size
@@ -1668,7 +1663,6 @@ class TestRefsOpsInfo(TestCase):
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
-        '_refs.nn.functional.elu',
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
@@ -1763,9 +1757,13 @@ class TestRefsOpsInfo(TestCase):
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_python_ref_db(self, op):
+        inplace = op[-1] == "_"
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
-        self.assertIn(op, self.ref_db_names)
+        elif inplace:
+            self.assertNotIn(op, self.ref_db_names, msg=f"{op} is an in-place operation and should not have an OpInfo")
+        else:
+            self.assertIn(op, self.ref_db_names)
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
