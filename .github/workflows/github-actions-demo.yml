@@ -48,6 +48,16 @@ jobs:
             notify_when: 'failure'
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
+      - name: Report Status 2
+        if: failure()
+        id: slack
+        uses: slackapi/slack-github-action@v1.23.0
+        with:
+            channel-id: 'C04DSC9D5T6'
+            # For posting a simple plain text message
+            slack-message: "GitHub build result: ${{ job.status }}\n link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+            SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
             
   Explore-GitHub-Actions3:
     runs-on: ubuntu-latest
@@ -75,12 +85,13 @@ jobs:
             notify_when: 'failure,cancelled,warnings,skipped,success'
         env:
             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
-      - name: Report Status 2  
+      - name: Report Status 2
+        if: failure()
         id: slack
         uses: slackapi/slack-github-action@v1.23.0
         with:
             channel-id: 'C04DSC9D5T6'
             # For posting a simple plain text message
-            slack-message: "GitHub build result: ${{ job.status }}\n<{repo_url}|{repo}@{branch}> on <{commit_url}|{commit_sha}> link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            slack-message: "GitHub build result: ${{ job.status }}\n link here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
             SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
