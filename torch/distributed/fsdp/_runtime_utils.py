@@ -532,11 +532,12 @@ def _post_backward_hook(
                 # ahead of the first backward pass reduction, which is possible
                 # since the reduction is issued in a separate stream and is
                 # async and would result in reducing the wrong gradient.
-                unsharded_grad = param.grad.data
+                unsharded_grad = param.grad.data  # already padded
                 param.grad = None
                 p_assert(
-                    len(unsharded_grad.size()) == 1,
-                    f"Expects gradient to be flattened but got {unsharded_grad.size()}",
+                    unsharded_grad.shape == handle.flat_param._unsharded_size,
+                    f"Expects gradient to have shape {handle.flat_param._unsharded_size} "
+                    f"but got {unsharded_grad.shape}",
                 )
                 chunks = list(unsharded_grad.chunk(state.world_size))
                 numel_to_pad = (
@@ -546,15 +547,10 @@ def _post_backward_hook(
                     numel_to_pad == 0,
                     f"Expects no padding needed but requires {numel_to_pad} numel",
                 )
-                padded_unsharded_grad = (
-                    F.pad(unsharded_grad, [0, numel_to_pad])
-                    if numel_to_pad > 0
-                    else unsharded_grad
-                )
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
-                    padded_unsharded_grad,
+                    unsharded_grad,
                     new_sharded_grad,
                 )
                 _cast_grad_to_param_dtype(state, handle, new_sharded_grad, param)
