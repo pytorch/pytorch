@@ -1,23 +1,22 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
-
 import torch
 from torch.distributed.distributed_c10d import (
-    _get_default_group,
     all_gather,
     all_reduce,
-    all_to_all,
     broadcast,
-    get_global_rank,
     get_rank,
     get_world_size,
+    get_global_rank,
+    ReduceOp,
     GroupMember,
+    scatter,
+    _get_default_group,
+    reduce_scatter,
     new_group,
     ProcessGroup,
-    reduce_scatter,
-    ReduceOp,
-    scatter,
+    all_to_all,
     Work,
 )
 
@@ -26,7 +25,9 @@ _global_device_mesh: Optional["DeviceMesh"] = None
 
 def get_global_device_mesh() -> "DeviceMesh":
     global _global_device_mesh
-    assert _global_device_mesh is not None, "Could not get a default device mesh!"
+    assert (
+        _global_device_mesh is not None
+    ), "Could not get a default device mesh!"
     return _global_device_mesh
 
 
@@ -336,7 +337,9 @@ class DeviceMesh(object):
         if dim_group is not GroupMember.WORLD:
             src_for_dim = get_global_rank(dim_group, 0)
 
-        return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+        return broadcast(
+            tensor, src=src_for_dim, group=dim_group, async_op=async_op
+        )
 
     def all_gather(
         self,
@@ -360,7 +363,9 @@ class DeviceMesh(object):
             A :class:`Work` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        return all_gather(tensor_list, tensor, group=dim_group, async_op=async_op)
+        return all_gather(
+            tensor_list, tensor, group=dim_group, async_op=async_op
+        )
 
     def all_reduce(
         self,
@@ -448,9 +453,9 @@ class DeviceMesh(object):
             # scatter the tensor
             output_offset = offset_list[my_coordinate]
             output.copy_(
-                flat_tensor[output_offset : output_offset + output.numel()].view(
-                    output.shape
-                )
+                flat_tensor[
+                    output_offset : output_offset + output.numel()
+                ].view(output.shape)
             )
         else:
             raise RuntimeError(

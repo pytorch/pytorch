@@ -75,9 +75,6 @@ class LocalSource(Source):
 class RandomValueSource(Source):
     random_call_index: int
 
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
     def reconstruct(self, codegen):
         return [
             codegen.create_load(codegen.tx.output.random_values_var),

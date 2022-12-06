@@ -106,16 +106,8 @@ MetricsArena* MetricsArena::Get() {
   return arena;
 }
 
-void MetricsArena::ResetCounters() {
+void MetricsArena::Reset() {
   for (auto& pair : counters_) {
-    if (pair.second) {
-      pair.second->Reset();
-    }
-  }
-}
-
-void MetricsArena::ResetMetrics() {
-  for (auto& pair : metrics_) {
     if (pair.second) {
       pair.second->Reset();
     }
@@ -149,9 +141,6 @@ void MetricsArena::ForEachMetric(
     const std::function<void(const std::string&, MetricData*)>& metric_func) {
   std::lock_guard<std::mutex> lock(lock_);
   for (auto& name_data : metrics_) {
-    if (!name_data.second->IsValid()) {
-      continue;
-    }
     metric_func(name_data.first, name_data.second.get());
   }
 }
@@ -160,44 +149,40 @@ void MetricsArena::ForEachCounter(
     const std::function<void(const std::string&, CounterData*)>& counter_func) {
   std::lock_guard<std::mutex> lock(lock_);
   for (auto& name_data : counters_) {
-    if (!name_data.second->IsValid())
-      continue;
     counter_func(name_data.first, name_data.second.get());
   }
 }
 
 std::vector<std::string> MetricsArena::GetMetricNames() {
   std::vector<std::string> names;
-  ForEachMetric([&names](const std::string& name, MetricData* data) {
-    names.push_back(name);
-  });
+  std::lock_guard<std::mutex> lock(lock_);
+  for (auto& name_data : metrics_) {
+    names.push_back(name_data.first);
+  }
   return names;
 }
 
 MetricData* MetricsArena::GetMetric(const std::string& name) {
   std::lock_guard<std::mutex> lock(lock_);
   auto it = metrics_.find(name);
-  if (it == metrics_.end()) {
-    return nullptr;
-  }
-  return it->second->IsValid() ? it->second.get() : nullptr;
+  return it != metrics_.end() ? it->second.get() : nullptr;
 }
 
 std::vector<std::string> MetricsArena::GetCounterNames() {
   std::vector<std::string> names;
-  ForEachCounter([&names](const std::string& name, CounterData* data) {
-    names.push_back(name);
-  });
+  std::lock_guard<std::mutex> lock(lock_);
+  for (auto& name_data : counters_) {
+    if (name_data.second->Value() > 0) {
+      names.push_back(name_data.first);
+    }
+  }
   return names;
 }
 
 CounterData* MetricsArena::GetCounter(const std::string& name) {
   std::lock_guard<std::mutex> lock(lock_);
   auto it = counters_.find(name);
-  if (it == counters_.end()) {
-    return nullptr;
-  }
-  return it->second->IsValid() ? it->second.get() : nullptr;
+  return it != counters_.end() ? it->second.get() : nullptr;
 }
 
 MetricData::MetricData(MetricReprFn repr_fn, size_t max_samples)
@@ -241,14 +226,6 @@ std::vector<Sample> MetricData::Samples(
     *total_samples = count_;
   }
   return samples;
-}
-
-void MetricData::Reset() {
-  std::lock_guard<std::mutex> lock(lock_);
-  count_ = 0;
-  // Don't clear. samples_ are init with placeholders.
-  samples_ = std::vector<Sample>(samples_.size());
-  accumulator_ = 0.0;
 }
 
 Metric::Metric(std::string name, MetricReprFn repr_fn, size_t max_samples)
@@ -383,26 +360,21 @@ std::string CreateMetricReport(
     const std::vector<std::string>& metric_names) {
   MetricsArena* arena = MetricsArena::Get();
   std::stringstream ss;
-  std::set<std::string> metric_name_set(
-      metric_names.begin(), metric_names.end());
-  arena->ForEachMetric(
-      [&ss, &metric_name_set](const std::string& name, MetricData* data) {
-        if (metric_name_set.find(name) != metric_name_set.end()) {
-          EmitMetricInfo(name, data, &ss);
-        }
-      });
-  std::set<std::string> counter_name_set(
-      counter_names.begin(), counter_names.end());
-  arena->ForEachCounter(
-      [&ss, &counter_name_set](const std::string& name, CounterData* data) {
-        if (counter_name_set.find(name) != counter_name_set.end()) {
-          EmitCounterInfo(name, data, &ss);
-        }
-      });
-
+  for (const std::string& metric_name : metric_names) {
+    MetricData* data = arena->GetMetric(metric_name);
+    if (data && data->TotalSamples() > 0) {
+      EmitMetricInfo(metric_name, data, &ss);
+    }
+  }
+  for (const std::string& counter_name : counter_names) {
+    CounterData* data = arena->GetCounter(counter_name);
+    if (data && data->Value() > 0) {
+      EmitCounterInfo(counter_name, data, &ss);
+    }
+  }
   static std::string fall_back_counter_prefix = "aten::";
   arena->ForEachCounter([&ss](const std::string& name, CounterData* data) {
-    if (name.rfind(fall_back_counter_prefix, 0) == 0) {
+    if (name.rfind(fall_back_counter_prefix, 0) == 0 && data->Value() > 0) {
       // it might emit duplicated counter if user also specified exact aten
       // counter in the `counter_names` but it should be very rare.
       EmitCounterInfo(name, data, &ss);

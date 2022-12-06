@@ -85,7 +85,6 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     return *this == static_cast<std::uint8_t>(other);
   }
 
-  // todo(crcrpar): Handle `RedOpType::PREMUL_SUM` with its scaling factor.
   bool operator==(const ReduceOp& other) {
     return *this == other.op_;
   }

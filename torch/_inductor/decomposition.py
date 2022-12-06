@@ -66,8 +66,6 @@ decompositions = get_decompositions(
         aten.mv,
         aten.narrow,
         aten.native_batch_norm,
-        aten._native_batch_norm_legit,
-        aten._native_batch_norm_legit_functional,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -154,8 +152,8 @@ def check_device_dtype(a: Tensor, b: Tensor):
     return (
         a.is_cuda
         and b.is_cuda
-        and a.dtype in (torch.float32, torch.float16, torch.bfloat16)
-        and b.dtype in (torch.float32, torch.float16, torch.bfloat16)
+        and a.dtype == torch.float32
+        and b.dtype == torch.float32
     )
 
 
@@ -210,9 +208,6 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
-    assert utils.has_triton()
-    from triton.testing import do_bench
-
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m_padded_length = get_padded_length(mat1.shape[0])
@@ -233,13 +228,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         warmup = 5
         rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-            ori_time = do_bench(
+            ori_time = utils.do_bench(
                 lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
             )[0]
         else:
             if input is not None:
                 input = torch.randn_like(input)
-            ori_time = do_bench(
+            ori_time = utils.do_bench(
                 lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
             )[0]
 
@@ -251,14 +246,14 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 input_pad = input.new_empty(
                     [get_padded_length(i) + i for i in input.shape]
                 )
-            pad_time = do_bench(
+            pad_time = utils.do_bench(
                 lambda: op(input_pad, mat1_pad, mat2_pad),
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
             )[0]
         else:
-            pad_time = do_bench(
+            pad_time = utils.do_bench(
                 lambda: op(mat1_pad, mat2_pad), warmup=warmup, rep=rep, fast_flush=True
             )[0]
 
@@ -353,6 +348,11 @@ def convolution_backward(
         [output_mask[0], output_mask[1], False],
     )
     return (grad_inp, grad_weight, grad_bias)
+
+
+@register_decomposition([aten.rsqrt])
+def rsqrt(x):
+    return torch.reciprocal(torch.sqrt(x))
 
 
 @register_decomposition([aten.log2])
@@ -450,6 +450,11 @@ def silu_(x):
 @register_decomposition(aten.masked_fill_)
 def masked_fill_(x, mask, value):
     return x.copy_(aten.masked_fill(x, mask, value))
+
+
+@register_decomposition([aten.log1p])
+def log1p(x):
+    return torch.log(x + 1)
 
 
 @register_decomposition([aten.baddbmm])

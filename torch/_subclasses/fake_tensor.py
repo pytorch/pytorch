@@ -230,7 +230,11 @@ class FakeTensorConverter(object):
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
+        ctx = contextlib.nullcontext()
+        if shape_env is not None:
+            ctx = shape_env.suppress_guards()
+        with ctx:
+            out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
@@ -332,6 +336,21 @@ def resize_as_(fake_mode, func, *args, **kwargs):
 def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     # TODO: remove me
     return constructors(fake_mode, func, *args, **kwargs)
+
+
+# _to_copy fails when run with FakeTensors to cuda device
+# TODO: debug
+@register_op_impl(aten._to_copy.default)
+def to_copy(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    input_device = new_kwargs.pop("device", None)
+    out_device = input_device if input_device else new_kwargs["input"].device
+    with in_kernel_invocation_manager(fake_mode):
+        input = new_kwargs.pop("input").to("meta")
+        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
 # index.Tensor data-dependent in only some conditions

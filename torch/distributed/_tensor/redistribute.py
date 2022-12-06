@@ -1,15 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, cast
 
 import torch
 import torch.distributed._tensor.api as dtensor
+from torch.distributed._tensor.placement_types import Placement, _Partial, Shard, Replicate
 from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor.placement_types import (
-    _Partial,
-    Placement,
-    Replicate,
-    Shard,
-)
 
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
@@ -59,7 +54,8 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
             and isinstance(target, Shard)
             and (
                 current.dim != target.dim
-                or repeat_dim_current[current.dim] != repeat_dim_target[target.dim]
+                or repeat_dim_current[current.dim]
+                != repeat_dim_target[target.dim]
             )
         ):
             # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
@@ -81,7 +77,9 @@ def _redistribute_with_local_tensor(
 ) -> torch.Tensor:
     new_local_tensor = None
 
-    sorted_placements = list(enumerate(zip(current_placements, target_placements)))
+    sorted_placements = list(
+        enumerate(zip(current_placements, target_placements))
+    )
     sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
 
@@ -230,7 +228,9 @@ class Redistribute(torch.autograd.Function):
                 target_placements.append(target)
 
         return (
-            redistribute_dtensor(grad_output, previous_device_mesh, target_placements),
+            redistribute_dtensor(
+                grad_output, previous_device_mesh, target_placements
+            ),
             None,
             None,
         )

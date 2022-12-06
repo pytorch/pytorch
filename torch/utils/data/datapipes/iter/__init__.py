@@ -20,6 +20,7 @@ from torch.utils.data.datapipes.iter.filelister import (
     FileListerIterDataPipe as FileLister,
 )
 from torch.utils.data.datapipes.iter.fileopener import (
+    FileLoaderIterDataPipe as FileLoader,
     FileOpenerIterDataPipe as FileOpener,
 )
 from torch.utils.data.datapipes.iter.grouping import (
@@ -43,6 +44,7 @@ __all__ = ['Batcher',
            'Concater',
            'Demultiplexer',
            'FileLister',
+           'FileLoader',
            'FileOpener',
            'Filter',
            'Forker',

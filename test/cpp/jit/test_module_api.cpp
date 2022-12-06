@@ -66,7 +66,7 @@ TEST(ModuleAPITest, MethodRunAsync) {
     mtx.lock();
     ++counter;
     mtx.unlock();
-    at::launch(std::move(f));
+    at::launch(move(f));
   };
 
   auto method = m.get_method("forward");

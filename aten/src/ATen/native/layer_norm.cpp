@@ -3,7 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -79,10 +78,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  bool mixed_type = is_mixed_type(input, weight, bias);
-  if (mixed_type) {
-    check_mixed_data_type(input, weight, bias);
-  }
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -98,9 +93,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
-  const auto dtype = param_scalar_type(input, mixed_type);
-  Tensor mean = at::empty({M}, X->options().dtype(dtype));
-  Tensor rstd = at::empty({M}, X->options().dtype(dtype));
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
 
   layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
@@ -181,9 +175,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-Tensor layer_norm_symint(
+Tensor layer_norm(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -192,7 +186,8 @@ Tensor layer_norm_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+
+  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);

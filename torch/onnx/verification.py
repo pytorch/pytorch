@@ -107,8 +107,8 @@ def _ort_session(
 ):
     try:
         import onnxruntime  # type: ignore[import]
-    except ImportError as e:
-        raise ImportError("onnxruntime is required for export verification.") from e
+    except ImportError:
+        raise ImportError("onnxruntime is required for export verification.")
 
     if ort_providers is None:
         ort_providers = _ORT_PROVIDERS

@@ -9,7 +9,7 @@ import operator
 import re
 import types
 from abc import ABCMeta
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -36,7 +36,9 @@ from ..source import (
 )
 from ..utils import (
     clone_input,
+    fake_tensors_available,
     get_fake_value,
+    get_real_value,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -84,7 +86,6 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
-    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedNumpyVariable,
@@ -108,13 +109,8 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
-    fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor):
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -123,13 +119,6 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
-
-    def get_fake_examples(self):
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-            return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -252,19 +241,9 @@ class VariableBuilder:
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
-        elif istype(value, (slice, range)):
-            items = [
-                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
-                    getattr(value, k)
-                )
-                for k in ("start", "stop", "step")
-            ]
-            if isinstance(value, slice):
-                return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
-            else:
-                return RangeVariable(
-                    items, guards=make_guards(GuardBuilder.EQUALS_MATCH)
-                )
+        elif istype(value, range):
+            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
+            return RangeVariable(value=value, guards=guards)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -319,18 +298,9 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
-            elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+            elif issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
-                if getattr(value, "_is_fsdp_managed_module", False):
-                    # Note: we can't do this assert inside FSDP constructor,
-                    # since we don't know yet whether dynamo will be used
-                    assert getattr(
-                        value, "_fsdp_use_orig_params", False
-                    ), "Dynamo only supports FSDP with use_orig_params=True"
-
-                # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-                # in fully_sharded_data_parallel.py for more information
                 return UnspecializedNNModuleVariable(
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
@@ -478,6 +448,14 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
+        elif isinstance(value, slice):
+            items = [
+                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
+                    getattr(value, k)
+                )
+                for k in ("start", "stop", "step")
+            ]
+            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
             return TorchPyOperator(
                 value,
@@ -535,9 +513,7 @@ class VariableBuilder:
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), value, False, None)
-            )
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
@@ -565,6 +541,10 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), value, False)
+                )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
@@ -584,15 +564,6 @@ class VariableBuilder:
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
-
-            fake_tensor_value = None
-            example_value = tensor_variable.proxy.node.meta["example_value"]
-            if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                fake_tensor_value = example_value
-
-            graph_arg = GraphArg(self.get_source(), value, False, fake_tensor_value)
-            self.tx.output.graphargs.append(graph_arg)
-
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)
@@ -608,23 +579,18 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            if config.dynamic_shapes and isinstance(value, int):
-                shape_env = self.tx.output.shape_env
-                wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value)
+            wrapped_value = torch.tensor(value)
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), wrapped_value, True)
                 )
-                # TODO: Do float
-            else:
-                # TODO: Eliminate this case entirely
-                wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
             else:
                 options = {}
             options.update({"source": self.get_source()})
-            if isinstance(wrapped_value, torch.Tensor):
-                options.update({"raw_value": value})
+            options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
@@ -647,14 +613,6 @@ class VariableBuilder:
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
-            if not is_constant_source(self.get_source()):
-                fake_tensor_value = None
-                example_value = unspec_var.proxy.node.meta["example_value"]
-                if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                    fake_tensor_value = example_value
-                self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
-                )
             return unspec_var
 
 
@@ -698,12 +656,17 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             options.update(target_cls.specialize(example_value))
         return target_cls(proxy, **options)
 
+    use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
+
     initial_example_value = example_value
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
+            use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
+            if not use_fake_tensors or not isinstance(
+                value, torch._subclasses.fake_tensor.FakeTensor
+            ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -711,13 +674,14 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
 
     with preserve_rng_state():
         if example_value is None:
-            example_value = get_fake_value(proxy.node, tx)
+            if use_fake_tensors:
+                example_value = get_fake_value(proxy.node, tx)
+            else:
+                example_value = get_real_value(proxy.node, tx.output)
+
         else:
-            # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
-            # TODO(voz): Find all the callsites and burn this down.
-            # Flipping it to an assert fails dozens of tests.
-            if not isinstance(example_value, torch._subclasses.FakeTensor):
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+            proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+            if use_fake_tensors:
                 fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
                 example_value = fake_wrapper(example_value)
 
@@ -732,7 +696,9 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
-        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+        if use_fake_tensors and isinstance(
+            example_value, torch._subclasses.fake_tensor.FakeTensor
+        ):
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else torch.Tensor
             )
@@ -826,14 +792,25 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         and (proxy.node.target == "item" or proxy.node.target in {math.sqrt, math.pow})
         and config.capture_scalar_outputs
     ):
-        # item raw value should not be accessed
-        return wrap_fx_proxy_cls(
-            FakeItemVariable,
-            tx=tx,
-            proxy=proxy,
-            example_value=torch.tensor(example_value),
-            **options,
-        )
+        if use_fake_tensors:
+            # item raw value should not be accessed
+            return wrap_fx_proxy_cls(
+                FakeItemVariable,
+                tx=tx,
+                proxy=proxy,
+                example_value=torch.tensor(example_value),
+                **options,
+            )
+        else:
+            return wrap_fx_proxy_cls(
+                UnspecializedPythonVariable,
+                tx=tx,
+                proxy=proxy,
+                example_value=torch.tensor(example_value),
+                raw_value=None if use_fake_tensors else example_value,
+                need_unwrap=False,
+                **options,
+            )
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)

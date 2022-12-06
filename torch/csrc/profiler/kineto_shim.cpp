@@ -37,7 +37,7 @@ const std::set<libkineto::ActivityType> cudaTypes = {
 #endif // USE_KINETO
 
 static_assert(
-    c10::is_pod_v<DeviceAndResource>,
+    std::is_pod<DeviceAndResource>::value,
     "Kineto specific details should be in `kineto_ids`.");
 
 const DeviceAndResource kineto_ids() {

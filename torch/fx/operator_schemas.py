@@ -355,9 +355,9 @@ def normalize_module(
     """
     try:
         submod = root.get_submodule(target)
-    except AttributeError as e:
+    except AttributeError:
         raise RuntimeError(f"Tried to normalize node with target {target} but root did not "
-                           f"have that target!") from e
+                           f"have that target!")
     if hasattr(submod.__class__, '__name__'):
         classname = submod.__class__.__name__
         if getattr(torch.nn, classname, None) == submod.__class__:

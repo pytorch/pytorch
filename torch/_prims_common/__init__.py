@@ -20,7 +20,6 @@ if hasattr(torch._C, "_nvfuser"):
         torch.bfloat16: DataType.BFloat16,
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
-        torch.uint8: DataType.Int32,
         torch.bool: DataType.Bool,
         # Python scalars
         complex: DataType.ComplexDouble,
@@ -474,9 +473,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing dims to be
-# specified using negative indices. If `wrap_scalar` is true then scalar
-# tensors of rank 0 will allow dimensions in the range [-1, 0]. Otherwise,
-# idx should be in the range [-rank, rank-1].
+# specified using negative indices. For scalar tensors with rank 0, then idx
+# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"
@@ -509,20 +507,20 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
+def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
     pass
 
 
 @overload
-def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
+def canonicalize_dims(rank: int, indices: int) -> int:
     pass
 
 
-def canonicalize_dims(rank, indices, wrap_scalar=True):
+def canonicalize_dims(rank, indices):
     if isinstance(indices, Dim):
-        return canonicalize_dim(rank, indices, wrap_scalar)
+        return canonicalize_dim(rank, indices)
 
-    return tuple(canonicalize_dim(rank, x, wrap_scalar) for x in indices)
+    return tuple(canonicalize_dim(rank, x) for x in indices)
 
 
 def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
@@ -722,14 +720,12 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
-        # Convert to list to produce a compatible error message with core
-        # PyTorch, which prints sequences in square brackets.
-        shape = list(shape)
         check(
             newsize != 0,
-            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
-                     f"unspecified dimension size -1 can be any value and is ambiguous"),
+            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+            f"unspecified dimension size -1 can be any value and is ambiguous",
         )
+        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 
