@@ -5100,8 +5100,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select_scatter_symint
-    CompositeExplicitAutogradNonFunctional: select_scatter
+    CompositeExplicitAutogradNonFunctional: select_scatter_symint
   autogen: select_scatter.out
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
