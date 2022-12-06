@@ -41,9 +41,12 @@ static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
 
 static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
   if (v_src.is_quantized()) {
+    auto plane_size =
+        get_dim<Dim4D::Height>(v_src) * get_dim<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
-        return VK_KERNEL(image_to_nchw_quantized);
+        return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                   : VK_KERNEL(image_to_nchw_quantized);
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:
@@ -130,6 +133,19 @@ void record_image_to_nchw_op(
       api::utils::make_ivec3(v_src.extents()),
       plane_size,
   };
+
+  if (v_src.is_quantized()) {
+    if (plane_size % 4 == 0) {
+      global_size.data[0u] = plane_size / 4;
+      global_size.data[1u] = 1;
+      local_size.data[0u] *= local_size.data[1u];
+      local_size.data[1u] = 1;
+    } else {
+      uint32_t numel = v_src.numel();
+      global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
+      local_size = {64u, 1u, 1u};
+    }
+  }
 
   api::UniformParamsBuffer params(context, block);
   context->submit_compute_job(

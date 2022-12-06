@@ -173,6 +173,9 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
 }
 
 void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
+  TORCH_CHECK(
+      !src.is_quantized(),
+      "Copy of vulkan quantized tensors to cpu is currently disabled!");
   api::Context* const context = api::context();
 
   // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
