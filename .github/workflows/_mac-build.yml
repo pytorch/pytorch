@@ -47,8 +47,11 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+      is-test-matrix-empty:
+        value: ${{ jobs.build.outputs.is-test-matrix-empty }}
+        description: True if the filtered test configs matrix is empty. False otherwise.
       build-outcome:
         value: ${{ jobs.build.outputs.build-outcome }}
         description: The outcome of the build step. This is used to influence test filtering logic later on.
@@ -73,6 +76,8 @@ jobs:
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
     outputs:
       build-outcome: ${{ steps.build.outcome }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch

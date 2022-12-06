@@ -39,3 +39,4 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.is-test-matrix-empty }}

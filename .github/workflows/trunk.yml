@@ -38,6 +38,7 @@ jobs:
       build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.is-test-matrix-empty }}
 
   # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-focal-py3_7-gcc7-build:
@@ -76,6 +77,7 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7
       docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.is-test-matrix-empty }}
 
   linux-bionic-cuda11_6-py3_10-gcc7-sm86-build:
     name: cuda11.6-py3.10-gcc7-sm86
@@ -103,6 +105,7 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-sm86-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-sm86-build.outputs.is-test-matrix-empty }}
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
@@ -147,6 +150,7 @@ jobs:
       build-environment: linux-bionic-py3.7-clang9-slow
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.is-test-matrix-empty }}
 
   linux-focal-py3_7-clang7-tsan-build:
     name: linux-focal-py3.7-clang7-tsan
@@ -167,6 +171,7 @@ jobs:
       build-environment: linux-focal-py3.7-clang7-tsan
       docker-image: ${{ needs.linux-focal-py3_7-clang7-tsan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_7-clang7-tsan-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-focal-py3_7-clang7-tsan-build.outputs.is-test-matrix-empty }}
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
@@ -201,6 +206,7 @@ jobs:
     with:
       build-environment: macos-12-py3-x86-64
       test-matrix: ${{ needs.macos-12-py3-x86-64-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.macos-12-py3-x86-64-build.outputs.is-test-matrix-empty }}
       arch: x86_64
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
@@ -259,6 +265,7 @@ jobs:
     with:
       build-environment: macos-12-py3-arm64
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.macos-12-py3-arm64-build.outputs.is-test-matrix-empty }}
       arch: arm64
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
@@ -290,6 +297,7 @@ jobs:
       build-environment: win-vs2019-cuda11.6-py3
       cuda-version: "11.6"
       test-matrix: ${{ needs.win-vs2019-cuda11_6-py3-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.win-vs2019-cuda11_6-py3-build.outputs.is-test-matrix-empty }}
 
   linux-focal-rocm5_2-py3_8-build:
     name: linux-focal-rocm5.2-py3.8
@@ -312,6 +320,7 @@ jobs:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-build.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ needs.linux-focal-rocm5_2-py3_8-build.outputs.is-test-matrix-empty }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
