@@ -9054,7 +9054,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T9[1];
     T9[0] = 0;
     T9[0]
-       = T2[((i143 / i95) * (i150 * T0.size[3])) + ((i147 % T0.size[3]) * i150) + ((i145 / i94) * T0.size[2]) + (i147 / T0.size[3])];
+       = T2[(((((i143 / i95) * (i150 * T0.size[3])) + ((i147 % T0.size[3]) * i150)) + ((i145 / i94) * T0.size[2])) + (i147 / T0.size[3]))];
     __half T8[1];
     T8[0] = 0;
     T8[0]

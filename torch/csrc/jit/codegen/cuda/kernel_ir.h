@@ -125,19 +125,10 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
 
 class TORCH_CUDA_CU_API TensorIndex final : public Val {
  public:
-  TensorIndex(
-      IrBuilderPasskey,
-      const TensorView* view,
-      std::vector<Val*> indices);
+  TensorIndex(IrBuilderPasskey, const TensorView* view, Val* index);
 
-  std::vector<Val*>::size_type nDims() const {
-    return indices_.size();
-  }
-
-  Val* index(int i) const;
-
-  const std::vector<Val*>& indices() const {
-    return indices_;
+  Val* index() const {
+    return index_;
   }
 
   TensorView* view() const {
@@ -147,7 +138,7 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
 
  private:
   const TensorView* view_ = nullptr;
-  std::vector<Val*> indices_;
+  Val* index_ = nullptr;
 };
 
 //! Allocate is a lower level Node that describes a buffer of memory that

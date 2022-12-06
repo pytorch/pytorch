@@ -1537,6 +1537,14 @@ std::unordered_map<IterDomain*, IterDomain*> mapAllProducerDomainsToConsumer(
   return p2c_alloc_map;
 }
 
+Val* sumVals(std::vector<Val*> vals) {
+  Val* result_index = GpuLower::current()->kernel()->zeroVal();
+  for (auto v : vals) {
+    result_index = SimplifyingIrBuilder::addExpr(result_index, v);
+  }
+  return result_index;
+}
+
 } // namespace
 
 // Producer index for either shared or local memory
@@ -1768,11 +1776,11 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   return strided_inds;
 }
 
-std::vector<Val*> Index::getLinearLogicalIndex(
+Val* Index::getLinearLogicalIndex(
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   auto guard = ir_utils::overrideContiguityGuard(consumer_tv, true);
-  return getGlobalConsumerStridedIndices(consumer_tv, loops);
+  return sumVals(getGlobalConsumerStridedIndices(consumer_tv, loops));
 }
 
 std::vector<Val*> Index::getPerDimLogicalIndex(
@@ -2059,34 +2067,23 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   return strided_inds;
 }
 
-std::vector<Val*> Index::getProducerStridedIndices(
+Val* Index::getProducerStridedIndices(
     TensorView* producer,
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops,
     const std::unordered_map<IterDomain*, Val*>& override_index) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getProducerStridedIndices");
   if (producer->domain()->noReductions().size() == 0) {
-    return std::vector<Val*>(
-        producer->getMaybeRFactorDomain().size(),
-        GpuLower::current()->kernel()->zeroVal());
+    return GpuLower::current()->kernel()->zeroVal();
   }
 
-  std::vector<Val*> strided_indices;
   if (producer->getMemoryType() == MemoryType::Global) {
-    strided_indices = getGlobalProducerStridedIndices(
-        producer, consumer, loops, override_index);
+    return sumVals(getGlobalProducerStridedIndices(
+        producer, consumer, loops, override_index));
   } else {
-    strided_indices = getNonGlobalProducerStridedIndices(
-        producer, consumer, loops, override_index);
+    return sumVals(getNonGlobalProducerStridedIndices(
+        producer, consumer, loops, override_index));
   }
-
-  TORCH_INTERNAL_ASSERT(
-      strided_indices.size() ==
-      producer->getMaybeRFactorDomain().size() +
-          (producer->isDoubleBuffered() || producer->isCircularBuffered() ? 1
-                                                                          : 0));
-
-  return strided_indices;
 }
 
 // Producer is the inputs of an expression
@@ -2101,24 +2098,19 @@ kir::TensorIndex* Index::getProducerIndex(
       producer, strided_indices);
 }
 
-std::vector<Val*> Index::getConsumerStridedIndices(
+Val* Index::getConsumerStridedIndices(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getConsumerStridedIndices");
   if (consumer->domain()->noReductions().size() == 0) {
-    return std::vector<Val*>(
-        consumer->getMaybeRFactorDomain().size(),
-        GpuLower::current()->kernel()->zeroVal());
+    return GpuLower::current()->kernel()->zeroVal();
   }
 
-  std::vector<Val*> strided_indices;
   if (consumer->getMemoryType() == MemoryType::Global) {
-    strided_indices = getGlobalConsumerStridedIndices(consumer, loops);
+    return sumVals(getGlobalConsumerStridedIndices(consumer, loops));
   } else {
-    strided_indices = getNonGlobalConsumerStridedIndices(consumer, loops);
+    return sumVals(getNonGlobalConsumerStridedIndices(consumer, loops));
   }
-
-  return strided_indices;
 }
 
 // Consumer is the output of an expression

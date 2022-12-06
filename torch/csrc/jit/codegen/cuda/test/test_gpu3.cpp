@@ -1413,8 +1413,8 @@ TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
       ks1, MemoryType::Local, kernel->oneVal());
 
   auto tk0 = kernel->inputs()[0]->as<TensorView>();
-  auto tki0 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks0});
-  auto tki1 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks1});
+  auto tki0 = IrBuilder::create<kir::TensorIndex>(tk0, ks0);
+  auto tki1 = IrBuilder::create<kir::TensorIndex>(tk0, ks1);
   auto tk0_expr = IrBuilder::create<UnaryOp>(UnaryOpType::Set, tki0, tki1);
 
   // Insert the scalar expression and the allocation of the
@@ -1544,7 +1544,8 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
         auto out_ti = arith_expr->outputs()[0]->as<kir::TensorIndex>();
         if (out_ti->view()->name() == 1) {
           // Ref: T1[*, hoisted_index] = T0[*, hoisted_index * T0.stride];
-          auto t1_index = out_ti->index(1);
+          auto t1_index =
+              out_ti->index()->definition()->as<BinaryOp>()->input(1);
           TORCH_CHECK(
               t1_index == hoisted_index,
               "Invalid index: ",
@@ -1561,7 +1562,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 0);
           // hoisted_index * T0.stride[1]
-          auto t0_index = in0->index(1);
+          auto t0_index = in0->index()->definition()->as<BinaryOp>()->input(1);
           TORCH_CHECK(
               is_index_times_ns(t0_index, hoisted_index, "T0.stride[1]"),
               "Invalid index: ",
@@ -1570,7 +1571,8 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
               expr->toString());
         } else if (out_ti->view()->name() == 2) {
           // Ref: T3[*, hoisted_index] = T2[*, hoisted_index];
-          auto out_index = out_ti->index(1);
+          auto out_index =
+              out_ti->index()->definition()->as<BinaryOp>()->input(1);
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",
@@ -1587,7 +1589,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 1);
-          auto in0_index = in0->index(1);
+          auto in0_index = in0->index()->definition()->as<BinaryOp>()->input(1);
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
@@ -1596,7 +1598,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
               expr->toString());
         } else if (out_ti->view()->name() == 3) {
           // Ref: T3[hoisted_index] = T2[hoisted_index];
-          auto out_index = out_ti->index(0);
+          auto out_index = out_ti->index();
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",
@@ -1613,7 +1615,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 2);
-          auto in0_index = in0->index(0);
+          auto in0_index = in0->index();
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
@@ -1632,7 +1634,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 3);
-          auto in0_index = in0->index(0);
+          auto in0_index = in0->index();
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
@@ -1641,7 +1643,7 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
               expr->toString());
         } else if (out_ti->view()->name() == 5) {
           // Ref: T5[hoisted_index] = T4[0]
-          auto out_index = out_ti->index(0);
+          auto out_index = out_ti->index();
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",

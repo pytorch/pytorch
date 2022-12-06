@@ -110,10 +110,17 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
       const ReferenceTensors& tensors,
       kir::IfThenElse* parent_scope_ite) {
     // Generate vectorize index
-    auto indices = (tensors.out_tv->getMemoryType() == MemoryType::Global)
+    auto tensor_index = (tensors.out_tv->getMemoryType() == MemoryType::Global)
         ? Index::getConsumerStridedIndices(tensors.out_tv, for_loop_structure)
         : Index::getProducerStridedIndices(
               tensors.in_tv, tensors.out_tv, for_loop_structure);
+    auto last_index = (tensors.out_tv->getMemoryType() == MemoryType::Global)
+        ? Index::getGlobalConsumerStridedIndices(
+              tensors.out_tv, for_loop_structure)
+              .back()
+        : Index::getGlobalProducerStridedIndices(
+              tensors.in_tv, tensors.out_tv, for_loop_structure)
+              .back();
 
     // >>>>>>>>>>>>>
     // Number of elements in vectorize access
@@ -129,7 +136,7 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
         IrBuilder::mulExpr(vector_size, data_size_in_bytes);
 
     auto index =
-        IrBuilder::create<kir::TensorIndex>(tensors.global_tv, indices);
+        IrBuilder::create<kir::TensorIndex>(tensors.global_tv, tensor_index);
     auto address = createNamedScalarFromValue(
         parent_scope_ite->thenBody(), index, "address", true);
 
@@ -172,8 +179,9 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
         "extent_minus_remainder");
 
     // >>>>>>>>>>>>>
+    // TODO: I don't think this is correct. What if the last dim is a broadcast?
     auto last_root_domain_index = createNamedScalarFromValue(
-        parent_scope_ite->thenBody(), indices.back(), "last_root_domain_index");
+        parent_scope_ite->thenBody(), last_index, "last_root_domain_index");
 
     // >>>>>>>>>>>>>
     auto last_root_domain_index_shift =

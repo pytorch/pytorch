@@ -103,8 +103,7 @@ void IndexLowering::handle(const RNGOp* rop) {
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "rand scalar not yet supported");
 
   // TensorIndex for philox subsequence and component.
-  auto philox_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
+  auto philox_index = Index::getLinearLogicalIndex(out_tv, for_loops_);
 
   // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
@@ -141,8 +140,7 @@ void IndexLowering::handle(const ARangeOp* aop) {
   TORCH_INTERNAL_ASSERT(out_tv != nullptr);
 
   // linear index for computing arange output
-  auto linear_index = SimplifyingIrBuilder::create<kir::TensorIndex>(
-      out_tv, Index::getLinearLogicalIndex(out_tv, for_loops_));
+  auto linear_index = Index::getLinearLogicalIndex(out_tv, for_loops_);
 
   // TensorIndex for writing arange output.
   const auto out = lowerDstIndex(out_tv);

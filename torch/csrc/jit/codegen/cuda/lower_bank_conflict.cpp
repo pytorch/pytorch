@@ -104,7 +104,6 @@ std::vector<int64_t> evaluateAddressesOnFirstPhase(
       tidz = tidy / launch_params->bdimy();
       tidy = tidy % launch_params->bdimy();
     }
-    int64_t index = 0;
     // make a copy of the expression evaluator
     ExpressionEvaluator expr_eval = expr_eval_common;
     expr_eval.bind("threadIdx.x", tidx);
@@ -120,9 +119,7 @@ std::vector<int64_t> evaluateAddressesOnFirstPhase(
         expr_eval.bind(fl->index(), start);
       }
     }
-    for (auto ind : ti->indices()) {
-      index += expr_eval.evaluate(ind)->as<int64_t>();
-    }
+    int64_t index = expr_eval.evaluate(ti->index())->as<int64_t>();
     addresses.emplace_back(index * word_size_bytes);
   }
   return addresses;

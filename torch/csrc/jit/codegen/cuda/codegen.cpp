@@ -458,37 +458,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  //! Returns the sum of all indices in a TensorIndex,
-  //!  or 0 if the indices vector is empty.
-  //! Used lowering generic tensor index and lowering
-  //!  mma fragment indices.
-  std::string genTensorIndex(const kir::TensorIndex* ti) {
-    bool first = true;
-    std::stringstream index;
-    for (auto* ind : ti->indices()) {
-      if (!ind->isZeroInt()) {
-        if (!first) {
-          index << " + ";
-        }
-        index << genInline(ind);
-        first = false;
-      }
-    }
-
-    if (first) {
-      index << "0";
-    }
-
-    return index.str();
-  }
-
   void handle(const kir::TensorIndex* ti) final {
     bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
         kernel_->summary().sync_map->needsRawSync(ti->view()).hasBID();
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
-    code_ << varName(ti->view()) << "[" << genTensorIndex(ti) << "]";
+    code_ << varName(ti->view()) << "[" << genInline(ti->index()) << "]";
   }
 
   void handle(const ViewAsScalar* sv) final {
@@ -559,8 +535,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const ARangeOp* aop) final {
-    auto index =
-        genTensorIndex(aop->getLinearLogicalIndex()->as<kir::TensorIndex>());
+    auto index = genInline(aop->getLinearLogicalIndex());
     indent() << gen(aop->output(0)) << " = arange<" << aop->dtype() << ">";
     code_ << "(" << index << ", " << gen(aop->start()) << ", "
           << gen(aop->step()) << ");\n";
@@ -753,7 +728,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   void handle(const RNGOp* rop) final {
     // TODO: TORCH_INTERNAL_ASSERT that the scheduler correctly creates an
     // innermost ID of size 4 (float) or size 2 (double)?
-    auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
+    auto index = genInline(rop->getPhiloxIndex());
     int multiple = rop->getPhiloxMultiple();
     indent() << "nvfuser_index_t linear_index" << rop->name() << " = " << index
              << ";\n";
@@ -1083,13 +1058,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
              << getInputARegisterSize(options.macro) << ","
              << getInputARegisterSize(options.macro) << ">*>(&"
              << varName(mma->inA()->as<kir::TensorIndex>()->view()) << ")["
-             << genTensorIndex(mma->inA()->as<kir::TensorIndex>()) << "])"
+             << genInline(mma->inA()->as<kir::TensorIndex>()->index()) << "])"
              << ",\n";
     indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputBRegisterSize(options.macro) << ","
              << getInputBRegisterSize(options.macro) << ">*>(&"
              << varName(mma->inB()->as<kir::TensorIndex>()->view()) << ")["
-             << genTensorIndex(mma->inB()->as<kir::TensorIndex>()) << "])";
+             << genInline(mma->inB()->as<kir::TensorIndex>()->index()) << "])";
   }
 
   void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {

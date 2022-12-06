@@ -54,38 +54,16 @@ Predicate::Predicate(IrBuilderPasskey passkey, Bool* value)
 TensorIndex::TensorIndex(
     IrBuilderPasskey passkey,
     const TensorView* view,
-    std::vector<Val*> indices)
+    Val* index)
     : Val(passkey, ValType::TensorIndex, view->getDataType().value()),
       view_(view),
-      indices_(indices) {
+      index_(index) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
   TORCH_INTERNAL_ASSERT(
-      std::all_of(
-          indices.begin(),
-          indices.end(),
-          [](Val* v) { return isIntegralType(v->dtype()); }),
+      isIntegralType(index->dtype()),
       "Cannot index with a value other than an int.");
-  indices_.erase(
-      std::remove_if(
-          indices_.begin(),
-          indices_.end(),
-          [](Val* index) { return index->isZeroInt(); }),
-      indices_.end());
-  // If indices becomes empty, just put one ZeroInt
-  if (indices_.empty()) {
-    indices_.push_back(FusionGuard::getCurFusion()->zeroVal());
-  }
-}
-
-Val* TensorIndex::index(int i) const {
-  TORCH_INTERNAL_ASSERT(
-      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
-  if (i < 0)
-    i += nDims();
-  TORCH_INTERNAL_ASSERT(i >= 0 && i < int(nDims()));
-  return indices_[i];
 }
 
 Allocate::Allocate(

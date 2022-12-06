@@ -401,20 +401,13 @@ class WelfordVectorizer : public kir::ExprMutator {
   kir::TensorIndex* hoistCount(kir::TensorIndex* out_N) {
     TORCH_INTERNAL_ASSERT(!for_loops_.empty());
     auto innermost_loop = for_loops_.back();
-    const auto& original_indices = out_N->indices();
+    const auto& original_index = out_N->index();
     std::unordered_map<Val*, Val*> index_replacement_map;
     index_replacement_map.emplace(
         innermost_loop->index(), GpuLower::current()->kernel()->zeroVal());
 
-    std::vector<Val*> indices_zero;
-    std::transform(
-        original_indices.begin(),
-        original_indices.end(),
-        std::back_inserter(indices_zero),
-        [&](Val* original_index) {
-          return ir_utils::replaceValInIndexVal(
-              original_index, index_replacement_map);
-        });
+    Val* indices_zero =
+        ir_utils::replaceValInIndexVal(original_index, index_replacement_map);
 
     auto hoisted_count =
         IrBuilder::create<kir::TensorIndex>(out_N->view(), indices_zero);

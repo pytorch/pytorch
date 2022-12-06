@@ -317,6 +317,16 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  // get the strides of a tensor used for the index lowering
+  static std::vector<Val*> getStrides(const TensorView* tv);
+
+  // get the root indices of a tensor used for the index lowering
+  static std::vector<Val*> getRootIndices(
+      const TensorView* tv,
+      const std::vector<kir::ForLoop*>& loops,
+      const IndexFromIdGraph& index_from_id_graph);
+
+ public:
   // Producer if it's in global memory
   static std::vector<Val*> getGlobalProducerStridedIndices(
       TensorView* producer,
@@ -329,16 +339,6 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
-  // get the strides of a tensor used for the index lowering
-  static std::vector<Val*> getStrides(const TensorView* tv);
-
-  // get the root indices of a tensor used for the index lowering
-  static std::vector<Val*> getRootIndices(
-      const TensorView* tv,
-      const std::vector<kir::ForLoop*>& loops,
-      const IndexFromIdGraph& index_from_id_graph);
-
- public:
   // Indexing functions
   // Consumer = Producer
   // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
@@ -358,7 +358,7 @@ class Index {
   //! root domain of a producer tensor. The size of the returned
   //! vector is guaranteed to be equal to the number of axes of the
   //! indexing root domain.
-  static std::vector<Val*> getProducerStridedIndices(
+  static Val* getProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops,
@@ -368,7 +368,7 @@ class Index {
   //! root domain of a consumer tensor. The size of the returned
   //! vector is guaranteed to be equal to the number of axes of the
   //! indexing root domain.
-  static std::vector<Val*> getConsumerStridedIndices(
+  static Val* getConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
@@ -376,7 +376,7 @@ class Index {
   //! linear memory address a consumer tensor. The returned index is intended to
   //! be used for the computation of some tensor factories, such as: arange and
   //! rand (for Philox pseudo random sequences)
-  static std::vector<Val*> getLinearLogicalIndex(
+  static Val* getLinearLogicalIndex(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops);
 
