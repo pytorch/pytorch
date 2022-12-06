@@ -402,7 +402,7 @@ class TestBaseStructuredSparsifier(TestCase):
         self._check_pruner_pruned(model, pruner, device)
         if y_pruned.shape == y_expected.shape:
             assert torch.isclose(
-                y_expected, y_pruned, rtol=1e-05, atol=1e-06
+                y_expected, y_pruned, rtol=1e-05, atol=1e-05
             ).all(), f"fail for {type(model)}"
             # only time this should be equal is when all layers have padding and we can't prune
             assert num_pruned_params <= num_original_params
