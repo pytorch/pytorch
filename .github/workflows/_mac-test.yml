@@ -13,7 +13,7 @@ on:
         description: JSON description of what test configs to run.
       is-test-matrix-empty:
         required: true
-        type: boolean
+        type: string
         description: True if the filtered test configs matrix is empty. False otherwise.
       sync-tag:
         required: false
