@@ -3642,7 +3642,6 @@ class TestQuantizedLinear(TestCase):
             float_bias = b if use_bias else None
             W_prepack = qlinear_prepack(W_q, float_bias)
             if use_multi_dim_input:
-                X = X.view(3, int(batch_size / 3), input_channels)
                 X_q = X_q.view(3, int(batch_size / 3), input_channels)
             # Quantized Linear operator with prepacked weight
             Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
@@ -3680,22 +3679,11 @@ class TestQuantizedLinear(TestCase):
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.booleans())
     @skipIfNoFBGEMM
-    def test_qlinear_with_input_q_dq_qweight_dq(
+    def test_qlinear_with_input_q_dq_qweight_dq_output_fp32(
             self, batch_size, input_channels, output_channels, use_bias,
             use_relu, use_multi_dim_input, use_channelwise):
         decimal_val = 4
         dtypes = [torch.quint8]
-        if torch.backends.quantized.engine == 'qnnpack':
-            # QNNPACK supports uint8 in the kernels. In the op we shift the int8
-            # weight values to uint8 to be on par with fbgemm. However, this causes
-            # some rounding issues in rare cases. So, we relax the check to allow
-            # off by one results.
-            decimal_val = 0
-
-            # only qnnpack qengine supports qint8 when xnnpack is available
-            if torch.backends.xnnpack.enabled:
-                dtypes.append(torch.qint8)
-
         for dtype in dtypes:
             # No support for channelwise in xnnpack (int8)
             # ONEDNN does not support qint8
@@ -3705,9 +3693,9 @@ class TestQuantizedLinear(TestCase):
             nptype = np_dtype[dtype]
             qlinear_prepack = torch.ops.quantized.linear_prepack
             if use_relu:
-                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_relu
+                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_output_fp32_relu
             else:
-                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq
+                qlinear = torch.ops.quantized.linear_with_input_q_dq_qweight_dq_output_fp32
             if use_multi_dim_input:
                 batch_size *= 3  # Test the multi-dim input tensor
             X_scale = 1.5
