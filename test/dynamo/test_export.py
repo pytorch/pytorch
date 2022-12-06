@@ -938,23 +938,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         def compiler(gm, sample_inputs):
-            aten_gm = make_fx(gm)(*sample_inputs)
+            def fw(*args):
+                aten_gm = make_fx(gm)(*args)
+                return aten_gm(*args)
 
-            self.assertEqual(len(aten_gm.graph.nodes), len(out_graph.graph.nodes))
-            for node1, node2 in zip(aten_gm.graph.nodes, out_graph.graph.nodes):
-                self.assertEqual(node1.op, node2.op)
-                if node1.op == "call_function":
-                    self.assertEqual(node1.target, node2.target)
-                    self.assertEqual(len(node1.args), len(node2.args))
-                    for arg1, arg2 in zip(node1.args, node2.args):
-                        self.assertEqual(type(arg1), type(arg2))
-
-            return aten_gm.forward
+            return fw
 
         opt_func = torch._dynamo.optimize(compiler, nopython=True)(func)
-        make_fx_result = opt_func(inp)
+        make_fx_result_through_backend = opt_func(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(make_fx_result, export_result))
+        fx_g = make_fx(func)(inp)
+        make_fx_result_through_direct = fx_g(inp)
+
+        self.assertTrue(
+            torch._dynamo.utils.same(make_fx_result_through_backend, export_result)
+        )
+        self.assertTrue(
+            torch._dynamo.utils.same(make_fx_result_through_direct, export_result)
+        )
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
@@ -1434,7 +1435,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_module_layer(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         def true_fn(layer, val):
             return layer(val) * torch.tensor(2)
