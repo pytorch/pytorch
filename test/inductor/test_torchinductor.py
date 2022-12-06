@@ -5089,6 +5089,32 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_mixed_precison_add(self):
+            class Test(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.temperature = np.power(128, 0.5)
+
+                def forward(self, x):
+                    return x + self.temperature
+
+            x = torch.randn(128, 3, 7, 7)
+            mod = Test().eval()
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_mod = torch._dynamo.optimize("inductor")(mod)
+                opt_mod(x)
+
+                real_out = mod(x)
+                compiled_out = opt_mod(x)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count >= 1
+
         def test_cpu_vec_cosim(self):
             cpp_vec_op_list = []
             cpp_op_list = []

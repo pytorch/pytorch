@@ -359,7 +359,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype):
-        assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
+        assert dtype in [
+            torch.bool,
+            torch.float32,
+        ], f"{__name__} does not support {dtype}"
         return f"({x})"
 
 
@@ -785,14 +788,22 @@ class CppVecKernel(CppKernel):
         new_index = self.transform_index(index)
 
         if expanded_index == new_index:
-            line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
+            if index == 0:
+                if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
+                    g_tmp_buf = f"g_tmp_buffer_{var}"
+                    nelements = 1
+                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                    self.loads.writeline(f"to_float({var}, {g_tmp_buf}, {nelements});")
+                    line = f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(index)}])"
+            else:
+                line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
                 self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                    f"to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
                 )
                 line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
             else:
@@ -907,6 +918,7 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float32,
             torch.bool,
             torch.uint8,
+            torch.float64,
         ]:
             self.simd_vec = False
             return self.simd_vec
@@ -1007,7 +1019,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype):
-                if dtype != torch.bool:
+                if dtype not in [torch.bool, torch.float32]:
                     self.simd_vec = False
                 return x
 

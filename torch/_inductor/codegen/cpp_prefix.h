@@ -62,10 +62,18 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 // vectorization. The caller needs to make sure the src represents TRUE/FALSE
 // correctly.
 template <typename T>
-void flag_to_float(const T* src, float* dst, int64_t n) {
+void to_float(const T* src, float* dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {
     uint32_t* dst_u32 = (uint32_t*)dst;
     dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
+  }
+}
+
+template <>
+void to_float<double>(const double* src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    dst[i] = static_cast<float>(src[i]);;
   }
 }
