@@ -31,7 +31,6 @@ from torch._C._functorch import (
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed
 )
-from torch.autograd.forward_ad import _enable_fwd_grad
 
 argnums_t = Union[int, Tuple[int, ...]]
 
@@ -814,7 +813,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     try:
         global JVP_NESTING
         JVP_NESTING += 1
-        with _enable_fwd_grad():
+        with fwAD._enable_fwd_grad():
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
