@@ -47,6 +47,42 @@ executorch_default_dynamic_float16_dtype_config = DTypeConfig(
     is_dynamic=True,
 )
 
+# xnnpack compatible dtype configs
+
+# We restrict scale values to be 2 ** -12 to ensure the
+# requantization scale never falls below the xnnpack lower
+# threshold. Additionally, for qint8 weight, we restrict
+# the quantization values to [-127, +127], excluding -128.
+# For more detail, refer to the description of
+# `default_symmetric_qnnpack_qconfig`.
+
+# TODO: add additional restriction on qscheme to ensure it
+# is either per_tensor_symmetric or per_channel_symmetric
+
+executorch_act_qint8_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    quant_min_lower_bound=-127,
+    quant_max_upper_bound=127,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_weighted_op_qint8_symmetric_dtype_config = DTypeConfig(
+    input_dtype=executorch_act_qint8_scale_min_2_neg_12,
+    output_dtype=executorch_act_qint8_scale_min_2_neg_12,
+    weight_dtype=executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12,
+    bias_dtype=torch.float,
+)
+
+executorch_default_op_qint8_symmetric_dtype_config = DTypeConfig(
+    input_dtype=executorch_act_qint8_scale_min_2_neg_12,
+    output_dtype=executorch_act_qint8_scale_min_2_neg_12,
+)
+
 
 # =============================
 # |  BACKEND PATTERN CONFIGS  |
@@ -58,6 +94,7 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [
+        executorch_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
         executorch_default_dynamic_int8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
@@ -84,7 +121,10 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     Return all configs related to conv modules and ops.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [executorch_weighted_op_int8_dtype_config]
+    dtype_configs = [
+        executorch_weighted_op_qint8_symmetric_dtype_config,
+        executorch_weighted_op_int8_dtype_config
+    ]
     conv_configs = []
     for convs in [_Conv2dMetadata]:
         # conv module
@@ -137,7 +177,10 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     """
     Return all configs related to binary ops.
     """
-    dtype_configs = [executorch_weighted_op_int8_dtype_config]
+    dtype_configs = [
+        executorch_default_op_qint8_symmetric_dtype_config,
+        executorch_weighted_op_int8_dtype_config
+    ]
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
         # will need to change this to NO_OBSERVER later after we implemented
@@ -165,7 +208,10 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     observer_0 - avgpool2d - observer_0 (same observer instance as input)
     """
     observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        executorch_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
         F.relu,
@@ -192,7 +238,10 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     Return all configs related to batchnorm.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        executorch_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     bn_configs = []
     bn_configs.append(
         BackendPatternConfig(nn.BatchNorm2d)
@@ -201,7 +250,10 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     return bn_configs
 
 def _get_cat_configs() -> List[BackendPatternConfig]:
-    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    dtype_configs = [
+        executorch_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
     cat_configs = []
     cat_configs.append(
         BackendPatternConfig(torch.cat)
