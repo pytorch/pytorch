@@ -38,7 +38,6 @@ on:
 
 jobs:
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && inputs.is-test-matrix-empty == 'False'
     # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179

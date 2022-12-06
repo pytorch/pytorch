@@ -38,7 +38,6 @@ env:
 
 jobs:
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && inputs.is-test-matrix-empty == 'False'
     strategy:
