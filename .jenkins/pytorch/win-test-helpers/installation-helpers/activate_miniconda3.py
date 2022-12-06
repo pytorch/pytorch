@@ -16,11 +16,14 @@ else:
 os.environ['INSTALL_FRESH_CONDA'] = '1'
 install_fresh_conda = '1'
 
-if not os.path.exists(os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat'):
+
+if not os.environ['CONDA_ENV_RUN'] in os.environ
     os.environ['INSTALL_FRESH_CONDA'] = '1'
     install_fresh_conda = '1'
+
 elif 'INSTALL_FRESH_CONDA' in os.environ:
     install_fresh_conda = os.environ['INSTALL_FRESH_CONDA']
+
 
 
 
@@ -48,17 +51,18 @@ if install_fresh_conda == '1':
 
 
 # Activate conda so that we can use its commands, i.e. conda, python, pip
-subprocess.run(['call', conda_parent_dir + '\\Miniconda3\\Scripts\\activate.bat',
-    conda_parent_dir + '\\Miniconda3'])
+subprocess.run(['conda', 'create', '--prefix ', conda_parent_dir + '\\Miniconda3\\test_env'])
+os.environ['CONDA_ENV_RUN'] = 'conda run -n ' + os.environ['CONDA_ENV_NAME']
+
 
 if install_fresh_conda == '1':
 
     try:
 
-        subprocess.run(['call', 'conda', 'install', '-y', '-q', 'numpy"<1.23"',
+        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'install', '-y', '-q', 'numpy"<1.23"',
             'cffi', 'pyyaml', 'boto3', 'libuv'])
 
-        subprocess.run(['call', 'conda', 'install', '-y', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
+        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'install', '-y', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
 
     except Exception as e:
 
