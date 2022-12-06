@@ -31,9 +31,6 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from torch.nn.modules import Module
-from torch.nn.parallel._replicated_tensor_ddp_utils import (
-    _ddp_with_replicated_tensor_enabled,
-)
 from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 
 __all__ = ["DistributedDataParallel"]
@@ -138,7 +135,6 @@ class DistributedDataParallel(Module):
         process_group=None,
         bucket_cap_mb=25,
         find_unused_parameters=False,
-        check_reduction=False,
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
@@ -222,20 +218,6 @@ class DistributedDataParallel(Module):
         else:
             self.parameters_to_ignore = []
 
-        self._use_replicated_tensor_module = (
-            _ddp_with_replicated_tensor_enabled()
-        )
-        self._build_replicated_tensor_module()
-
-        if check_reduction:
-            # This argument is no longer used since the reducer
-            # will ensure reduction completes even if some parameters
-            # do not receive gradients.
-            warnings.warn(
-                "The `check_reduction` argument in `DistributedDataParallel` "
-                "module is deprecated. Please avoid using it."
-            )
-
         # Check that a module does not have Uninitialized parameters
         for param in module.parameters():
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
@@ -281,19 +263,6 @@ class DistributedDataParallel(Module):
 
         if static_graph:
             self._set_static_graph()
-
-    def _build_replicated_tensor_module(self):
-        if self._use_replicated_tensor_module:
-            # Create a module with ReplicatedTensor without copying tensors. Avoid
-            # registering '_replicated_tensor_module' as a submodule by directly
-            # adding to self.__dict__.
-            from torch.nn.parallel._replicated_tensor_ddp_interop import (
-                _replicate_module,
-            )
-
-            self.__dict__["_replicated_tensor_module"] = _replicate_module(
-                self.module, self.process_group
-            )
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -404,15 +373,12 @@ class DistributedDataParallel(Module):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
-        if self._use_replicated_tensor_module:
-            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
-        self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -627,12 +593,6 @@ class DistributedDataParallel(Module):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        module_to_run = (
-            self._replicated_tensor_module
-            if self._use_replicated_tensor_module
-            else self.module
-        )
-
         if self.device_ids:
             inputs, kwargs = _to_kwargs(
                 inputs,
@@ -641,10 +601,10 @@ class DistributedDataParallel(Module):
                 self.use_side_stream_for_tensor_copies,
             )
             with self._inside_ddp_forward():
-                return module_to_run(*inputs[0], **kwargs[0])  # type: ignore[index]
+                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
         else:
             with self._inside_ddp_forward():
-                return module_to_run(*inputs, **kwargs)
+                return self.module(*inputs, **kwargs)
 
     def pre_forward(self):
         with torch.autograd.profiler.record_function(
@@ -766,8 +726,6 @@ class DistributedDataParallel(Module):
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
-        if self._use_replicated_tensor_module:
-            self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
