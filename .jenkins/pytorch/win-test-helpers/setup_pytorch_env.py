@@ -68,7 +68,7 @@ except Exception as e:
 if 'BUILD_ENVIRONMENT' in os.environ:
 
     try:
-        subprocess.run([*'conda run -n test_env'.split(), 'install', '-y', '-q', 'mkl', 'protobuf',
+        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', 'mkl', 'protobuf',
             'numba', 'scipy=1.6.2', 'typing_extensions', 'dataclasses'])
     except Exception as e:
 

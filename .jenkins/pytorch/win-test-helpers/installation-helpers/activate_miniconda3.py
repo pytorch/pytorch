@@ -64,9 +64,9 @@ if install_fresh_conda == '1':
 
     try:
 
-        subprocess.run([*'conda run -n test_env'.split(), 'install', '-q', 'numpy\"<1.23\"', 'cffi', 'pyyaml', 'boto3', 'libuv'])
+        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', 'numpy\"<1.23\"', 'cffi', 'pyyaml', 'boto3', 'libuv'])
 
-        subprocess.run([*'conda run -n test_env'.split(), 'install', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
+        subprocess.run(['conda', 'install', '-n', 'test_env', '-y', '-q', '-c', 'conda-forge', 'cmake=3.22.3'])
 
     except Exception as e:
 
