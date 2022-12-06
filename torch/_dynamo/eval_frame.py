@@ -19,6 +19,8 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
+from .hooks import Hooks
+
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
@@ -322,8 +324,7 @@ def catch_errors_wrapper(callback):
                     )
                     hijacked_callback = convert_frame.convert_frame(
                         ddp_optimizer.compile_fn,
-                        guard_export_fn=None,
-                        guard_fail_fn=None,
+                        hooks=hooks,
                     )
                     return hijacked_callback(frame, cache_size)
 
@@ -412,6 +413,9 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    # Note: This could be global for less plumbing, but then nested .optimize() calls
+    # have an annoying story and behavior.
+    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
@@ -436,14 +440,11 @@ def optimize(
     if nopython:
         return optimize_assert(
             backend,
-            guard_export_fn=guard_export_fn,
-            guard_fail_fn=guard_fail_fn,
             dynamic=dynamic,
+            hooks=hooks,
         )
     return _optimize_catch_errors(
-        convert_frame.convert_frame(
-            backend, guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn
-        ),
+        convert_frame.convert_frame(backend),
         backend_ctx_ctor,
         dynamic=dynamic,
     )
@@ -602,7 +603,7 @@ def export(
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            guard_export_fn=guard_export_print,
+            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
@@ -677,9 +678,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(
-    backend, *, guard_export_fn=None, guard_fail_fn=None, export=False, dynamic=False
-):
+def optimize_assert(backend, *, hooks=None, export=False, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -689,9 +688,7 @@ def optimize_assert(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(
-            backend, guard_export_fn, guard_fail_fn=guard_fail_fn, export=export
-        ),
+        convert_frame.convert_frame_assert(backend, hooks, export=export),
         backend_ctx_ctor,
         dynamic=dynamic,
     )

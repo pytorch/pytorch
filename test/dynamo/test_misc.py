@@ -3000,7 +3000,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(guard_failure is not None)
         self.assertEqual(guard_failure[0][0], "k == 3")
-        self.assertTrue("dynamo/test_misc.py" in guard_failure[1].co_filename)
 
 
 class CustomFunc1(torch.autograd.Function):
