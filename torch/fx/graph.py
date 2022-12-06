@@ -1351,7 +1351,7 @@ class Graph:
                                               'shows once to avoid console overload.  Please review your graph '
                                               'for similar issues, or correct this node and re-run the linter '
                                               'to show the next node with similar issue, if any more exist. ')
-                                attr_warning_shown = True      
+                                attr_warning_shown = True
                         else:
                             m_itr = new_m_itr
 
