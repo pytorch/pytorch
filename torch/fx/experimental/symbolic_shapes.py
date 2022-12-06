@@ -546,6 +546,8 @@ class ShapeEnv(object):
     # but there may be a replacement that allows it to be immediately
     # simplified
     def create_symbol(self, val: int, *, simplify: bool = True, sname: str) -> "sympy.Expr":
+        assert isinstance(sname, str), f"{type(sname)} {sname}"
+
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 

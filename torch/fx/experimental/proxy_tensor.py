@@ -655,6 +655,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
         arg_count = 0
+
         def wrap_fake(x):
             nonlocal arg_count
             if isinstance(x, torch.Tensor):

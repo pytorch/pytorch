@@ -647,7 +647,7 @@ class VariableBuilder:
                 # NB: we MUST register this as a GraphArg
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, sname=self.source.name)
+                    shape_env.create_symbol(value, sname=self.source.name())
                 )
                 # TODO: Do float
             else:
