@@ -23,7 +23,7 @@ shutil.copy(str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) + "\\.pytorch-test-
 with pushd('test'):
     try:
         subprocess.run(['echo', 'Run', 'jit_profiling', 'tests'])
-        subprocess.run(['python', 'run_test.py', '--include', 'test_jit_legacy',
+        subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'python', 'run_test.py', '--include', 'test_jit_legacy',
             'test_jit_fuser_legacy', '--verbose'])
     except Exception as e:
         pass

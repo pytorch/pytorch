@@ -80,7 +80,7 @@ subprocess.run(['echo', 'build CONDA_PARENT_DIR: ' + os.environ['CONDA_PARENT_DI
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
-    subprocess.run(['pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses',
+    subprocess.run([os.environ['CONDA_ENV_RUN'].split(), 'pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses',
         'typing_extensions', "expecttest==0.1.3"])
 
 # Override VS env here
@@ -203,9 +203,9 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
         '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
 
 
-subprocess.call("python setup.py bdist_wheel", shell=True)
+subprocess.call(os.environ['CONDA_ENV_RUN'] + " python setup.py bdist_wheel", shell=Tru)
 subprocess.call("sccache --show-stats", shell=True)
-subprocess.call('python -c \"import os, glob; os.system(\'python -mpip install \'' +
+subprocess.call(os.environ['CONDA_ENV_RUN'] + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
     ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
 
 
@@ -222,7 +222,7 @@ else:
                     '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z\" \"' + os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\\"', shell=True)
 
     # export test times so that potential sharded tests that'll branch off this build will use consistent data
-    subprocess.call('python tools/stats/export_test_times.py', shell=True)
+    subprocess.call(os.environ['CONDA_ENV_RUN'] + ' python tools/stats/export_test_times.py', shell=True)
     shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
 
     # Also save build/.ninja_log as an artifact
