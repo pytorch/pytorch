@@ -33,6 +33,7 @@ enum class RecordType {
   VarianceMeanOp,
   ViewOp,
   PermuteOp,
+  FullOp
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -1579,6 +1580,95 @@ struct BatchNormOpRecord : RecordFunctor {
  private:
   bool training_;
   bool channels_last_;
+};
+
+struct FullOpRecord : RecordFunctor {
+  FullOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      std::vector<int64_t>& shape,
+      Nvf::DataType dtype)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "ops.full",
+            RecordType::FullOp),
+        shape_(std::move(shape)),
+        dtype_(dtype) {}
+  virtual ~FullOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new FullOpRecord(*this);
+  }
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 --- 24 | 23 --------------------------  0 |
+  //! | Dtype     | Shape hash code                  |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t shape_hash = 0;
+    for (auto p : shape_) {
+      shape_hash ^= static_cast<size_t>(p);
+    }
+    result |= ((static_cast<size_t>(dtype_) & 0xff) << 24);
+    result |= (shape_hash & 0xffff);
+    return result;
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const FullOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = (shape_.size() == child_ptr->shape_.size());
+        if (result) {
+          for (size_t i = 0; i < shape_.size(); ++i) {
+            if (shape_[i] != child_ptr->shape_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::Val>();
+
+    std::vector<torch::jit::fuser::cuda::Val*> nvf_shape(
+        shape_.size(), nullptr);
+    for (const auto idx : c10::irange(shape_.size())) {
+      nvf_shape[idx] = Nvf::IrBuilder::create<Nvf::Int>(shape_.at(idx));
+    }
+    auto output = torch::jit::fuser::cuda::full(nvf_shape, arg, dtype_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", shape=[";
+    bool first_arg = true;
+    for (auto p : shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << p;
+    }
+    os << "]";
+    os << ", dtype=" << dtypeToPyString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
+  }
+
+ private:
+  //! Represents shape of new tensor
+  std::vector<int64_t> shape_;
+  //! Type of output
+  Nvf::DataType dtype_;
 };
 
 } // namespace nvfuser
