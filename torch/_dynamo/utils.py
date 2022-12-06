@@ -1158,14 +1158,24 @@ def get_real_value(node, output_graph):
 
 
 def assert_no_fake_params_or_buffers(gm):
+    from torch._subclasses.fake_tensor import FakeTensorConfig
+
+    def stack_or_hint(t):
+        if FakeTensorConfig.debug:
+            import traceback
+
+            return f"FAKE TENSOR CREATION TRACEBACK: \n {traceback.format_list(t._debug_trace)}"
+        else:
+            return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
     for name, buffer in gm.named_buffers():
         assert not isinstance(
             buffer, torch._subclasses.FakeTensor
-        ), f"Unexpected fake buffer {name}"
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
         assert not isinstance(
             param, torch._subclasses.FakeTensor
-        ), f"Unexpected fake param {name}"
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fake_mode_from_tensors(inputs: List[Any]):
