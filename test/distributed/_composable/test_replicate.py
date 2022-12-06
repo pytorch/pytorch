@@ -1,4 +1,4 @@
-s  # Owner(s): ["oncall: distributed"]
+# Owner(s): ["oncall: distributed"]
 
 import os
 from copy import deepcopy
