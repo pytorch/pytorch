@@ -607,6 +607,7 @@ class TestBaseStructuredSparsifier(TestCase):
                     also_prune_bias,
                 )
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_complex_conv2d(self):
         """Test fusion for models that contain Conv2d & Linear modules.
         Currently supports: Conv2d-Pool2d-Flatten-Linear, Skip-add"""
@@ -634,6 +635,6 @@ class TestBaseStructuredSparsifier(TestCase):
                     config,
                     x,
                     shape,
-                    device,
+                    torch.device(device),
                     also_prune_bias,
                 )
