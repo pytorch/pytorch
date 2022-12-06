@@ -4,7 +4,8 @@ from torch import Tensor
 from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
-__all__ = ['Adamax', 'adamax']
+__all__ = ["Adamax", "adamax"]
+
 
 class Adamax(Optimizer):
     r"""Implements Adamax algorithm (a variant of Adam based on infinity norm).
@@ -50,9 +51,18 @@ class Adamax(Optimizer):
         https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, foreach: Optional[bool] = None, *, maximize: bool = False,
-                 differentiable: bool = False):
+    def __init__(
+        self,
+        params,
+        lr=2e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0,
+        foreach: Optional[bool] = None,
+        *,
+        maximize: bool = False,
+        differentiable: bool = False,
+    ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -64,21 +74,55 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
-                        foreach=foreach, maximize=maximize, differentiable=differentiable)
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            foreach=foreach,
+            maximize=maximize,
+            differentiable=differentiable,
+        )
         super(Adamax, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
-            group.setdefault('foreach', None)
-            group.setdefault('maximize', False)
-            group.setdefault('differentiable', False)
+            group.setdefault("foreach", None)
+            group.setdefault("maximize", False)
+            group.setdefault("differentiable", False)
         state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
+            state_values[0]["step"]
+        )
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s["step"] = torch.tensor(float(s["step"]))
+
+    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError("Adamax does not support sparse gradients")
+            grads.append(p.grad)
+
+            state = self.state[p]
+
+            # State initialization
+            if len(state) == 0:
+                state["step"] = torch.tensor(0.0)
+                state["exp_avg"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+                state["exp_inf"] = torch.zeros_like(
+                    p, memory_format=torch.preserve_format
+                )
+
+            exp_avgs.append(state["exp_avg"])
+            exp_infs.append(state["exp_inf"])
+            state_steps.append(state["step"])
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -100,114 +144,106 @@ class Adamax(Optimizer):
             exp_infs = []
             state_steps = []
 
-            beta1, beta2 = group['betas']
-            eps = group['eps']
-            lr = group['lr']
-            weight_decay = group['weight_decay']
-            foreach = group['foreach']
-            maximize = group['maximize']
-            differentiable = group['differentiable']
+            beta1, beta2 = group["betas"]
+            eps = group["eps"]
+            lr = group["lr"]
+            weight_decay = group["weight_decay"]
+            foreach = group["foreach"]
+            maximize = group["maximize"]
+            differentiable = group["differentiable"]
 
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError('Adamax does not support sparse gradients')
-                grads.append(p.grad)
+            self._init_group(group, params_with_grad, grads, exp_avgs, exp_infs, state_steps)
 
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = torch.tensor(0.)
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                exp_avgs.append(state['exp_avg'])
-                exp_infs.append(state['exp_inf'])
-                state_steps.append(state['step'])
-
-            adamax(params_with_grad,
-                   grads,
-                   exp_avgs,
-                   exp_infs,
-                   state_steps,
-                   eps=eps,
-                   beta1=beta1,
-                   beta2=beta2,
-                   lr=lr,
-                   weight_decay=weight_decay,
-                   foreach=foreach,
-                   maximize=maximize,
-                   differentiable=differentiable)
+            adamax(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_infs,
+                state_steps,
+                eps=eps,
+                beta1=beta1,
+                beta2=beta2,
+                lr=lr,
+                weight_decay=weight_decay,
+                foreach=foreach,
+                maximize=maximize,
+                differentiable=differentiable,
+            )
 
         return loss
 
 
-def adamax(params: List[Tensor],
-           grads: List[Tensor],
-           exp_avgs: List[Tensor],
-           exp_infs: List[Tensor],
-           state_steps: List[Tensor],
-           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
-           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-           foreach: bool = None,
-           maximize: bool = False,
-           differentiable: bool = False,
-           *,
-           eps: float,
-           beta1: float,
-           beta2: float,
-           lr: float,
-           weight_decay: float):
+def adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    foreach: bool = None,
+    maximize: bool = False,
+    differentiable: bool = False,
+    *,
+    eps: float,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+):
     r"""Functional API that performs adamax algorithm computation.
 
     See :class:`~torch.optim.Adamax` for details.
     """
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+        raise RuntimeError(
+            "API has changed, `state_steps` argument must contain a list of singleton tensors"
+        )
 
     if foreach is None:
         # Placeholder for more complex foreach logic to be added when value is not set
         foreach = False
 
     if foreach and torch.jit.is_scripting():
-        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+        raise RuntimeError("torch.jit.script not supported with foreach optimizers")
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamax
     else:
         func = _single_tensor_adamax
 
-    func(params,
-         grads,
-         exp_avgs,
-         exp_infs,
-         state_steps,
-         eps=eps,
-         beta1=beta1,
-         beta2=beta2,
-         lr=lr,
-         weight_decay=weight_decay,
-         maximize=maximize,
-         differentiable=differentiable)
+    func(
+        params,
+        grads,
+        exp_avgs,
+        exp_infs,
+        state_steps,
+        eps=eps,
+        beta1=beta1,
+        beta2=beta2,
+        lr=lr,
+        weight_decay=weight_decay,
+        maximize=maximize,
+        differentiable=differentiable,
+    )
 
 
-def _single_tensor_adamax(params: List[Tensor],
-                          grads: List[Tensor],
-                          exp_avgs: List[Tensor],
-                          exp_infs: List[Tensor],
-                          state_steps: List[Tensor],
-                          *,
-                          eps: float,
-                          beta1: float,
-                          beta2: float,
-                          lr: float,
-                          weight_decay: float,
-                          maximize: bool,
-                          differentiable: bool):
+def _single_tensor_adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    eps: float,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    maximize: bool,
+    differentiable: bool,
+):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -231,35 +267,36 @@ def _single_tensor_adamax(params: List[Tensor],
         # Update biased first moment estimate.
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         # Update the exponentially weighted infinity norm.
-        norm_buf = torch.cat([
-            exp_inf.mul_(beta2).unsqueeze(0),
-            grad.abs().add_(eps).unsqueeze_(0)
-        ], 0)
+        norm_buf = torch.cat(
+            [exp_inf.mul_(beta2).unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
+        )
 
         if not differentiable:
             torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
         else:
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
-        bias_correction = 1 - beta1 ** step
+        bias_correction = 1 - beta1**step
         clr = lr / bias_correction
 
         param.addcdiv_(exp_avg, exp_inf, value=-clr)
 
 
-def _multi_tensor_adamax(params: List[Tensor],
-                         grads: List[Tensor],
-                         exp_avgs: List[Tensor],
-                         exp_infs: List[Tensor],
-                         state_steps: List[Tensor],
-                         *,
-                         beta1: float,
-                         beta2: float,
-                         lr: float,
-                         weight_decay: float,
-                         eps: float,
-                         maximize: bool,
-                         differentiable: bool):
+def _multi_tensor_adamax(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_infs: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    differentiable: bool,
+):
 
     assert not differentiable, "_foreach ops don't support autograd"
 
@@ -288,10 +325,9 @@ def _multi_tensor_adamax(params: List[Tensor],
     torch._foreach_mul_(exp_infs, beta2)
 
     for exp_inf, grad in zip(exp_infs, grads):
-        norm_buf = torch.cat([
-            exp_inf.unsqueeze(0),
-            grad.abs().add_(eps).unsqueeze_(0)
-        ], 0)
+        norm_buf = torch.cat(
+            [exp_inf.unsqueeze(0), grad.abs().add_(eps).unsqueeze_(0)], 0
+        )
         torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
     bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
