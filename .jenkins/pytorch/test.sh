@@ -814,6 +814,12 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_perf
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
@@ -834,6 +840,13 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench_perf
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
