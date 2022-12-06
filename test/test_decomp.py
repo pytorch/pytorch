@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
@@ -159,8 +160,12 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+        (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+        (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -303,9 +308,11 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
-
     # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
     ("cpu", torch.bfloat16, "_softmax_backward_data"),
+    (None, None, "norm"),
+    # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
+    (None, None, "native_batch_norm"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -571,6 +578,47 @@ class DecompContiguousTests(TestCase):
 
 instantiate_device_type_tests(DecompContiguousTests, globals())
 
+class DecompAmpTests(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @onlyCUDA
+    def test_amp_batch_norm_backward(self):
+        device = "cuda"
+        grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
+        x = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
+        weight = torch.randn((2,), dtype=torch.float32, device=device)
+        rmean = torch.randn((2,), dtype=torch.float32, device=device)
+        rvar = torch.randn((2,), dtype=torch.float32, device=device)
+        mean = torch.randn((0,), dtype=torch.float32, device=device)
+
+        ref = torch.ops.aten.native_batch_norm_backward(
+            grad_out,
+            x,
+            weight,
+            rmean,
+            rvar,
+            mean,
+            mean,
+            False,
+            1e-05,
+            [True, True, True])
+        res = torch._decomp.decompositions.native_batch_norm_backward(
+            grad_out,
+            x,
+            weight,
+            rmean,
+            rvar,
+            mean,
+            mean,
+            False,
+            1e-05,
+            [True, True, True])
+        for (a, b) in zip(ref, res):
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.dtype, b.dtype)
+
+
+instantiate_device_type_tests(DecompAmpTests, globals())
 
 if __name__ == "__main__":
     run_tests()

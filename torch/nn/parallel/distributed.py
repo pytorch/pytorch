@@ -1001,6 +1001,10 @@ class DistributedDataParallel(Module, Joinable):
             >>>   for input in inputs:
             >>>     ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
+
+        .. warning::
+            The forward pass should be included inside the context manager, or
+            else gradients will still be synchronized.
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
@@ -1621,10 +1625,10 @@ class DistributedDataParallel(Module, Joinable):
         )
         try:
             overlapped_optim.register_ddp(self)
-        except NotImplementedError:
+        except NotImplementedError as e:
             raise RuntimeError(
                 f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
-            )
+            ) from e
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
