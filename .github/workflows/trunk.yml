@@ -290,7 +290,7 @@ jobs:
               status: ${{ job.status }}
               notify_when: 'failure'
             env:
-             SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
+              SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
 
   win-vs2019-cuda11_6-py3-test:
     name: win-vs2019-cuda11.6-py3
