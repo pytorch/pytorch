@@ -76,7 +76,18 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py'
 :: We just need to activate it here
 '''
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
-subprocess.run(['echo', 'build CONDA_PARENT_DIR: ' + os.environ['CONDA_PARENT_DIR']])
+
+try:
+    subprocess.run(['conda', 'env', 'list'])
+except Exception as e:
+    try:
+        os.environ['PATH'] = conda_parent_dir + '\\Miniconda3\\Library\\bin;' + conda_parent_dir +\
+            '\\Miniconda3;' + conda_parent_dir + '\\Miniconda3\\Scripts;' + os.environ['PATH']
+
+        subprocess.run(['conda', 'env', 'list'])
+
+    except Exception as e:
+        None    
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
@@ -227,7 +238,6 @@ else:
 
     # Also save build/.ninja_log as an artifact
     shutil.copy("build\\.ninja_log", os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\')
-
 
 
 
