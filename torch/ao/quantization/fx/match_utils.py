@@ -53,6 +53,9 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, MatchAllNode):
         return True
 
+    if node == pattern:
+        return True
+
     if not isinstance(node, Node) or len(node.users) > max_uses:
         return False
 
