@@ -50,7 +50,8 @@ public:
 
   DeviceIndex device_index() const { return stream_.device_index(); }
 
-  DeviceType device_type() const { return stream_.device_type(); }
+  // Unsafely coerce HIP device into CUDA device
+  DeviceType device_type() const { return DeviceType::CUDA; }
 
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
