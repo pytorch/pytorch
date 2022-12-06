@@ -614,7 +614,9 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False, fake_tensor_value))
+        self.tx.output.graphargs.append(
+            GraphArg(self.get_source(), value, False, fake_tensor_value)
+        )
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -755,7 +757,9 @@ def wrap_fx_proxy_cls(
                 # the subclass.  It's not clear to me that's what you actually
                 # want, but whatever, I wouldn't have this cache at all.
                 with torch._C.DisableTorchFunction():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
                 # NB: If we're ignoring subclass, then the expectation is you will
                 # take the returned TensorVariable and wrap it into a more
                 # accurate TensorVariable that is able to track subclass-ness;
