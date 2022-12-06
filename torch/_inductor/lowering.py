@@ -370,37 +370,12 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-@register_lowering(aten._to_copy)
-def _to_copy(
-    x,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    non_blocking=False,
-    memory_format=None,
-):
-    assert not layout or layout == torch.strided, "TODO"
-    assert not pin_memory, "TODO"
-    assert not memory_format, "TODO"
-    if device:
-        device = decode_device(device)
-    if device is not None and device != x.get_device():
-        if dtype is not None and device.type == "cpu":
-            # CPU can do fewer type conversions
-            x = to_dtype(x, decode_dtype(dtype))
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, decode_dtype(dtype))
-    return x
 
 
 def ops_wrapper(name):
