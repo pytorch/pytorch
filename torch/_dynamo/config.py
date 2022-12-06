@@ -175,6 +175,10 @@ else:
 
 debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
 
+# this is to resolve a import problem in fbcode, we will be deleting
+# this very shortly
+DO_NOT_USE_legacy_non_fake_example_inputs = False
+
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
