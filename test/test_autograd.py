@@ -1243,6 +1243,7 @@ class TestAutograd(TestCase):
 
         self_strided = torch.rand(4, 4, dtype=torch.double) + 1
         grad_strided = torch.rand(4, 4, dtype=torch.double) + 1
+
         for from_to_attr in to_attr_names:
             from_params = to_attr_names_params[from_to_attr]
             self_from = getattr(self_strided, from_to_attr)(*from_params).requires_grad_(True)
@@ -1256,6 +1257,7 @@ class TestAutograd(TestCase):
 
                     grad_res = torch.autograd.grad(self_to, self_from, grad_to)[0]
 
+                    self.assertEqual(grad_res.layout, self_from.layout)
                     self.assertEqual(grad_res.to_dense(), grad_strided)
                     self.assertEqual(grad_to.to_dense(), grad_strided)
 
