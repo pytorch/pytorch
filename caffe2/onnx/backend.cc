@@ -381,11 +381,10 @@ Caffe2Ops Caffe2Backend::CreateCast(
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 
   auto onnx_dtype =
-      onnx_node->attributes.get<int64_t>("to", TensorProto::UNDEFINED);
-  auto c2_dtype = caffe2::TensorProto::UNDEFINED;
+      onnx_node->attributes.get<int64_t>("to", ::ONNX_NAMESPACE::TensorProto::UNDEFINED);
+  auto c2_dtype = caffe2::TensorProto::FLOAT;
   switch (onnx_dtype) {
     case ::ONNX_NAMESPACE::TensorProto::FLOAT:
-      c2_dtype = caffe2::TensorProto::FLOAT;
       break;
     case ::ONNX_NAMESPACE::TensorProto::UINT8:
       c2_dtype = caffe2::TensorProto::UINT8;
@@ -417,21 +416,14 @@ Caffe2Ops Caffe2Backend::CreateCast(
     case ::ONNX_NAMESPACE::TensorProto::DOUBLE:
       c2_dtype = caffe2::TensorProto::DOUBLE;
       break;
-    case ::ONNX_NAMESPACE::TensorProto::UINT32:
-    case ::ONNX_NAMESPACE::TensorProto::UINT64:
-    case ::ONNX_NAMESPACE::TensorProto::COMPLEX64:
-    case ::ONNX_NAMESPACE::TensorProto::COMPLEX128:
-    case ::ONNX_NAMESPACE::TensorProto::UNDEFINED:
-      c2_dtype = caffe2::TensorProto::UNDEFINED;
+    default:
+      CAFFE_THROW(
+          "Casting to '",
+          onnx_dtype,
+          "' dtype is not supported");
       break;
   };
 
-  CAFFE_ENFORCE_NE(
-      c2_dtype,
-      caffe2::TensorProto::UNDEFINED,
-      "Casting to '",
-      onnx_dtype,
-      "' dtype is not supported");
 
   CAFFE_ENFORCE_EQ(
       c2_op.ops.Get(0).arg().size(),
