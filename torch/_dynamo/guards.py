@@ -714,10 +714,6 @@ class CheckFunctionManager:
 
         guard_expression = self.output_graph.shape_env.get_guard_expr()
         expr_as_str = guard_printer.doprint(guard_expression)
-        # We may get into a state where symbolic shape keys (all should be found in replacements)
-        # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-        for key in self.output_graph.shape_env.var_to_val.keys():
-            assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
         finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():

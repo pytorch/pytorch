@@ -676,19 +676,22 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items).add_options(obj)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, **options):
+def wrap_fx_proxy(tx, proxy, example_value=None, source=None, **options):
     return wrap_fx_proxy_cls(
         target_cls=TensorVariable,
         tx=tx,
         proxy=proxy,
         example_value=example_value,
+        source=source,
         **options,
     )
 
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
-def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
+def wrap_fx_proxy_cls(
+    target_cls, tx, proxy, example_value=None, source=None, **options
+):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
@@ -718,7 +721,9 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             # Flipping it to an assert fails dozens of tests.
             if not isinstance(example_value, torch._subclasses.FakeTensor):
                 proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+                fake_wrapper = functools.partial(
+                    wrap_to_fake_tensor_and_record, tx=tx, source=source
+                )
                 example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
