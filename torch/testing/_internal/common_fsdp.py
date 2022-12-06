@@ -796,7 +796,6 @@ class FSDPTest(MultiProcessTestCase):
         autocast: bool,
         lr: float = 0.01,
         fsdp_cpu_offload: Optional[CPUOffload] = None,
-        norm_type: Optional[Union[float, int]] = None,
         save_model: bool = False,
         mixed_precision: Optional[MixedPrecision] = None,
         enable_sharded_grad_scaler: bool = False,
@@ -843,21 +842,6 @@ class FSDPTest(MultiProcessTestCase):
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
             model.module.run_backward(loss)
-            if norm_type is not None:
-                max_norm = 0.3
-                if isinstance(model, FSDP):
-                    model.clip_grad_norm_(max_norm, norm_type)
-                    total_norm_after_clip = _collect_total_grad_norm_fsdp(
-                        model, norm_type, self.rank
-                    )
-                else:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm, norm_type
-                    )
-                    total_norm_after_clip = _collect_total_grad_norm_local(
-                        model, norm_type
-                    )
-                self.assertTrue(total_norm_after_clip <= max_norm)
             # Post-backward, if CPU offloading model params should be on CPU.
             if cpu_offload_params and isinstance(model, FSDP):
                 for p in model.parameters():
@@ -895,7 +879,6 @@ class FSDPTest(MultiProcessTestCase):
         use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        norm_type: Optional[Union[float, int]] = None,
         init_kwargs: Optional[Dict[str, Any]] = None,
         **fsdp_kwargs,
     ):
@@ -941,7 +924,6 @@ class FSDPTest(MultiProcessTestCase):
             lr=lr,
             fsdp_cpu_offload=cpu_offload,
             mixed_precision=mixed_precision,
-            norm_type=norm_type,
             enable_sharded_grad_scaler=enable_sharded_grad_scaler,
             use_pure_fp16=use_pure_fp16,
         )
@@ -1008,7 +990,6 @@ class FSDPTest(MultiProcessTestCase):
                 fsdp_cpu_offload=cpu_offload,
                 save_model=save_model,
                 mixed_precision=mixed_precision,
-                norm_type=norm_type,
                 enable_sharded_grad_scaler=enable_sharded_grad_scaler,
                 use_pure_fp16=use_pure_fp16,
             )
