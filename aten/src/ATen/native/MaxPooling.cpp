@@ -29,7 +29,8 @@ static void check_max_pool1d(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    bool ceil_mode) {
 
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
@@ -72,6 +73,9 @@ static void check_max_pool1d(
       kernel_size[0]);
   TORCH_CHECK(
       dilation[0] > 0, "max_pool1d() dilation must be greater than zero, but got ", dilation[0]);
+
+  const int64_t OW = pooling_output_shape(self.size(-1), kernel_size[0], padding[0], stride[0], dilation[0], ceil_mode);
+  TORCH_CHECK(OW >= 0, "max_pool1d() Invalid computed output size: ", OW);
 }
 
 } // namespace
@@ -101,12 +105,6 @@ Tensor max_pool1d_impl(
   const int64_t DJ = dilation[0];
 
   const int64_t OW = pooling_output_shape(IW, KW, PJ, SJ, DJ, ceil_mode);
-  TORCH_CHECK(OW >= 0,
-              "Given input size: (",
-              NB, "x", NC, "x", IW, "). ",
-              "Calculated output size: (",
-              NB, "x", NC, "x", OW, "). ",
-              "Output size is too small");
   Tensor output = at::empty({NB, NC, OW}, self.options());
 
   PoolingParams1D params{NB, NC, IW, OW, KW, SJ, PJ, DJ};
@@ -144,7 +142,7 @@ Tensor max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
 
-  check_max_pool1d(self, kernel_size, stride, padding, dilation);
+  check_max_pool1d(self, kernel_size, stride, padding, dilation, ceil_mode);
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
       !self.device().is_cpu() ||
