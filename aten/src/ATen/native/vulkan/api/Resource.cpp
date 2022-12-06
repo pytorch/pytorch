@@ -36,6 +36,10 @@ VkFormat vk_format(const at::ScalarType dtype) {
 #endif /* USE_VULKAN_FP16_INFERENCE */
     case c10::kQUInt8:
       return VK_FORMAT_R8G8B8A8_UINT;
+    case c10::kQInt8:
+      return VK_FORMAT_R8G8B8A8_SINT;
+    case c10::kQInt32:
+      return VK_FORMAT_R32G32B32A32_SINT;
 
     default:
       TORCH_CHECK(
