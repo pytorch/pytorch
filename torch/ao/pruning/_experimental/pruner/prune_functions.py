@@ -330,7 +330,7 @@ def prune_conv2d_pool_flatten_linear(
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(
-        [[val] * flatten_scale for val in mask], dtype=torch.bool
+        [[val] * flatten_scale for val in mask], dtype=torch.bool, device=mask.device
     ).flatten()
 
     if getattr(conv2d, "prune_bias", False):
@@ -338,7 +338,7 @@ def prune_conv2d_pool_flatten_linear(
     else:
         pruned_biases = cast(Tensor, _propogate_module_bias(conv2d, mask))
         flattened_pruned_biases = torch.tensor(
-            [[bias] * flatten_scale for bias in pruned_biases]
+            [[bias] * flatten_scale for bias in pruned_biases], device=mask.device
         ).flatten()
         linear.bias = _get_adjusted_next_layer_bias(
             linear, flattened_pruned_biases, flattened_mask
