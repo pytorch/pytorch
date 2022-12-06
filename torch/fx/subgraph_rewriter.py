@@ -80,7 +80,6 @@ def replace_pattern(
         ``gm``: The GraphModule that wraps the Graph to operate on
         ``pattern``: The subgraph to match in ``gm`` for replacement
         ``replacement``: The subgraph to replace ``pattern`` with
-        ``match_filter``: A function that takes in (`InternalMatch`, original_graph, pattern_graph)
 
     Returns:
         List[Match]: A list of ``Match`` objects representing the places
