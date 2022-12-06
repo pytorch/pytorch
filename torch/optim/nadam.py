@@ -90,6 +90,29 @@ class NAdam(Optimizer):
             for s in state_values:
                 s['mu_product'] = torch.tensor(s['mu_product'])
 
+    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
+        for p in group['params']:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError('NAdam does not support sparse gradients')
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # Lazy state initialization
+                if len(state) == 0:
+                    state['step'] = torch.tensor(0.)
+                    state['mu_product'] = torch.tensor(1.)
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
+                mu_products.append(state['mu_product'])
+                state_steps.append(state['step'])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -112,27 +135,7 @@ class NAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            for p in group['params']:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError('NAdam does not support sparse gradients')
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-                    # Lazy state initialization
-                    if len(state) == 0:
-                        state['step'] = torch.tensor(0.)
-                        state['mu_product'] = torch.tensor(1.)
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                    exp_avgs.append(state['exp_avg'])
-                    exp_avg_sqs.append(state['exp_avg_sq'])
-                    mu_products.append(state['mu_product'])
-                    state_steps.append(state['step'])
+            self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
 
             nadam(params_with_grad,
                   grads,
@@ -173,6 +176,7 @@ def nadam(params: List[Tensor],
 
     See :class:`~torch.optim.NAdam` for details.
     """
+
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
