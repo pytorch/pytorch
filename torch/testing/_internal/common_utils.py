@@ -86,7 +86,7 @@ from torch.testing._comparison import (
     Pair,
     TensorLikePair,
 )
-from torch.testing._comparison import are_equal as are_equal
+from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 from .composite_compliance import no_dispatch
@@ -2854,7 +2854,7 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
-        comparison_error_metas = are_equal(
+        error_metas = not_close_error_metas(
             x,
             y,
             pair_types=(
@@ -2889,9 +2889,9 @@ class TestCase(expecttest.TestCase):
             check_is_coalesced=exact_is_coalesced,
         )
 
-        if comparison_error_metas:
+        if error_metas:
             # TODO: compose all metas into one AssertionError
-            raise comparison_error_metas[0].to_error(
+            raise error_metas[0].to_error(
                 # This emulates unittest.TestCase's behavior if a custom message passed and
                 # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
                 # is True (default)
