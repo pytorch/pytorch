@@ -1490,7 +1490,7 @@ def compute_required_storage_length(
     >>> slice.storage().size()
     100
 
-    >>> compute_required_storage_length(t.shape, t.stride(), t.storage_offset())
+    >>> compute_required_storage_length(slice.shape, slice.stride(), slice.storage_offset())
     40
 
     """
