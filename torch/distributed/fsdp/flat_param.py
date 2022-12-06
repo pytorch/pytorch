@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed.fsdp._common_utils import (
+    _get_root_modules,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -166,6 +167,11 @@ class FlatParameter(nn.Parameter):
             depend on its existence in the future.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
+        _root_modules (Set[nn.Module]): Modules in ``self._modules`` that are
+            root modules (i.e. parent-less) with respect to ``self._modules``.
+            These are the modules for which we register pre/post-forward hooks
+            in the composable code path. There will be one unshard/reshard pair
+            for each root module in this set.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -265,6 +271,7 @@ class FlatParameter(nn.Parameter):
         self._modules = set(pi.module for pi in self._param_infos).union(
             set(spi.module for spi in self._shared_param_infos)
         )
+        self._root_modules = _get_root_modules(self._modules)
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(

@@ -158,10 +158,19 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    # Mapping from module to every `FlatParamHandle` that the module consumes,
+    # where there is an entry for every (sub)module
     _module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
     state._module_to_handles = _module_to_handles
+    # Same as `_module_to_handle` but filtered to only include keys that are
+    # root modules with respect to the `FlatParamHandle` (see `_root_modules`
+    # in `FlatParameter`)
+    _root_module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._root_module_to_handles = _root_module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -181,10 +190,6 @@ def _init_runtime_state(
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
     state._sync_gradients = True
     state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
     state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
@@ -354,6 +359,8 @@ def _init_param_handle_from_params(
     state._handles.append(handle)
     for module in handle.flat_param._modules:
         state._module_to_handles[module].append(handle)
+    for module in handle.flat_param._root_modules:
+        state._root_module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
