@@ -159,7 +159,15 @@ class ConstCheck : private OptOutConstDispatch {
   }
 
   void handle(const NamedScalar* ns) final {
-    is_const_ = is_const_ && false;
+    is_const_ = false;
+  }
+
+  void handle(const TensorView* ns) final {
+    is_const_ = false;
+  }
+
+  void handle(const kir::TensorIndex* ns) final {
+    is_const_ = false;
   }
 
   void handle(const Expr* expr) final {
@@ -169,7 +177,7 @@ class ConstCheck : private OptOutConstDispatch {
   }
 
   void handle(const Val* val) final {
-    if (!val->isAnInt()) {
+    if (!val->isIntegralScalar()) {
       is_int_ = false;
     }
 
@@ -196,6 +204,40 @@ class ConstCheck : private OptOutConstDispatch {
 
 } // namespace
 
+bool Val::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (auto other_val = dynamic_cast<const Val*>(other)) {
+    if (definition_ == nullptr || other_val->definition_ == nullptr) {
+      return false;
+    }
+    if (vtype_ != other_val->vtype_) {
+      return false;
+    }
+    if (dtype_ != other_val->dtype_) {
+      return false;
+    }
+    if (!definition_->sameAs(other_val->definition_)) {
+      return false;
+    }
+    if (definition_->outputs().size() !=
+        other_val->definition_->outputs().size()) {
+      return false;
+    }
+    // For definition with multiple outputs, only outputs at the same position
+    // could be the same
+    for (auto i : c10::irange(definition_->outputs().size())) {
+      if ((definition_->output(i) == this) !=
+          (other_val->definition_->output(i) == other_val)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 bool Val::isConstScalar() const {
   if (!isScalar()) {
     return false;
@@ -204,7 +246,7 @@ bool Val::isConstScalar() const {
 }
 
 bool Val::isConstInt() const {
-  return ConstCheck::isConst(this) && isAnInt();
+  return ConstCheck::isConst(this) && isIntegralScalar();
 }
 
 int64_t Val::evaluateInt() {
@@ -259,14 +301,14 @@ bool Val::evaluateBool() {
 }
 
 c10::optional<int64_t> Val::getInt() const {
-  if (isConstScalar() && isAnInt() && isA<Int>()) {
+  if (isConstScalar() && isIntegralScalar() && isA<Int>()) {
     return this->as<Int>()->value();
   }
   return c10::nullopt;
 }
 
 c10::optional<double> Val::getDouble() const {
-  if (isConstScalar() && isADouble() && isA<Double>()) {
+  if (isConstScalar() && isFloatingPointScalar() && isA<Double>()) {
     return this->as<Double>()->value();
   }
   return c10::nullopt;

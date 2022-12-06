@@ -115,38 +115,6 @@ std::string genCall(
   return ss.str();
 }
 
-//! A utility class to check if an expression of a particular type exists
-class ExprFinder : kir::ConstIrVisitor {
- public:
-  //! True if expr or any of its nested expressions is included in
-  //! expr_types
-  static bool exists(
-      const Expr* expr,
-      const std::unordered_set<std::type_index>& expr_types) {
-    ExprFinder finder(expr_types);
-    finder.handle(std::vector<const Expr*>{expr});
-    return finder.is_found_;
-  }
-
- private:
-  ExprFinder(const std::unordered_set<std::type_index>& expr_types)
-      : expr_types_(expr_types) {}
-
-  using kir::ConstIrVisitor::handle;
-
-  void handle(const Expr* expr) final {
-    if (expr_types_.find(typeid(*expr)) != expr_types_.end()) {
-      is_found_ = true;
-      return;
-    }
-    kir::ConstIrVisitor::handle(expr);
-  }
-
- private:
-  const std::unordered_set<std::type_index>& expr_types_;
-  bool is_found_ = false;
-};
-
 class CudaKernelGenerator : private OptOutConstDispatch {
   static constexpr const char* kTab = "  ";
 
@@ -483,8 +451,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (ns->getParallelIndex().has_value() ||
         ns->getParallelDim().has_value()) {
       code_ << "((nvfuser_index_t)" << ns->name() << ")";
-    } else {
+    } else if (ns->definition() == nullptr) {
       code_ << ns->name();
+    } else {
+      code_ << genInline(ns->definition());
     }
   }
 
@@ -736,14 +706,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     const auto op_type = uop->getUnaryOpType();
-
-    if (uop->out()->isA<NamedScalar>()) {
-      if (auto op = inline_op_str(op_type)) {
-        indent() << gen(uop->out()) << " = " << *op << genInline(uop->in())
-                 << ";\n";
-      }
-      return;
-    }
 
     if (!print_inline_) {
       indent() << gen(uop->out());
@@ -2482,19 +2444,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         " which is handled by its own handler");
   }
 
-  //! True if loop is grouped. The IterDomain of the loop must have
-  //! ParallelType::Group, but it isn't sufficient as the loop may be
-  //! for an initialization expression, for which the loop shold not
-  //! be grouped. Make sure a GroupedGridReduction is found.
-  bool isGroupedLoop(const kir::ForLoop* loop) {
-    if (loop->iter_domain()->getParallelType() != ParallelType::Group) {
-      return false;
-    }
-    return ExprFinder::exists(
-        loop,
-        {typeid(kir::GroupedGridReduction), typeid(kir::GroupedGridWelford)});
-  }
-
   void handle(const kir::ForLoop* loop) final {
     if (loop->isTrivial()) {
       handleTrivialLoop(loop);
@@ -2503,7 +2452,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     // If a loop is grouped, no loop is created, but it isn't
     // considered trivial as the loop trip count is not one.
-    if (isGroupedLoop(loop)) {
+    if (loop->isGroup()) {
       grouped_loops_.push_back(loop);
       handleScope(loop->body());
       grouped_loops_.pop_back();

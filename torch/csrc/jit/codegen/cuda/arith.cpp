@@ -77,7 +77,7 @@ Val* simplifiedInt(Val* val) {
 Val* promoteSize(Val* v1, Val* v2) {
   if (v1 == nullptr) {
     TORCH_INTERNAL_ASSERT(
-        v2 == nullptr || v2->isAnInt(),
+        v2 == nullptr || v2->isIntegralScalar(),
         "Expecting Int's only in this routine.");
     return v2;
   }
@@ -85,7 +85,8 @@ Val* promoteSize(Val* v1, Val* v2) {
     return v1;
   }
   TORCH_INTERNAL_ASSERT(
-      v1->isAnInt() && v2->isAnInt(), "Expecting Int's only in this routine.");
+      v1->isIntegralScalar() && v2->isIntegralScalar(),
+      "Expecting Int's only in this routine.");
 
   if (!v1->isConstInt() && !v2->isConstInt()) {
     return v1;

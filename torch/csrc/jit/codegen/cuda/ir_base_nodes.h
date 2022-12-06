@@ -253,12 +253,12 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // Returns if all dependencies are constant integers
   bool isConstInt() const;
 
-  bool isAnInt() const {
-    return isScalar() && dtype_ == DataType::Int;
+  bool isIntegralScalar() const {
+    return isScalar() && isIntegralType(dtype_);
   }
 
-  bool isADouble() const {
-    return isScalar() && dtype_ == DataType::Double;
+  bool isFloatingPointScalar() const {
+    return isScalar() && isFloatingPointType(dtype_);
   }
 
   bool isABool() const {
@@ -340,12 +340,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
         getDataType() == other->as<Val>()->getDataType();
   }
 
-  // TODO: Make this more sophisticated. A value being the same as another value
-  // should be evaluated based on the DAG that created it, and that DAGs leaf
-  // nodes
-  bool sameAs(const Statement* other) const override {
-    return this == other;
-  }
+  bool sameAs(const Statement* other) const override;
 
   void setEvaluatorIndex(int to) {
     TORCH_INTERNAL_ASSERT(evaluator_index_ == -1);

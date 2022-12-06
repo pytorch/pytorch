@@ -959,7 +959,7 @@ TensorView* TensorView::multiOutputRfactorHelper(
   // guarantee that the rFactor is defined meaningfully the scheduling of the
   // output TV that got the rfactor call is force replayed towards the other two
 
-  if (!sameAs(tv)) {
+  if (this != tv) {
     auto root = tv->getRootDomain();
     auto this_root = getRootDomain();
 

@@ -199,8 +199,11 @@ void assignRNGOffset(Fusion* fusion) {
 }
 
 // Dump expr string if enable lower_verbose
-void dumpExprsIfEnabled(const std::vector<Expr*>& exprs, std::string msg_pre) {
-  if (isDebugDumpEnabled(DebugDumpOption::LowerVerbose)) {
+void dumpExprsIfEnabled(
+    const std::vector<Expr*>& exprs,
+    std::string msg_pre,
+    bool force_enable = false) {
+  if (isDebugDumpEnabled(DebugDumpOption::LowerVerbose) || force_enable) {
     std::cout << msg_pre << ":" << std::endl;
     for (auto exp : exprs) {
       std::cout << exp->toString() << std::endl;

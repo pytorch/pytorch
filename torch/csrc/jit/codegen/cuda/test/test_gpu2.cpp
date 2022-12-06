@@ -9038,17 +9038,27 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  int64_t i165;
-  i165 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i165 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  int64_t i143;
+  i143 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  int64_t i94;
+  i94 = T0.size[2] * T0.size[3];
+  int64_t i95;
+  i95 = T0.size[1] * i94;
+  int64_t i150;
+  i150 = T0.size[2] * T0.size[1];
+  int64_t i145;
+  i145 = i143 % i95;
+  int64_t i147;
+  i147 = i145 % i94;
+  if ((i143 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
-       = T2[((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * ((T0.size[2] * T0.size[1]) * T0.size[3])) + ((((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * (T0.size[2] * T0.size[1])) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * T0.size[2]) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3])];
+       = T2[((i143 / i95) * (i150 * T0.size[3])) + ((i147 % T0.size[3]) * i150) + ((i145 / i94) * T0.size[2]) + (i147 / T0.size[3])];
     __half T8[1];
     T8[0] = 0;
     T8[0]
-       = T0[i165];
+       = T0[i143];
     float T3[1];
     T3[0]
        = __half2float(T9[0]);
@@ -9068,7 +9078,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T10[1];
     T10[0]
        = __float2half(T6[0]);
-    T7[i165]
+    T7[i143]
        = T10[0];
   }
 }
@@ -9248,8 +9258,10 @@ TEST_F(NVFuserTest, FusionIssue1133_CUDA) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node)) {
       auto size = alloc->size();
       if (!(alloc->buffer()->name() == 1 || alloc->buffer()->name() == 2)) {
-        // There should be no allocation other than those for tv1 and tv2
-        TORCH_CHECK(false, "Invalid allocation detected");
+        // There should be no allocation other than those for tv1 and tv2 and
+        // hoisted indices
+        TORCH_CHECK(
+            alloc->buffer()->isIntegralScalar(), "Invalid allocation detected");
       }
       TORCH_CHECK(size->isA<Int>(), "Invalid allocation size");
       TORCH_CHECK(size->as<Int>()->isConst(), "Allocation not constant");

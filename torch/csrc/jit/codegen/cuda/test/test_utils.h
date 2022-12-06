@@ -62,7 +62,7 @@ void checkIntValue(
     ExpressionEvaluator& evaluator,
     Val* val,
     Int::ScalarType expected_value) {
-  TORCH_CHECK(val->isAnInt());
+  TORCH_CHECK(val->isIntegralScalar());
   const auto actual_value = evaluator.evaluate(val);
   TORCH_CHECK(actual_value.has_value());
   TORCH_CHECK(actual_value.value() == expected_value);

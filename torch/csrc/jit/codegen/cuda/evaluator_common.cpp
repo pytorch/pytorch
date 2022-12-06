@@ -197,10 +197,10 @@ void PrecomputedValues::initializeValueList(
     // Use an expression evaluator to test if value is const
     if (sorted_value_list[i]->isConstScalar()) {
       is_constant_[i] = true;
-      if (sorted_value_list[i]->isAnInt()) {
+      if (sorted_value_list[i]->isIntegralScalar()) {
         values_[i] = EvaluatorValue(sorted_value_list[i]->evaluateInt());
       }
-      if (sorted_value_list[i]->isADouble()) {
+      if (sorted_value_list[i]->isFloatingPointScalar()) {
         values_[i] = EvaluatorValue(sorted_value_list[i]->evaluateDouble());
       }
       if (sorted_value_list[i]->isABool()) {

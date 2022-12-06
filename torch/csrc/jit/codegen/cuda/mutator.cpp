@@ -149,13 +149,13 @@ void OptOutMutator::mutate(Expr* op) {
     if (!all_same) {
       break;
     }
-    all_same = all_same && mutated_outputs[i]->sameAs(op->output(i));
+    all_same = all_same && mutated_outputs[i] == op->output(i);
   }
   for (auto i : c10::irange(op->inputs().size())) {
     if (!all_same) {
       break;
     }
-    all_same = all_same && mutated_inputs[i]->sameAs(op->input(i));
+    all_same = all_same && mutated_inputs[i] == op->input(i);
   }
   for (auto i : c10::irange(op->attributes().size())) {
     if (!all_same) {
@@ -163,7 +163,7 @@ void OptOutMutator::mutate(Expr* op) {
     }
     bool same =
         ((mutated_attrs[i] == nullptr) && (op->attribute(i) == nullptr)) ||
-        mutated_attrs[i]->sameAs(op->attribute(i));
+        mutated_attrs[i] == op->attribute(i);
     all_same = all_same && same;
   }
 

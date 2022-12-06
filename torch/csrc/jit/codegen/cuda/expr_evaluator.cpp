@@ -116,18 +116,19 @@ c10::optional<EvaluatorValue> ExpressionEvaluator::evaluate(const Val* value) {
 
 c10::optional<EvaluatorValue> ExpressionEvaluator::getValue(const Val* value) {
   TORCH_INTERNAL_ASSERT(
-      value->isAnInt() || value->isADouble() || value->isABool(),
-      value->toString(),
+      value->isIntegralScalar() || value->isFloatingPointScalar() ||
+          value->isABool(),
+      value->toInlineString(),
       " is not a supported type in expression evaluation.");
 
   if (value->isScalar() && value->isConst()) {
-    if (value->isADouble()) {
+    if (value->isFloatingPointScalar()) {
       return toOptionalEvaluatorValue(value->as<Double>()->value());
     }
     if (value->isABool()) {
       return toOptionalEvaluatorValue(value->as<Bool>()->value());
     }
-    if (value->isAnInt()) {
+    if (value->isIntegralScalar()) {
       return toOptionalEvaluatorValue(value->as<Int>()->value());
     }
     TORCH_INTERNAL_ASSERT(

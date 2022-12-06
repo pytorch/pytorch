@@ -516,13 +516,6 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     auto namedScalar = (address) ? IrBuilder::addressExprNamedScalar(name, val)
                                  : IrBuilder::setExprNamedScalar(name, val);
     TORCH_INTERNAL_ASSERT(namedScalar->definition() != nullptr);
-
-    auto alloc = IrBuilder::create<kir::Allocate>(
-        namedScalar,
-        MemoryType::Local,
-        GpuLower::current()->kernel()->oneVal());
-    body.push_back(alloc);
-    body.push_back(namedScalar->definition());
     return namedScalar;
   }
 };

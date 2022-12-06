@@ -86,7 +86,7 @@ class TORCH_CUDA_CU_API Scalar : public Val {
     if (isConst() && other_val->isConst()) {
       return *value() == *(other_val->value());
     }
-    return false;
+    return Val::sameAs(other);
   }
 
  private:

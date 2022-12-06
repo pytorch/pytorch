@@ -502,6 +502,9 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   //! True if no actual for-loop is materialized
   bool isTrivial() const;
 
+  //! True if loop is grouped reduction/welford
+  bool isGroup() const;
+
   //! Returns the stage of a double buffered iterdomain
   //!  that this for loop materializes.
   auto doubleBufferLoopStage() const {

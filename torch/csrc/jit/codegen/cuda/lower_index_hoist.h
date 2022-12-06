@@ -2,147 +2,91 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
-#include <functional>
+#include <list>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
-
-// Hoisting common index subexpressions
-//
-// Class CommonIndexMap is updated during the lowering as new indices
-// are inserted. An index is uniquely identified with CommonIndexKey,
-// which consists of the concrete ID of the indexed/predicated domain,
-// the for-loops used in the index, and the index vals of the use
-// for-loops.
-//
-// Once all indices are inserted to CommonIndexMap, allocations of the
-// the hoisted indices are inserted by allocateCommonIndices. Note
-// that this assumes that the CUDA code generator does not inline a
-// scalar Val with allocation (PR #1434).
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-//! Class to represent unique indexed domains for index
-//! hoisting. Uniquenesss is determined with the indexed domain
-//! itself, the for-loops and their index values.
-class CommonIndexKey {
-  friend struct CommonIndexKeyHash;
+// Hoisting common index subexpressions
+//
+// Class CommonIndexMap is updated during the lowering as new indices
+// are inserted.
+//
+// Once all indices are inserted to CommonIndexMap, allocations of the
+// the hoisted indices are inserted by allocateCommonIndices. Note
+// that this assumes that the CUDA code generator does not inline a
+// scalar Val with allocation (PR #1434).
 
- public:
-  //! \param consumer_indexed_id Indexed consumer domain
-  //! \param consumer_td TensorDomain of consumer_indexed_id
-  //! \param ref_td Reference domain at the time of indexing
-  //! \param ref_index_map Index map of the reference domain
-  //! \param loops Loop structure where this id is indexed
-  CommonIndexKey(
-      IterDomain* consumer_indexed_id,
-      TensorDomain* consumer_td,
-      TensorDomain* ref_td,
-      const std::unordered_map<IterDomain*, Val*>& ref_index_map,
-      const std::vector<kir::ForLoop*>& loops);
-
-  //! \param consumer_indexed_id Indexed consumer domain
-  //! \param consumer_td TensorDomain of consumer_indexed_id
-  //! \param loop_domains Resolved vector of iterdomain corresponding to loops
-  //! \param loop_index_map Index mapping generated from the loop nest.
-  //! \param loops Loop structure where this id is indexed
-  //! Duplicate of above, but without a reference domain. TODO: Remove other
-  //! implementation.
-  CommonIndexKey(
-      IterDomain* consumer_indexed_id,
-      TensorDomain* consumer_td,
-      const std::vector<IterDomain*>& loop_domains,
-      const std::unordered_map<IterDomain*, Val*>& loop_index_map,
-      const std::vector<kir::ForLoop*>& loops);
-
-  const IterDomain* concreteIndexedId() const {
-    return concrete_indexed_id_;
-  }
-
-  const std::vector<kir::ForLoop*>& usedLoops() const {
-    return used_loops_;
-  }
-
-  const std::vector<Val*>& loopIndexVals() const {
-    return loop_index_vals_;
-  }
-
-  bool operator==(const CommonIndexKey& other) const;
-
-  std::string toString() const;
-
- private:
-  //! Concrete domain of indexed domain
-  IterDomain* concrete_indexed_id_ = nullptr;
-  //! Loops used for the index
-  std::vector<kir::ForLoop*> used_loops_;
-  //! Loop index vals for the used loops
-  std::vector<Val*> loop_index_vals_;
-};
-
-struct CommonIndexKeyHash {
-  std::size_t operator()(const CommonIndexKey& key) const {
-    auto h = std::hash<const IterDomain*>{}(key.concrete_indexed_id_);
-    // NOTE: do not use other fields as the pointers can be different
-    // even when two keys can share the same index
-    return h;
-  }
-};
-
-//! Map to hold hoisted common indices
 class TORCH_CUDA_CU_API CommonIndexMap {
  public:
-  //! Register an indexd consumer domain to hoist
-  //!
-  //! Returns a corresponding hoisted index and a flag indicating if a
-  //! new index is inserted.
-  //!
-  //! Consumer domains are used even for producer indexing since
-  //! producer domains in producer indexing are temporary replay
-  //! domains.
-  std::pair<Val*, bool> insert(
-      IterDomain* indexed_consumer_id,
-      TensorDomain* consumer_td,
-      TensorDomain* ref_td,
-      const std::unordered_map<IterDomain*, Val*>& ref_index_map,
-      const std::vector<kir::ForLoop*>& loops,
-      Val* index);
+  //! For the given index, insert its subexpressions to the loop that has
+  //! minimum amount of computation. For example, if I have a loop
+  //! FOR i1
+  //!   FOR i2
+  //!     FOR i3
+  //!       FOR i4
+  //!         index = ((i1*1 + i2*2) + i3*3) + i4*4
+  //! then this function will try insert i1*1 to common_index_map_[FOR i1],
+  //! try insert i1*1 + i2*2 to common_index_map_[FOR i2],
+  //! try insert ((i1*1 + i2*2) + i3*3) to common_index_map_[FOR i3],
+  //! try insert ((i1*1 + i2*2) + i3*3) + i4*4 to common_index_map_[FOR i4],
+  //! Before insertion, this function recursively uses
+  //! reuseIndexIfAlreadyComputed to find existing expressions/subexpressions in
+  //! common_index_map_ that can be reused. If a reuse oppportunity is found,
+  //! then this function will modify the definition of `index` to use the
+  //! existing subexpression. This function returns the modified value whose
+  //! definition reuses other expressions in the list.
+  Val* hoistIndex(Val* index, const std::vector<kir::ForLoop*>& loops);
 
-  //! Duplicate of above, but without a reference domain. TODO: Remove other
-  //! implementation.
-  std::pair<Val*, bool> insert(
-      IterDomain* indexed_consumer_id,
-      TensorDomain* consumer_td,
-      const std::vector<IterDomain*>& loop_domains,
-      const std::unordered_map<IterDomain*, Val*>& loop_index_map,
-      const std::vector<kir::ForLoop*>& loops,
-      Val* index);
-
-  const auto& commonIndexMap() const {
-    return common_index_map_;
-  }
-
-  const auto& useCounts() const {
-    return use_counts_;
-  }
+  //! common_index_map_ stores all seen indices in a given loop, however, we
+  //! don't want to create separate allocation for all of them. We are only
+  //! interested in allocating for the indices that is actually hoisted, or used
+  //! more than once. This method returns the Vals that will get its separate
+  //! allocation.
+  std::vector<Val*> getHoistedIndices(kir::ForLoop* loop) const;
 
  private:
-  //! Utility method to insert a key into common index
-  //!  map. Returns a pair of an IR node and a boolean value.
-  //! The IR node will be the previously inserted index if
-  //!  the key found a match, or will be the original index
-  //!  if this is new key and the key will be stored.
-  //! The boolean value will be true if the key is stored,
-  //!  i.e. first time it is inserted.
-  std::pair<Val*, bool> tryInsertNewIndex(CommonIndexKey key, Val* index);
+  //! This is the underlying implementation of the public hoistIndex, with some
+  //! additional arguments and return values.
+  //! Returns (hoisted index, has tensor dependency)
+  std::pair<Val*, bool> hoistIndexImpl(
+      Val* index,
+      const std::vector<kir::ForLoop*>& loops,
+      int64_t position, // if `index` is given to `hoistIndex` (i.e., is_give ==
+                        // true), then this is the position of the outer-most
+                        // loop nest that contains all the dependencies of
+                        // `index`. if `index` is a subexpression of the index
+                        // given to `hoistIndex`, then this is the position of
+                        // the outer-most loop nest that contains all the
+                        // dependencies of its parent.
+      bool is_given = false // true for the given index from the public
+                            // `hoistIndex`, false otherwise.
+  );
+
+  //! If there is already an expression in common_index_map_[loop] which is
+  //! sameAs `index`, then just return that expression. Otherwise, if there is a
+  //! subexpression of an existing expression sameAs `index`, then that
+  //! subexpression will be split out as a separate item in the mapped list, and
+  //! that subexpression will be returned. If nothing sameAs `index`, then
+  //! return nullptr.
+  Val* reuseIndexIfAlreadyComputed(Val* index, kir::ForLoop* loop);
 
  private:
-  //! Map to hold hoisted common indices
-  std::unordered_map<CommonIndexKey, Val*, CommonIndexKeyHash>
-      common_index_map_;
-  std::unordered_map<CommonIndexKey, int, CommonIndexKeyHash> use_counts_;
+  //! Map to hold hoisted common indices. The order matters and indicates data
+  //! dependency. For example, my list might have [i1*4, i1*4+2, i1*4/16]
+  std::unordered_map<kir::ForLoop*, std::list<Val*>> common_index_map_;
+
+  //! A set to identify that if a val is hoisted (an expression used in the
+  //! inner loop, but its value only depend on outer loop variables, so the
+  //! computation of this expression is hoisted to an outer loop) or reused (one
+  //! expression is used in multiple indices/predicates).
+  std::unordered_set<Val*> hoisted_or_reused_;
 };
 
 //! Insert allocations of hoisted indices. Must be called after
