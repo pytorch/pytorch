@@ -648,7 +648,7 @@ Tensor _mkldnn_convolution_transpose(
         "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
   bool is_channels_last = use_channels_last || input_t.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  
+
   std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
 
   auto memory_format =
@@ -734,7 +734,7 @@ Tensor mkldnn_convolution_transpose_pointwise(
     c10::optional<c10::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
-      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);  
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
   return _mkldnn_convolution_transpose(
       input_t,
       weight_t,
@@ -898,7 +898,7 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_FN(mkldnn_convolution_pointwise_binary_));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
-      TORCH_FN(mkldnn_convolution_transpose_pointwise));      
+      TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
 }}  // namespace at::native
 
