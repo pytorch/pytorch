@@ -1936,7 +1936,7 @@ def uniform(
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
 ):
-    return prims.uniform(
+    return prims._uniform_helper(
         x.shape,
         low=sym_float(low),
         high=sym_float(high),

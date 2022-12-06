@@ -4699,7 +4699,7 @@ def _uniform_helper(
     assert isinstance(dtype, torch.dtype)
     device = utils.canonicalize_device(device)
 
-    return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
 @register_decomposition(
