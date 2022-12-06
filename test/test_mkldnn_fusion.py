@@ -363,6 +363,21 @@ class TestMkldnnFusion(JitTestCase):
                         attr = pointwise_info.attr
                         scalars = pointwise_info.scalars
                         algorithm = pointwise_info.algorithm
+
+                        # Prepack weight
+                        packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
+                            mod.conv_transpose.weight.to_mkldnn(),
+                            mod.conv_transpose.padding,
+                            mod.conv_transpose.stride,
+                            mod.conv_transpose.dilation,
+                            mod.conv_transpose.groups,
+                            mod.conv_transpose.output_padding,
+                            x.size())
+                        mod.conv_transpose.weight = torch.nn.Parameter(
+                            packed_weight,
+                            requires_grad=mod.conv_transpose.weight.requires_grad,
+                        )
+
                         fused = torch.ops.mkldnn._convolution_transpose_pointwise(
                             x,
                             mod.conv_transpose.weight,
