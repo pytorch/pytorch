@@ -80,10 +80,6 @@ TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 
-// NB: Not lock safe, you should only call this from Python where the GIL will
-// prevent race conditions.
-TORCH_API bool areTransformsActive();
-
 // NOTE: [Life handles and lexically scoped transforms]
 // functorch transforms are lexically scoped.
 // Given a level, we store a "life handle" that is a boolean that tells us if the
