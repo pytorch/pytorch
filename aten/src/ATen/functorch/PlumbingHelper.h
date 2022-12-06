@@ -26,6 +26,8 @@
 
 namespace at { namespace functorch {
 
+void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
+
 // Create a BatchedTensor given a tensor, bdim, and level
 TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level);
 

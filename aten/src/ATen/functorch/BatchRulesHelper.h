@@ -3,6 +3,9 @@
 //
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
+#pragma once
+
+#include <c10/util/TypeList.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Operators.h>
@@ -65,7 +68,7 @@ template <typename A, A a, typename C>
 struct BasicUnaryBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct BasicUnaryBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
       optional<int64_t> batch_dim,
@@ -90,7 +93,7 @@ template <typename A, A a, typename C>
 struct VariadicBdimsBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct VariadicBdimsBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& tensor,
       optional<int64_t> batch_dim,
@@ -123,7 +126,8 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_tensor_inputs_batch_rule");
+
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
@@ -379,7 +383,7 @@ template <typename A, A a, typename C>
 struct ExistingBdimBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
-struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
+struct ExistingBdimBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& self,
       optional<int64_t> self_bdim,
