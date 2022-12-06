@@ -243,13 +243,8 @@ class BackendConfig(object):
                 "cpu": Backend.GLOO,
                 "cuda": Backend.NCCL,
             }
-        elif backend == Backend.UCC:
-            self.device_backend_map = {
-                "cpu": Backend.UCC,
-                "cuda": Backend.NCCL,
-            }
         elif backend.lower() in Backend.backend_list:
-            # backend applies to all devices (e.g. "GLOO", "MPI", "custom_backend")
+            # backend applies to all devices (e.g. "GLOO", "UCC", "MPI", "custom_backend")
             backend_val = Backend(backend)
             self.device_backend_map = {
                 "cpu": backend_val,

@@ -1570,12 +1570,14 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
                  const ::c10d::ProcessGroup::BackendType& backendType,
-                 const c10::intrusive_ptr<::c10d::Backend>& backend) {
+                 const c10::optional<c10::intrusive_ptr<::c10d::Backend>>&
+                     backend) {
                 self->setBackend(device.type(), backendType, backend);
               },
               py::arg("device"),
               py::arg("backend_type"),
-              py::arg("backend"),
+              py::arg("backend") =
+                  c10::optional<c10::intrusive_ptr<::c10d::Backend>>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_backend",

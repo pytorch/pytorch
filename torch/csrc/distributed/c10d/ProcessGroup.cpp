@@ -4,12 +4,52 @@
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 
 namespace c10d {
+
+ProcessGroup::BackendType strToBackendType(std::string backend) {
+  if (backend == "undefined") {
+    return ProcessGroup::BackendType::UNDEFINED;
+  } else if (backend == "gloo") {
+    return ProcessGroup::BackendType::GLOO;
+  } else if (backend == "nccl") {
+    return ProcessGroup::BackendType::NCCL;
+  } else if (backend == "ucc") {
+    return ProcessGroup::BackendType::UCC;
+  } else if (backend == "mpi") {
+    return ProcessGroup::BackendType::MPI;
+  } else if (backend == "tcp") {
+    return ProcessGroup::BackendType::TCP;
+  } else {
+    return ProcessGroup::BackendType::CUSTOM;
+  }
+}
+
+std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
+  switch (backendType) {
+    case ProcessGroup::BackendType::UNDEFINED:
+      return "undefined";
+    case ProcessGroup::BackendType::GLOO:
+      return "gloo";
+    case ProcessGroup::BackendType::NCCL:
+      return "nccl";
+    case ProcessGroup::BackendType::UCC:
+      return "ucc";
+    case ProcessGroup::BackendType::MPI:
+      return "mpi";
+    case ProcessGroup::BackendType::TCP:
+      return "tcp";
+    case ProcessGroup::BackendType::CUSTOM:
+      return "custom";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown backend type");
+  }
+}
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -63,42 +103,63 @@ bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
-    c10::DeviceType deviceType) const {
-  // TORCH_CHECK(
-  //     deviceTypeToBackends_.find(deviceType) != deviceTypeToBackends_.end(),
-  //     "Backend type for device type ",
-  //     deviceType,
-  //     " was not found");
+    c10::DeviceType deviceType) {
+  // If there is a backend associated with this device type then return it
+  if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
+    std::cout << "Found backend for device type and returning" << std::endl;
+    return deviceTypeToBackend_.at(deviceType);
+  }
 
-  // // get backend type from device type
-  // ProcessGroup::BackendType backendType =
-  // deviceTypeToBackendType_.at(deviceType);
+  // Get the backend type associated with the device
+  ProcessGroup::BackendType backendType =
+      deviceTypeToBackendType_.at(deviceType);
 
-  // // backendType is in map
-  // if (backendTypeToBackends_.find(backendType) !=
-  // backendTypeToBackends_.end()) {
-  //   return backendTypeToBackends_.at(backendType);
-  // }
+  // Check if the backend has already been initialized
+  if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+    auto backend = backendTypeToBackend_.at(backendType);
+    deviceTypeToBackend_[deviceType] = backend;
+    return backend;
+  } else {
+    std::cout << "C++ initializing the backend for " << backendType
+              << std::endl;
+    // initialize the backend
 
-  // if (backendType == ProcessGroup::BackendType::MPI) {
-  //   auto backend = c10::make_intrusive<ProcessGroupMPI>();
-  // } else if (backendType == ProcessGroup::BackendType::GLOO) {
-  //   return c10::make_intrusive<ProcessGroupGloo>();
-  // } else if (backendType == ProcessGroup::BackendType::NCCL) {
-  //   return c10::make_intrusive<ProcessGroupNCCL>();
-  // } else if (backendType == ProcessGroup::BackendType::UCC) {
-  //   return c10::make_intrusive<ProcessGroupUCC>();
-  // } else {
-  //   TORCH_CHECK(false, "Unknown backend type: ", backendType);
-  // }
+    // create a separate prefix store for the newly created backend
+    auto prefixStore =
+        c10::make_intrusive<PrefixStore>(backendTypeToStr(backendType), store_);
+
+    // if backend is gloo then initialize a gloo backend
+    if (backendType == ProcessGroup::BackendType::GLOO) {
+      // create ProcessGroupGloo options
+      auto glooOptions =
+          c10::make_intrusive<ProcessGroupGloo::Options>(options_->timeout);
+      auto backend = c10::make_intrusive<ProcessGroupGloo>(
+          store_, rank_, size_, glooOptions);
+      // auto backend = nullptr;
+      deviceTypeToBackend_[deviceType] = backend;
+      backendTypeToBackend_[backendType] = backend;
+      return backend;
+    }
+
+    // if (backendType == ProcessGroup::BackendType::MPI) {
+    //   auto backend = c10::make_intrusive<ProcessGroupMPI>();
+    // } else if (backendType == ProcessGroup::BackendType::GLOO) {
+    //   return c10::make_intrusive<ProcessGroupGloo>();
+    // } else if (backendType == ProcessGroup::BackendType::NCCL) {
+    //   return c10::make_intrusive<ProcessGroupNCCL>();
+    // } else if (backendType == ProcessGroup::BackendType::UCC) {
+    //   return c10::make_intrusive<ProcessGroupUCC>();
+    // } else {
+    //   TORCH_CHECK(false, "Unknown backend type: ", backendType);
+    // }
+  }
 
   TORCH_CHECK(
-      deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end(),
-      "Backend type for device type ",
-      deviceType,
-      " was not found");
-
-  return deviceTypeToBackend_.at(deviceType);
+      false,
+      "Could not retrieve or create the backend ",
+      backendType,
+      " for device type ",
+      deviceType);
 }
 
 ProcessGroup::ProcessGroup(
@@ -110,7 +171,7 @@ ProcessGroup::ProcessGroup(
       rank_(rank),
       size_(size),
       options_(options),
-      backendType_(backendTypeResolver(options->backend)),
+      backendType_(strToBackendType(options->backend)),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 

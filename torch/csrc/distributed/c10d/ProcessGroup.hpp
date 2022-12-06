@@ -74,24 +74,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 6,
   };
 
-  BackendType backendTypeResolver(std::string backend) const {
-    if (backend == "undefined") {
-      return BackendType::UNDEFINED;
-    } else if (backend == "gloo") {
-      return BackendType::GLOO;
-    } else if (backend == "nccl") {
-      return BackendType::NCCL;
-    } else if (backend == "ucc") {
-      return BackendType::UCC;
-    } else if (backend == "mpi") {
-      return BackendType::MPI;
-    } else if (backend == "tcp") {
-      return BackendType::TCP;
-    } else {
-      return BackendType::CUSTOM;
-    }
-  }
-
   // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
   explicit ProcessGroup(int rank, int size);
 
@@ -296,50 +278,37 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // create it and broadcast it to other ranks using the store. Only implemented
   // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
-    auto backendName = getBackendName();
-
+    auto backendType = getBackendType();
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendName == "gloo") {
-      backendTypeToBackend_.at(ProcessGroup::BackendType::GLOO)->setSequenceNumberForGroup();
+    if (backendType == ProcessGroup::BackendType::GLOO || backendType == ProcessGroup::BackendType::NCCL || backendType == ProcessGroup::BackendType::UCC) {
+      getDefaultBackend()->setSequenceNumberForGroup();
+    } else {
+      TORCH_CHECK(
+          false,
+          c10::str(
+              "ProcessGroup ",
+              getBackendName(),
+              " does not yet support sequence numbers."));
     }
-    else if (backendName == "nccl") {
-      backendTypeToBackend_.at(ProcessGroup::BackendType::NCCL)->setSequenceNumberForGroup();
-    }
-    else if (backendName == "ucc") {
-      backendTypeToBackend_.at(ProcessGroup::BackendType::UCC)->setSequenceNumberForGroup();
-    }
-
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            backendName,
-            " does not yet support sequence numbers."));
   }
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
-    auto backendName = getBackendName();
+    auto backendType = getBackendType();
 
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendName == "gloo") {
-      return backendTypeToBackend_.at(ProcessGroup::BackendType::GLOO)->getSequenceNumberForGroup();
+    if (backendType == ProcessGroup::BackendType::GLOO || backendType == ProcessGroup::BackendType::NCCL || backendType == ProcessGroup::BackendType::UCC) {
+      return getDefaultBackend()->getSequenceNumberForGroup();
+    } else {
+      TORCH_CHECK(
+          false,
+          c10::str(
+              "ProcessGroup ",
+              getBackendName(),
+              " does not yet support sequence numbers."));
     }
-    else if (backendName == "nccl") {
-      return backendTypeToBackend_.at(ProcessGroup::BackendType::NCCL)->getSequenceNumberForGroup();
-    }
-    else if (backendName == "ucc") {
-      return backendTypeToBackend_.at(ProcessGroup::BackendType::UCC)->getSequenceNumberForGroup();
-    }
-
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            backendName,
-            " does not yet support sequence numbers."));
   }
 
   virtual c10::intrusive_ptr<Work> send(
@@ -387,10 +356,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return !deviceTypeToBackendType_.empty();
   }
 
-  void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::intrusive_ptr<Backend>& backend) {
+  void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
     deviceTypeToBackendType_[deviceType] = backendType;
-    deviceTypeToBackend_[deviceType] = backend;
-    backendTypeToBackend_[backendType] = backend;
+    // check if backend has value
+    if (backend.has_value()) {
+      deviceTypeToBackend_[deviceType] = backend.value();
+      backendTypeToBackend_[backendType] = backend.value();
+    }
   }
 
   c10::intrusive_ptr<Backend> getDefaultBackend() const {
@@ -405,7 +377,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
 
-  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType) const;
+  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);
 
   c10::intrusive_ptr<Backend> getBackend(BackendType backendType) const {
     TORCH_CHECK(
