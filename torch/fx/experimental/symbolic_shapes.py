@@ -470,7 +470,7 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -520,7 +520,8 @@ class ShapeEnv(object):
             assert isinstance(s, sympy.Symbol)
             self.replacements[s] = stride_expr
             sym_stride.append(self.create_symintnode(s))
-        return sym_size, sym_stride
+        sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset()))
+        return sym_size, sym_stride, sym_storage_offset
 
     def create_symintnode(self, sym: "sympy.Expr"):
         assert isinstance(sym, sympy.Symbol) or isinstance(-sym, sympy.Symbol)
