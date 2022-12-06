@@ -1305,7 +1305,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   } else {
     op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   }
-  
   // Since src zero point is unknown, set runtime value here
   op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL});
 
