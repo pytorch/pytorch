@@ -8,6 +8,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -391,6 +392,19 @@ class TestDecomp(TestCase):
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
+
+    def test_uniform(self, device):
+        size = (2, 3, 4, 5)
+        dtype = torch.float32
+        x = make_tensor(size, dtype=dtype, device=device)
+        low = 0.3
+        high = 0.9
+
+        torch.manual_seed(123)
+        ref = torch.ops.aten.uniform(x, low, high)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.uniform(x, low=low, high=high)
+        self.assertEqual(ref, res)
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):

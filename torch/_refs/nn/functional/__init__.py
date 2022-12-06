@@ -73,7 +73,7 @@ def _dropout_helper(
     """
 
     return (
-        refs.uniform(
+        refs._uniform_helper(
             self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
         )
         < val

@@ -285,10 +285,6 @@ __all__ = [
     "zeros",
     "zeros_like",
     #
-    # Randomness References
-    #
-    "uniform",  # TODO: add OpInfo -- and testing for randomness?
-    #
     # Test-related functions
     #
     "allclose",
@@ -4685,8 +4681,7 @@ def scalar_tensor(
 #
 
 
-@register_decomposition(torch.ops.aten.uniform)
-def uniform(
+def _uniform_helper(
     shape: ShapeType,
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
@@ -4704,7 +4699,7 @@ def uniform(
     assert isinstance(dtype, torch.dtype)
     device = utils.canonicalize_device(device)
 
-    return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
 @register_decomposition(
