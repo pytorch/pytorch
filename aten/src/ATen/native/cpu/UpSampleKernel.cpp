@@ -8,6 +8,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include "UpSampleKernelAVXAntialias.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -256,45 +257,162 @@ static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
   }
 }
 
-template <typename scalar_t, typename index_t>
+template <typename scalar_t>
 static inline void basic_loop_aa_single_dim_zero_strides(
     char** data,
     const int64_t* strides,
-    int64_t n) {
+    int64_t n,
+    unsigned int weights_precision) {
   char* dst = data[0];
   char* src = data[1];
   // index stride is constant for the given dimension
-  const index_t ids_stride = *(index_t*)&data[2 + 2][0];
+  const int64_t ids_stride = *(int64_t*)&data[2 + 2][0];
 
   for (const auto i : c10::irange(n)) {
     *(scalar_t*)&dst[i * strides[0]] =
-        interpolate_aa_single_dim_zero_strides<scalar_t, index_t>(
+        interpolate_aa_single_dim_zero_strides<scalar_t, int64_t>(
             src + i * strides[1], &data[2], ids_stride);
   }
 }
 
-template <typename scalar_t, typename index_t>
-static inline void basic_loop_aa_single_dim_nonzero_strides(
+template <>
+inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
     char** data,
     const int64_t* strides,
-    int64_t n) {
+    int64_t n,
+    unsigned int weights_precision) {
   char* dst = data[0];
   char* src = data[1];
   // index stride is constant for the given dimension
-  const index_t ids_stride = *(index_t*)&data[2 + 2][0];
+  const int64_t ids_stride = *(int64_t*)&data[2 + 2][0];
+  const int64_t ids_size = *(int64_t*)&data[2 + 1][0];
+
+  int64_t i = 0;
+
+  for (; i<n; i++) {
+
+    const int64_t ids_min = *(int64_t*)&data[2 + 0][0];
+    const int64_t ids_size = *(int64_t*)&data[2 + 1][0];
+
+    char* src_min = src + i * strides[1] + ids_min;
+
+    uint8_t t = *(uint8_t*)&src_min[0];
+    int64_t wts_idx = *(int64_t*)&data[2 + 4][0];
+    short* wts_ptr = (short*)&data[2 + 3][wts_idx];
+    short wts = wts_ptr[0];
+
+    // Intermediate computations are using integer type
+    int output = 1 << (weights_precision - 1);
+    output += t * wts;
+    for (const auto j : c10::irange(1, ids_size)) {
+      wts = wts_ptr[j];
+      t = *(uint8_t*)&src_min[j * ids_stride];
+      output += t * wts;
+    }
+    output = (uint8_t) (output >> weights_precision);
+
+    *(uint8_t*)&dst[i * strides[0]] = output;
+    //     interpolate_aa_single_dim_zero_strides<scalar_t, int64_t>(
+    //         src + i * strides[1], &data[2], ids_stride);
+  }
+}
+
+template <typename scalar_t>
+static inline void basic_loop_aa_single_dim_nonzero_strides(
+    char** data,
+    const int64_t* strides,
+    int64_t n,
+    unsigned int weights_precision) {
+  char* dst = data[0];
+  char* src = data[1];
+  // index stride is constant for the given dimension
+  const int64_t ids_stride = *(int64_t*)&data[2 + 2][0];
 
   if (strides[1] == 0) {
     for (const auto i : c10::irange(n)) {
       *(scalar_t*)&dst[i * strides[0]] =
-          interpolate_aa_single_dim<scalar_t, index_t>(
+          interpolate_aa_single_dim<scalar_t, int64_t>(
               src, &data[2], &strides[2], i, ids_stride);
     }
   } else {
     for (const auto i : c10::irange(n)) {
       *(scalar_t*)&dst[i * strides[0]] =
-          interpolate_aa_single_dim<scalar_t, index_t>(
+          interpolate_aa_single_dim<scalar_t, int64_t>(
               src + i * strides[1], &data[2], &strides[2], i, ids_stride);
     }
+  }
+}
+
+// #define VERBOSE
+
+template <>
+inline void basic_loop_aa_single_dim_nonzero_strides<uint8_t>(
+    char** data,
+    const int64_t* strides,
+    int64_t n,
+    unsigned int weights_precision) {
+  char* dst = data[0];
+  char* src = data[1];
+  // index stride is constant for the given dimension
+  const int64_t ids_stride = *(int64_t*)&data[2 + 2][0];
+
+  int64_t i = 0;
+
+  // Here we are implementing data interpolation within the same line (vs between the lines)
+  // output[x, y] = input[xmin[x], y] * W[x] + input[xmin[x] + 1, y] * W[x + 1] + ... + input[xmin[x] + xsize, y] * W[x + xsize]
+
+  for (; i<n; i++) {
+
+    int64_t ids_min = *(int64_t*)&data[2 + 0][i * strides[2 + 0]];
+    int64_t ids_size = *(int64_t*)&data[2 + 1][i * strides[2 + 1]];
+
+    char* src_min = src + i * strides[1] + ids_min;
+
+    uint8_t t = *(uint8_t*)&src_min[0];
+    int64_t wts_idx = *(int64_t*)&data[2 + 4][i * strides[2 + 4]];
+    short* wts_ptr = (short*)&data[2 + 3][wts_idx];
+    short wts = wts_ptr[0];
+
+#ifdef VERBOSE
+    if (i < 2) {
+      std::cout << "\n-- i=" << i << ", n=" << n << std::endl;
+      std::cout << "t, wts: " << (int) t << ", " << wts << std::endl;
+    }
+#endif
+
+    // Intermediate computations are using integer type
+    int output = 1 << (weights_precision - 1);
+#ifdef VERBOSE
+    if (i < 2) {
+      std::cout << "1 output= " << output << std::endl;
+    }
+#endif
+    output += t * wts;
+#ifdef VERBOSE
+    if (i < 2) {
+      std::cout << "2 output= " << output << std::endl;
+    }
+#endif
+    for (const auto j : c10::irange(1, ids_size)) {
+      wts = wts_ptr[j];
+      t = *(uint8_t*)&src_min[j * ids_stride];
+      output += t * wts;
+#ifdef VERBOSE
+      if (i < 2) {
+        std::cout << j + 2 << " t, wts, output= " << (int) t << ", " << wts << ", " << output << std::endl;
+      }
+#endif
+    }
+    output = (uint8_t) (output >> weights_precision);
+#ifdef VERBOSE
+    if (i < 2) {
+      std::cout << "final output= " << output << std::endl;
+    }
+#endif
+
+    *(uint8_t*)&dst[i * strides[0]] = output;
+        // interpolate_aa_single_dim<uint8_t,q int64_t>(
+        //     src + i * strides[1], &data[2], &strides[2], i, ids_stride);
   }
 }
 
@@ -938,6 +1056,143 @@ struct HelperInterpLinear : public HelperInterpBase {
     );
     return indices_weights;
   }
+
+  static inline std::vector<Tensor> compute_indices_int16_weights_aa(
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const c10::optional<double> opt_scale,
+    unsigned int & weights_precision
+  ) {
+
+    std::vector<Tensor> indices_weights;
+
+    float scale = area_pixel_compute_scale<float>(
+        input_size, output_size, align_corners, opt_scale);
+
+    auto interp_size = HelperInterpLinear::interp_size;
+
+    // indices_weights = HelperInterpLinear::_compute_indices_weights_aa<float>(
+    //     input_size,
+    //     output_size,
+    //     stride,
+    //     ndims,
+    //     reshape_dim,
+    //     scale,
+    //     interp_size,
+    //     &HelperInterpLinear::aa_filter<float>);
+    // COPY-PASTE FROM _compute_indices_weights_aa
+
+    float support =
+        (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+    interp_size = (int)ceilf(support) * 2 + 1;
+
+    auto new_shape = std::vector<int64_t>(ndims, 1);
+    new_shape[reshape_dim] = output_size;
+
+    // Bounds approach as in PIL: xmin/xmax
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+
+    {
+      // Weights
+      new_shape[reshape_dim] = output_size * interp_size;
+      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
+      auto strides = wts.strides().vec();
+      strides[reshape_dim] = 0;
+      new_shape[reshape_dim] = output_size;
+      wts = wts.as_strided(new_shape, strides);
+      indices_weights.emplace_back(wts);
+      // Weights indices
+      indices_weights.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    }
+
+    int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
+    int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
+    int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
+    float* wt_ptr = indices_weights[3].data_ptr<float>();
+    int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
+
+    int64_t xmin, xmax;
+
+    for (const auto i : c10::irange(output_size)) {
+      HelperInterpBase::_compute_weights_aa(
+          i,
+          input_size,
+          scale,
+          support,
+          wt_ptr + i * interp_size,
+          interp_size,
+          HelperInterpLinear::aa_filter<float>,
+          xmin,
+          xmax);
+
+      idx_ptr_xmin[i] = xmin * stride;
+      idx_ptr_size[i] = xmax;
+      idx_ptr_stride[i] = stride;
+      // weight indices will be directly for rescaled weights as short
+      wt_idx_ptr[i] = i * interp_size * sizeof(short);
+    }
+
+    // Rescale float weights to int16 and compute weights precision
+    auto weights_f32 = indices_weights[3];
+    float * data_f32 = weights_f32.data_ptr<float>();
+    int64_t weights_f32_size = output_size * interp_size;
+    // can't use weights_f32.max() here as tensor is restrided
+    float w_max = data_f32[0];
+    for (const auto i : c10::irange(weights_f32_size)) {
+        float v = data_f32[i];
+        if (w_max < v) {
+            w_max = v;
+        }
+    }
+#ifdef VERBOSE
+    std::cout << "w_max: " << w_max << std::endl;
+#endif
+
+    // Copied from PIL-SIMD, https://github.com/uploadcare/pillow-simd/blob/668aa48d12305b8f093958792a5e4f690c2583d6/src/libImaging/Resample.c
+    for (weights_precision = 0; weights_precision < 22; weights_precision++) {
+        int next_value = (int) (0.5 + w_max * (1 << (weights_precision + 1)));
+        if (next_value >= (1 << 15))
+            break;
+    }
+
+#ifdef VERBOSE
+    std::cout << "weights_precision: " << weights_precision << std::endl;
+#endif
+
+    // rescale float values to int16, we use the same buffer as PIL-SIMD
+    // w_f32 -> w_i16 = int(w_f32 * 2^N + 0.5)
+    // out_ui8 = int( (w_i16 * in_ui8) / 2^N + 0.5 )
+
+    short * data_i16 = (short *) data_f32;
+#ifdef VERBOSE
+    std::cout << "weight (f32/u16): ";
+#endif
+    for (const auto i : c10::irange(weights_f32_size)) {
+      float v = data_f32[i];
+      if (v < 0) {
+          data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
+      } else {
+          data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
+      }
+#ifdef VERBOSE
+      std::cout << "(" << v << ", " << data_i16[i] << ") ";
+#endif
+    }
+#ifdef VERBOSE
+    std::cout << std::endl;
+#endif
+    return indices_weights;
+  }
 };
 
 struct HelperInterpCubic : public HelperInterpBase {
@@ -1048,6 +1303,117 @@ struct HelperInterpCubic : public HelperInterpBase {
     );
     return indices_weights;
   }
+
+  static inline std::vector<Tensor> compute_indices_int16_weights_aa(
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const c10::optional<double> opt_scale,
+    unsigned int & weights_precision
+  ) {
+
+    std::vector<Tensor> indices_weights;
+
+    float scale = area_pixel_compute_scale<float>(
+        input_size, output_size, align_corners, opt_scale);
+
+    auto interp_size = HelperInterpCubic::interp_size;
+
+    // indices_weights = HelperInterpCubic::_compute_indices_weights_aa<float>(
+    //     input_size,
+    //     output_size,
+    //     stride,
+    //     ndims,
+    //     reshape_dim,
+    //     scale,
+    //     interp_size,
+    //     &HelperInterpCubic::aa_filter<float>);
+    // COPY-PASTE FROM _compute_indices_weights_aa
+
+    float support =
+        (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+    interp_size = (int)ceilf(support) * 2 + 1;
+
+    auto new_shape = std::vector<int64_t>(ndims, 1);
+    new_shape[reshape_dim] = output_size;
+
+    // Bounds approach as in PIL: xmin/xmax
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    indices_weights.emplace_back(
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+
+    {
+      // Weights
+      new_shape[reshape_dim] = output_size * interp_size;
+      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
+      auto strides = wts.strides().vec();
+      strides[reshape_dim] = 0;
+      new_shape[reshape_dim] = output_size;
+      wts = wts.as_strided(new_shape, strides);
+      indices_weights.emplace_back(wts);
+      // Weights indices
+      indices_weights.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    }
+
+    int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
+    int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
+    int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
+    float* wt_ptr = indices_weights[3].data_ptr<float>();
+    int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
+
+    int64_t xmin, xmax;
+
+    for (const auto i : c10::irange(output_size)) {
+      HelperInterpBase::_compute_weights_aa(
+          i,
+          input_size,
+          scale,
+          support,
+          wt_ptr + i * interp_size,
+          interp_size,
+          HelperInterpLinear::aa_filter<float>,
+          xmin,
+          xmax);
+
+      idx_ptr_xmin[i] = xmin * stride;
+      idx_ptr_size[i] = xmax;
+      idx_ptr_stride[i] = stride;
+      // weight indices will be directly for rescaled weights as short
+      wt_idx_ptr[i] = i * interp_size * sizeof(short);
+    }
+
+    // Rescale float weights to int16 and compute weights precision
+    auto weights_f32 = indices_weights[3];
+    float w_max = weights_f32.max().item<float>();
+
+    // Copied from PIL-SIMD, https://github.com/uploadcare/pillow-simd/blob/668aa48d12305b8f093958792a5e4f690c2583d6/src/libImaging/Resample.c
+    for (weights_precision = 0; weights_precision < 22; weights_precision += 1) {
+        int next_value = (int) (0.5 + w_max * (1 << (weights_precision + 1)));
+        if (next_value >= (1 << 15))
+            break;
+    }
+
+    // rescale float values to int16, we use the same buffer as PIL-SIMD
+    float * data_f32 = weights_f32.data_ptr<float>();
+    short * data_i16 = (short *) data_f32;
+    for (int i=0; i<weights_f32.numel(); i++) {
+      float v = data_f32[i];
+      if (v < 0) {
+          data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
+      } else {
+          data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
+      }
+    }
+    return indices_weights;
+  }
+
 };
 
 // Generic upsampling interpolation kernel for N-d case.
@@ -1134,17 +1500,48 @@ void upsample_generic_Nd_kernel_impl(
   }
 }
 
-template <typename scalar_t>
-void cpu_upsample_generic_aa(at::TensorIterator& iter) {
+template <typename scalar_t, bool is_horizontal>
+void cpu_upsample_generic_aa(at::TensorIterator& iter, unsigned int weights_precision) {
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-    if ((strides[0] == sizeof(scalar_t)) && (strides[1] == sizeof(scalar_t)) &&
-        is_zero_stride<3 + 2>(&strides[2])) {
-      basic_loop_aa_single_dim_zero_strides<scalar_t, int64_t>(
-          data, strides, n);
+
+#ifdef VERBOSE
+    if (TI_SHOW_STRIDES) {
+      std::cout << "AA TI_SHOW: N=" << n << std::endl;
+      std::cout << "AA TI_SHOW_STRIDES: "
+        << strides[0] << " "
+        << strides[1] << " | ";
+
+      constexpr int m = 3 + 2;
+      int ndims = 1;
+      for (int i=0; i<ndims; i++) {
+        for (int j=0; j<m; j++) {
+          std::cout << strides[m * i + j + 2] << " ";
+        }
+        std::cout << "| ";
+      }
+      std::cout << std::endl;
+    }
+#endif
+
+    if (is_horizontal) {
+
+#ifdef VERBOSE
+      std::cout << "AA TI_BASIC_LOOP -> NONZERO STRIDES" << std::endl << std::flush;
+#endif
+      // Strides are : X 0 | 8 8 8 0 8
+      // upsampling data within a contiguous dimension (aka horizontal resampling)
+      basic_loop_aa_single_dim_nonzero_strides<scalar_t>(
+          data, strides, n, weights_precision);
+
     } else {
-      basic_loop_aa_single_dim_nonzero_strides<scalar_t, int64_t>(
-          data, strides, n);
+#ifdef VERBOSE
+      std::cout << "AA TI_BASIC_LOOP -> ZERO STRIDES" << std::endl << std::flush;
+#endif
+      // Strides are : X Y | 0 0 0 0 0
+      // upsampling data between contiguous dimensions (aka vertical resampling)
+      basic_loop_aa_single_dim_zero_strides<scalar_t>(
+          data, strides, n, weights_precision);
     }
   };
 
@@ -1152,7 +1549,7 @@ void cpu_upsample_generic_aa(at::TensorIterator& iter) {
 }
 
 // Generic separable upsampling interpolation kernels for N-d case with anti-aliasing
-template <int out_ndims, typename scale_type, class F>
+template <int out_ndims, typename scale_type, class F, bool is_horizontal>
 void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const Tensor& output,
     const Tensor& input,
@@ -1175,21 +1572,29 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   strides[interp_dim] = 0;
   auto restrided_input = input.as_strided(shape, strides);
 
-  std::vector<std::vector<Tensor>> indices_weights;
-
-  int interp_size = F::interp_size;
   auto input_scalar_type = input.scalar_type();
-  if (interp_size == 1 && input_scalar_type == at::ScalarType::Byte) {
-    // nearest also supports uint8 tensor, but we have to use float
-    // with compute_indices_weights
-    input_scalar_type = at::ScalarType::Float;
-  }
 
-  indices_weights.emplace_back(
+#ifdef VERBOSE
+  std::cout << "interp_dim: " << interp_dim << ", oshape: " << oshape << std::endl;
+#endif
+
+  std::vector<Tensor> indices_weights;
+  unsigned int weights_precision = 0;
+
+  if (input_scalar_type == at::kByte) {
+    indices_weights =
+      F::compute_indices_int16_weights_aa(
+        input.size(interp_dim), oshape[interp_dim],
+        input.stride(interp_dim) * input.element_size(),
+        input.dim(), interp_dim, align_corners, scales[interp_dim - 2], weights_precision);
+    TORCH_INTERNAL_ASSERT(weights_precision > 0);
+  } else {
+    indices_weights =
       F::compute_indices_weights_aa(
         input_scalar_type, input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
-        input.dim(), interp_dim, align_corners, scales[interp_dim - 2]));
+        input.dim(), interp_dim, align_corners, scales[interp_dim - 2]);
+  }
 
   TensorIteratorConfig config;
   config.check_all_same_dtype(false)
@@ -1197,25 +1602,16 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
       .add_output(output)
       .add_input(restrided_input);
 
-  for (auto& idx_weight : indices_weights) {
-    for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
-    }
+  for (auto& tensor : indices_weights) {
+    config.add_input(tensor);
   }
 
   auto iter = config.build();
 
-  if (interp_size > 1) {
-    // Nearest also supports uint8 tensor, so need to handle it separately
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "upsample_generic_Nd_aa", [&] {
-      cpu_upsample_generic_aa<scalar_t>(iter);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
-          cpu_upsample_generic_aa<scalar_t>(iter);
-        });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
+        cpu_upsample_generic_aa<scalar_t, is_horizontal>(iter, weights_precision);
+      });
 }
 
 template <int out_ndims, typename scale_type, class F>
@@ -1225,23 +1621,65 @@ void separable_upsample_generic_Nd_kernel_impl(
     bool align_corners,
     const scale_type& scales) {
 
-  auto temp_oshape = input.sizes().vec();
+  auto output_shape = output.sizes();
+  auto input_shape = input.sizes();
+  auto temp_oshape = input_shape.vec();
   at::Tensor temp_output, temp_input = input;
-  for (const auto i : c10::irange(out_ndims - 1)) {
-    int interp_dim = 2 + out_ndims - 1 - i;
-    temp_oshape[interp_dim] = output.sizes()[interp_dim];
-    temp_output = at::empty(temp_oshape, input.options());
+
+  int interp_dim = 0;
+  // Precompute the number of single dim resize method invocations
+  // to avoid copying temporary buffer to output
+  int num_single_dim_ops = 0;
+  for (const auto i : c10::irange(out_ndims)) {
+    interp_dim = 2 + out_ndims - 1 - i;
+    if (output_shape[interp_dim] != input_shape[interp_dim]) {
+      num_single_dim_ops += 1;
+    }
+  }
+
+  // upsampling data within the contiguous dimension (aka horizontal resampling)
+  interp_dim = 2 + out_ndims - 1;
+  if (output_shape[interp_dim] != input_shape[interp_dim]) {
+
+    num_single_dim_ops -= 1;
+    if (num_single_dim_ops > 0) {
+      temp_oshape[interp_dim] = output_shape[interp_dim];
+      temp_output = at::empty(temp_oshape, input.options());
+    } else {
+      temp_output = output;
+    }
+
     _separable_upsample_generic_Nd_kernel_impl_single_dim<
         out_ndims,
         scale_t,
-        F>(
+        F,
+        true>(
         temp_output, temp_input, interp_dim, align_corners, scales);
     temp_input = temp_output;
   }
-  _separable_upsample_generic_Nd_kernel_impl_single_dim<
-      out_ndims,
-      scale_t,
-      F>(output, temp_input, 2, align_corners, scales);
+
+  // upsampling data between contiguous dimensions (aka vertical resampling)
+  for (const auto i : c10::irange(1, out_ndims)) {
+    interp_dim = 2 + out_ndims - 1 - i;
+    if (output_shape[interp_dim] != input_shape[interp_dim]) {
+
+      num_single_dim_ops -= 1;
+      if (num_single_dim_ops > 0) {
+        temp_oshape[interp_dim] = output_shape[interp_dim];
+        temp_output = at::empty(temp_oshape, input.options());
+      } else {
+        temp_output = output;
+      }
+
+      _separable_upsample_generic_Nd_kernel_impl_single_dim<
+          out_ndims,
+          scale_t,
+          F,
+          false>(
+          temp_output, temp_input, interp_dim, align_corners, scales);
+      temp_input = temp_output;
+    }
+  }
 }
 
 void upsample_nearest1d_kernel_impl(
@@ -1375,9 +1813,17 @@ void upsample_bilinear2d_aa_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-
+#ifdef CPU_CAPABILITY_AVX2
+  if (input.dtype() == at::kByte) { // TODO: add more assumptions as needed
+    beepidiboop(input, output);
+  } else {
+    separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+        output, input, align_corners, {scales_h, scales_w});
+  }
+#else // CPU_CAPABILITY_AVX2
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
       output, input, align_corners, {scales_h, scales_w});
+#endif // CPU_CAPABILITY_AVX2
 }
 
 void upsample_trilinear3d_kernel_impl(
