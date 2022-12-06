@@ -1540,7 +1540,22 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            isInputNonSizeZeroTensor,
+            [](const Node* node) -> bool {
+              if (auto tensor_type =
+                      node->inputs()[0]->type()->cast<TensorType>()) {
+                // index_select doesn't support 0-dim tensors
+                if (tensor_type->dim() == 0) {
+                  return false;
+                }
+              }
+              for (const auto& val : node->inputs()) {
+                auto tensor_type = val->type()->cast<TensorType>();
+                if (tensor_type && is_zero_sized_tensor(tensor_type)) {
+                  return false;
+                }
+              }
+              return true;
+            },
             nullptr);
       }
     }

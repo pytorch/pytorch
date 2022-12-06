@@ -4156,6 +4156,20 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_index_select_0_dim_inputs(self):
+        lookup_tv = torch.tensor(1.5, device="cuda", dtype=torch.float)
+        indices_tv = torch.tensor([0], device="cuda", dtype=torch.long)
+
+        with nvfuser_singleton_fusion(True):
+            def t(x_kj, idx_kj):
+                return torch.index_select(x_kj, 0, idx_kj).relu()
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, lookup_tv, indices_tv)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_index_select_fusion(self):
         lookup_size = 68
         feat_dim = 128
