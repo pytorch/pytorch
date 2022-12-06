@@ -1029,7 +1029,7 @@ class FSDPTest(MultiProcessTestCase):
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is not None:
+        if mixed_precision is None:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,
