@@ -24,7 +24,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed.fsdp._common_utils import (
-    _computation_handle_training_states,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -141,10 +140,7 @@ class FlatParameter(nn.Parameter):
             size without padding.
         _padded_unsharded_size (torch.Size): Unsharded flattened parameter's
             size with padding. This is only set for sharded strategies since
-            they require padding for the all-gather. We enforce that the
-            ``FlatParameter`` has the padded unsharded size when applicable so
-            that the gradient is computed with padding included to avoid having
-            to pad manually in the post-backward hook.
+            they require padding for the all-gather.
         _sharded_size (torch.Size): Sharded flattened parameter's size with
             padding. This is also set for ``NO_SHARD``, in which case it is the
             same as the unsharded sizes. (We omit "padded" because there is no
@@ -296,36 +292,6 @@ class FlatParameter(nn.Parameter):
         # Tracks whether the `FlatParameter`'s post-backward hook has been
         # called to modify the behavior of the post-backward callback
         self._post_backward_called = False
-
-    @property
-    def _unsharded_size_for_comp(self) -> torch.Size:
-        """
-        Returns the unsharded size for computation. The existence of this
-        attribute is to abstract over the different cases.
-        """
-        # NOTE: `_padded_unsharded_size` is only defined for sharded strategies
-        # after lazy attribute initialization.
-        return (
-            self._padded_unsharded_size  # type: ignore[attr-defined]
-            if hasattr(self, "_padded_unsharded_size")
-            else self._unpadded_unsharded_size
-        )
-
-    @property
-    def _numel_to_pad(self) -> int:
-        """
-        Returns the numel to pad for this ``FlatParameter`` to have numel
-        divisible by the world size of the process group across which it is
-        sharded.
-        """
-        # Default to 0 if the attributes are not defined (yet)
-        if not hasattr(self, "_padded_unsharded_size") or not hasattr(
-            self, "_unpadded_unsharded_size"
-        ):
-            return 0
-        return (
-            self._padded_unsharded_size.numel() - self._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
-        )
 
 
 class FlatParamHandle:
@@ -953,19 +919,15 @@ class FlatParamHandle:
         padded_unsharded_flat_param: torch.Tensor,
     ) -> None:
         """
-        If running FSDP-managed computation (i.e. forward or backward), then
-        this switches to using the *padded* unsharded flattened parameter so
-        that the unsharded gradient can be computed directly with padding.
-        Otherwise (e.g. ``summon_full_params()``), this switches to using the
-        *unpadded* unsharded flattened parameter to avoid exposing the padding.
+        Switches to using the *unpadded* unsharded flattened parameter, which
+        is a view into the *padded* unsharded flattened parameter.
         """
-        self.flat_param.data = (
-            padded_unsharded_flat_param
-            if self._training_state in _computation_handle_training_states
-            else padded_unsharded_flat_param[
-                : self.flat_param._unpadded_unsharded_size.numel()
-            ]
-        )
+        unsharded_size = self.flat_param._unpadded_unsharded_size
+        self.flat_param.data = padded_unsharded_flat_param[
+            : unsharded_size.numel()
+        ].view(
+            unsharded_size
+        )  # this `.view()` is not autograd visible
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
@@ -1042,7 +1004,10 @@ class FlatParamHandle:
         dist.all_gather_into_tensor(
             padded_unsharded_grad, sharded_grad, self.process_group
         )
-        flat_param.grad = padded_unsharded_grad
+        unsharded_size = self.flat_param._unpadded_unsharded_size
+        flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
+            unsharded_size
+        )
         self._use_unsharded_grad_views()
 
     def reshard_grad(self):
@@ -1066,7 +1031,7 @@ class FlatParamHandle:
         )
         flat_param = self.flat_param
         if flat_param.grad is not None and (
-            flat_param.grad.size() != flat_param._unsharded_size_for_comp
+            flat_param.grad.size() != flat_param._unpadded_unsharded_size
             or flat_param.grad.device != flat_param.device  # grad on CPU
         ):
             self._check_on_compute_device(self.flat_param)
@@ -1179,7 +1144,10 @@ class FlatParamHandle:
         Postcondition: Same as the precondition.
         """
         self._check_sharded_strategy()
-        self._check_unsharded(self.flat_param)
+        p_assert(
+            self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+            f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
+        )
         self._check_on_compute_device(self.flat_param)
         # Check that the unpadded unsharded flattened parameter is a view into
         # the padded unsharded flattened parameter as expected
@@ -1198,7 +1166,10 @@ class FlatParamHandle:
         try:
             yield
         finally:
-            self._check_unsharded(self.flat_param)
+            p_assert(
+                self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+                f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
+            )
             padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
             # Copy from CPU to the compute device
             padded_unsharded_flat_param[: self.flat_param.numel()].copy_(
@@ -1277,74 +1248,29 @@ class FlatParamHandle:
     ) -> Iterator[Tensor]:
         """
         Returns unflattened ``Tensor`` views into ``tensor`` if it is not
-        ``None`` or into ``flat_param`` otherwise, where the unflattening is
-        based on ``flat_param`` 's metadata.
+        ``None`` or ``flat_param`` otherwise, where the unflattening is based
+        on ``flat_param`` 's metadata.
 
-        For example, to get views into the unsharded flattened parameter, pass
-        ``tensor`` as ``None``, but to get views into tensor optimizer state,
-        pass ``tensor`` as the optimizer state tensor.
-
-        If ``tensor`` is not ``None``, then this method expects ``tensor`` to
-        have the *unpadded* unsharded size. This supports non-computation use
-        cases like optimizer state checkpointing and ``summon_full_params()``.
-        If ``tensor`` is ``None``, then this method expects ``tensor`` to have
-        the *padded* unsharded size. This supports computing the gradient
-        directly with the padded size.
+        In other words, to get views into the unsharded flattened parameter,
+        pass ``tensor`` as ``None``, but to get views into tensor optimizer
+        state, pass ``tensor`` as the optimizer state tensor.
         """
-        use_padded_tensor = tensor is None  # iff in FSDP computation
-        if use_padded_tensor:
+        if tensor is None:
             tensor = flat_param
-            expected_numel = flat_param._unsharded_size_for_comp.numel()
-        else:
-            expected_numel = flat_param._unpadded_unsharded_size.numel()
-        assert tensor is not None  # mypy
         p_assert(
-            tensor.numel() == expected_numel,
-            f"Expects {expected_numel} but got {tensor.numel()} numel",
+            tensor.numel() == flat_param._unpadded_unsharded_size.numel(),
+            f"Expects {flat_param._unpadded_unsharded_size.numel()} numel but got "
+            f"{tensor.numel()} numel",
         )
-        numel_to_pad = flat_param._numel_to_pad
-        append_pad_entry = use_padded_tensor and numel_to_pad > 0
-        if append_pad_entry:
-            # Append a dummy entry to the metadata representing the padding so
-            # that the `FlatParameter` gradient has the padded size
-            # TODO (awgu): We can consider caching these lists.
-            numels: Union[List[int], Tuple[int, ...]] = list(flat_param._numels) + [
-                numel_to_pad
-            ]
-            shapes: Union[List[torch.Size], Tuple[torch.Size, ...]] = list(
-                flat_param._shapes
-            ) + [torch.Size([numel_to_pad])]
-            param_extensions: Union[List[Any], Tuple[Any, ...]] = list(
-                flat_param._param_extensions
-            ) + [None]
-            total_numel = sum(numels)
-            padded_unsharded_numel = flat_param._padded_unsharded_size.numel()  # type: ignore[attr-defined]
-            p_assert(
-                total_numel == padded_unsharded_numel,
-                f"Expects `numels` to sum to the padded unsharded numel "
-                f"{padded_unsharded_numel} but got {total_numel}",
+        views = (
+            _ext_post_unflatten_transform(subtensor.view(shape), param_extension)
+            for (subtensor, shape, param_extension) in zip(
+                torch.split(tensor, flat_param._numels, dim=0),  # type: ignore[arg-type]
+                flat_param._shapes,
+                flat_param._param_extensions,
             )
-        else:
-            numels = flat_param._numels
-            shapes = flat_param._shapes
-            param_extensions = flat_param._param_extensions
-        # NOTE: The `split()` and `view()` ops must be tracked by autograd for
-        # the original parameters' gradients to propagate to the
-        # `FlatParameter`'s gradient.
-        context = contextlib.suppress() if use_padded_tensor else torch.no_grad()
-        with context:  # type: ignore[attr-defined]
-            views = list(
-                _ext_post_unflatten_transform(subtensor.view(shape), param_extension)
-                for (subtensor, shape, param_extension) in zip(
-                    torch.split(tensor, numels, dim=0),  # type: ignore[arg-type]
-                    shapes,
-                    param_extensions,
-                )
-            )
-        if append_pad_entry:
-            # Exclude the dummy entry since it has served its purpose
-            return iter(views[:-1])
-        return iter(views)
+        )
+        return views
 
     def _use_unsharded_views(self, as_params: bool) -> None:
         """
@@ -1359,13 +1285,7 @@ class FlatParamHandle:
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
         self._check_unsharded(self.flat_param)
-        # Only expose the unsharded padding in FSDP-managed computation
-        source_tensor_for_views = (
-            self.flat_param
-            if self._training_state not in _computation_handle_training_states
-            else None
-        )
-        views = self._get_unflat_views(self.flat_param, source_tensor_for_views)
+        views = self._get_unflat_views(self.flat_param)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
@@ -1964,17 +1884,9 @@ class FlatParamHandle:
         )
 
     def _check_unsharded(self, tensor: Tensor):
-        """
-        See :meth:`_use_unsharded_flat_param` for the rules for using the
-        unsharded ``FlatParameter`` that define the expected unsharded size.
-        """
         msg_prefix = "Expects tensor to be unsharded "
         p_assert(tensor is not None, msg_prefix + "but got `None`")
-        unsharded_size = (
-            self.flat_param._unsharded_size_for_comp
-            if self._training_state in _computation_handle_training_states
-            else self.flat_param._unpadded_unsharded_size
-        )
+        unsharded_size = self.flat_param._unpadded_unsharded_size
         p_assert(
             tensor.size() == unsharded_size,
             msg_prefix + f"with size {unsharded_size} but got {tensor.size()}",
