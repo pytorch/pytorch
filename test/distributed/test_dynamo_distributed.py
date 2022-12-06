@@ -359,7 +359,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     def test_allreduce_meta(self):
         # Just make sure it runs w/o crash
-        x = torch.empty((4,2,3), device="meta")
+        x = torch.empty((4, 2, 3), device="meta")
         with _per_rank_init(self.rank, self.world_size, backend="gloo"):
             dist.all_reduce(x, group=dist.group.WORLD)
 
