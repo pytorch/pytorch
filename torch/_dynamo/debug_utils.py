@@ -502,7 +502,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from functorch._src.aot_autograd import make_boxed_func
+    from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
@@ -529,7 +529,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
@@ -762,6 +762,9 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
+# Please see NOTE: [Real Tensors in Accuracy Evaluation]
+MINIFIER_SPAWNED = False
+
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
@@ -832,6 +835,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
+torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = BACKENDS["{minifier_backend}"]
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
