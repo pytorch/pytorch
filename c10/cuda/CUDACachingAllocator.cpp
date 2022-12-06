@@ -1488,7 +1488,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if !defined(TORCH_ROCM_VERSION)
+#if !defined(TORCH_HIP_VERSION)
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only > 0 if some thread has begun and not yet ended a
     // capture, so it's usually 0, and we can short-circuit
