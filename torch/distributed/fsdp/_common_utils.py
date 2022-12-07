@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, List, no_type_check, Set, Optional
+from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -14,14 +14,20 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
+from .api import StateDictType
+
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
 class _FSDPState(_State):
-    # Move all the attributes to this class to enable typing for FSDP/fully_shard.
-    pass
+    def __init__(self) -> None:
+        # Move all the attributes to this class to enable typing for FSDP/fully_shard.
+        self._use_orig_params: bool = False
+        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
+        self.rank: int = 0
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
