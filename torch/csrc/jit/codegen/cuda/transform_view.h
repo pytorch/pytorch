@@ -39,7 +39,8 @@ struct AnalyzeViewResult {
   std::vector<std::shared_ptr<ViewTransform>> transforms;
 };
 
-struct TORCH_CUDA_CU_API AnalyzeViewConstraint {
+// This is wrong! we need to move this to torch_cpu instead. i.e. interface.h
+struct TORCH_API AnalyzeViewConstraint {
   // 1 if size 1 dimension, otherwise 0;
   std::vector<int64_t> original_constraint;
   std::vector<int64_t> new_constraint;
