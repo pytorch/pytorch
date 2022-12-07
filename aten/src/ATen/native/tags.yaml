@@ -40,3 +40,8 @@
           type promotion and boardcasting ops.
           Canonical aten ops is also effectively the opset produced by torchdynamo.export(aten_graph=True),
           and thus can be used as an opset for export purpose.
+- tag: pointwise
+  desc: |
+          Pointwise operators are operators where each element of the output is computed only by accessing
+          the corresponding element of all the broadcasted inputs. The output shape will be the broadcasted
+          shape of the inputs.
