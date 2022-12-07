@@ -463,15 +463,20 @@ void beepidiboop(const at::Tensor& input, const at::Tensor& output) {
   auto num_pixels_output = xout * yout;
 
   UINT32* unpacked_input_p = (UINT32*)malloc(sizeof(UINT32) * num_pixels_input);
-  const uint8_t* packed_input_p = (const uint8_t*)input.data_ptr<uint8_t>();
-  unpack_rgb((uint8_t*)unpacked_input_p, packed_input_p, num_pixels_input);
 
-  UINT32* unpacked_output_p =
-      ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout);
+  for (const auto i : c10::irange(input.size(0))) {
+    const uint8_t* packed_input_p = (const uint8_t*)input[i].data_ptr<uint8_t>();
+    unpack_rgb((uint8_t*)unpacked_input_p, packed_input_p, num_pixels_input);
 
-  uint8_t* packed_output_p = (uint8_t*)output.data_ptr<uint8_t>();
-  pack_rgb(
-      packed_output_p, (const uint8_t*)unpacked_output_p, num_pixels_output);
+    UINT32* unpacked_output_p =
+        ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout);
+
+    uint8_t* packed_output_p = (uint8_t*)output[i].data_ptr<uint8_t>();
+    pack_rgb(
+        packed_output_p, (const uint8_t*)unpacked_output_p, num_pixels_output);
+  }
+
+free(unpacked_input_p);
 }
 
 void ImagingResampleHorizontalConvolution8u4x(

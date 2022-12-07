@@ -1807,8 +1807,9 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
+  // Don't worry about the weird "== 1" check, it's just a hack to check the AVX implem against the fallback. It will be removed
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte)) { // TODO: add more assumptions as needed
-    input[0][0][0][0] = 0; // TODO: remove!!!
+    input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
     beepidiboop(input, output);
     // std::cout << "fast path" << std::endl;
   } else {
