@@ -215,10 +215,11 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
         frame_messages = [frame.location.message for frame in stack.frames]
+        # node missing onnx shape inference warning only comes from ToONNX (_jit_pass_onnx)
+        # after node-level shape type inference and processed symbolic_fn output type
         self.assertTrue(
             any(
-                isinstance(message, str)
-                and "torch::jit::ONNXShapeTypeInference" in message
+                isinstance(message, str) and "torch::jit::NodeToONNX" in message
                 for message in frame_messages
             )
         )
