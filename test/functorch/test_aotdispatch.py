@@ -354,6 +354,7 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
         def f(a):
             a.mul_(2)
@@ -373,6 +374,7 @@ def forward(self, primals_1):
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_is_output(self):
         def f(a):
             a.mul_(2)
@@ -386,6 +388,7 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     return [mul, mul]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_multiple(self):
         def f(a, b, c):
             a.mul_(2)
@@ -409,6 +412,7 @@ def forward(self, primals_1, primals_2, primals_3):
     add_1 = torch.ops.aten.add.Tensor(add, mul_1);  add = None
     return [mul, mul_1, add_1]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_metadata(self):
         def f(a, b):
             a.transpose_(1, 0)
@@ -420,6 +424,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_metadata2(self):
         def f(a):
             a.transpose_(1, 0)
@@ -429,6 +434,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_resize_smaller(self):
         def f(a, b):
             a.resize_(2, 2)
@@ -441,6 +447,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_batchnorm(self):
         def f(inpt, weight, bias, running_mean, running_var):
             # This is additionally a good test, because the input tensors that we mutate
@@ -464,6 +471,7 @@ def forward(self, primals_1, primals_2, primals_3):
         ])
         self.verify_aot_autograd(f, inp, test_mutation=True, decompositions=decompositions)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_output_view_simple(self):
         def f(a):
             return a.view(-1)
@@ -478,6 +486,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(primals_1, [-1]);  primals_1 = None
     return [view]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_output_view_mutate_multiple(self):
         def f(a, b, c):
             a.mul_(2)
@@ -504,6 +513,7 @@ def forward(self, primals_1, primals_2, primals_3):
     view_2 = torch.ops.aten.view.default(mul_1, [2, 2])
     return [mul, mul_1, view, view_2]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_output_view_metadata_mutate_multiple(self):
         def f(a, b, c):
             b.mul_(3)
@@ -532,6 +542,7 @@ def forward(self, primals_1, primals_2, primals_3):
     view_4 = torch.ops.aten.view.default(mul, [2, 2])
     return [mul, t, view_1, view_4, view_3]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_and_output_view(self):
         def f(a):
             a.add_(1)
@@ -552,6 +563,7 @@ def forward(self, primals_1):
     return [add, view_1]""")
 
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_output_view_multiple(self):
         def f(a, b, c, d):
             b.transpose_(1, 0)
@@ -576,6 +588,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
     return [transpose, add, add_1, diagonal, add_2]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_single(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -592,6 +605,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     return [view, mul]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_no_grad(self):
         def f(a, b):
             out = torch.mul(a, 3)
@@ -610,6 +624,7 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return [view, add]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_multiple(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -626,6 +641,7 @@ def forward(self, primals_1):
     view_1 = torch.ops.aten.view.default(mul, [-1])
     return [view, view_1, mul]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_and_returned(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -642,6 +658,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     return [view, mul]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_and_returned_flipped(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -658,6 +675,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     return [mul, view]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_and_returned_different_grad(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -675,6 +693,7 @@ def forward(self, primals_1):
     detach = torch.ops.aten.detach.default(select);  select = None
     return [view, mul, detach]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_inplace_view(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -686,6 +705,7 @@ def forward(self, primals_1):
         # See <github issue link>
         # self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_inplace_view_with_detach(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -705,6 +725,7 @@ def forward(self, primals_1):
     return [t]""")
 
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_inplace_view_and_view(self):
         def f(a):
             out = torch.mul(a, 3)
@@ -718,6 +739,7 @@ def forward(self, primals_1):
         # See <github issue link>
         # self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_multiple_mixed(self):
         def f(a):
             out1 = torch.mul(a, 3)
@@ -737,6 +759,7 @@ def forward(self, primals_1):
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
     return [view, transpose, transpose_1, mul, mul_1]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
         # (1) outputs that are views of inputs
@@ -762,6 +785,7 @@ def forward(self, primals_1):
     unsqueeze = torch.ops.aten.unsqueeze.default(transpose, 0)
     return [transpose, squeeze, transpose_1, unsqueeze, mul]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_data_and_metadata_mutation(self):
         def f(a):
             a.t_()
@@ -784,6 +808,7 @@ def forward(self, primals_1):
     view_1 = torch.ops.aten.view.default(t_5, [3, 3]);  t_5 = None
     return [t_3, view_1]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_view_and_inplace_view(self):
         def f(a, b):
             a.t_()
@@ -802,6 +827,7 @@ def forward(self, primals_1, primals_2):
     view_2 = torch.ops.aten.view.default(t, [3, 3])
     return [t, view_1, view_2]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -813,6 +839,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_inplace_requires_grad_true(self):
         def f(a, b):
             a.requires_grad_(True)
@@ -835,6 +862,7 @@ def forward(self, primals_1, primals_2):
     # One gets a data mutation, the other gets a metadata mutation.
     # We need to make sure that the metadata mutation gets propagated
     # back to the original input.
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_data_and_metadata_mutation_aliases_other_input(self):
         # a and b are aliased
         def f(a, b):
@@ -852,6 +880,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
         # The first output should view off the the first input, the 2nd output should view off the 2nd input
@@ -868,6 +897,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
             a.add_(1)
@@ -900,6 +930,7 @@ def forward(self, primals_1):
     add_1 = torch.ops.aten.add.Tensor(add, as_strided_10);  as_strided_10 = None
     return [add, add_1]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
             a.add_(1)
@@ -927,6 +958,7 @@ def forward(self, primals_1):
     add_1 = torch.ops.aten.add.Tensor(add, as_strided_7);  as_strided_7 = None
     return [add, add_1]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
             # Here, we need to take care:that because and b are aliased
@@ -954,6 +986,7 @@ def forward(self, primals_1):
     view_1 = torch.ops.aten.view.default(as_strided_22, [4]);  as_strided_22 = None
     return [add, view_1]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
             # a and c alias
@@ -987,6 +1020,7 @@ def forward(self, primals_1, primals_2):
     view_1 = torch.ops.aten.view.default(as_strided_20, [-1]);  as_strided_20 = None
     return [mul, add, view_1]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
             # a and b alias, and we do a metadata mutation on a
@@ -1009,6 +1043,7 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(t, primals_2);  primals_2 = None
     return [t, add]""")
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_and_none_require_gradients(self):
         def f(a, b, c):
             # a and b alias, but neither require gradients (so they don't have a _base)
@@ -1038,6 +1073,7 @@ def forward(self, primals_1, primals_2):
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return [mul, add, add_1]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
         # that we send to the compiled forward becomes:
@@ -1085,6 +1121,7 @@ def forward(self, primals_1, primals_2, primals_3):
     # input is mutated, that aliases another input (so we make a synthetic base)
     # an output is an alias of another output
     # an output is an alias of an intermediate
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_alias_everything(self):
         # a and c are aliased
         def f(a, b, c):
@@ -1134,6 +1171,7 @@ def forward(self, primals_1, primals_2):
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
     return [t, mul, view_1, t_1, unsqueeze, add]""")  # noqa: B950
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
         def f(a, b):
             return a.cos(), b.cos(), a * b
@@ -1143,6 +1181,7 @@ def forward(self, primals_1, primals_2):
             inps = [i() for i in inps]
             self.verify_aot_autograd(f, inps)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_some_output_requires_grad_input_doesnt(self):
         def f(a, b):
             a_view = a.view(-1)
@@ -1151,12 +1190,14 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)]
         self.verify_aot_autograd(f, inp)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_some_outputs_dont_require_grad_view(self):
         def f(a, b):
             return a.detach(), b
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3, requires_grad=True)]
         self.verify_aot_autograd(f, inp)
 
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_some_outputs_dont_require_grad_non_view(self):
         def f(a, b):
             return a.add(1).detach(), b
