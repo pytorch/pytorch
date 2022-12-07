@@ -169,6 +169,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-nofollow.ini',
+    '--code=MYPYNOFOLLOW',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -198,6 +199,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-strict.ini',
+    '--code=MYPYSTRICT',
     '--',
     '@{{PATHSFILE}}'
 ]
