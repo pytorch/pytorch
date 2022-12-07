@@ -16,7 +16,7 @@ import numpy as np
 import sympy
 
 import torch
-from torch.fx.experimental.guard_env import DuplicateInputs, GUARD_ENV, GuardEnvExpr
+from torch.fx.experimental.guard_env import DuplicateInputs, GuardEnvExpr
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -800,11 +800,8 @@ class CheckFunctionManager:
             )
 
             aot_autograd_expression = self._parse_guard_env_guards(
-                GUARD_ENV.get_guards()
+                torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.get_guards()
             )
-
-            # We are done with the guards made for this frame.
-            GUARD_ENV.clear()
 
             tensor_check_examples = (
                 local_builder.tensor_check_examples

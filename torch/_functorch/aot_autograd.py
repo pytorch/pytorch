@@ -28,7 +28,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-from torch.fx.experimental.guard_env import GUARD_ENV
 
 MutationType = Enum("MutationType", ("none", "metadata_only", "data"))
 OutputType = Enum("OutputType", ("non_alias", "alias_of_input", "alias_of_intermediate"))
@@ -1268,7 +1267,7 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
     for dupe_arg_pos, kept_pos in add_dupe_map.items():
         # Edge case, only happens for identity
         if dupe_arg_pos != kept_pos:
-            GUARD_ENV.register_duplicates(flat_args[dupe_arg_pos], flat_args[kept_pos])
+            torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.register_duplicates(flat_args[dupe_arg_pos], flat_args[kept_pos])
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):

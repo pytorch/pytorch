@@ -1,6 +1,7 @@
 from typing import List, Dict, Set
 import torch
 import dataclasses
+from contextlib import contextmanager
 
 """
 Parent structure for guard env expressions.
@@ -74,12 +75,15 @@ class GuardEnv:
     def get_guards(self) -> List[GuardEnvExpr]:
         return self._guards
 
-    def clear(self):
-        self._guards = []
-        self._tensor_to_names = {}
 
-# TODO(voz): This is not hacky, but it is kinda lame, but we do not have a great piping or kwargs
-# story, and this is a nice way to get access to it everywhere.
-# The only icurred mental overhead is rememebring to clear it, and that should happen right after we
-# extract guards out.
-GUARD_ENV = GuardEnv()
+CURRENT_GUARD_ENV = None
+
+@contextmanager
+def guarding(guard_env):
+    global CURRENT_GUARD_ENV
+    old_guard_env = CURRENT_GUARD_ENV
+    CURRENT_GUARD_ENV = guard_env
+    try:
+        yield CURRENT_GUARD_ENV
+    finally:
+        CURRENT_GUARD_ENV = old_guard_env

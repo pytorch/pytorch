@@ -369,7 +369,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxx(x, x)
         fxx(x, y)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, '___tensor_identity_match(x, y)')
+        self.assertEqual(failure_reason, "___tensor_identity_match(x, y)")
 
 
 if __name__ == "__main__":

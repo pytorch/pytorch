@@ -32,7 +32,6 @@ import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 
-from torch.fx.experimental.guard_env import GUARD_ENV
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -773,7 +772,7 @@ def wrap_to_fake_tensor_and_record(e, tx, name=None):
         fake_tensor = wrap_fake_exception(
             lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
         )
-        GUARD_ENV.associate(fake_tensor, name)
+        torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.associate(fake_tensor, name)
         return fake_tensor
     else:
         return e
