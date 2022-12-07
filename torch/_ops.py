@@ -8,7 +8,6 @@ from typing import Any, Dict
 
 import torch._C
 
-import torch.jit
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 
