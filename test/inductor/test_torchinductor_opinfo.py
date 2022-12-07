@@ -127,35 +127,15 @@ inductor_skips["cpu"] = {
 }
 
 inductor_skips["cuda"] = {
-    # flaky
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "masked.prod": {f16, f32, f64},
-    "linalg.vander": {f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
-    "broadcast_tensors": {f16, f32, f64},
-    "dsplit": {f16, f32, f64},
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # Disabled on migration to core
-    "linalg.pinv.singular": {f32, f64},
-    "linalg.householder_product": {f32},
-    # These might be passing now?
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.conv_transpose3d": {f16},
-    "max.reduction_with_dim": {i32, i64},
-    "min.reduction_with_dim": {i32, i64},
-    "linalg.lu": {f32, f64},
-    "lu_unpack": {f32, f64},
+    # flaky
     "native_batch_norm": {f16, f32, f64},
-    "native_layer_norm": {f16, f32, f64},
-    # Issues on sm86 periodic job (complex numbers)
-    "cdouble": {b8, f16, f32, f64, i32, i64},
-    "cfloat": {b8, f16, f32, f64, i32, i64},
-    "randint": {b8, f16, f32, f64, i32, i64},
+    "_native_batch_norm_legit": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -186,7 +166,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "erf": {b8, f64},
     "fft.fft": {f32, f64},
     "fft.fft2": {b8, f32, f64, i32, i64},
     "fft.fftn": {b8, f32, f64, i32, i64},
@@ -217,7 +196,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.singular": {f32, f64},
-    "logdet": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
     "masked_fill": {f16},
@@ -235,7 +213,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.adaptive_avg_pool2d": {f16, f64},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
-    "nn.functional.gelu": {f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pairwise_distance": {f16},
@@ -256,7 +233,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -270,7 +246,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
-    "view_as_complex": {f16, f32, f64},
+    "view_as_complex": {f16},
 }
 
 
@@ -280,6 +256,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
@@ -287,6 +264,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
+    "cdouble": {b8, f16, f32, f64, i32, i64},
+    "cfloat": {b8, f16, f32, f64, i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
@@ -322,17 +301,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "lu_unpack": {f32, f64},
+    "linalg.pinv.singular": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_with_dim": {b8, i32, i64},
-    "min.reduction_with_dim": {b8, i32, i64},
+    "max.reduction_with_dim": {b8},
+    "min.reduction_with_dim": {b8},
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
+    "grid_sampler_2d": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
@@ -345,12 +325,13 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
+    "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "sgn": {f16, f32, f64},
+    "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
@@ -359,10 +340,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
-    "view_as_complex": {f16, f32, f64},
     # AssertionError: Tensor-likes are not close!
-    "erf": {b8, f64},
-    "nn.functional.gelu": {f64},
     "nn.functional.triplet_margin_loss": {f16},
 }
 
@@ -374,8 +352,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
-    "native_batch_norm": {f16, f32, f64},
-    "native_layer_norm": {f16, f32, f64},
     "nn.functional._scaled_dot_product_attention": {f16},
     "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16},
