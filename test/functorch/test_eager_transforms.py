@@ -2624,6 +2624,7 @@ class TestComposability(TestCase):
             self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
             self.assertEqual(y, x.cos())
 
+    @_set_autograd_function_extension_enabled()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
