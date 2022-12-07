@@ -2,6 +2,7 @@ import gzip
 import io
 import json
 import os
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -12,6 +13,7 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
+TARGET_WORKFLOW = "--rerun-disabled-tests"
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -165,3 +167,16 @@ def unzip(p: Path) -> None:
 
     with zipfile.ZipFile(p, "r") as zip:
         zip.extractall(unzipped_dir)
+
+
+def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
+    """
+    Check if the test report is coming from rerun_disabled_tests workflow
+    """
+    skipped = root.find(".//*skipped")
+    # Need to check against None here, if not skipped doesn't work as expected
+    if skipped is None:
+        return False
+
+    message = skipped.attrib.get("message", "")
+    return TARGET_WORKFLOW in message or "num_red" in message

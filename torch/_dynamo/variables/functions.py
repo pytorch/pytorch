@@ -24,6 +24,8 @@ def wrap_bound_arg(val, options):
         return cls([wrap_bound_arg(x, options) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
+    elif isinstance(val, types.FunctionType):
+        return variables.UserFunctionVariable(val, **options)
     elif isinstance(val, enum.Enum):
         return variables.EnumVariable(val, **options)
     elif isinstance(val, (type, abc.ABCMeta)):
