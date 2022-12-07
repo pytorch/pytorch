@@ -1087,9 +1087,7 @@ def _map_param_id_to_optim_keys(
     """
     rank = dist.get_rank(group)
     optim_state_key_to_param_id: Dict[_OptimStateKey, int] = {}  # local
-    r0_param_id_to_optim_state_key: Dict[
-        int, _OptimStateKey
-    ] = {}  # rank 0
+    r0_param_id_to_optim_state_key: Dict[int, _OptimStateKey] = {}  # rank 0
 
     for param_id, param in enumerate(param_id_to_param):
         # Do not include parameters without state to avoid empty mappings
