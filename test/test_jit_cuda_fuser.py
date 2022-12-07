@@ -5252,16 +5252,27 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             # enables guard mode since tracing could change graph to violate guard.
             torch._C._jit_set_nvfuser_guard_mode(True)
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
-        self.nvfuser_enable_options = os.environ['PYTORCH_NVFUSER_ENABLE']
-        # TODO: remove this when index_select is fixed on opinfo tests
-        os.environ['PYTORCH_NVFUSER_ENABLE'] = ""
+
+        self.skip_node_list = []
+        # TODO: remove aten::index_select when it is fixed on opinfo tests
+        # link issue: https://github.com/csarofeen/pytorch/issues/2246
+        disabled_ops = ("aten::index_select",)
+        for op in disabled_ops:
+            disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
+            if not disabled_flag:
+                torch._C._jit_set_nvfuser_skip_node_kind(op, True)
+                self.skip_node_list.append(op)
 
     def tearDown(self):
         if RUN_NVFUSER:
             self.cuda_fuser_options.restore()
 
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
-        os.environ['PYTORCH_NVFUSER_ENABLE'] = self.nvfuser_enable_options
+        # restoring skip node to the configuration before tests
+        for op in self.skip_node_list:
+            disabled_flag = torch._C._jit_set_nvfuser_skip_node_kind(op, False)
+            if disabled_flag:
+                torch._C._jit_set_nvfuser_skip_node_kind(op, True)
 
         super(TestCudaFuserOpInfoParent, self).tearDown()
 
