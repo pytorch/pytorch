@@ -81,8 +81,8 @@ try:
     subprocess.run(['conda', 'env', 'list'])
     subprocess.run(['echo', 'running conda succeded'])
 except Exception as e:
-        subprocess.run(['echo', 'running conda failed'])
-        subprocess.run(['echo', e])
+    subprocess.run(['echo', 'running conda failed'])
+    subprocess.run(['echo', e])
 
     try:
         os.environ['PATH'] = conda_parent_dir + '\\Miniconda3\\Library\\bin;' + conda_parent_dir +\
