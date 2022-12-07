@@ -642,6 +642,12 @@ def tvm_compile_inner(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
+                if not cuda:
+                    # meta_schedule needs num-cores to be specified
+                    # here we use the maximum core count
+                    target = tvm.target.Target(
+                        f"{llvm_target()} --num-cores {ms.utils.cpu_count(logical=False)}"
+                    )
                 # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
                 # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
                 database = ms.relay_integration.tune_relay(
@@ -680,6 +686,14 @@ def tvm_compile_inner(
                 return torch.from_numpy(nd_tensor.numpy())
             return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
+        def to_tvm_tensor(torch_tensor):
+            """A helper function to transfer a torch.tensor to NDArray."""
+            if torch_tensor.dtype == torch.bool:
+                # same reason as above, fallback to numpy conversion which
+                # could introduce data copy overhead
+                return tvm.nd.array(torch_tensor.cpu().numpy())
+            return tvm.nd.from_dlpack(torch_tensor)
+
         def exec_tvm(*i_args):
             args = [a.contiguous() for a in i_args]
             for idx, arg in enumerate(args, 0):
@@ -688,7 +702,7 @@ def tvm_compile_inner(
                         arg = arg.detach()
                     m.set_input(
                         f"inp_{idx}",
-                        tvm.nd.array(arg.numpy(), dev),
+                        to_tvm_tensor(arg),
                     )
             m.run()
             return [
@@ -748,11 +762,11 @@ def torchxla_trace_once(subgraph):
     import torch._dynamo.optimizations.torchxla_integration as integration
 
     compiled_graph = None
+    model = subgraph.model
 
     def fwd(*args):
         nonlocal subgraph
         nonlocal compiled_graph
-        model = subgraph.model
         if compiled_graph is None:
             compiled_graph = integration.extract_compiled_graph(model, args)
             del subgraph
