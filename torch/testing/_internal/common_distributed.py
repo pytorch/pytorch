@@ -333,7 +333,7 @@ def skip_if_rocm(func):
 def skip_if_win32():
     return sandcastle_skip_if(
         sys.platform == "win32",
-        "This unit test case is not supportted on Windows platform",
+        "This unit test case is not supported on Windows platform",
     )
 
 
@@ -365,8 +365,9 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
 
 # https://github.com/pytorch/pytorch/issues/75665
 if TEST_WITH_ROCM:
