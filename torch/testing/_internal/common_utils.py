@@ -1893,8 +1893,14 @@ class TypedStoragePair(TensorLikePair):
 
     def _to_tensor(self, typed_storage):
         return torch.tensor(
-            [typed_storage._getitem(idx) for idx in range(typed_storage._size())],
-            dtype=typed_storage.dtype,
+            typed_storage,
+            dtype={
+                torch.quint8: torch.uint8,
+                torch.quint4x2: torch.uint8,
+                torch.quint2x4: torch.uint8,
+                torch.qint32: torch.int32,
+                torch.qint8: torch.int8
+             }.get(typed_storage.dtype, typed_storage.dtype),
             device=typed_storage.device,
         )
 
