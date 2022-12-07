@@ -98,14 +98,8 @@ class TestFSDPCheckpoint(FSDPTest):
         base_model = copy.deepcopy(model)
 
         test_model = copy.deepcopy(model)
-        test_model.u1 = fully_shard(
-            test_model.u1,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
-        test_model.u2 = fully_shard(
-            test_model.u2,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
+        test_model.u1 = fully_shard(test_model.u1, policy=None)
+        test_model.u2 = fully_shard(test_model.u2, policy=None)
 
         test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=use_reentrant)
         test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=use_reentrant)
