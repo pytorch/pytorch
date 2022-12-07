@@ -147,25 +147,45 @@ def generate_libtorch_matrix(os: str, abi_version: str,
             # ROCm builds without-deps failed even in ROCm runners; skip for now
             if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
                 continue
-            ret.append(
-                {
-                    "gpu_arch_type": gpu_arch_type,
-                    "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
-                    "libtorch_variant": libtorch_variant,
-                    "libtorch_config": abi_version if os == "windows" else "",
-                    "devtoolset": abi_version if os != "windows" else "",
-                    "container_image": LIBTORCH_CONTAINER_IMAGES[
-                        (arch_version, abi_version)
-                    ] if os != "windows" else "",
-                    "package_type": "libtorch",
-                    "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
-                        ".", "_"
-                    ),
-                }
-            )
+            desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
+
+            if desired_cuda == "rocm5.1.1" and abi_version == PRE_CXX11_ABI:
+                ret.append(
+                    {
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": desired_cuda,
+                        "libtorch_variant": libtorch_variant,
+                        "libtorch_config": abi_version if os == "windows" else "",
+                        "devtoolset": abi_version if os != "windows" else "",
+                        "container_image": (
+                            "pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5"
+                            if os != "windows" else ""
+                        ),
+                        "package_type": "libtorch",
+                        "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
+                            ".", "_"
+                        ),
+                    }
+                )
+            else:
+                ret.append(
+                    {
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": desired_cuda,
+                        "libtorch_variant": libtorch_variant,
+                        "libtorch_config": abi_version if os == "windows" else "",
+                        "devtoolset": abi_version if os != "windows" else "",
+                        "container_image": LIBTORCH_CONTAINER_IMAGES[
+                            (arch_version, abi_version)
+                        ] if os != "windows" else "",
+                        "package_type": "libtorch",
+                        "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
+                            ".", "_"
+                        ),
+                    }
+                )
     return ret
 
 
@@ -205,6 +225,7 @@ def generate_wheels_matrix(os: str,
             if python_version == "3.11" and gpu_arch_type == "rocm":
                 continue
 
+            desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install
             if arch_version == "11.7" and os == "linux":
@@ -213,9 +234,7 @@ def generate_wheels_matrix(os: str,
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
+                        "desired_cuda": desired_cuda,
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements":
@@ -229,20 +248,32 @@ def generate_wheels_matrix(os: str,
                         ),
                     }
                 )
-
-            ret.append(
-                {
-                    "python_version": python_version,
-                    "gpu_arch_type": gpu_arch_type,
-                    "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
-                    "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                    "package_type": package_type,
-                    "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
-                        ".", "_"
-                    ),
-                }
-            )
+            if desired_cuda == "rocm5.1.1":
+                ret.append(
+                    {
+                        "python_version": python_version,
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": desired_cuda,
+                        "container_image": "pytorch/manylinux-builder:rocm5.1.1-cd2573d54f9bd9b8f32b4dd7f182923a846597d5",
+                        "package_type": package_type,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                            ".", "_"
+                        ),
+                    }
+                )
+            else:
+                ret.append(
+                    {
+                        "python_version": python_version,
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": desired_cuda,
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "package_type": package_type,
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                            ".", "_"
+                        ),
+                    }
+                )
     return ret
