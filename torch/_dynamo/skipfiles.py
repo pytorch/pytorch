@@ -146,7 +146,10 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    try:
+        module_spec = importlib.util.find_spec(import_name)
+    except ModuleNotFoundError:
+        return
     if not module_spec:
         return
     origin = module_spec.origin
@@ -189,6 +192,7 @@ for _name in (
     "tvm",
     "fx2trt_oss",
     "xarray",
+    "torchrec.distributed",
 ):
     add(_name)
 
