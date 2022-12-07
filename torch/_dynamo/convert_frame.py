@@ -464,7 +464,7 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks=None):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 

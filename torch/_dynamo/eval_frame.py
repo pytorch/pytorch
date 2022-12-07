@@ -326,7 +326,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size)
+                    return hijacked_callback(frame, cache_size, hooks)
 
         with compile_lock:
             return callback(frame, cache_size, hooks)
