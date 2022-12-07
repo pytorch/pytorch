@@ -603,8 +603,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
+        self.assertEqual(weight, torch.tensor([2.0, 3.0, 4.0, 5.0, 6.0]))
 
     def test_constant_fold_sub(self):
         class Module(torch.nn.Module):
@@ -635,8 +634,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
+        self.assertEqual(weight, torch.tensor([0.0, -1.0, -2.0, -3.0, -4.0]))
 
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):

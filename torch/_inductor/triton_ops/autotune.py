@@ -184,7 +184,7 @@ class CachingAutotuner(KernelInterface):
                 raise RuntimeError(
                     """Consider updating Triton with
 `pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                )
+                ) from e
             else:
                 raise e
 
