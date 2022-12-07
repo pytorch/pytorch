@@ -13,6 +13,8 @@ from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
+from .._dynamo import config as dynamo_config
+
 from . import config, ir
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
@@ -491,7 +493,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(logging.CODE, "Output code: %s", mod.__file__)
+        if dynamo_config.output_code:
+            log.info("Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
