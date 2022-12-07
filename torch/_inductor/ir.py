@@ -13,6 +13,7 @@ from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
+import types
 import numpy
 import sympy
 from sympy import Expr, Integer
@@ -2931,6 +2932,8 @@ class DynamicScalar(IRNode):
     def get_reads(self):
         return ()
 
+def get_callable_name(callable):
+    return = f"{callable.__name__}_{callable.__hash__()}"
 
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
@@ -2950,10 +2953,13 @@ class FallbackKernel(ExternKernelAlloc):
         )
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
             self.kernel = f"aten.{kernel.__name__}"
-        else:
+        elif "._ops." in kernel.__module__:
             self.kernel = (
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
+        else:
+            self.kernel = get_callable_name(kernel)
+
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         if self.kernel not in ("aten.convolution_backward",):

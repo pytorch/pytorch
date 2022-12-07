@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from functorch.compile import aot_module
 
 try:
     import sympy
@@ -1422,6 +1423,53 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    def test_opaque_callable(self):
+        def fn(a):
+            a = torch.sin(a)
+            a = torch.mm(a, a)
+            return a
+
+        class OpaqueModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, *args):
+                x = args[0]
+                return torch.sin(x)
+
+        def opaque_func(*args):
+            x = args[0]
+            return torch.sin(x)
+
+        def insert_opaque_callable(gm, opaque_callable):
+            for n in gm.graph.nodes:
+                if n.target == aten.sin.default:
+                    n.target = opaque_callable
+            gm.print_readable()
+            return gm
+
+        for opaque_callable in [opaque_func, OpaqueModule().forward]:
+            def insert_opaque_compiler(gm, sample_inputs):
+                def inner_compiler(gm, sample_inputs):
+                    gm = insert_opaque_callable(gm, opaque_callable)
+                    gm = compile_fx_inner(gm, sample_inputs)
+                    return gm
+
+                return aot_module(
+                    gm,
+                    fw_compiler=inner_compiler,
+                    bw_compiler=inner_compiler,
+                )
+
+            torch._dynamo.reset()
+            opt_fn = torch._dynamo.optimize(insert_opaque_compiler, nopython=True)(fn)
+
+            x = torch.rand(3, 3)
+            opt_out = opt_fn(x)
+            eager_out = fn(x)
+
+            self.assertEqual(opt_out, eager_out)
 
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")

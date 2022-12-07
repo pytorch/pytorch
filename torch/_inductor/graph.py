@@ -20,7 +20,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox, get_callable_name
 from .lowering import (
     layout_constraints,
     lowerings,
@@ -95,6 +95,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
+        self.opaque_callable = {}
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
@@ -258,6 +259,11 @@ class GraphLowering(torch.fx.Interpreter):
                         error.operator_str(target, args, kwargs),
                     )
                     make_fallback(target)
+
+                    if not isinstance(target, torch._ops.OpOverload):
+                        name = get_callable_name(target)
+                        self.opaque_callable[name] = target
+
                 elif get_decompositions([target]):
                     # There isn't a good way to dynamically patch this in
                     # since AOT Autograd already ran.  The error message tells
@@ -489,6 +495,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         mod = PyCodeCache.load(code)
         for name, value in self.constants.items():
+            setattr(mod, name, value)
+
+        for name, value in self.opaque_callable.items():
             setattr(mod, name, value)
 
         log.log(logging.CODE, "Output code: %s", mod.__file__)
