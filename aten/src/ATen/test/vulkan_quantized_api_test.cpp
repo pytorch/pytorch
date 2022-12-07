@@ -223,10 +223,12 @@ class VulkanAPITest : public ::testing::Test {
 
 at::Tensor cpu_to_vulkan(at::Tensor in_cpu) {
   auto options = in_cpu.options();
-  if (options.dtype().toScalarType() == c10::ScalarType::QUInt8) {
+  if (options.dtype().toScalarType() == c10::ScalarType::QUInt8 ||
+      options.dtype().toScalarType() == c10::ScalarType::QInt8 ||
+      options.dtype().toScalarType() == c10::ScalarType::QInt32) {
     auto ret = at::native::vulkan::ops::_empty_affine_quantized(
         in_cpu.sizes(),
-        c10::ScalarType::QUInt8,
+        options.dtype().toScalarType(),
         options.layout(),
         options.device(),
         options.pinned_memory(),
@@ -244,7 +246,9 @@ at::Tensor cpu_to_vulkan(at::Tensor in_cpu) {
 
 at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
   auto q_options = in_cpu.options();
-  if (q_options.dtype().toScalarType() == c10::ScalarType::QUInt8) {
+  if (q_options.dtype().toScalarType() == c10::ScalarType::QUInt8 ||
+      q_options.dtype().toScalarType() == c10::ScalarType::QInt8 ||
+      q_options.dtype().toScalarType() == c10::ScalarType::QInt32) {
     auto output = at::native::empty_affine_quantized(
         in_cpu.sizes(),
         q_options.dtype().toScalarType(),
@@ -383,12 +387,13 @@ TEST_F(VulkanAPITest, DISABLED_support_vulkan) {
 void test_cpu_to_vulkan_and_vulkan_to_cpu(
     const at::IntArrayRef input_shape,
     const double scale,
-    const int zero_point) {
+    const int zero_point,
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8) {
 
   // produce random quantized cpu tensor
   auto in_cpu = produce_random_tensor(input_shape);
   auto in_q_cpu = at::quantize_per_tensor(
-      in_cpu, scale, zero_point, c10::ScalarType::QUInt8);
+      in_cpu, scale, zero_point, dtype);
 
   // copy quantized cpu tensor to vulkan
   auto in_q_cpu_vk = cpu_to_vulkan(in_q_cpu);
@@ -415,37 +420,215 @@ void test_cpu_to_vulkan_and_vulkan_to_cpu(
   ASSERT_TRUE(check);
 }
 
-void test_cpu_to_vulkan_and_vulkan_to_cpu_random() {
+void test_cpu_to_vulkan_and_vulkan_to_cpu_random(
+    const c10::ScalarType dtype) {
   const double scale = produce_random_scale();
-  const int64_t zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+  const int64_t zero_point = produce_random_zero_point(dtype);
   const at::IntArrayRef tensor_shape =
     {rand_pos_int(30), rand_pos_int(30), rand_pos_int(100), rand_pos_int(100)};
-  test_cpu_to_vulkan_and_vulkan_to_cpu(tensor_shape, scale, zero_point);
+  test_cpu_to_vulkan_and_vulkan_to_cpu(
+    tensor_shape, scale, zero_point, dtype);
 }
 
 // TODO: Fix vulkan to cpu on Android
-TEST_F(VulkanAPITest, DISABLED_cpu_to_vulkan_and_vulkan_to_cpu) {
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, 21);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, 120);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, 10);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, 15);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, 10);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, 10);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, 43);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, 19);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, 19);
-  test_cpu_to_vulkan_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89);
+TEST_F(VulkanAPITest, DISABLED_cpu_to_vulkan_and_vulkan_to_cpu_quint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QUInt8;
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, 21, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, 120, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, 15, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, 43, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
 
   for (int i = 0; i < 20; i += 1) {
-    test_cpu_to_vulkan_and_vulkan_to_cpu_random();
+    test_cpu_to_vulkan_and_vulkan_to_cpu_random(dtype);
+  }
+}
+
+// TODO: Fix vulkan to cpu on Android
+TEST_F(VulkanAPITest, DISABLED_cpu_to_vulkan_and_vulkan_to_cpu_qint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt8;
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, -21, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, -120, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, -15, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, -43, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, -19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, -19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_cpu_to_vulkan_and_vulkan_to_cpu_random(dtype);
+  }
+}
+
+// TODO: Fix vulkan to cpu on Android
+TEST_F(VulkanAPITest, DISABLED_cpu_to_vulkan_and_vulkan_to_cpu_qint32) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt32;
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, -21123, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 1, 4}, 0.339, 8734, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 4, 1}, 0.228, -12023, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 7, 7}, 0.338, 8723, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 8, 8}, 0.193, -1023, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 8, 8}, 0.0449, 972, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 11, 17}, 0.073, -15, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1572, 102, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 12, 17}, 0.147, -156, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 17, 12}, 0.129, 10448, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({2, 4, 17, 12}, 0.137, -10, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, -43267, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1243, 19, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1889, -19784, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1345, 196, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({4, 4, 25, 29}, 0.129, -19489, dtype);
+  test_cpu_to_vulkan_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_cpu_to_vulkan_and_vulkan_to_cpu_random(dtype);
+  }
+}
+
+void test_cpu_to_vulkan_and_dequantize(
+    const at::IntArrayRef input_shape,
+    const double scale,
+    const int zero_point,
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8) {
+
+  // produce random quantized cpu tensor
+  auto in_cpu = produce_random_tensor(input_shape);
+  auto in_q_cpu = at::quantize_per_tensor(
+      in_cpu, scale, zero_point, dtype);
+
+  // copy quantized cpu tensor to vulkan
+  auto in_q_cpu_vk = cpu_to_vulkan(in_q_cpu);
+
+  // dequantize tensors
+  const auto out_cpu_deq = at::dequantize(in_q_cpu);
+  const auto out_vk_deq = at::dequantize(in_q_cpu_vk);
+  const auto out_vk_deq_cpu = out_vk_deq.cpu();
+
+  // check dequantized tensors are equal
+  const auto check = almostEqual(out_cpu_deq, out_vk_deq_cpu);
+
+  if (!check) {
+    const auto error = at::abs(out_vk_deq_cpu - out_cpu_deq).max().item<float>();
+    std::cout
+      << "Copy cpu to vulkan and dequantize failed with input shape: "
+      << input_shape << " scale: " << scale << " and zero point: "
+      << zero_point << std::endl;
+    std::cout << "Error: " << error << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+void test_cpu_to_vulkan_and_dequantize_random(
+    const c10::ScalarType dtype) {
+  const double scale = produce_random_scale();
+  const int64_t zero_point = produce_random_zero_point(dtype);
+  const at::IntArrayRef tensor_shape =
+    {rand_pos_int(30), rand_pos_int(30), rand_pos_int(100), rand_pos_int(100)};
+  test_cpu_to_vulkan_and_dequantize(
+    tensor_shape, scale, zero_point, dtype);
+}
+
+TEST_F(VulkanAPITest, cpu_to_vulkan_and_dequantize_quint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QUInt8;
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 1}, 0.13, 21, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 4, 1}, 0.2, 120, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 8, 8}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 11, 17}, 0.07, 15, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({2, 4, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 14}, 0.009, 43, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 9, 17}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_cpu_to_vulkan_and_dequantize_random(dtype);
+  }
+}
+
+TEST_F(VulkanAPITest, cpu_to_vulkan_and_dequantize_qint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt8;
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 1}, 0.13, -21, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 4, 1}, 0.2, -120, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 8, 8}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 11, 17}, 0.07, -15, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 12, 17}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_cpu_to_vulkan_and_dequantize({2, 4, 17, 12}, 0.1, -10, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 14}, 0.009, -43, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 9, 17}, 0.1, -19, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 25, 29}, 0.1, -19, dtype);
+  test_cpu_to_vulkan_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_cpu_to_vulkan_and_dequantize_random(dtype);
+  }
+}
+
+TEST_F(VulkanAPITest, cpu_to_vulkan_and_dequantize_qint32) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt32;
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 1}, 0.13, -21123, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 1, 4}, 0.339, 8734, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 4, 1}, 0.228, -12023, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 7, 7}, 0.338, 8723, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 8, 8}, 0.193, -1023, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 8, 8}, 0.0449, 972, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 11, 17}, 0.073, -15, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 12, 17}, 0.1572, 102, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 12, 17}, 0.147, -156, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 17, 12}, 0.129, 10448, dtype);
+  test_cpu_to_vulkan_and_dequantize({2, 4, 17, 12}, 0.137, -10, dtype);
+  test_cpu_to_vulkan_and_dequantize({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 14}, 0.009, -43267, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 10, 15}, 0.1243, 19, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 9, 17}, 0.1889, -19784, dtype);
+  test_cpu_to_vulkan_and_dequantize({3, 5, 25, 29}, 0.1345, 196, dtype);
+  test_cpu_to_vulkan_and_dequantize({4, 4, 25, 29}, 0.129, -19489, dtype);
+  test_cpu_to_vulkan_and_dequantize({11, 17, 25, 29}, 0.027, 89, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_cpu_to_vulkan_and_dequantize_random(dtype);
   }
 }
 
@@ -482,6 +665,7 @@ void test_quantize_per_tensor_and_vulkan_to_cpu(
     const at::IntArrayRef input_shape,
     const double input_scale,
     const int input_zero_point,
+    const c10::ScalarType dtype = c10::ScalarType::QUInt8,
     const int tolerance = 1) {
   // tolerance = 1, to allow for precision differences after dividing by random
   // scale which could result on a difference of 1 unit in the quantized result
@@ -490,10 +674,10 @@ void test_quantize_per_tensor_and_vulkan_to_cpu(
 
   // quantize tensor
   at::Tensor out_q_cpu = at::quantize_per_tensor(
-    input, input_scale, input_zero_point, c10::ScalarType::QUInt8);
+    input, input_scale, input_zero_point, dtype);
 
   at::Tensor out_q_vk = at::quantize_per_tensor(
-    input.vulkan(), input_scale, input_zero_point, c10::ScalarType::QUInt8);
+    input.vulkan(), input_scale, input_zero_point, dtype);
 
   // copy vulkan tensor to cpu
   at::Tensor out_q_vk_cpu = vulkan_to_cpu(out_q_vk, out_q_cpu);
@@ -516,38 +700,97 @@ void test_quantize_per_tensor_and_vulkan_to_cpu(
   ASSERT_TRUE(check);
 }
 
-void test_quantize_per_tensor_and_vulkan_to_cpu_random() {
+void test_quantize_per_tensor_and_vulkan_to_cpu_random(
+    const c10::ScalarType dtype) {
   const double scale = produce_random_scale();
-  const int64_t zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+  const int64_t zero_point = produce_random_zero_point(dtype);
   const at::IntArrayRef tensor_shape =
     {rand_pos_int(30), rand_pos_int(30), rand_pos_int(100), rand_pos_int(100)};
-  test_quantize_per_tensor_and_vulkan_to_cpu(tensor_shape, scale, zero_point);
+  test_quantize_per_tensor_and_vulkan_to_cpu(
+    tensor_shape, scale, zero_point, dtype);
 }
 
 // TODO: Fix vulkan to cpu on Android
-TEST_F(VulkanAPITest, DISABLED_quantize_per_tensor_and_vulkan_to_cpu) {
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, 21);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, 120);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, 10);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, 15);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, 10);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10);
-  test_quantize_per_tensor_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, 10);
-  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, 43);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19);
-  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, 19);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19);
-  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, 19);
-  test_quantize_per_tensor_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89);
-  test_quantize_per_tensor_and_vulkan_to_cpu({3, 16, 77, 54}, 0.204173, 229);
+TEST_F(VulkanAPITest, DISABLED_quantize_per_tensor_and_vulkan_to_cpu_quint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QUInt8;
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, 21, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, 120, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, 15, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, 43, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 16, 77, 54}, 0.204173, 229, dtype);
 
   for (int i = 0; i < 20; i += 1) {
-    test_quantize_per_tensor_and_vulkan_to_cpu_random();
+    test_quantize_per_tensor_and_vulkan_to_cpu_random(dtype);
+  }
+}
+
+// TODO: Fix vulkan to cpu on Android
+TEST_F(VulkanAPITest, DISABLED_quantize_per_tensor_and_vulkan_to_cpu_qint8) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt8;
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, -21, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 4}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 4, 1}, 0.2, -120, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 7, 7}, 0.3, 87, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 8, 8}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 8, 8}, 0.04, 97, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 11, 17}, 0.07, -15, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 12, 17}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 17, 12}, 0.1, 10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({2, 4, 17, 12}, 0.1, -10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, -43, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1, -19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 25, 29}, 0.1, -19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 16, 77, 54}, 0.204173, 229, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_quantize_per_tensor_and_vulkan_to_cpu_random(dtype);
+  }
+}
+
+// TODO: Fix vulkan to cpu on Android
+TEST_F(VulkanAPITest, DISABLED_quantize_per_tensor_and_vulkan_to_cpu_qint32) {
+  const c10::ScalarType dtype = c10::ScalarType::QInt32;
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 1}, 0.13, -21123, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 1, 4}, 0.339, 8734, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 4, 1}, 0.228, -12023, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 7, 7}, 0.338, 8723, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 8, 8}, 0.193, -1023, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 8, 8}, 0.0449, 972, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 11, 17}, 0.073, -15, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 12, 17}, 0.1572, 102, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 12, 17}, 0.147, -156, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 17, 12}, 0.129, 10448, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({2, 4, 17, 12}, 0.137, -10, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({1, 1, 10, 14}, 0.0001, 101, dtype, 1);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 14}, 0.009, -43267, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 10, 15}, 0.1243, 19, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 9, 17}, 0.1889, -19784, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 5, 25, 29}, 0.1345, 196, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({4, 4, 25, 29}, 0.129, -19489, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({11, 17, 25, 29}, 0.027, 89, dtype);
+  test_quantize_per_tensor_and_vulkan_to_cpu({3, 16, 77, 54}, 0.204173, 229, dtype);
+
+  for (int i = 0; i < 20; i += 1) {
+    test_quantize_per_tensor_and_vulkan_to_cpu_random(dtype);
   }
 }
 

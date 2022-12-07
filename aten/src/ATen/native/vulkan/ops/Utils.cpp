@@ -20,7 +20,19 @@ static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
   if (v_dst.is_quantized()) {
     switch (v_dst.storage_type()) {
       case api::StorageType::TEXTURE_3D:
-        return VK_KERNEL(nchw_to_image_quantized);
+        switch (v_dst.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return VK_KERNEL(nchw_to_image_uint8);
+          case c10::ScalarType::QInt8:
+            return VK_KERNEL(nchw_to_image_int8);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(nchw_to_image_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_dst.dtype());
+        }
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:
@@ -45,8 +57,21 @@ static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
         get_dim<Dim4D::Height>(v_src) * get_dim<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
-        return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
-                                   : VK_KERNEL(image_to_nchw_quantized);
+        switch (v_src.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(image_to_nchw_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_src.dtype());
+        }
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:
@@ -134,7 +159,8 @@ void record_image_to_nchw_op(
       plane_size,
   };
 
-  if (v_src.is_quantized()) {
+  if (v_src.dtype() == c10::ScalarType::QUInt8 ||
+      v_src.dtype() == c10::ScalarType::QInt8) {
     if (plane_size % 4 == 0) {
       global_size.data[0u] = plane_size / 4;
       global_size.data[1u] = 1;
