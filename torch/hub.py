@@ -25,12 +25,6 @@ class Faketqdm(object):  # type: ignore[no-redef]
         self.disable = disable
         self.n = 0
         # Ignore all extra *args and **kwargs lest you want to reinvent tqdm
-    
-    def __iter__(self):
-        return self.iterable.__iter__()
-    
-    def __next__(self):
-        self.update(self.n + 1)
 
     def update(self, n):
         if self.disable:

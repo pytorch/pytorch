@@ -614,7 +614,7 @@ class AsyncCompile:
             total=num_kernels,
             desc="Inductor Compilation",
             disable=config.disable_progress,
-            delay=15,
+            delay=0,
         )
         if config.compile_threads > 1:
             for key, result in scope.items():
