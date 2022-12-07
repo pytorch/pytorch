@@ -879,11 +879,24 @@ def tp_transports():
 
 def _run_test_with_mt_pg(self, timeout, world_size, callback):
     failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+    # let's distinguish timeout error from others
+    timeout_ranks = []
+    other_exception_ranks = []
     for rank, exc_info in failed_ranks:
         print(f"Rank {rank} raised:")
         for line in traceback.format_exception(*exc_info):
             sys.stdout.write(line)
-    self.assertEqual([], failed_ranks, "Some ranks failed")
+        if exc_info[0] == TimeoutError:
+            timeout_ranks.append(rank)
+        else:
+            other_exception_ranks.append(rank)
+
+    report_msg = f"Out of {world_size} testing threads, {len(timeout_ranks)} threads timed out and {len(other_exception_ranks)} threads failed."
+    if failed_ranks:
+        if timeout_ranks:
+            raise TimeoutError(report_msg)
+        else:
+            raise RuntimeError(report_msg)
 
 
 def spawn_threads_and_init_comms(
