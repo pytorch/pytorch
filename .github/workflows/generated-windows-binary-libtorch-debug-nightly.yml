@@ -22,7 +22,6 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: windows-binary-libtorch-debug
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -1062,6 +1061,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.6-py3
+          CUDA_VERSION: 11.6
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -1301,6 +1303,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.6-py3
+          CUDA_VERSION: 11.6
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -1540,6 +1545,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.6-py3
+          CUDA_VERSION: 11.6
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -1779,6 +1787,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.6-py3
+          CUDA_VERSION: 11.6
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -2018,6 +2029,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.7-py3
+          CUDA_VERSION: 11.7
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -2257,6 +2271,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.7-py3
+          CUDA_VERSION: 11.7
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -2496,6 +2513,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.7-py3
+          CUDA_VERSION: 11.7
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
@@ -2735,6 +2755,9 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
         shell: bash
+        env:
+          BUILD_ENVIRONMENT: win-vs2019-cuda11.7-py3
+          CUDA_VERSION: 11.7
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3

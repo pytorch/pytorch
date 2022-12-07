@@ -17,7 +17,6 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: windows-binary-libtorch-debug
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
