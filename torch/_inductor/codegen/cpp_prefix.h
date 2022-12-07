@@ -58,22 +58,21 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
                                                std::memory_order_relaxed));
 }
 
-// This function is used to convert bool or uint8 to float mask for
-// vectorization. The caller needs to make sure the src represents TRUE/FALSE
-// correctly.
+// This function is used to convert a value to float for vectorization.
+// Only support bool/uint8(unsigned char)/double to float conversion now,
+// So the caller needs to make sure the src meets the dtype requirement.
 template <typename T>
 void to_float(const T* src, float* dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
+    dst[i] = static_cast<float>(src[i]);;
   }
 }
 
 template <>
-void to_float<double>(const double* src, float* dst, int64_t n) {
+void to_float(const unsigned char* src, float* dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {
-    dst[i] = static_cast<float>(src[i]);;
+    dst[i] = *(src + i) ? 1 : 0;
   }
 }
