@@ -15,30 +15,6 @@ Add new types to `types_base.py` if they are basic and not attached to ATen/c10.
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
 
-from torchgen.api.types_base import (
-    ArgName,
-    ArrayCType,
-    BaseCppType,
-    BaseCType,
-    Binding,
-    boolT,
-    byteT,
-    charT,
-    ConstRefCType,
-    CType,
-    doubleT,
-    Expr,
-    floatT,
-    int32T,
-    longT,
-    MutRefCType,
-    NamedCType,
-    shortT,
-    SpecialArgName,
-    TupleCType,
-    VectorCType,
-    voidT,
-)
 from torchgen.model import (
     BackendIndex,
     BaseTy,
@@ -47,6 +23,22 @@ from torchgen.model import (
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
     ScalarType,
+)
+
+from .types_base import (
+    BaseCppType,
+    BaseCType,
+    Binding,
+    boolT,
+    byteT,
+    charT,
+    CType,
+    doubleT,
+    Expr,
+    floatT,
+    int32T,
+    longT,
+    shortT,
 )
 
 _T = TypeVar("_T")
