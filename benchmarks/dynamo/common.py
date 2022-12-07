@@ -991,8 +991,8 @@ class BenchmarkRunner:
 
         try:
             self.model_iter_fn(model, example_inputs)
-        except Exception:
-            raise NotImplementedError("Eager model failed to run")
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
         model = copy.deepcopy(model)
@@ -1084,7 +1084,7 @@ class BenchmarkRunner:
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
-                model = FSDP(model)
+                model = FSDP(model, use_orig_params=True)
                 torch._inductor.config.triton.cudagraphs = False
                 log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
