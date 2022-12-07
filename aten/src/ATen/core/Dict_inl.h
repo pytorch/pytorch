@@ -38,20 +38,30 @@ GenericDict toGenericDict(Dict<Key, Value> dict) {
 namespace detail {
 
 inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
-  if (ivalue.isInt()) {
-    return std::hash<int64_t>()(ivalue.toInt());
-  } else if (ivalue.isString()) {
-    return std::hash<c10::string_view>()(ivalue.toStringView());
-  } else if (ivalue.isDouble()) {
-    return std::hash<double>()(ivalue.toDouble());
-  } else if (ivalue.isComplexDouble()) {
-    return c10::hash<c10::complex<double>>()(ivalue.toComplexDouble());
+  if (ivalue.isNone()) {
+    return 0;
   } else if (ivalue.isBool()) {
     return std::hash<bool>()(ivalue.toBool());
+  } else if (ivalue.isDouble()) {
+    return std::hash<double>()(ivalue.toDouble());
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
+  } else if (ivalue.isStorage()) {
+    return c10::get_hash(ivalue.payload.u.as_int);
+  } else if (ivalue.isInt()) {
+    return std::hash<int64_t>()(ivalue.toInt());
+  } else if (ivalue.isSymInt()) {
+    return c10::get_hash(ivalue.payload.u.as_int);
+  } else if (ivalue.isSymFloat()) {
+    return c10::get_hash(ivalue.payload.u.as_int);
+  } else if (ivalue.isString()) {
+    return std::hash<c10::string_view>()(ivalue.toStringView());
+  } else if (ivalue.isTuple()) {
+    return c10::get_hash(*v.toTuple());
   } else if (ivalue.isDevice()) {
     return std::hash<Device>()(ivalue.toDevice());
+  } else if (ivalue.isComplexDouble()) {
+    return c10::hash<c10::complex<double>>()(ivalue.toComplexDouble());
   } else {
     throw std::runtime_error(
         "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
