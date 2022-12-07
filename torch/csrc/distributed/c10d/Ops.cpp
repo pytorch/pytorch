@@ -212,6 +212,14 @@ c10::intrusive_ptr<Work> recv_(
       tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<Work> recv_any_source_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recvAnysource(tensor_vec, static_cast<int>(tag));
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup, Work, and ReduceOp definitions are more like
   // declarations. They don't expose the details of the two classes into
@@ -272,6 +280,9 @@ TORCH_LIBRARY(c10d, m) {
           c10::DispatchKey::CompositeExplicitAutograd, monitored_barrier_));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
+  m.def(
+      "recv_any_source_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_any_source_));
 }
 } // namespace
 
@@ -574,6 +585,19 @@ c10::intrusive_ptr<Work> recv(
                            int64_t,
                            int64_t)>();
   return op.call(tensors, process_group, srcRank, tag);
+}
+
+c10::intrusive_ptr<Work> recv_any_source(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    int64_t tag) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::recv_any_source_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t)>();
+  return op.call(tensors, process_group, tag);
 }
 
 } // namespace ops

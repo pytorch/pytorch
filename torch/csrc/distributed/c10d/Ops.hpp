@@ -100,5 +100,10 @@ TORCH_API c10::intrusive_ptr<Work> recv(
     int64_t srcRank,
     int64_t tag);
 
+TORCH_API c10::intrusive_ptr<Work> recv_any_source(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    int64_t tag);
+
 } // namespace ops
 } // namespace c10d
