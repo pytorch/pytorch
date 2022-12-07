@@ -194,6 +194,18 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_issue90375(self):
+        class Model(nn.Module):
+            def forward(self):
+                return torch.randn(3) * torch.randn(3)
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model()
+
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
