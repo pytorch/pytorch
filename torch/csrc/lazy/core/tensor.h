@@ -40,7 +40,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     // TODO(alanwaketan): Remove this ctor. This is a
     // temporary ctor to ease XLA LTC migration.
     Data(BackendDevice device)
-        : device(std::move(device)),unique_id(GetNextTensorId()) {}
+        : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
     ~Data();
 
