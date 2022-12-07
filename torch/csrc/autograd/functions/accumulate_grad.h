@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>

@@ -1,4 +1,4 @@
-#include <ATen/VmapMode.h>
+#include <ATen/LegacyVmapMode.h>
 
 namespace at {
 namespace impl {

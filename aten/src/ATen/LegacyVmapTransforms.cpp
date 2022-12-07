@@ -1,4 +1,4 @@
-#include <ATen/VmapTransforms.h>
+#include <ATen/LegacyVmapTransforms.h>
 #include <ATen/ATen.h>
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
