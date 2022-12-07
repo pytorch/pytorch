@@ -752,6 +752,9 @@ def prepare_n_shadows_model(
     example_inputs: Any,
     qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
+    custom_prepare_fn: Optional[Callable] = None,
+    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_tracer: Any = None,
 ) -> torch.nn.Module:
     """
     Given a model with a graph with M ops such as
@@ -790,7 +793,10 @@ def prepare_n_shadows_model(
     4. add examples to docblocks
     """
 
-    tracer = quantize_fx.QuantizationTracer([], [])
+    if custom_tracer is None:
+        tracer = quantize_fx.QuantizationTracer([], [])
+    else:
+        tracer = custom_tracer
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
     mt._node_name_to_scope = tracer.node_name_to_scope
@@ -834,7 +840,9 @@ def prepare_n_shadows_model(
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
-            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig)
+            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
+            custom_prepare_fn, custom_prepare_kwargs
+        )
 
     mt.recompile()
     return mt
@@ -862,7 +870,11 @@ def loggers_set_save_activations(
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 
-def convert_n_shadows_model(model: GraphModule) -> GraphModule:
+def convert_n_shadows_model(
+    model: GraphModule,
+    custom_convert_fn: Optional[Callable] = None,
+    custom_convert_kwargs: Optional[Dict[str, Any]] = None
+) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`
     on each shadow submodule.
@@ -872,8 +884,13 @@ def convert_n_shadows_model(model: GraphModule) -> GraphModule:
         # node name string match
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
             orig_mod = getattr(model, node.name)
-            converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
-                orig_mod)
+            if custom_convert_fn is None:
+                converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
+                    orig_mod)
+            else:
+                if custom_convert_kwargs is None:
+                    custom_convert_kwargs = {}
+                converted_mod = custom_convert_fn(orig_mod, **custom_convert_kwargs)
             setattr(model, node.name, converted_mod)
 
     return model
