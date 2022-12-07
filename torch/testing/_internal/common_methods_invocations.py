@@ -10181,7 +10181,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
-           error_inputs_func=error_inputs_masked_select),
+           error_inputs_func=error_inputs_masked_select,
+           skips=(
+               # Might need to skip until ROCm5.5 based on SWDEV-357998
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+           )),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -14543,6 +14547,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_multiple_devices', dtypes=[torch.float32, torch.int64]),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -15480,6 +15486,8 @@ op_db: List[OpInfo] = [
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
+               # Might need to skip until ROCm5.5 based on SWDEV-352448
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
            )
            ),
     OpInfo('logcumsumexp',
@@ -15717,6 +15725,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # Might need to skip until ROCm5.5 based on SWDEV-357998
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
            )),
     # Following tests are for jiterator's python interface
     # Jiterator can be used to author elementwise CUDA kernel
@@ -16233,6 +16243,10 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,
         sample_inputs_func=sample_inputs_argwhere,
+        skips=(
+            # Might need to skip until ROCm5.5 based on SWDEV-357998
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+        ),
     ),
     ReductionOpInfo(
         'all',
