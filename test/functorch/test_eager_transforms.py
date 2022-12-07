@@ -39,9 +39,8 @@ from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
+from torch.autograd.function import _set_autograd_function_extension_enabled
 import torch.autograd.forward_ad as fwAD
-
-torch._C._set_autograd_function_extension_enabled(True)
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -982,6 +981,7 @@ class TestGradTransform(TestCase):
 
 
 class TestAutogradFunction(TestCase):
+    @_set_autograd_function_extension_enabled()
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1008,6 +1008,7 @@ class TestAutogradFunction(TestCase):
         grad(f)(y, x)
         grad(grad(f))(y, x)
 
+    @_set_autograd_function_extension_enabled()
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1050,6 +1051,7 @@ class TestAutogradFunction(TestCase):
 
         return NumpyCubeNotComposable
 
+    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_autograd_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 
@@ -1070,6 +1072,7 @@ class TestAutogradFunction(TestCase):
     # (or, if impossible, figure out how to raise a nice error)
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
+    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_grad_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 
@@ -1086,6 +1089,7 @@ class TestAutogradFunction(TestCase):
 
 
 class TestAutogradFunctionVmapAPI(TestCase):
+    @_set_autograd_function_extension_enabled()
     def test_no_vmap_staticmethod(self, device):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
@@ -1106,6 +1110,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
             vmap(NumpyCube.apply)(x)
 
+    @_set_autograd_function_extension_enabled()
     def test_info_object(self, device):
         batch_size = 10
 
@@ -1130,6 +1135,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         x = torch.randn(batch_size, 3, device=device)
         vmap(Id.apply)(x)
 
+    @_set_autograd_function_extension_enabled()
     def test_in_dims_single_input(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
@@ -1154,6 +1160,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         vmap(Id.apply, in_dims=1)(x)
         vmap(Id.apply, in_dims=(1,))(x)
 
+    @_set_autograd_function_extension_enabled()
     def test_in_dims_multiple_inputs(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
@@ -1178,6 +1185,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         x = torch.randn(2, device=device)
         vmap(Id.apply)(x, [x, x])
 
+    @_set_autograd_function_extension_enabled()
     def test_skips_empty_layer(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
