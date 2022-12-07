@@ -41,10 +41,13 @@ class Unboxing:
 
     }
     """
+
     argument_type_gen: Callable[[Type, bool, str, bool], NamedCType]
 
     # Convert all the arguments in a NativeFunction to C++ code
-    def convert_arguments(self, args: Sequence[Binding]) -> Tuple[List[Binding], List[str]]:
+    def convert_arguments(
+        self, args: Sequence[Binding]
+    ) -> Tuple[List[Binding], List[str]]:
         code_list = [f"EValue& {args[i].name} = *stack[{i}];" for i in range(len(args))]
         binding_list = []
         for arg in args:
@@ -62,16 +65,19 @@ class Unboxing:
             binding_list.append(arg.with_name(unboxed_name))
         return binding_list, code_list
 
-
-    # Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
-    # (1) the C++ code necessary to unbox the argument
-    # (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
     def argumenttype_evalue_convert(
         self, t: Type, arg_name: str, *, mutable: bool = False
     ) -> Tuple[str, CType, List[str], List[str]]:
-        ctype = self.argument_type_gen(
-            t=t, mutable=mutable, binds=arg_name
-        ).type
+        """
+        Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
+        (1) the C++ code necessary to unbox the argument
+        (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
+        :param t: a `Type` of an argument
+        :param arg_name: argument name
+        :param mutable: boolean for whether this argument type is mutable
+        :return: unboxed result
+        """
+        ctype = self.argument_type_gen(t=t, mutable=mutable, binds=arg_name).type
 
         if isinstance(t, BaseType):
             out_name = f"{arg_name}_base"
@@ -92,7 +98,6 @@ class Unboxing:
             raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
         return out_name, ctype, code, decl
 
-
     def _gen_code_base_type(
         self, arg_name: str, out_name: str, ctype: CType
     ) -> Tuple[List[str], List[str]]:
@@ -100,12 +105,13 @@ class Unboxing:
             f"{ctype.cpp_type()} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"
         ], []
 
-
     def _gen_code_optional_type(
         self, arg_name: str, out_name: str, t: OptionalType, ctype: CType
     ) -> Tuple[List[str], List[str]]:
         in_name = f"{arg_name}_opt_in"
-        res_name, base_type, res_code, decl = self.argumenttype_evalue_convert(t.elem, in_name)
+        res_name, base_type, res_code, decl = self.argumenttype_evalue_convert(
+            t.elem, in_name
+        )
         return (
             f"""
     {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
@@ -115,14 +121,15 @@ class Unboxing:
             decl,
         )
 
-
     def _gen_code_list_type(
         self, arg_name: str, out_name: str, t: ListType, ctype: CType
     ) -> Tuple[List[str], List[str]]:
         in_name = f"{arg_name}_list_in"
         elem_name = f"{arg_name}_elem"
         code = []
-        res_name, res_ctype, res_code, decl = self.argumenttype_evalue_convert(t.elem, elem_name)
+        res_name, res_ctype, res_code, decl = self.argumenttype_evalue_convert(
+            t.elem, elem_name
+        )
 
         # pyre-fixme[16]: `Enum` has no attribute `Tensor`.
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Tensor:
@@ -191,7 +198,9 @@ torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {o
             # use ArrayRef as default.
             vec_name = arg_name + "_vec"
             # need to bring vector instantiation out of scope so that ArrayRef has valid data
-            decl.append(f"std::vector<{res_ctype.cpp_type(strip_ref=True)}> {vec_name};")
+            decl.append(
+                f"std::vector<{res_ctype.cpp_type(strip_ref=True)}> {vec_name};"
+            )
             code.extend(
                 f"""
     for (EValue {elem_name}: {in_name}) {{
