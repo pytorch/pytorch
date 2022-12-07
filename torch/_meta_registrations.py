@@ -251,15 +251,6 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
-# From aten/src/ATen/native/BatchLinearAlgebra.cpp
-@register_meta(aten.linalg_cholesky.default)
-def meta_linalg_cholesky(A: Tensor, upper=False):
-    # All the checks done on info in the corresponding C++ function
-    # are data dependent, so we skip info computation
-    L, infos = linalg_cholesky_ex(A, upper, False)
-    return L, infos
-
-
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
@@ -1013,8 +1004,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     check(p >= 0, lambda: "cdist only supports non-negative p values")
     check(
-        compute_mode >= 0 and compute_mode <= 2,
-        lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 1, 2),
+        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -1992,7 +1983,14 @@ def meta_scatter_add_(self, dim, index, src):
     return self
 
 
-@register_meta(aten.scatter)
+@register_meta(
+    [
+        aten.scatter.src,
+        aten.scatter.value,
+        aten.scatter.reduce,
+        aten.scatter.value_reduce,
+    ]
+)
 @out_wrapper()
 def meta_scatter(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
@@ -2000,7 +1998,14 @@ def meta_scatter(self, dim, index, src_or_value, reduce=None):
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.scatter_)
+@register_meta(
+    [
+        aten.scatter_.src,
+        aten.scatter_.value,
+        aten.scatter_.reduce,
+        aten.scatter_.value_reduce,
+    ]
+)
 def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
     scatter_meta_impl(self, dim, index, src, reduce)
@@ -2178,6 +2183,12 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
+            if op_overload in global_decomposition_table["meta"]:
+                raise RuntimeError(
+                    f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    "register meta function for it. Instead, we should let the decomposition run and write "
+                    "meta kernels for the base operators."
+                )
             pass
         elif op_overload.name() in {
             "aten::empty_strided",  # causing infinite recursion, test_meta.py

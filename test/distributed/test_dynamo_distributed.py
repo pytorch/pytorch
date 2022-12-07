@@ -101,8 +101,8 @@ def get_hf_bert(rank):
     # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
-    except ImportError:
-        raise unittest.SkipTest("Unable to import transformers")
+    except ImportError as e:
+        raise unittest.SkipTest("Unable to import transformers") from e
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
@@ -557,6 +557,12 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
+    def test_fsdp_orig_params_assert(self):
+        # Test with basic FSDP wrapping (outer wrap around whole model)
+        m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+        fsdp_m = FSDP(m, use_orig_params=False)
+        fsdp_m = torch._dynamo.optimize()(fsdp_m)
+        self.assertRaisesRegex(AssertionError, "Dynamo only supports FSDP with use_orig_params=True", fsdp_m, inputs)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

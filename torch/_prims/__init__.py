@@ -199,7 +199,7 @@ __all__ = [
     # Randomness Prims
     #
     "normal",
-    "uniform",
+    "_uniform_helper",
     #
     # FFT prims
     #
@@ -1941,7 +1941,11 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
-    strides = utils.compute_elementwise_output_strides(a)
+    # dtype conversion preserves dense strides
+    if torch._prims_common.is_non_overlapping_and_dense(a):
+        strides = a.stride()
+    else:
+        strides = utils.compute_elementwise_output_strides(a)
 
     return TensorMeta(a, strides=strides, dtype=dtype)
 
@@ -2702,7 +2706,7 @@ _uniform_doc = """
 """
 
 # TODO: we should more seriously review randomness modeling and prims
-uniform = _make_prim(
+_uniform_helper = _make_prim(
     schema=(
         "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),

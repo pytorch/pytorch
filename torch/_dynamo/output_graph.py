@@ -79,7 +79,7 @@ def _get_gen_rand_values_fn(random_calls):
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict):
+    def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
         super(FakeRootModule, self).__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
@@ -144,7 +144,6 @@ class OutputGraph(fx.Tracer):
     ):
         super(OutputGraph, self).__init__()
 
-        # Mutable state checkpointed by copy_graphstate()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.guards: Set[Guard] = set()
@@ -152,6 +151,9 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
+        # used to track nodes that are added between calls of copy_graphstate
+        # and restore_graphstate
+        self.timestamp = 0
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
@@ -159,6 +161,7 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
+        self._current_tx = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
@@ -169,7 +172,6 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
-        self.base_symbols = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -185,37 +187,47 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
+
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        graph_nodes = set(self.graph.nodes)
-        return (
-            graph_nodes,
+        state = (
             list(self.graphargs),
             set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
+            self.timestamp,
         )
+        self.timestamp += 1
+        return state
 
     def restore_graphstate(self, state):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
-            graph_nodes,
             self.graphargs,
             self.guards,
             self.nn_modules,
             self.side_effects,
+            self.timestamp,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
-            if node not in graph_nodes:
+            if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -503,10 +515,15 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= logging.INFO and config.output_code:
+                graph_str = (
+                    gm.print_readable()
+                    if config.output_graph_code
+                    else format_graph_tabular(gm.graph)
+                )
                 log.log(
                     logging.CODE,  # type: ignore[attr-defined]
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(
@@ -563,6 +580,8 @@ class OutputGraph(fx.Tracer):
             )
             if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
@@ -594,9 +613,9 @@ class OutputGraph(fx.Tracer):
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
                 elif node.op == "call_function" and node.target is operator.getitem:
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
 
         expanded_graphargs = []
         for arg in self.graphargs:
@@ -611,9 +630,8 @@ class OutputGraph(fx.Tracer):
             if arg.uses == 0:
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -659,14 +677,13 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
-        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -685,3 +702,14 @@ class OutputGraph(fx.Tracer):
         rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv
+
+    def create_node(self, *args, **kwargs):
+        node = super().create_node(*args, **kwargs)
+        node.meta["creation_timestamp"] = self.timestamp
+        return node
+
+    # Note: we did not override erase_node since
+    # we call self.graph.erase_node elsewhere
+    def remove_node(self, node):
+        self.graph.erase_node(node)
+        self.name_to_input.pop(node.name, None)

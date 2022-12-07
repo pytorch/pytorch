@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import operator
 import builtins
@@ -37,12 +37,6 @@ SYM_FUNCTION_MODE = None
 #
 # Didn't bother with ancestors for now, unlikely to have multiple modes for
 # symints right now
-
-
-# so we can add extra attributes
-# TODO: slots'ify this
-class VarSymbol(sympy.Symbol):
-    pass
 
 
 # SymDispatchMode gets invoked whenever an operation is processed on
@@ -154,11 +148,18 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None):
+    def __init__(self, expr, shape_env, pytype, constant=None, symbol=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         self.constant = constant
+        # Unlike expr, sympy.Symbol is guaranteed to either be a
+        # symbol or its negation a symbol, and it never gets simplified into a
+        # constant or another symbol.  This only exists for freshly
+        # create_symint; intermediate values are None.  The usage of this
+        # property is fairly short-lived: it lives long enough so that Dynamo
+        # can get its hands on symbols and setup Source associations
+        self.symbol: Optional[sympy.Expr] = symbol
 
     @property
     def expr(self):
@@ -361,8 +362,6 @@ def _make_node_magic(method, func):
             pytype = int
         elif method in always_float_magic_methods:
             pytype = float
-        elif method in ["sym_int"]:
-            pytype = int
         else:
             pytype = self.pytype
 
@@ -450,6 +449,8 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.tls = threading.local()
+        # Set holds symbols which definitely are not 0 or 1.
+        self.definitely_not_01: Set["sympy.Symbol"] = set()
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -469,7 +470,7 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -505,31 +506,60 @@ class ShapeEnv(object):
                 )
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+        sym_size = [self.create_symintnode(i) for i in size]
+        sym_stride = []
+        for stride_expr in stride:
+            # NB: Don't duck size the stride; instead use the expression
+            # we computed
+            # TODO: We actually allocated an unnecessary extra symbol
+            # here in the smallest unbound stride case, but it's not
+            # a big deal because the non-0/1 symbol immediately
+            # evaporates from its duck-sizing simplification
+            s = self.create_symbol(val, simplify=False)
+            assert stride_expr is not None
+            assert isinstance(s, sympy.Symbol)
+            self.replacements[s] = stride_expr
+            sym_stride.append(self.create_symintnode(s))
+        sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset()))
+        return sym_size, sym_stride, sym_storage_offset
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        return SymInt(SymNode(expr, self, int))
+    def create_symintnode(self, sym: "sympy.Expr"):
+        assert isinstance(sym, sympy.Symbol) or isinstance(-sym, sympy.Symbol)
+        return SymInt(SymNode(sym.xreplace(self.replacements), self, int, symbol=sym))
 
-    def create_symbol(self, val: int) -> "sympy.Expr":
+    # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
+    # but there may be a replacement that allows it to be immediately
+    # simplified
+    def create_symbol(self, val: int, *, simplify: bool = True) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
+
         if val < 0:
-            # all sympy base variables must be positive and > 1
-            assert False
-            return -self.create_symbol(-val)
+            return -self.create_symbol(-val, simplify=simplify)
+
+        symbol = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+        self.var_to_val[symbol] = sympy.Integer(val)
+
+        if not simplify:
+            return symbol
+
+        # Now attempt to simplify this symbol
+        # TODO: Create a guard whenever this happens
+        # TODO: Do this duck sizing lazily later
+
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
-        # TODO: Create a guard whenever this happens
-        # TODO: But how do I represent the guard in this case?
-        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
-        # this also ensures that all symbols are > 1
-        if val in self.val_to_var:
-            return self.val_to_var[val]
-        sympy_expr = VarSymbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-        sympy_expr.tb = traceback.extract_stack()
-        self.var_to_val[sympy_expr] = sympy.Integer(val)
-        self.val_to_var[val] = sympy_expr
-        return sympy_expr
+        if val not in self.val_to_var:
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            self.val_to_var[val] = sympy_expr
+            self.definitely_not_01.add(sympy_expr)
+
+        self.replacements[symbol] = self.val_to_var[val]
+
+        # Return the *symbol*; you're expected to apply the replacement to get
+        # the simplified variable
+        return symbol
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
@@ -575,6 +605,7 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
+            if k in self.definitely_not_01
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
@@ -659,29 +690,24 @@ class ShapeEnv(object):
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        zero_expr = lhs - rhs
-        zero_expr = self.simplify(zero_expr)
-        if zero_expr.has(sympy.Mod):
-            mod_expr = tuple(zero_expr.atoms(sympy.Mod))[0]
-            try:
-                solutions = sympy.solve(zero_expr, mod_expr, dict=True)
-                if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                    self.divisible.add(mod_expr)
-            except NotImplementedError:
+        try:
+            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+            if len(solutions) != 1:
                 return
-        elif zero_expr.has(FloorDiv):  # Can't simplify
+            solution = solutions[0][free[0]]
+            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                new_var = self._find(solution)
+                self.replacements[cast(sympy.Symbol, free[0])] = new_var
+        except NotImplementedError:
+            if expr.has(sympy.Mod):
+                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                try:
+                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                        self.divisible.add(mod_expr)
+                except NotImplementedError:
+                    pass
             return
-        else:
-            try:
-                solutions = sympy.solve(zero_expr, free[0], dict=True)
-                if len(solutions) != 1:
-                    return
-                solution = solutions[0][free[0]]
-                if all(t.is_integer for t in sympy.preorder_traversal(solution)):
-                    new_var = self._find(solution)
-                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
-            except NotImplementedError:
-                return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):

@@ -1703,7 +1703,7 @@ class TestAutograd(TestCase):
                     self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
-                except UnrecoverableException:
+                except UnrecoverableException :
                     self.assertTrue(torch.is_grad_enabled())
                     raise SecondaryException
 
@@ -4148,20 +4148,32 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         check(fast_mode=True)
         check(fast_mode=False)
 
-    @unittest.expectedFailure
     def test_gradcheck_sparse_csr_input(self):
         def check(fast_mode):
             def fn(sparse_csr):
                 return torch.clone(sparse_csr).to_dense()
 
-            # Fails because gradcheck can't work with sparse csr inputs yet
             gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=True,
                       check_batched_grad=False, fast_mode=fast_mode)
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
                           check_batched_grad=False, fast_mode=fast_mode)
-        # check(fast_mode=True) # Segmentation fault
+        # check(fast_mode=True) # RuntimeError: sparse_mask_sparse_csr expects self to be 2D
+        check(fast_mode=False)
+
+    def test_gradcheck_sparse_csc_input(self):
+        def check(fast_mode):
+            def fn(sparse_csc):
+                return torch.clone(sparse_csc).to_dense()
+
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=False,
+                          check_batched_grad=False, fast_mode=fast_mode)
+        # check(fast_mode=True) # RuntimeError: Expected result Tensor to be of format CSR
         check(fast_mode=False)
 
     def test_gradcheck_nondeterministic(self):
