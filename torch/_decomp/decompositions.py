@@ -1522,7 +1522,7 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    if device is None or dtype is None or memory_format is None:
+    if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
     if device is not None and device != x.get_device():
