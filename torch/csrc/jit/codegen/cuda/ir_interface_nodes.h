@@ -27,7 +27,7 @@ class IrCloner;
 //! the kernel is compiled) or a constant value (inlined into the kernel
 //! definition).
 template <typename UnderlyingType>
-class TORCH_CUDA_CU_API Scalar : public Val {
+class Scalar : public Val {
  public:
   using ScalarType = UnderlyingType;
   static constexpr DataType kDefaultDataType =

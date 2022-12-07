@@ -408,7 +408,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
 //! to hold non-IR data, such as DataType, std::vector<int>, etc. Please don't
 //! use this class to hold IR nodes or their pointers.
 template <typename T>
-class TORCH_CUDA_CU_API Attribute : public Val {
+class Attribute : public Val {
  public:
   T value;
   Attribute(IrBuilderPasskey passkey, const T& value)
