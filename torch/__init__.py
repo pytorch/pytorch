@@ -143,6 +143,7 @@ if sys.platform == 'win32':
 
 
 def _preload_cuda_deps():
+    """ Preloads cudnn/cublas deps if they could not be found otherwise """
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
     for path in sys.path:
@@ -151,9 +152,12 @@ def _preload_cuda_deps():
             continue
         cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
         cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        ctypes.CDLL(cublas_path)
-        ctypes.CDLL(cudnn_path)
+        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
+            continue
         break
+
+    ctypes.CDLL(cublas_path)
+    ctypes.CDLL(cudnn_path)
 
 
 # See Note [Global dependencies]
@@ -168,6 +172,8 @@ def _load_global_deps():
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
+        # Can only happen of wheel with cublas as PYPI deps
+        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
         if 'libcublas.so.11' not in err.args[0]:
             raise err
         _preload_cuda_deps()
