@@ -2842,6 +2842,31 @@ RootPredicateInfo RootPredicateInfo::getFalseInfo() {
   return info;
 }
 
+Val* Index::arange(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* start,
+    Val* step,
+    DataType dtype) {
+  auto linear_index = Index::getLinearLogicalIndex(consumer_tv, loops);
+  start = castOp(dtype, start);
+  step = castOp(dtype, step);
+  auto result = add(start, mul(step, linear_index));
+  GpuLower::current()->commonIndexMap().hoistIndex(result, loops);
+  return result;
+}
+
+Val* Index::eye(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    DataType dtype) {
+  auto indices = Index::getPerDimLogicalIndex(consumer_tv, loops);
+  TORCH_INTERNAL_ASSERT(indices.size() == 2);
+  auto result = castOp(dtype, eq(indices[0], indices[1]));
+  GpuLower::current()->commonIndexMap().hoistIndex(result, loops);
+  return result;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

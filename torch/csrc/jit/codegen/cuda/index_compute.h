@@ -415,6 +415,20 @@ class Index {
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
+
+  //! Compute the result for arange
+  static Val* arange(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops,
+      Val* start,
+      Val* step,
+      DataType dtype);
+
+  //! Compute the result for eye
+  static Val* eye(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops,
+      DataType dtype);
 };
 
 // Used for local and shared index mapping. Returns a map from loops

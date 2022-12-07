@@ -529,25 +529,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           << "&" << gen(ldst->in()) << ");\n";
   }
 
-  void handle(const FullOp* fop) final {
-    indent() << gen(fop->output(0)) << " = (" << fop->dtype() << ")"
-             << gen(fop->getFillValue()) << ";\n";
-  }
-
-  void handle(const ARangeOp* aop) final {
-    auto index = genInline(aop->getLinearLogicalIndex());
-    indent() << gen(aop->output(0)) << " = arange<" << aop->dtype() << ">";
-    code_ << "(" << index << ", " << gen(aop->start()) << ", "
-          << gen(aop->step()) << ");\n";
-  }
-
-  void handle(const EyeOp* aop) final {
-    auto index1 = gen(aop->getIndex1());
-    auto index2 = gen(aop->getIndex2());
-    indent() << gen(aop->output(0)) << " = (" << aop->dtype() << ")";
-    code_ << "(" << index1 << " == " << index2 << ");\n";
-  }
-
   void handle(const UnaryOp* uop) final {
     bool is_vector_op = false;
     size_t vector_word_size = 1;

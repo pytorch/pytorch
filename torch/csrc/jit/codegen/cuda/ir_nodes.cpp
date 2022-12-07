@@ -167,8 +167,7 @@ ARangeOp::ARangeOp(
     Val* start,
     Val* end,
     Val* step,
-    DataType dtype,
-    Val* linear_index)
+    DataType dtype)
     : Expr(passkey) {
   addInput(start);
   addInput(end);
@@ -176,17 +175,11 @@ ARangeOp::ARangeOp(
   addOutput(out);
   addAttribute(
       IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
-  addAttribute(linear_index);
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(ARangeOp)
 
-EyeOp::EyeOp(
-    IrBuilderPasskey passkey,
-    Val* out,
-    DataType dtype,
-    Val* index1,
-    Val* index2)
+EyeOp::EyeOp(IrBuilderPasskey passkey, Val* out, DataType dtype)
     : Expr(passkey) {
   if (out->isA<TensorView>()) {
     addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
@@ -198,8 +191,6 @@ EyeOp::EyeOp(
   addOutput(out);
   addAttribute(
       IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
-  addAttribute(index1);
-  addAttribute(index2);
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(EyeOp)

@@ -113,8 +113,7 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
       Val* start,
       Val* end,
       Val* step,
-      DataType dtype,
-      Val* linear_index = nullptr);
+      DataType dtype);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
@@ -136,10 +135,6 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
 
   Val* step() const {
     return input(2);
-  }
-
-  Val* getLinearLogicalIndex() const {
-    return attributeVal(1);
   }
 };
 
@@ -165,12 +160,7 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
  public:
   using Expr::Expr;
 
-  EyeOp(
-      IrBuilderPasskey,
-      Val* out,
-      DataType dtype,
-      Val* index1 = nullptr,
-      Val* index2 = nullptr);
+  EyeOp(IrBuilderPasskey, Val* out, DataType dtype);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
@@ -180,14 +170,6 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
 
   DataType dtype() const {
     return attribute(0)->as<Attribute<DataType>>()->value;
-  }
-
-  Val* getIndex1() const {
-    return attributeVal(1);
-  }
-
-  Val* getIndex2() const {
-    return attributeVal(2);
   }
 };
 
