@@ -451,7 +451,9 @@ class MetaConverter:
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t, shape_env=None, *, callback=lambda t: t()):
+    def __call__(
+        self, t, shape_env=None, *, callback=lambda t: t(), ignore_subclass=False
+    ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
@@ -459,6 +461,7 @@ class MetaConverter:
         if (
             type(t) is torch.Tensor
             or type(t) is torch.nn.Parameter
+            or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
         ):
             if any(
@@ -488,7 +491,16 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
+                # When ignoring subclasses, we treat the input tensor "as if" it
+                # were a normal tensor and create a non-subclassed fake tensor
+                # that, modulo type and attributes, resembles the original tensor.
+                # This can be helpful if you're planning to simulate the subclassness
+                # by hand, e.g., as is done in Dynamo
+                ctx = contextlib.nullcontext()
+                if ignore_subclass:
+                    ctx = torch._C.DisableTorchFunction()
+                with ctx:
+                    r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
