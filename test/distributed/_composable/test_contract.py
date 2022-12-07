@@ -54,7 +54,7 @@ class TestContract(TestCase):
         ) -> Tuple[torch.Tensor]:
             return grad_input
 
-        @contract
+        @contract()
         def noop_api(module: nn.Module) -> nn.Module:
             module.register_forward_pre_hook(forward_pre_hook)
             module.register_forward_hook(forward_hook)
@@ -84,7 +84,7 @@ class TestContract(TestCase):
             def forward(self, x):
                 return self.module(x)
 
-        @contract
+        @contract()
         def wrap_module(module: nn.Module) -> nn.Module:
             return ModelWrapper(module)
 
@@ -104,7 +104,7 @@ class TestContract(TestCase):
 
         # FIXME: circular reference looks a bit weird. Shall we make .state a
         # top-level API instead attached to contract API?
-        @contract
+        @contract()
         def api(module: nn.Module) -> nn.Module:
             api.state(module).dummy_state = 7
             module.register_forward_pre_hook(check_and_update_state_hook)
