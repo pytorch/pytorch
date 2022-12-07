@@ -27,6 +27,7 @@ from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 SpecialArgName = Enum("SpecialArgName", ("possibly_redundant_memory_format",))
 ArgName = Union[str, SpecialArgName]
 
+
 # This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
 class BaseCppType:
@@ -67,7 +68,7 @@ class CType(ABC):
 
 
 @dataclass(frozen=True)
-class BaseCType:
+class BaseCType(CType):
     type: BaseCppType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
