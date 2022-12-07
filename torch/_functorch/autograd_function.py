@@ -91,7 +91,6 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
 def generate_single_level_function(interpreter, autograd_function):
     level = interpreter.level()
 
-    @staticmethod
     def forward(*operands):
         unwrapped_operands = pytree.tree_map_only(
             torch.Tensor,
@@ -108,19 +107,16 @@ def generate_single_level_function(interpreter, autograd_function):
             lambda x: _wrap_for_grad(x, level),
             output)
 
-    @staticmethod
     def setup_context(ctx, outputs, *operands):
         ctx.mark_dirty = mark_dirty_error
         return autograd_function.setup_context(ctx, outputs, *operands)
 
     # backward is only used if the transform is TransformType.Grad
-    @staticmethod
     def backward(ctx, *grads):
         result = autograd_function.backward(ctx, *grads)
         return result
 
     # jvp is only used if the transform is TransformType.Jvp
-    @staticmethod
     def jvp(ctx, *tangents):
         result = autograd_function.jvp(ctx, *tangents)
         return result
@@ -134,10 +130,10 @@ def generate_single_level_function(interpreter, autograd_function):
         name,
         (torch.autograd.function._SingleLevelFunction,),
         {
-            'forward': forward,
-            'backward': backward,
-            'jvp': jvp,
-            'setup_context': setup_context,
+            'forward': staticmethod(forward),
+            'backward': staticmethod(backward),
+            'jvp': staticmethod(jvp),
+            'setup_context': staticmethod(setup_context),
         },
     )
     return Generated
