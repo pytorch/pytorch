@@ -1292,7 +1292,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/Batching.cpp",
+    "aten/src/ATen/native/LegacyBatching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",
     "aten/src/ATen/native/BlasKernel.cpp",
