@@ -18,7 +18,13 @@ torch.signal.windows
     :toctree: generated
     :nosignatures:
 
+    bartlett
+    blackman
     cosine
     exponential
     gaussian
+    general_cosine
+    general_hamming
+    hamming
+    hann
     kaiser
