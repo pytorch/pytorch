@@ -14,46 +14,7 @@ from torch.onnx import _constants, _experimental, verification
 from torch.testing._internal import common_utils
 
 
-@common_utils.instantiate_parametrized_tests
 class TestVerification(pytorch_test_common.ExportTestCase):
-    @common_utils.parametrize(
-        "onnx_backend",
-        [
-            common_utils.subtest(
-                verification.OnnxBackend.REFERENCE,
-                # TODO: enable this when ONNX submodule catches up to >= 1.13.
-                decorators=[unittest.expectedFailure],
-            ),
-            verification.OnnxBackend.ONNX_RUNTIME_CPU,
-        ],
-    )
-    def test_verify_found_mismatch_when_export_is_wrong(
-        self, onnx_backend: verification.OnnxBackend
-    ):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        def incorrect_add_symbolic_function(g, self, other, alpha):
-            return self
-
-        opset_version = _constants.ONNX_DEFAULT_OPSET
-        torch.onnx.register_custom_op_symbolic(
-            "aten::add", incorrect_add_symbolic_function, opset_version=opset_version
-        )
-
-        with self.assertRaisesRegex(AssertionError, ".*Tensor-likes are not close!.*"):
-            verification.verify(
-                Model(),
-                (torch.randn(2, 3),),
-                opset_version=opset_version,
-                options=verification.VerificationOptions(backend=onnx_backend),
-            )
-
-        torch.onnx.unregister_custom_op_symbolic(
-            "aten::add", opset_version=opset_version
-        )
-
     def test_check_export_model_diff_returns_diff_when_constant_mismatch(self):
         class UnexportableModel(torch.nn.Module):
             def forward(self, x, y):
@@ -161,6 +122,56 @@ class TestVerification(pytorch_test_common.ExportTestCase):
             )
 
 
+@common_utils.instantiate_parametrized_tests
+class TestVerificationOnWrongExport(pytorch_test_common.ExportTestCase):
+    opset_version: int
+
+    def setUp(self):
+        super().setUp()
+
+        def incorrect_add_symbolic_function(g, self, other, alpha):
+            return self
+
+        self.opset_version = _constants.ONNX_DEFAULT_OPSET
+        torch.onnx.register_custom_op_symbolic(
+            "aten::add",
+            incorrect_add_symbolic_function,
+            opset_version=self.opset_version,
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.onnx.unregister_custom_op_symbolic(
+            "aten::add", opset_version=self.opset_version
+        )
+
+    @common_utils.parametrize(
+        "onnx_backend",
+        [
+            common_utils.subtest(
+                verification.OnnxBackend.REFERENCE,
+                # TODO: enable this when ONNX submodule catches up to >= 1.13.
+                decorators=[unittest.expectedFailure],
+            ),
+            verification.OnnxBackend.ONNX_RUNTIME_CPU,
+        ],
+    )
+    def test_verify_found_mismatch_when_export_is_wrong(
+        self, onnx_backend: verification.OnnxBackend
+    ):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with self.assertRaisesRegex(AssertionError, ".*Tensor-likes are not close!.*"):
+            verification.verify(
+                Model(),
+                (torch.randn(2, 3),),
+                opset_version=self.opset_version,
+                options=verification.VerificationOptions(backend=onnx_backend),
+            )
+
+
 @parameterized.parameterized_class(
     [
         # TODO: enable this when ONNX submodule catches up to >= 1.13.
@@ -246,6 +257,8 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
             self.assertEqual(leaf_info.essential_node_kinds(), {"aten::relu"})
 
     def test_find_mismatch_prints_correct_info_when_no_mismatch(self):
+        self.maxDiff = None
+
         class Model(torch.nn.Module):
             def forward(self, x):
                 return x + 1
