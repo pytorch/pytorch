@@ -718,8 +718,8 @@ class TorchPyOperator(VariableTracker):
                 for a in sub_args:
                     assert isinstance(a, TensorVariable)
                     tx.output.create_graph_input(a.as_proxy().node.name)
-                    # TODO: graphargs?  I think we end up not using
-                    # graphargs at all.  Not populated for now.
+                    # NB: we don't bother populating graphargs, as
+                    # they won't actually get used by anything
 
                 # NB: 0 is predicate
                 ix = 1 if branch else 2
