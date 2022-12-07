@@ -10,14 +10,14 @@ _HAS_GFILE_JOIN = hasattr(tf.io.gfile, "join")
 
 
 def _gfile_join(a, b):
-  # The join API is different between tensorboard's TF stub and TF:
-  # https://github.com/tensorflow/tensorboard/issues/6080
-  # We need to try both because `tf` may point to either the stub or the real TF.
-  if _HAS_GFILE_JOIN:
-    return tf.io.gfile.join(a, b)
-  else:
-    fs = tf.io.gfile.get_filesystem(a)
-    return fs.join(a, b)
+    # The join API is different between tensorboard's TF stub and TF:
+    # https://github.com/tensorflow/tensorboard/issues/6080
+    # We need to try both because `tf` may point to either the stub or the real TF.
+    if _HAS_GFILE_JOIN:
+        return tf.io.gfile.join(a, b)
+    else:
+        fs = tf.io.gfile.get_filesystem(a)
+        return fs.join(a, b)
 
 
 def make_tsv(metadata, save_path, metadata_header=None):
@@ -31,7 +31,7 @@ def make_tsv(metadata, save_path, metadata_header=None):
 
     metadata_bytes = tf.compat.as_bytes("\n".join(metadata) + "\n")
     with tf.io.gfile.GFile(_gfile_join(save_path, "metadata.tsv"), "wb") as f:
-      f.write(metadata_bytes)
+        f.write(metadata_bytes)
 
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
@@ -57,7 +57,7 @@ def make_sprite(label_img, save_path):
         im_bytes = buf.getvalue()
 
     with tf.io.gfile.GFile(_gfile_join(save_path, "sprite.png"), "wb") as f:
-      f.write(im_bytes)
+        f.write(im_bytes)
 
 
 def get_embedding_info(metadata, label_img, subdir, global_step, tag):
@@ -75,7 +75,7 @@ def get_embedding_info(metadata, label_img, subdir, global_step, tag):
 def write_pbtxt(save_path, contents):
     config_path = _gfile_join(save_path, "projector_config.pbtxt")
     with tf.io.gfile.GFile(config_path, "wb") as f:
-      f.write(tf.compat.as_bytes(contents))
+        f.write(tf.compat.as_bytes(contents))
 
 
 def make_mat(matlist, save_path):
