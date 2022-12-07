@@ -138,10 +138,6 @@ def _unshard(
     """
     if not handles:
         return
-    if state.limit_all_gathers:
-        event = state._free_event_queue.dequeue_if_needed()
-        if event:
-            event.synchronize()
     any_ran_pre_unshard = False
     with torch.cuda.stream(pre_unshard_stream):
         for handle in handles:
@@ -149,6 +145,10 @@ def _unshard(
             any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
+    if state.limit_all_gathers:
+        event = state._free_event_queue.dequeue_if_needed()
+        if event:
+            event.synchronize()
     with torch.cuda.stream(unshard_stream):
         for handle in handles:
             handle.unshard()
@@ -482,9 +482,14 @@ def _post_backward_hook(
         "FullyShardedDataParallel._post_backward_hook"
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
+        # For multiple applications of reentrant AC across submodules sharing
+        # the same `FlatParameter`, the post-backward hook may run multiple
+        # times in one backward, in which case we permit the state to already
+        # be in `BACKWARD_POST`.
         p_assert(
-            handle._training_state == HandleTrainingState.BACKWARD_PRE,
-            f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
+            handle._training_state
+            in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
+            f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
         )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
@@ -883,7 +888,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._module_to_handles[module]
+        module_param_handles = state._root_module_to_handles[module]
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -913,7 +918,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._module_to_handles[module]
+        module_param_handles = state._root_module_to_handles[module]
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
