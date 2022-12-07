@@ -443,6 +443,9 @@ autodoc_docstring_signature = True
 #
 #
 
+#import sphinx_rtd_theme
+#html_theme = 'sphinx_rtd_theme'
+#html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 html_theme = 'pytorch_sphinx_theme'
 html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 

@@ -67,7 +67,7 @@ Features described in this documentation are classified by release status:
 
 .. toctree::
    :glob:
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: Python API
 
    torch
@@ -76,61 +76,7 @@ Features described in this documentation are classified by release status:
    tensors
    tensor_attributes
    tensor_view
-   torch.amp <amp>
-   torch.autograd <autograd>
-   torch.library <library>
-   cuda
-   torch.backends <backends>
-   torch.distributed <distributed>
-   torch.distributed.algorithms.join <distributed.algorithms.join>
-   torch.distributed.elastic <distributed.elastic>
-   torch.distributed.fsdp <fsdp>
-   torch.distributed.optim <distributed.optim>
-   torch.distributed.tensor.parallel <distributed.tensor.parallel>
-   torch.distributed.checkpoint <distributed.checkpoint>
-   torch.distributions <distributions>
-   torch._dynamo <_dynamo>
-   torch.fft <fft>
-   futures
-   fx
-   torch.hub <hub>
-   torch.jit <jit>
-   torch.linalg <linalg>
-   torch.monitor <monitor>
-   torch.signal <signal>
-   torch.special <special>
-   torch.overrides
-   torch.package <package>
-   profiler
-   nn.init
-   onnx
-   onnx_diagnostics
-   optim
-   complex_numbers
-   ddp_comm_hooks
-   pipeline
-   quantization
-   rpc
-   torch.random <random>
-   masked
-   torch.nested <nested>
-   sparse
-   storage
-   torch.testing <testing>
-   torch.utils.benchmark <benchmark_utils>
-   torch.utils.bottleneck <bottleneck>
-   torch.utils.checkpoint <checkpoint>
-   torch.utils.cpp_extension <cpp_extension>
-   torch.utils.data <data>
-   torch.utils.jit <jit_utils>
-   torch.utils.dlpack <dlpack>
-   torch.utils.mobile_optimizer <mobile_optimizer>
-   torch.utils.model_zoo <model_zoo>
-   torch.utils.tensorboard <tensorboard>
-   type_info
-   named_tensor
-   name_inference
-   torch.__config__ <config_mod>
+   func
 
 .. toctree::
    :maxdepth: 1
