@@ -1,31 +1,31 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from typing import List, cast
+import itertools
+from typing import cast, List
+
+import torch
+import torch.distributed as dist
+from torch import rand, randn, Tensor
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed._tensor.ops.view_ops import (
+    Broadcast,
+    Flatten,
+    InputDim,
+    ops,
+    Repeat,
+    Singleton,
+    Split,
+    view_groups,
+)
 from torch.distributed._tensor.placement_types import Placement
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     redistribute_profiler,
     with_comms,
 )
-from torch.distributed._tensor import DeviceMesh, Shard, Replicate, distribute_tensor
-from torch.distributed._tensor.ops.view_ops import (
-    ops,
-    Singleton,
-    Broadcast,
-    Flatten,
-    Repeat,
-    Split,
-    InputDim,
-    view_groups,
-)
-from torch import Tensor, rand, randn
-from torch.testing._internal.common_utils import run_tests
 from torch.utils._pytree import tree_flatten
-
-import itertools
-import torch
-import torch.distributed as dist
 
 
 class TestViewOps(DTensorTestBase):
@@ -75,12 +75,8 @@ class TestViewOps(DTensorTestBase):
         self.assertEquals(
             view_groups([2, 3, 4, 5, 7], [3, 8, 7, 5]),
             (
-                Split(
-                    Flatten((InputDim(0), InputDim(1), InputDim(2))), (3, 8), 0
-                ),
-                Split(
-                    Flatten((InputDim(0), InputDim(1), InputDim(2))), (3, 8), 1
-                ),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (3, 8), 0),
+                Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (3, 8), 1),
                 Split(Flatten((InputDim(3), InputDim(4))), (7, 5), 0),
                 Split(Flatten((InputDim(3), InputDim(4))), (7, 5), 1),
             ),
@@ -159,9 +155,7 @@ class TestViewOps(DTensorTestBase):
             no_shard_dims.add(kwargs.get("dim", 0))
 
         sharding_choices = cast(List[Placement], [Replicate()]) + [
-            Shard(i)
-            for i, s in enumerate(in_shape)
-            if s > 1 and i not in no_shard_dims
+            Shard(i) for i, s in enumerate(in_shape) if s > 1 and i not in no_shard_dims
         ]
 
         all_sharding_choices = itertools.product(
@@ -175,9 +169,7 @@ class TestViewOps(DTensorTestBase):
             with redistribute_profiler() as profiler:
                 out_dt = op(in_dt, *args[1:], **kwargs)
 
-            self.assertEqual(
-                profiler.num_calls, 0, "Expected no redistribution."
-            )
+            self.assertEqual(profiler.num_calls, 0, "Expected no redistribution.")
 
             full_out = out_dt.redistribute(
                 device_mesh, device_mesh.ndim * [Replicate()]
@@ -198,19 +190,11 @@ class TestViewOps(DTensorTestBase):
         )
         self.dimmap_test(torch.atleast_1d, (randn(()),), (Singleton(),))
         self.dimmap_test(torch.atleast_1d, (randn(24),), (InputDim(0),))
-        self.dimmap_test(
-            torch.atleast_1d, (randn(24, 36),), (InputDim(0), InputDim(1))
-        )
+        self.dimmap_test(torch.atleast_1d, (randn(24, 36),), (InputDim(0), InputDim(1)))
 
-        self.dimmap_test(
-            torch.atleast_2d, (randn(()),), (Singleton(), Singleton())
-        )
-        self.dimmap_test(
-            torch.atleast_2d, (randn(24),), (Singleton(), InputDim(0))
-        )
-        self.dimmap_test(
-            torch.atleast_2d, (randn(24, 36),), (InputDim(0), InputDim(1))
-        )
+        self.dimmap_test(torch.atleast_2d, (randn(()),), (Singleton(), Singleton()))
+        self.dimmap_test(torch.atleast_2d, (randn(24),), (Singleton(), InputDim(0)))
+        self.dimmap_test(torch.atleast_2d, (randn(24, 36),), (InputDim(0), InputDim(1)))
         self.dimmap_test(
             torch.atleast_2d,
             (randn(24, 36, 48),),

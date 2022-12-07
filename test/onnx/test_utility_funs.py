@@ -124,6 +124,18 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
         _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=12)
         self.assertEqual(unconvertible_ops, [])
 
+    def test_it_returns_empty_list_when_model_contains_supported_inplace_ops(self):
+        class SkipConnectionModule(torch.nn.Module):
+            def forward(self, x):
+                out = x
+                out += x
+                out = torch.nn.functional.relu(out, inplace=True)
+
+        module = SkipConnectionModule()
+        x = torch.randn(4, 4)
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=13)
+        self.assertEqual(unconvertible_ops, [])
+
 
 @parameterized.parameterized_class(
     [
@@ -228,7 +240,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -246,7 +257,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
