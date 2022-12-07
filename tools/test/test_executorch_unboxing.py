@@ -1,9 +1,5 @@
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    subtest,
-    TestCase,
-)
+import unittest
+
 from torchgen import local
 
 from torchgen.api import cpp as aten_cpp, types as aten_types
@@ -17,17 +13,17 @@ ATEN_UNBOXING = Unboxing(argument_type_gen=aten_cpp.argumenttype_type)
 ET_UNBOXING = Unboxing(argument_type_gen=et_cpp.argumenttype_type)
 
 
-@instantiate_parametrized_tests
-class TestUnboxing(TestCase):
-    @parametrize(
-        "unboxing, types",
-        [
-            subtest((ATEN_UNBOXING, aten_types), name="aten"),
-            subtest((ET_UNBOXING, et_types), name="executorch"),
-        ],
+class TestUnboxing(unittest.TestCase):
+    """
+    Could use torch.testing._internal.common_utils to reduce boilerplate.
+    GH CI job doesn't build torch before running tools unit tests, hence
+    manually adding these parametrized tests.
+    """
+
+    @local.parametrize(
+        use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
     )
-    @local.parametrize(use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False)
-    def test_symint_argument_translate_ctype(self, unboxing, types) -> None:
+    def _test_symint_argument_translate_ctype(self, unboxing, types) -> None:
         # test if `SymInt[]` JIT argument can be translated into C++ argument correctly.
         # should be `IntArrayRef` due to the fact that Executorch doesn't use symint sig.
 
@@ -43,15 +39,16 @@ class TestUnboxing(TestCase):
         # pyre-fixme[16]:
         self.assertEqual(ctype.type, types.intArrayRefT)
 
-    @parametrize(
-        "unboxing, types",
-        [
-            subtest((ATEN_UNBOXING, aten_types), name="aten"),
-            subtest((ET_UNBOXING, et_types), name="executorch"),
-        ],
+    def test_symint_argument_translate_ctype_aten(self):
+        self._test_symint_argument_translate_ctype(ATEN_UNBOXING, aten_types)
+
+    def test_symint_argument_translate_ctype_executorch(self):
+        self._test_symint_argument_translate_ctype(ET_UNBOXING, et_types)
+
+    @local.parametrize(
+        use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
     )
-    @local.parametrize(use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False)
-    def test_const_tensor_argument_translate_ctype(self, unboxing, types) -> None:
+    def _test_const_tensor_argument_translate_ctype(self, unboxing, types) -> None:
         # pyre-fixme[16]: `enum.Enum` has no attribute `Tensor`
         # pyre-fixme[19]: Call `BaseType.__init__` expects 0 positional arguments, 1 was provided.
         tensor_type = BaseType(BaseTy.Tensor)
@@ -64,15 +61,16 @@ class TestUnboxing(TestCase):
         # pyre-fixme[16]:
         self.assertEqual(ctype, ConstRefCType(BaseCType(types.tensorT)))
 
-    @parametrize(
-        "unboxing, types",
-        [
-            subtest((ATEN_UNBOXING, aten_types), name="aten"),
-            subtest((ET_UNBOXING, et_types), name="executorch"),
-        ],
+    def test_const_tensor_argument_translate_ctype_aten(self):
+        self._test_const_tensor_argument_translate_ctype(ATEN_UNBOXING, aten_types)
+
+    def test_const_tensor_argument_translate_ctype_executorch(self):
+        self._test_const_tensor_argument_translate_ctype(ET_UNBOXING, et_types)
+
+    @local.parametrize(
+        use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
     )
-    @local.parametrize(use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False)
-    def test_mutable_tensor_argument_translate_ctype(self, unboxing, types) -> None:
+    def _test_mutable_tensor_argument_translate_ctype(self, unboxing, types) -> None:
         # pyre-fixme[16]: `enum.Enum` has no attribute `Tensor`
         # pyre-fixme[19]: Call `BaseType.__init__` expects 0 positional arguments, 1 was provided.
         tensor_type = BaseType(BaseTy.Tensor)
@@ -85,15 +83,16 @@ class TestUnboxing(TestCase):
         # pyre-fixme[16]:
         self.assertEqual(ctype, MutRefCType(BaseCType(types.tensorT)))
 
-    @parametrize(
-        "unboxing, types",
-        [
-            subtest((ATEN_UNBOXING, aten_types), name="aten"),
-            subtest((ET_UNBOXING, et_types), name="executorch"),
-        ],
+    def test_mutable_tensor_argument_translate_ctype_aten(self):
+        self._test_mutable_tensor_argument_translate_ctype(ATEN_UNBOXING, aten_types)
+
+    def test_mutable_tensor_argument_translate_ctype_executorch(self):
+        self._test_mutable_tensor_argument_translate_ctype(ET_UNBOXING, et_types)
+
+    @local.parametrize(
+        use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
     )
-    @local.parametrize(use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False)
-    def test_tensor_list_argument_translate_ctype(self, unboxing, types) -> None:
+    def _test_tensor_list_argument_translate_ctype(self, unboxing, types) -> None:
         # pyre-fixme[16]: `enum.Enum` has no attribute `Tensor`
         # pyre-fixme[19]: Call `BaseType.__init__` expects 0 positional arguments, 1 was provided.
         tensor_list_type = ListType(elem=BaseType(BaseTy.Tensor), size=None)
@@ -106,15 +105,16 @@ class TestUnboxing(TestCase):
         # pyre-fixme[16]:
         self.assertEqual(ctype, BaseCType(types.tensorListT))
 
-    @parametrize(
-        "unboxing, types",
-        [
-            subtest((ATEN_UNBOXING, aten_types), name="aten"),
-            subtest((ET_UNBOXING, et_types), name="executorch"),
-        ],
+    def test_tensor_list_argument_translate_ctype_aten(self):
+        self._test_tensor_list_argument_translate_ctype(ATEN_UNBOXING, aten_types)
+
+    def test_tensor_list_argument_translate_ctype_executorch(self):
+        self._test_tensor_list_argument_translate_ctype(ET_UNBOXING, et_types)
+
+    @local.parametrize(
+        use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
     )
-    @local.parametrize(use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False)
-    def test_optional_int_argument_translate_ctype(self, unboxing, types) -> None:
+    def _test_optional_int_argument_translate_ctype(self, unboxing, types) -> None:
         # pyre-fixme[16]: `enum.Enum` has no attribute `Tensor`
         # pyre-fixme[19]: Call `BaseType.__init__` expects 0 positional arguments, 1 was provided.
         optional_int_type = OptionalType(elem=BaseType(BaseTy.int))
@@ -126,3 +126,9 @@ class TestUnboxing(TestCase):
         self.assertEqual(out_name, "something_opt_out")
         # pyre-fixme[16]:
         self.assertEqual(ctype, types.OptionalCType(BaseCType(types.longT)))
+
+    def test_optional_int_argument_translate_ctype_aten(self):
+        self._test_optional_int_argument_translate_ctype(ATEN_UNBOXING, aten_types)
+
+    def test_optional_int_argument_translate_ctype_executorch(self):
+        self._test_optional_int_argument_translate_ctype(ET_UNBOXING, et_types)
