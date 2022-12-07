@@ -1,10 +1,10 @@
-import contextlib
 import torch
 import torch._C as _C
 from torch._C import _functions
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
+from torch.autograd.grad_mode import _DecoratorContextManager
 import functools
 import warnings
 from collections import OrderedDict
@@ -495,14 +495,16 @@ def traceable(fn_cls):
 
 
 # Private feature flag. Not user-facing.
-@contextlib.contextmanager
-def _set_autograd_function_extension_enabled(enabled=True):
-    try:
-        prev_state = torch._C._is_autograd_function_extension_enabled()
-        torch._C._set_autograd_function_extension_enabled(enabled)
-        yield
-    finally:
-        torch._C._set_autograd_function_extension_enabled(prev_state)
+class _set_autograd_function_extension_enabled(_DecoratorContextManager):
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+
+    def __enter__(self):
+        self.prev_state = torch._C._is_autograd_function_extension_enabled()
+        torch._C._set_autograd_function_extension_enabled(self.enabled)
+
+    def __exit__(self, *args, **kwargs):
+        torch._C._set_autograd_function_extension_enabled(self.prev_state)
 
 
 class InplaceFunction(Function):
@@ -553,13 +555,11 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif isinstance(obj, dict):
             # We only accept primitive key types, so we needn't inspect them
             for o in obj.values():
-                for var in _iter(o):
-                    yield var
+                yield from _iter(o)
         elif allow_unknown:
             yield obj
         else:
