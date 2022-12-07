@@ -42,7 +42,8 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import codecache, config, metrics
-    from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
+    from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
+    from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.overrides import (
@@ -520,7 +521,12 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
-
+        # if there are negative terms in ModularIndexing base, we cannot replace it with IndexingDiv
+        expr = ModularIndexing(i1 - 15, 1, 64)
+        self.assertEqual(
+            sizevars.simplify_with_ranges(expr, var_ranges),
+            ModularIndexing(i1 - 15, 1, 64),
+        )
         # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
@@ -548,6 +554,14 @@ class TestIndexingSimplification(TorchTestCase):
         # the same things happens with symbolic divisor
         self.assertEqual(
             ModularIndexing(i0 + i1 * i2 * r3, i2, r3), ModularIndexing(i0, i2, r3)
+        )
+
+        # if there are negative terms, we cannot optimize away zero terms due to https://github.com/openai/triton/issues/619
+        self.assertEqual(
+            ModularIndexing(-i0 + i1 * 20, 2, 10), ModularIndexing(-i0 + i1 * 20, 2, 10)
+        )
+        self.assertEqual(
+            ModularIndexing(-15 + i1 * 20, 2, 10), ModularIndexing(-15 + i1 * 20, 2, 10)
         )
 
         # Constant fold from divisor into base
@@ -1293,19 +1307,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @patch.object(config, "fusion_reorder_loops", True)
     def test_softmax_outer_dim_fusion(self):
         def fn(a):
             return torch.softmax(a, dim=0)
 
         self.common(fn, (torch.randn(20, 20),))
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            1 if self.device == "cuda" else 4,
+        )
 
     def test_softmax_inner_dim_fusion(self):
         def fn(a):
             return torch.softmax(a, dim=1)
 
         self.common(fn, (torch.randn(20, 20),))
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count,
+            1 if self.device == "cuda" else 3,
+        )
 
     def test_log_softmax(self):
         def fn(a, b):
@@ -5846,6 +5867,31 @@ if HAS_CUDA:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
+
+
+class ExprPrinterTests(TestCase):
+    def test_print_pow(self):
+        s1 = sympy.Symbol("foo", integer=True)
+        s2 = sympy.Symbol("bar", integer=True)
+        s3 = sympy.Symbol("baz", integer=True)
+
+        cases = (
+            # expr, result
+            # Test exprs.
+            (
+                s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
+                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+            ),
+            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            # Test Pow directly.
+            (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
+            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
+            (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
+        )
+
+        for expr, result in cases:
+            self.assertEqual(cexpr(expr), result)
+            self.assertEqual(texpr(expr), result)
 
 
 if __name__ == "__main__":

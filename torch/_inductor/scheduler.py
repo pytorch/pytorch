@@ -6,7 +6,7 @@ import logging
 import os
 import pprint
 import textwrap
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import sympy
@@ -14,9 +14,9 @@ import sympy
 import torch
 
 from . import config, dependencies, ir, metrics
-from .dependencies import MemoryDep, StarDep
+from .dependencies import canonicalization_prefix, MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils, has_triton
+from .utils import cache_on_self, cmp, dynamo_utils, has_triton, sympy_symbol
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -255,12 +255,26 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node: ir.ComputedBuffer, group_fn):
+    def __init__(
+        self,
+        scheduler: "Scheduler",
+        node: ir.ComputedBuffer,
+        group_fn,
+        loop_reorder=None,
+    ):
         super().__init__(scheduler, node)
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_and_reorder()
+
+        if loop_reorder is None:
+
+            def loop_reorder(n):
+                return n.simplify_and_reorder()
+
+        else:
+            assert (
+                not self.is_reduction()
+            ), "loop_reorder is not supported for reductions"
+
+        self._sizes, self._body = loop_reorder(node)
 
         self.group = (node.get_device(), group_fn(self._sizes))
 
@@ -272,11 +286,6 @@ class SchedulerNode(BaseSchedulerNode):
             # downstream dependencies get confused by it
             self.read_writes.writes = self.read_writes.writes | {
                 w.strip_last_size() for w in self.read_writes.writes
-            }
-            # reduction not on the last dim swaps the sizes, and downstream
-            # dependencies expect unswapped
-            self.read_writes.writes = self.read_writes.writes | {
-                w.maybe_swap_sizes() for w in self.read_writes.writes
             }
 
     def debug_str_extra(self):
@@ -792,19 +801,29 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
-        for node1, node2 in self.get_possible_fusions():
-            node1 = self.name_to_fused_node[node1.get_first_name()]
-            node2 = self.name_to_fused_node[node2.get_first_name()]
+
+        recent_fusions = set()
+        possible_fusions = self.get_possible_fusions()
+        for node1, node2 in possible_fusions:
+            if node1.get_first_name() in recent_fusions:
+                node1 = self.name_to_fused_node[node1.get_first_name()]
+            if node2.get_first_name() in recent_fusions:
+                node2 = self.name_to_fused_node[node2.get_first_name()]
+
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
                 node3 = FusedSchedulerNode.fuse(node1, node2)
-                fused_nodes.remove(node1)
-                fused_nodes.remove(node2)
+                fused_nodes.remove(self.name_to_fused_node[node1.get_first_name()])
+                fused_nodes.remove(self.name_to_fused_node[node2.get_first_name()])
                 fused_nodes.add(node3)
                 self.name_to_fused_node.update(
                     {n.get_name(): node3 for n in node3.get_nodes()}
                 )
+
+                recent_fusions.add(node1.get_first_name())
+                recent_fusions.add(node2.get_first_name())
+
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.topological_sort_schedule()
 
@@ -812,22 +831,21 @@ class Scheduler:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
-        possible_fusions = []
+        possible_fusions = set()
         seen = set()
 
         def check_all_pairs(nodes):
-            for node1_index, node1 in enumerate(nodes):
-                for node2 in nodes[node1_index + 1 :]:
-                    key = (node1, node2)
-                    if key in seen:
-                        continue
-                    seen.add(key)
+            for node1, node2 in self._upper_triangle_pairs(nodes):
+                key = (node1, node2)
+                if key in seen:
+                    continue
+                seen.add(key)
 
-                    if self.can_fuse(node1, node2):
-                        possible_fusions.append(key)
-                    elif node2.is_template() and self.can_fuse(node2, node1):
-                        # epilogue fusions are order dependent
-                        possible_fusions.append((node2, node1))
+                if self.can_fuse(node1, node2):
+                    possible_fusions.add(key)
+                elif node2.is_template() and self.can_fuse(node2, node1):
+                    # epilogue fusions are order dependent
+                    possible_fusions.add((node2, node1))
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in self.nodes:
@@ -835,6 +853,11 @@ class Scheduler:
                 buffer_names_grouping[buf].append(node)
         for node_grouping in buffer_names_grouping.values():
             check_all_pairs(node_grouping)
+
+        if config.fusion_reorder_loops:
+            possible_fusions |= self.get_reorder_fusions(
+                buffer_names_grouping, ignore=possible_fusions
+            )
 
         if config.aggressive_fusion:
             group_grouping = collections.defaultdict(list)
@@ -846,6 +869,180 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         return sorted(possible_fusions, key=self.score_fusion_key, reverse=True)
+
+    @staticmethod
+    def _upper_triangle_pairs(nodes):
+        for node1_index, node1 in enumerate(nodes):
+            for node2 in nodes[node1_index + 1 :]:
+                yield node1, node2
+
+    @staticmethod
+    def reorder_deps(dep1, dep2) -> Optional[List[int]]:
+        if dep1 == dep2:
+            return None
+
+        if not isinstance(dep1, MemoryDep) or not isinstance(dep2, MemoryDep):
+            return None
+
+        sizevars = V.graph.sizevars
+
+        def expr_key(expr):
+            return (sizevars.size_hint(expr), str(expr))
+
+        def sort_exprs(exprs):
+            return sorted(exprs, key=expr_key)
+
+        if sort_exprs(dep1.size) != sort_exprs(dep2.size):
+            return None
+
+        ndim = len(dep1.size)
+        c = canonicalization_prefix()
+        index_vars = [sympy_symbol(f"{c}{i}") for i in range(ndim)]
+        (
+            strides1,
+            offset1,
+        ) = sizevars.maybe_stride_and_offset_vars(dep1.index, index_vars)
+        (
+            strides2,
+            offset2,
+        ) = sizevars.maybe_stride_and_offset_vars(dep2.index, index_vars)
+
+        if any(
+            x is None
+            for x in itertools.chain(strides1, (offset1,), strides2, (offset2,))
+        ):
+            return None
+
+        if offset1 != offset2:
+            return None
+
+        dep1_permutation = sorted(range(ndim), key=lambda i: expr_key(strides1[i]))
+        dep2_permutation = sorted(range(ndim), key=lambda i: expr_key(strides2[i]))
+        if dep1_permutation == dep2_permutation:
+            return None
+
+        valid = all(
+            dep1.size[d1] == dep2.size[d2]
+            for d1, d2 in zip(dep1_permutation, dep2_permutation)
+        )
+        if not valid:
+            return None
+
+        # Permute node2 to iteration in the same order as node1
+        return [dep2_permutation[i] for i in dep1_permutation]
+
+    def get_reorder_fusions(
+        self,
+        buffer_names_grouping: Dict[str, List[BaseSchedulerNode]],
+        ignore: Set[Tuple[BaseSchedulerNode, BaseSchedulerNode]],
+    ) -> Set[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+        possible_fusions = set()
+        reorder_opportunities: Dict[
+            Tuple[BaseSchedulerNode, BaseSchedulerNode], Set[Tuple[int, ...]]
+        ] = collections.defaultdict(set)
+
+        for buf_name, node_grouping in buffer_names_grouping.items():
+            for node1, node2 in self._upper_triangle_pairs(node_grouping):
+                if node2.is_reduction():
+                    if node1.is_reduction():
+                        continue
+                    else:
+                        node1, node2 = node2, node1
+
+                if (node1, node2) in possible_fusions or (
+                    node1,
+                    node2,
+                ) in possible_fusions:
+                    continue
+
+                if not isinstance(node2, (FusedSchedulerNode, SchedulerNode)):
+                    # TODO: Handle fused nodes
+                    continue
+
+                if isinstance(node2, FusedSchedulerNode) and any(
+                    not isinstance(n, SchedulerNode) for n in node2.get_nodes()
+                ):
+                    continue
+
+                node1_buf_deps = [
+                    dep
+                    for dep in (node1.read_writes.reads | node1.read_writes.writes)
+                    if dep.name == buf_name
+                ]
+                node2_buf_deps = [
+                    dep
+                    for dep in (node2.read_writes.reads | node2.read_writes.writes)
+                    if dep.name == buf_name
+                ]
+
+                orders = set()
+                for dep1, dep2 in itertools.product(node1_buf_deps, node2_buf_deps):
+                    if dep1 == dep2:
+                        continue
+
+                    if not isinstance(dep1, MemoryDep) or not isinstance(
+                        dep2, MemoryDep
+                    ):
+                        continue
+
+                    reorder = self.reorder_deps(dep1, dep2)
+                    if reorder is not None:
+                        reorder_opportunities[(node1, node2)].add(tuple(reorder))
+
+        def reorder_loop_node(
+            node: SchedulerNode, new_order: Tuple[int, ...]
+        ) -> SchedulerNode:
+            reorder = ir.same_reorder(order)
+
+            def loop_reorder(ir_node: ir.ComputedBuffer):
+                (
+                    iter_vars,
+                    reduce_vars,
+                ), var_ranges = dependencies.index_vars_no_squeeze(
+                    *node._sizes, prefix="sched_reorder"
+                )
+                assert len(reduce_vars) == 0
+                body = ir.LoopBody(
+                    node._body,
+                    [reorder(iter_vars), reduce_vars],
+                    var_ranges,
+                )
+                iter_ranges = [var_ranges[v] for v in reorder(iter_vars)]
+                reduce_ranges = []
+                return (iter_ranges, reduce_ranges), body
+
+            new_node = SchedulerNode(
+                self,
+                node.node,
+                self.get_backend(node.get_device()).group_fn,
+                loop_reorder=loop_reorder,
+            )
+            new_node.users = node.users
+            new_node.inverse_users = node.inverse_users
+            new_node.recursive_predecessors = node.recursive_predecessors
+            new_node.min_order = node.min_order
+            new_node.max_order = node.max_order
+            new_node.last_usage = node.last_usage
+            new_node.written = node.written
+            return new_node
+
+        for (node1, node2), orders in reorder_opportunities.items():
+            for order in orders:
+                if isinstance(node2, SchedulerNode):
+                    new_node = reorder_loop_node(node2, order)
+                elif isinstance(node2, FusedSchedulerNode):
+                    assert all(isinstance(n, SchedulerNode) for n in node2.get_nodes())
+                    new_node = FusedSchedulerNode(
+                        self, [reorder_loop_node(n, order) for n in node2.get_nodes()]
+                    )
+                else:
+                    assert False, f"Unsupported node type {node2}"
+
+                if self.can_fuse(node1, new_node):
+                    possible_fusions.add((node1, new_node))
+
+        print(possible_fusions)
+        return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
         """Finds whether there's a path from src to dst caused indirectly by fusion"""

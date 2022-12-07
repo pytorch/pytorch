@@ -55,6 +55,10 @@ tune_layout = False
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# Allow scheduler fusions to reorder loops
+# NOTE: fusions during lowering can always reorder
+fusion_reorder_loops = True
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -119,12 +123,12 @@ class cpp:
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
-        "g++-12",
-        "g++-11",
-        "g++-10",
-        "clang++",
+        # "g++-12",
+        # "g++-11",
+        # "g++-10",
+        # "clang++",
         "g++",
-        "g++.par",
+        # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False

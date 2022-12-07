@@ -250,6 +250,7 @@ class FusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
+    @patch.object(config, "fusion_reorder_loops", True)
     def test_softmax_outer(self):
         def f(a):
             return torch.softmax(a, dim=0)
