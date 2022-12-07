@@ -2139,6 +2139,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_dynamic_slicing(self):
+        def f(x):
+            return x[:x.shape[0]-2, x.shape[1]-1:]
+
+        # gm, _ = torch._dynamo.export(
+        #     f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        # )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=False)
+        print(gm)
+
+        inp = torch.randn(6, 5)
+        self.assertEqual(gm(inp).shape, f(inp).shape)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

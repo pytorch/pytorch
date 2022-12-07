@@ -10,6 +10,7 @@ from typing import Dict, List
 import numpy as np
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
 from .. import config, variables
@@ -247,7 +248,29 @@ class BuiltinVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.__getitem__(bool[])")
+        if (
+            self.fn is operator.getitem
+            and len(args) == 2
+            and isinstance(args[0], variables.TensorVariable)
+            and isinstance(args[1], variables.SliceVariable)):
+            print("ARGS", args)
 
+            start = args[1].var_getattr(tx, "start")
+            end = args[1].var_getattr(tx, "stop") 
+            step = args[1].var_getattr(tx, "step") if args[1].var_getattr(tx, "step").value else variables.ConstantVariable(1)
+
+            prox_args = proxy_args_kwargs((args[0],), kwargs = {"start": start, "end": end, "step":step})
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten.slice.Tensor,
+                    *prox_args,
+                    current_tx=tx,
+                ),
+                **options,
+            )
+            
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable

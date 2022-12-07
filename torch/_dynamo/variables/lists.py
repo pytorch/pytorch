@@ -437,8 +437,8 @@ class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
         from .tensor import DynamicShapeVariable
 
-        if any([isinstance(x, DynamicShapeVariable) for x in items]):
-            unimplemented("Dynamic slicing not supported")
+        # if any([isinstance(x, DynamicShapeVariable) for x in items]):
+        #     unimplemented("Dynamic slicing not supported")
 
         items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
