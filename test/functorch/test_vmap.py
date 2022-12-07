@@ -20,7 +20,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
-from torch.utils._pytree import tree_flatten
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3174,13 +3173,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
-                if noncontiguous:
-                    sample_input = sample_input.noncontiguous()
-
-                    # Sanity check that all tensors are `non-contiguous`
-                    tensors = filter(lambda t: isinstance(t, torch.Tensor), tree_flatten(sample_input))
-                    assert all(map(lambda t: not t.is_contiguous(), tensors))
-
                 args = (sample_input.input,) + sample_input.args
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
@@ -3311,32 +3303,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('trace'),
         xfail('as_strided', 'partial_views'),
     }))
-    def test_vmap_exhaustive(self, device, dtype, op):
-        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False)
-
-    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive_noncontiguous', (
-        # The following is often flaky, but just on windows.
-        # We should investigate if it's actually a problem or not.
-        tol1('nn.functional.conv_transpose3d',
-             {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
-    ))
-    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive_noncontiguous', vmap_fail.union({
-        xfail('native_batch_norm'),
-        # The error inputs are vectors, that pass when batched as they are treated as a matrix
-        xfail('trace'),
-        # Generator functions which don't take Tensor inputs
-        xfail('randint'),
-        xfail('randn'),
-        xfail('signal.windows.cosine'),
-        xfail('signal.windows.exponential'),
-        xfail('signal.windows.gaussian'),
-        xfail('signal.windows.kaiser'),
-    }))
-    def test_vmap_exhaustive_noncontiguous(self, device, dtype, op):
-        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False, noncontiguous=True)
+    @parametrize('noncontiguous', (False, True))
+    def test_vmap_exhaustive(self, device, dtype, op, noncontiguous):
+        self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False, noncontiguous=noncontiguous)
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
