@@ -73,6 +73,21 @@ class OutputGraphState(NamedTuple):
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
+    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
+
+    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
+        for k in self._fields:
+            if k == "side_effects":
+                r = self.side_effects.diff(other.side_effects)
+                if r is not None:
+                    return r
+                continue
+
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{prefix}{k} mismatch: {sv} != {ov}"
+        return None
 
 
 @functools.lru_cache(None)
@@ -227,6 +242,7 @@ class OutputGraph(fx.Tracer):
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
+            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
@@ -239,6 +255,7 @@ class OutputGraph(fx.Tracer):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
+            self.name_to_input,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
