@@ -605,13 +605,13 @@ def determine_local_world_size(nproc_per_node: str):
     try:
         logging.info(f"Using nproc_per_node={nproc_per_node}.")
         return int(nproc_per_node)
-    except ValueError:
+    except ValueError as e:
         if nproc_per_node == "cpu":
             num_proc = os.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
-                raise ValueError("Cuda is not available.")
+                raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
         elif nproc_per_node == "auto":
@@ -622,7 +622,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = os.cpu_count()
                 device_type = "cpu"
         else:
-            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}")
+            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
         log.info(
             f"Using nproc_per_node={nproc_per_node},"

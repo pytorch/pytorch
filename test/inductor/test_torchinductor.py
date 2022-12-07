@@ -65,7 +65,7 @@ except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("requires sympy/functorch/filelock") from e
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 

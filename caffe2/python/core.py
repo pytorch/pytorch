@@ -970,7 +970,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                         input_name,
                         err
                     )
-                )
+                ) from err
 
             # Finally, let's create the sum operator.
             sum_ops, g = self._MakeSumOps(input_name, input_version)
@@ -1175,7 +1175,7 @@ class GradientRegistry(object):
                 raise Exception(
                     "Exception when creating gradient for [{}]:{}.\nOp: \n{}".
                     format(op.type, e, str(op))
-                )
+                ) from e
 
         if gradient_ops is None:
             return [], g_input

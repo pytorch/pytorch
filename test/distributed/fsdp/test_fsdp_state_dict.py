@@ -611,8 +611,8 @@ class TestFSDPStateDict(FSDPTest):
     def _state_dict(model: Module, state_dict_type: str):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]
-        except KeyError:
-            raise ValueError(f"No state_dict type for {state_dict_type}")
+        except KeyError as e:
+            raise ValueError(f"No state_dict type for {state_dict_type}") from e
 
         with FSDP.state_dict_type(model, enum_val):
             return model.state_dict()
@@ -623,8 +623,8 @@ class TestFSDPStateDict(FSDPTest):
     ):
         try:
             enum_val = STATE_DICT_MAPPING[state_dict_type]
-        except KeyError:
-            raise ValueError(f"No state_dict for {state_dict_type}")
+        except KeyError as e:
+            raise ValueError(f"No state_dict for {state_dict_type}") from e
 
         with FSDP.state_dict_type(model, enum_val):
             return model.load_state_dict(state_dict, strict=True)

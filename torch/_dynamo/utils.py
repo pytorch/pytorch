@@ -348,13 +348,13 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except NotImplementedError:
+    except NotImplementedError as e:
         from .exc import unimplemented
         from .variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
+        ) from e
 
 
 @dataclasses.dataclass
@@ -745,7 +745,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg)
+        raise unimplemented(msg) from e
 
 
 def wrap_to_fake_tensor(e, fake_mode):

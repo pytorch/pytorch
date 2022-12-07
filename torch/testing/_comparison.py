@@ -677,8 +677,8 @@ class TensorLikePair(Pair):
 
         try:
             return torch.as_tensor(tensor_like)
-        except Exception:
-            raise UnsupportedInputs()
+        except Exception as e:
+            raise UnsupportedInputs() from e
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {

@@ -277,8 +277,9 @@ def min_cut_rematerialization_partition(
     """
     try:
         import networkx as nx
-    except ImportError:
-        raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
+    except ImportError as e:
+        raise RuntimeError("Need networkx installed to perform smart recomputation "
+                           "heuristics") from e
 
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()

@@ -1001,8 +1001,8 @@ class BenchmarkRunner:
 
         try:
             self.model_iter_fn(model, example_inputs)
-        except Exception:
-            raise NotImplementedError("Eager model failed to run")
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
         model = copy.deepcopy(model)

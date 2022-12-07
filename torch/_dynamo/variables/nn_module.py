@@ -504,8 +504,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
+        except AttributeError as e:
+            raise NotImplementedError from e
 
         if fn in (
             torch.nn.ModuleList.__iter__,

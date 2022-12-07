@@ -228,7 +228,7 @@ def _handle_exception(result):
             raise RuntimeError(  # noqa: B904
                 f"Failed to create original exception type. Error msg was {str(e)}"
                 f" Original exception on remote side was {exception_msg}"
-            )
+            ) from e
 
         if exc is not None:
             raise exc

@@ -3805,7 +3805,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)
+            raise AssertionError(msg) from e
 
     def test_public_api_surface(self):
         non_back_compat_objects = {}

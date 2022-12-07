@@ -1719,8 +1719,8 @@ class Type:
             return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
-        except KeyError:
-            raise RuntimeError(f"unrecognized type {t}")
+        except KeyError as e:
+            raise RuntimeError(f"unrecognized type {t}") from e
 
     def __str__(self) -> str:
         raise NotImplementedError

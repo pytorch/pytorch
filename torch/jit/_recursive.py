@@ -185,7 +185,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         except RuntimeError as re:
             raise RuntimeError(
                 "Error inferring type for {name}: {item}: {re}".format(name=name, item=item, re=re)
-            )
+            ) from re
 
         return attr_type, inferred
 

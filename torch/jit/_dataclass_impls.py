@@ -20,13 +20,13 @@ def compose_fn(cls, name: str, body_lines: List[str], signature: str) -> ParsedD
     # Parse the function declaration
     try:
         py_ast = ast.parse(decl)
-    except SyntaxError:
+    except SyntaxError as e:
         # This should only happen if there's some unforeseeable change
         # in the dataclasses module that makes our synthesized code fail
         raise RuntimeError(
             f"TorchScript failed to synthesize dataclass method '{name}' for class '{cls.__name__}'. "
             "Please file a bug report at <https://github.com/pytorch/pytorch/issues>"
-        )
+        ) from e
     fake_filename = _get_fake_filename(cls, name)
     # Parse the function
     return ParsedDef(

@@ -1015,11 +1015,11 @@ def _get_param_id_to_param_from_optim_input(
         return list(model.parameters())
     try:
         params = list(optim_input)
-    except TypeError:
+    except TypeError as e:
         raise TypeError(
             "Optimizer input should be an iterable of Tensors or dicts, "
             f"but got {optim_input}"
-        )
+        ) from e
     if len(params) == 0:
         raise ValueError("Optimizer input should not be empty")
 

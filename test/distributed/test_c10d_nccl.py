@@ -2598,7 +2598,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             try:
                 pg_gloo.barrier().wait()
             except Exception as e:
-                raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}")
+                raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
             # Now verify communicators on this rank have
             # been aborted by watchdog.
             self._wait_for_comm_abort(process_group, failed_collective_timeout)
