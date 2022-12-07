@@ -1,12 +1,11 @@
 #pragma once
 #ifdef CPU_CAPABILITY_AVX2
 
-
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
@@ -72,33 +71,40 @@ static inline double bilinear_filter(double x) {
   return 0.0;
 }
 
-void unpack_rgb(uint8_t* unpacked, const uint8_t* packed, int num_pixels)
+void unpack_rgb(
+    uint8_t* unpacked,
+    const uint8_t* packed,
+    int num_pixels,
+    int num_channels)
 // TODO: maybe use faster version from
 // https://github.com/python-pillow/Pillow/pull/2693/files
 {
-  int i;
-  for (i = 0; i < num_pixels; i++) {
-    unpacked[0] = packed[0];
-    unpacked[1] = packed[1];
-    unpacked[2] = packed[2];
-    unpacked[3] = 255;
+  for (const auto i : c10::irange(num_pixels)) {
+    for (const auto j : c10::irange(num_channels)) {
+      unpacked[j] = packed[j];
+    }
+    for (const auto j : c10::irange(num_channels, 4)) {
+      unpacked[j] = 255;
+    }
     unpacked += 4;
-    packed += 3;
+    packed += num_channels;
   }
 }
 
-void pack_rgb(uint8_t* packed, const uint8_t* unpacked, int num_pixels)
+void pack_rgb(
+    uint8_t* packed,
+    const uint8_t* unpacked,
+    int num_pixels,
+    int num_channels)
 // TODO: maybe use faster version from
 // https://github.com/python-pillow/Pillow/pull/2693/files
 {
-  int i;
-  /* RGB triplets */
-  for (i = 0; i < num_pixels; i++) {
-    packed[0] = unpacked[0];
-    packed[1] = unpacked[1];
-    packed[2] = unpacked[2];
-    packed += 3;
+  for (const auto i : c10::irange(num_pixels)) {
+    for (const auto j : c10::irange(num_channels)) {
+      packed[j] = unpacked[j];
+    }
     unpacked += 4;
+    packed += num_channels;
   }
 }
 
@@ -324,8 +330,7 @@ void ImagingResampleVertical_8bpc(
   // use the same buffer for normalized coefficients
   kk = (INT16*)prekk;
   coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
-    // std::cout << "BB " << coefs_precision << std::endl;
-
+  // std::cout << "BB " << coefs_precision << std::endl;
 
   for (yy = 0; yy < yout; yy++) {
     k = &kk[yy * ksize];
@@ -455,6 +460,8 @@ UINT32* ImagingResampleInner(
 void beepidiboop(const at::Tensor& input, const at::Tensor& output) {
   // Assume shape is 1, 3, H, W  and layout is channels_last
 
+  auto batch_size = input.size(0);
+  auto num_channels = input.size(1);
   auto xin = input.size(3);
   auto yin = input.size(2);
   auto xout = output.size(3);
@@ -464,19 +471,27 @@ void beepidiboop(const at::Tensor& input, const at::Tensor& output) {
 
   UINT32* unpacked_input_p = (UINT32*)malloc(sizeof(UINT32) * num_pixels_input);
 
-  for (const auto i : c10::irange(input.size(0))) {
-    const uint8_t* packed_input_p = (const uint8_t*)input[i].data_ptr<uint8_t>();
-    unpack_rgb((uint8_t*)unpacked_input_p, packed_input_p, num_pixels_input);
+  for (const auto i : c10::irange(batch_size)) {
+    const uint8_t* packed_input_p =
+        (const uint8_t*)input[i].data_ptr<uint8_t>();
+    unpack_rgb(
+        (uint8_t*)unpacked_input_p,
+        packed_input_p,
+        num_pixels_input,
+        num_channels);
 
     UINT32* unpacked_output_p =
         ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout);
 
     uint8_t* packed_output_p = (uint8_t*)output[i].data_ptr<uint8_t>();
     pack_rgb(
-        packed_output_p, (const uint8_t*)unpacked_output_p, num_pixels_output);
+        packed_output_p,
+        (const uint8_t*)unpacked_output_p,
+        num_pixels_output,
+        num_channels);
   }
 
-free(unpacked_input_p);
+  free(unpacked_input_p);
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
