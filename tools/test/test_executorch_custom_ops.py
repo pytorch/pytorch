@@ -1,6 +1,6 @@
 from typing import Dict
 
-from torch.testing.common_utils import (
+from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     subtest,
