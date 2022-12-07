@@ -35,6 +35,7 @@ from common_utils import (
     is_batch_norm_training,
     is_valid_inplace_sample_input,
     loop2,
+    expectedFailureIf
 )
 
 from torch.testing._internal.opinfo.core import SampleInput
@@ -416,7 +417,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
         decorate('linalg.det', 'singular',
-                 decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
+                 decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -904,8 +905,8 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
-        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
+        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
+        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS)),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
