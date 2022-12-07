@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List
 
 import torch
 
-from torch.hub import tqdm
+from torch.hub import tqdm, Faketqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
 
@@ -618,7 +618,7 @@ class AsyncCompile:
         )
         if config.compile_threads > 1:
             for key, result in scope.items():
-                if config.verbose_progress:
+                if config.verbose_progress and isinstance(tqdm, Faketqdm) :
                     pbar.set_postfix_str(key)
                 if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()

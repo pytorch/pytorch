@@ -2,14 +2,14 @@ import itertools
 import logging
 import os
 
-from torch.hub import tqdm
+from torch.hub import tqdm, Faketqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
 logging.addLevelName(logging.CODE, "CODE")
 
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
-disable_progress = True
+disable_progress = False
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
@@ -99,8 +99,10 @@ if not disable_progress:
 
 def get_step_logger(logger):
     if not disable_progress:
-        pbar.set_postfix_str(f"{logger.name}")
         pbar.update(1)
+        if isinstance(tqdm, Faketqdm):
+            pbar.set_postfix_str(f"{logger.name}")
+
     step = next(_step_counter)
 
     def log(level, msg):
