@@ -65,6 +65,16 @@ const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Ten
 
 
 c10::SymInt get_nbytes(const Tensor& value) {
+  // The functionalization story when wrapping tensors that don't have storage
+  // is a bit wonky, but fortunately for some models (e.g., dlrm) we never
+  // actually perform mutations on these tensors, so you never really get
+  // called out on it.  For now, functionalization still creates "storages"
+  // for these tensors (which is wrong), but we don't give them any space.
+  // A more proper fix would be to have a SparseFunctionalTensorWrapper that
+  // models sparse correctly.
+  if (!value.has_storage()) {
+    return 0;
+  }
   if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     // Today, the two implementations of SymInt are in Python (proxy tensor),
     // and lazy tensor (LTC/XLA).
