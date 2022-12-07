@@ -2,7 +2,7 @@ import itertools
 import logging
 import os
 
-from torch.hub import tqdm, Faketqdm
+from torch.hub import Faketqdm, tqdm
 
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
@@ -100,7 +100,7 @@ if not disable_progress:
 def get_step_logger(logger):
     if not disable_progress:
         pbar.update(1)
-        if isinstance(tqdm, Faketqdm):
+        if not isinstance(pbar, Faketqdm):
             pbar.set_postfix_str(f"{logger.name}")
 
     step = next(_step_counter)
