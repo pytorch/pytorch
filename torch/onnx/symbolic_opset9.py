@@ -894,7 +894,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         self_t = self_t.to(torch.double)
         dims = []
         for d in range(self_t.dim()):
-            if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
+            if (self_t.mean(d).unsqueeze(d).expand_as(self_t) == self_t).all():
                 dims.append(d)
                 self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
 
@@ -2701,24 +2701,32 @@ def native_layer_norm(
 
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
     eps_cst = symbolic_helper._generate_wrapped_number(g, eps)
-    eps_dtype = _type_utils.JitScalarType.from_value(eps_cst)
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
+
     # Cast it to eps dtype to avoid precision loss
-    cast_numerator = g.op(
-        "Cast", numerator, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
+    is_type_half = (
+        _type_utils.JitScalarType.from_value(numerator)
+        == _type_utils.JitScalarType.HALF
     )
+    if is_type_half:
+        eps_dtype = _type_utils.JitScalarType.from_value(eps_cst)
+        numerator = g.op(
+            "Cast", numerator, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
+        )
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    # Cast it to eps dtype to avoid precision loss
-    cast_variance = g.op(
-        "Cast", variance, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
-    )
+    denominator = sqrt(g, g.op("Add", variance, eps_cst))
+    normalized = g.op("Div", numerator, denominator)
 
-    denominator = sqrt(g, g.op("Add", cast_variance, eps_cst))
-    normalized = g.op("Div", cast_numerator, denominator).setType(eps_cst.type())
+    # Cast back to input type as eps related ops are all done
+    if is_type_half:
+        input_dtype = _type_utils.JitScalarType.from_value(input)
+        normalized = g.op(
+            "Cast", normalized, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
@@ -2728,11 +2736,13 @@ def native_layer_norm(
     # rdenominator := 1 / sqrt(variance + eps)
     # According to aten::native_layer_norm, rdenominator should have the same dtype as input,
     # mean and normalized, so we need to Cast it back
-    mean_dtype = _type_utils.JitScalarType.from_value(mean)
-    cast_denominator = g.op(
-        "Cast", denominator, to_i=_type_utils.JitScalarType(mean_dtype).onnx_type()
-    )
-    rdenominator = g.op("Reciprocal", cast_denominator)
+    if is_type_half:
+        denominator = g.op(
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
+        rdenominator = g.op("Reciprocal", denominator)
+    else:
+        rdenominator = reciprocal(g, denominator)
 
     return normalized, mean, rdenominator
 
