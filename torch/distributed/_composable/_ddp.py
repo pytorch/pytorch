@@ -38,24 +38,6 @@ __all__ = ["DistributedDataParallel"]
 logger = logging.getLogger(__name__)
 
 
-def _tree_flatten_with_rref(output):
-    output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
-    if output_is_rref:
-        output_tensor_list, treespec = tree_flatten(output.local_value())
-    else:
-        output_tensor_list, treespec = tree_flatten(output)
-    # Need to return flattened tensors, spec to re-pack them, as well
-    # as if the return type was actually an RRef to reconstruct.
-    return output_tensor_list, treespec, output_is_rref
-
-
-def _tree_unflatten_with_rref(output, treespec, output_is_rref):
-    output = tree_unflatten(output, treespec)
-    if output_is_rref:
-        output = RRef(output)
-    return output
-
-
 def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
@@ -110,10 +92,7 @@ class _DDPSink(Function):
         state_dict = ctx.state_dict
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
-        if (
-            state_dict["static_graph"]
-            and state_dict["num_iterations"] == 1
-        ):
+        if state_dict["static_graph"] and state_dict["num_iterations"] == 1:
             Variable._execution_engine.queue_callback(
                 ctx.reducer._delay_all_reduce
             )
@@ -655,11 +634,7 @@ class DistributedDataParallel(Module):
                 "num_iterations": self.num_iterations,
             }
 
-            (
-                output_tensor_list,
-                treespec,
-                output_is_rref,
-            ) = _tree_flatten_with_rref(output)
+            output_tensor_list, treespec = tree_flatten(output)
             output_placeholders = [
                 None for _ in range(len(output_tensor_list))
             ]
@@ -684,9 +659,7 @@ class DistributedDataParallel(Module):
                     output_placeholders[i] = passthrough_tensor_list[i]
 
             # Reconstruct output data structure.
-            output = _tree_unflatten_with_rref(
-                output_placeholders, treespec, output_is_rref
-            )
+            output = tree_unflatten(output_placeholders, treespec)
         return output
 
     def forward(self, *inputs, **kwargs):
