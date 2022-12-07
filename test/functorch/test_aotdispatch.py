@@ -599,15 +599,16 @@ def forward(self, primals_1):
             return out.view(-1), b.add(1)
         inp = [torch.ones(3, 3), torch.ones(3, 3, requires_grad=True)]
 
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # important bit: we don't bother generating an intermediate base as an output in the graph,
         # because the intermediate base itself didn't require gradients.
         # (the only problematic case is when both the base and the aliasesed output require gradients).
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
+def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-    view = torch.ops.aten.view.default(mul, [-1])
-    view_1 = torch.ops.aten.view.default(mul, [-1])
-    return [view, view_1, mul]""")
+    view = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    return [view, add]""")
 
     def test_output_aliases_intermediate_multiple(self):
         def f(a):
@@ -665,7 +666,6 @@ def forward(self, primals_1):
             return out.view(-1), out, out[0].detach()
         inp = [torch.ones(3, 3, requires_grad=True)]
 
-        # TODO: enable mutation
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
@@ -674,6 +674,49 @@ def forward(self, primals_1):
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
     return [view, mul, detach]""")
+
+    def test_output_aliases_intermediate_inplace_view(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            out.t_()
+            return out
+        inp = [torch.ones(2, 4, requires_grad=True)]
+
+        # TODO: fix this test.
+        # See <github issue link>
+        # self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_output_aliases_intermediate_inplace_view_with_detach(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            out.t_()
+            out.detach_()
+            # Thanks to the detach_() AOT Autograd doesn't need to do anything.
+            # `out` will show up as having OutputType.non_alias,
+            # and ._is_view() == False
+            return out
+        inp = [torch.ones(2, 4, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    t = torch.ops.aten.t.default(mul);  mul = None
+    return [t]""")
+
+
+    def test_output_aliases_intermediate_inplace_view_and_view(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            out_view = out.unsqueeze(0)
+            out.t_()
+            out_view2 = out.unsqueeze(0)
+            return out_view, out, out_view2
+        inp = [torch.ones(2, 4, requires_grad=True)]
+
+        # TODO: fix this test.
+        # See <github issue link>
+        # self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_output_aliases_intermediate_multiple_mixed(self):
         def f(a):
@@ -807,21 +850,7 @@ def forward(self, primals_1, primals_2):
             inp2 = x[1]
             return [base], [inp1, inp2]
 
-        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
-        # Important parts of the graph:
-        # - the compiled graph takes in a base, and we generate a and b (the views) off of the base
-        # - clone() is still in the graph, because we need to call grad() on the original (non-mutated) inputs
-        # - We re-generate the views *after* the clone, to preserve view relationships.
-        self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
-    mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [2], [1], 0);  clone = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
-    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
-    mul_1 = torch.ops.aten.mul.Tensor(mul, t_1)
-    return [mul, t_1, mul_1, t_1, mul]""")
+        self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
@@ -860,12 +889,16 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 2);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided, [2], [1], 0);  as_strided = None
+    add = torch.ops.aten.add.Tensor(as_strided_1, 1);  as_strided_1 = None
+    as_strided_8 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_8, add, [2], [1], 0);  as_strided_8 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_10 = torch.ops.aten.as_strided.default(as_strided_9, [2], [1], 2);  as_strided_9 = None
+    add_1 = torch.ops.aten.add.Tensor(add, as_strided_10);  as_strided_10 = None
+    return [add, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_other_input2(self):
         def f(a, b):
@@ -884,18 +917,20 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0);  as_strided_scatter = None
-    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  as_strided_4 = None
-    return [add, add_1]""")
+    as_strided = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided, [2], [1], 0);  as_strided = None
+    add = torch.ops.aten.add.Tensor(as_strided_1, 1);  as_strided_1 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_6, add, [2], [1], 0);  as_strided_6 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, as_strided_7);  as_strided_7 = None
+    return [add, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
             # Here, we need to take care:that because and b are aliased
-            # (1) since a and b are aliased, we generate a view off of "updated b"
-            # (2) We're returning a view, which doesn't show up in the graph
+            # since a and b are aliased, we generate a view off of "updated b"
             a.add_(1)
             return b.view(b.shape)
 
@@ -908,12 +943,16 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
-    as_strided_10 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_10, [4]);  as_strided_10 = None
-    return [add, view_1]""")
+    as_strided = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided, [4], [1], 0);  as_strided = None
+    add = torch.ops.aten.add.Tensor(as_strided_1, 1);  as_strided_1 = None
+    as_strided_8 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_8, add, [4], [1], 0);  as_strided_8 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_21 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_22 = torch.ops.aten.as_strided.default(as_strided_21, [4], [1], 0);  as_strided_21 = None
+    view_1 = torch.ops.aten.view.default(as_strided_22, [4]);  as_strided_22 = None
+    return [add, view_1]""")  # noqa: B950
 
     def test_input_aliased_with_mutation_output_alias(self):
         def f(a, b, c):
@@ -936,13 +975,17 @@ def forward(self, primals_1):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
-    mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_2 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_2, [4], [1], 0);  as_strided_2 = None
+    mul = torch.ops.aten.mul.Tensor(as_strided_3, 2);  as_strided_3 = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_9, [-1]);  as_strided_9 = None
-    return [mul, add, view_1]""")
+    as_strided_6 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_6, mul, [4], [1], 0);  as_strided_6 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_19 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_20 = torch.ops.aten.as_strided.default(as_strided_19, [4], [1], 0);  as_strided_19 = None
+    view_1 = torch.ops.aten.view.default(as_strided_20, [-1]);  as_strided_20 = None
+    return [mul, add, view_1]""")  # noqa: B950
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -983,13 +1026,17 @@ def forward(self, primals_1, primals_2):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
-    mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_2, 1);  as_strided_2 = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided, [4], [1], 0);  as_strided = None
+    mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_4 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_4, mul, [4], [1], 0);  as_strided_4 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_5, [4], [1], 0);  as_strided_5 = None
+    add = torch.ops.aten.add.Tensor(as_strided_6, 1);  as_strided_6 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    return [mul, add, add_1]""")
+    return [mul, add, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
@@ -1018,16 +1065,21 @@ def forward(self, primals_1, primals_2):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_1 = torch.ops.aten.as_strided.default(as_strided, [4], [1], 0);  as_strided = None
+    add = torch.ops.aten.add.Tensor(as_strided_1, 1);  as_strided_1 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    t_1 = torch.ops.aten.t.default(as_strided_4);  as_strided_4 = None
+    as_strided_8 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_8, add, [4], [1], 0);  as_strided_8 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0)
+    as_strided_10 = torch.ops.aten.as_strided.default(as_strided_9, [4], [1], 0);  as_strided_9 = None
+    t_1 = torch.ops.aten.t.default(as_strided_10);  as_strided_10 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = None
-    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    view_1 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
-    return [add, t_1, add_2, view_1]""")
+    as_strided_29 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_30 = torch.ops.aten.as_strided.default(as_strided_29, [4], [1], 0);  as_strided_29 = None
+    view_1 = torch.ops.aten.view.default(as_strided_30, [-1]);  as_strided_30 = None
+    return [add, t_1, add_2, view_1]""")  # noqa: B950
 
     # Mondo test that tests a combination of:
     # input is mutated, that aliases another input (so we make a synthetic base)
@@ -1067,16 +1119,20 @@ def forward(self, primals_1, primals_2, primals_3):
 def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
-    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
-    mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_2 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_2, [4], [1], 0);  as_strided_2 = None
+    mul = torch.ops.aten.mul.Tensor(as_strided_3, 2);  as_strided_3 = None
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
-    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
-    add = torch.ops.aten.add.Tensor(as_strided_4, mul);  as_strided_4 = None
+    as_strided_8 = torch.ops.aten.as_strided.default(clone, [2, 2], [2, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(as_strided_8, mul, [4], [1], 0);  as_strided_8 = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(clone, as_strided_scatter, [2, 2], [2, 1], 0);  clone = as_strided_scatter = None
+    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter_1, [2, 2], [2, 1], 0);  as_strided_scatter_1 = None
+    as_strided_10 = torch.ops.aten.as_strided.default(as_strided_9, [4], [1], 0);  as_strided_9 = None
+    add = torch.ops.aten.add.Tensor(as_strided_10, mul);  as_strided_10 = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
-    return [t, mul, view_1, t_1, unsqueeze, add]""")
+    return [t, mul, view_1, t_1, unsqueeze, add]""")  # noqa: B950
 
     def test_no_grad_input_output(self):
         def f(a, b):

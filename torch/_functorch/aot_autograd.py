@@ -138,8 +138,260 @@ def setup_stacktrace_preservation_hooks(roots: List):
         )
         node.register_hook(get_posthook(special_stack))
 
-# This class tells us about a user's forward output that is an alias.
-# It can be an alias of either a user forward input, of of a graph intermediate.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# AOT Autograd contains a pretty non-trivial amount of logic to handle edge cases around aliasing and mutation
+# that are external to the graph (they show up as side effects in some way when you run the graph).
+#
+# Take a look at `test_aotdispatch.py TestAOTAutograd` for some examples functions and what they're compiled graphs looks like.
+# Below is a very long comment detailing several edge cases, and showing how AOT Autograd handles them.
+#
+# Note [AOT Autograd: input data mutations]
+#
+# Info:
+# If we compile a function that mutates inputs, then those input mutations are real side effects
+# that a user expects to see after running the compiled graph.
+# However, the graph that we want to send to a backend needs to be *entirely* functional.
+# The way we reconcile this difference is that we remove the mutations completely from the graph that we compile
+# but we update the graph to return (updated_inputs, user_outputs).
+# In the epilogue that runs after the compiled graph is executed, we copy the updated inputs back to the originals.
+#
+# Example: original user code:
+# def f(x):
+#     x.mul_(2)
+#     out = x.mul(3)
+#     return out
+#
+# After AOT Autograd compiles, we end up with a:
+# (a) compiled graph
+# (b) autograd.Function.forward() method, that executes the compiled graph
+# (c) wrapper function, that calls the autograd.Function.forward() and performs the epilogue
+#
+# The output of (a, b, c) are all written below.
+#
+# def compiled_forward_graph(x):
+#     x_updated = x.mul(2)
+#     out = x_updated.mul(3)
+#     return x_updated, out
+#
+# # x_updated gets a gradient in the compiled backward
+# def compiled_backward_graph(grad_x_updated, grad_out):
+#     grad_x = ...
+#     return grad_x
+#
+# def autograd.Function.forward(x):
+#     x_updated, out = compiled_forward_graph(x)
+#     return x_updated, out
+#
+# def compiled_wrapper(x):
+#     x_updated, out = autograd.Function.apply(x)
+#     x.copy_(x_updated)
+#     return out
+#
+# Another important thing to note is that updated inputs (due to data mutations) *do* participate
+# in the compiled backward graph! Since the compiled forward graph gets N extra outputs
+# (due to updated inputs showing up as graph outputs),
+# The compiled backward gets an additional N inputs.
+# That way, during the x.copy_(x_updated) bit in the epilogue, gradients will flow from the updated input
+# back to the original input.
+
+
+# Note [AOT Autograd: input metadata mutations]
+#
+# Info:
+# For the same reason as input mutations, we also don't put input metadata mutations in the graph.
+# Instead, we return the updated version of the input (a view), and mutate the input's metadata outside of the graph
+#
+# Example: original user code:
+# def f(x):
+#     x.t_()
+#     out = x.mul(3)
+#     return out
+#
+# AOT Autograd output (compiled graph, autograd.Function.forward(), wrapper function):
+# def compiled_forward_graph(x):
+#     x_updated = x.t()
+#     out = x_updated.mul(3)
+#     return x_updated, out
+#
+# # x_updated does *not* get a gradient in the compiled backward
+# def compiled_backward_graph(grad_out):
+#     grad_x = ...
+#     return grad_x
+#
+# def autograd.Function.forward(x):
+#     x_updated, out = compiled_forward_graph(x)
+#     return x_updated, out
+#
+# def compiled_wrapper(x):
+#     x_updated, out = autograd.Function.apply(x)
+#     x.as_strided_(x_updated)
+#     return out
+
+
+# Note [AOT Autograd: input metadata mutations]
+#
+# Info:
+# For the same reason as input mutations, we also don't put input metadata mutations in the graph.
+# Instead, we return the updated version of the input (a view), and mutate the input's metadata outside of the graph
+# AOT Autograd includes an analysis pass (run_functionalized_fw_and_collect_metadata()), which tracks for every input,
+# whether than input had a (1) data mutation, (2) metadata mutation, (3) both.
+#
+# Another important thing to note is that updated inputs with metadata-only mutations do *not* show up in the backward graph.
+# See Note [AOT Autograd: outputs aliasing inputs or intermediates] for details.
+#
+# Example: original user code:
+# def f(x):
+#     x.t_()
+#     out = x.mul(3)
+#     return out
+#
+# AOT Autograd output (compiled graph, autograd.Function.forward(), wrapper function):
+# def compiled_forward_graph(x):
+#     x_updated = x.t()
+#     out = x_updated.mul(3)
+#     return x_updated, out
+#
+# x_updated gets a gradient in the backward graph
+# def compiled_backward_graph(grad_x_updated, grad_out):
+#     grad_x = ...
+#     return grad_x
+#
+# def autograd.Function.forward(x):
+#     x_updated, out = compiled_forward_graph(x)
+#     return x_updated, out
+#
+# def compiled_wrapper(x):
+#     x_updated, out = autograd.Function.apply(x)
+#     x.as_strided_(x_updated)
+#     return out
+
+
+# Note [AOT Autograd: outputs aliasing inputs or intermediates!]
+#
+# Info:
+# AOT Autograd needs special handling for outputs that alias graph inputs or intermediates!
+# Why?
+# (1) autograd.Function.forward() has a limitation, where views that returned in the forward cannot later be mutated.
+# (2) views don't need to be compiled in the graph anyway - it's cheap to generate them outside of the compiled graph,
+#     in an epilogue.
+# For outputs that alias inputs, we do the following:
+# (a) *still* return the aliased output as a graph output
+# (b) In the AOT Autograd wrapper/epilogue, we don't return that aliased output. Instead, we use it to regenerate the output.
+#
+# For outputs that alias *intermediates*, we do the following:
+# (a) Return the output in the compiled forward, **and** return it's ._base (a graph intermediates) as an output in the forward
+# (b) Use (output, graph_intermediate) to regenerate the alias, and return that to the user (instead of the compiled fw output).
+# You might wonder why we return the aliased output directly in the graph (and making the graph compute it),
+# only to not return it and instead generate a fresh alias off of the intermediate,
+# instead of (say) just storing metadata about the size/stride of the output somewhere to generate the alias. There are two reasons:
+# (1) Getting the actual alias tensor allows us to use view-replay to generate the alias, instead of an as_strided() call
+# (2) Inductor (and other backends) are free to change the memory format of graph outputs, if it results in better performance.
+#     This can result in problems if a user later tries to .view() that output expecting it to have one set of strides,
+#     when it has a different set of strides.
+#     By including the view op directly in the graph, inductor takes that into account when deciding what memory format
+#     the graph intermediate should be.
+#
+# Another important thing to note is how our traced backward() graph handles aliases.
+# (this applies to outputs aliasing inputs, outputs aliasing intermediates,
+#  *and* updated inputs returned in the compiled forward due to metadata-only mutations).
+# Any outputs that alias (either inputs or intermediates) do NOT participate in the compiled backward graph
+# It would be wasteful to include them in the compiled backward(), because we regenerate them eagerly
+# at the end of the forward.
+#
+# Example: original user code:
+# def f(x):
+#     out1 = x.t()
+#     intermediate = x.mul(2)
+#     out2 = intermediate.view(-1)
+#     return out1, out2
+#
+# AOT Autograd output (compiled graph, autograd.Function.forward(), wrapper function):
+# def compiled_forward_graph(x):
+#     out1 = x.t()
+#     intermediate = x.mul(2)
+#     out2 = intermediate.view(-1)
+#     # the compiled graph also returns the intermediate
+#     return out1, out2, intermediate
+#
+# # intermediate gets a gradient in the compiled backward.
+# # both output aliases (out1 and out2) do not.
+# def compiled_backward_graph(grad_intermediate):
+#     grad_x = ...
+#     return grad_x
+#
+# def autograd.Function.forward(x):
+#     out1, out2, intermediate = compiled_forward_graph(x)
+#     return out1, out2, intermediate
+#
+# def compiled_wrapper(x):
+#     out1, out2, intermediate = autograd.Function.apply(x)
+#     # regenerate out1 from the input
+#     out1_regenerated = out1._view_func(x)
+#     # regenerate out1 from the intermediate
+#     out2_regenerated = out2._view_func(intermediate)
+#     return out1_regenerated, out2_regenerated
+
+
+# Note [AOT Autograd: mutations to inputs that alias other inputs]
+#
+# Info:
+# Another edge case that is (only partially) handled today is when an input is mutated, but itself aliases another input.
+# AOT Autograd needs to **ensure** that functionalization knows that the two inputs are aliased to each other.
+# That way, when the aliased input is accessed later in the graph, functionalization knows to "update" the alias
+# given the mutation that occurred.
+#
+# This is handled by updating the calling convention: we create a "synthetic base" that becomes a new input
+# in the compiled function, and we regenerate the original (aliased) inputs directly off of the base
+# inside of the compiled function.
+#
+# See merge_view_inputs() for more detailed info.
+#
+# Example: original user code:
+# def f(x, x_view):
+#     x.mul_(2)
+#     out = x * x_view
+#     return out
+# f(x, x.view(-1))
+#
+# AOT Autograd output (compiled graph, autograd.Function.forward(), wrapper function):
+# def compiled_forward_graph(base)
+#     x = generate_x(base)
+#     x_view = generate_x_view(base)
+#     x_updated = x.mul(2)
+#     x_view_updated = x_updated.view(-1)
+#     out = x_updated * x_view_udpated
+#     return x_updated, out
+#
+# # The calling convention change from (aliases) -> (base) happens
+# # *outside* of the autograd.Function.forward().
+# # That means the forward() only has 1 input (base),
+# # and the backward() only has 1 output (grad_base)
+# def compiled_backward_graph(grad_out):
+#     grad_base = ...
+#     return grad_base
+#
+# def autograd.Function.forward(base):
+#     x_updated, out = compiled_forward_graph(base)
+#     return x_updated, out
+#
+# # The compiled wrapper is where we create synthetic bases.
+# # The info on which inputs are mutated is also tracked *before* synthetic base creation.
+# def compiled_wrapper(x, x_view):
+#     base = merge_view_inputs(x, x_view)
+#     x_updated, out = autograd.Function.apply(base)
+#     # x and x_view are aliased in eager mode, so this mutation to x will automatically affect x_view.
+#     x.copy_(x_updated)
+#     return out
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# This class stores info about every "output:" where outputs are defined as either:
+# - outputs from the original user's forward()
+# - graph intermediates that we manually return in the compiled forward (but don't return to the user)
 @dataclass(frozen=True)
 class OutputAliasInfo:
     # Tells us if this output is:
@@ -148,14 +400,14 @@ class OutputAliasInfo:
     # (3) an alias of an intermediate (aka an alias of an output of the inner traced forward)
     output_type: OutputType
     # If (1) above, then
-    # - Tells us that this output corresponds directly to traced_fw_outputs[base_idx]
+    # - base_idx is None
     # If (2) above, then
     # - Tells us that the base of this alias is user_fwd_input[base_idx]
     #   (This is an index into the inputs *before* we make synthetic bases)
     # If (3) above, then
     # - Tells us that the base of this alias is traced_fwd_outputs[base_idx]
     #   here, this refers to the index of the *direct* traced
-    base_idx: int
+    base_idx: Optional[int]
     # Only important when output_type == OutputType.alias_of_input
     # Tells the runtime code to return args[base_idx] *exactly*, and not generate a view off of it.
     is_input_tensor: bool
@@ -164,8 +416,7 @@ class OutputAliasInfo:
     # in the forward graph.
     add_base_to_outputs: bool
 
-# This class tells us about how to perform a metadata mutation on forward inputs.
-# it only applies to forward inputs that experience metadata-only mutations
+# This class tells us info about user inputs.
 @dataclass(frozen=True)
 class InputAliasInfo:
     mutation_type: MutationType
@@ -178,19 +429,24 @@ class ViewAndMutationMeta:
     # length = # user inputs
     # This gives us info about every input, and what sort of mutation happened to it (if any)
     input_info: List[InputAliasInfo]
-    # length = # user outputs
-    # This gives us info about every user output (mostly around whether it aliases other tensors)
+    # length = # user outputs + # intermediates that are returned as graph outputs
+    # This gives us info about every output (mostly around whether it aliases other tensors)
     output_info: List[OutputAliasInfo]
     # length = # outputs in the compiled forward. Equal to:
     #   # mutated inps + # user outputs + # intermediate bases
+    #   (same as)
+    #   len(x for x in input_info if x.MutationType != MutationType.none) + len(output_info) + num_intermediate_bases
     # For every output *and* mutated input returned from the forward,
     # tells us whether or not the output should require gradients or not
-    # Note: this does *not* include intermediate bases
-    # (which always require gradients)
     requires_grad_info: List[bool]
+    # length = len(x for x in input_info if x.MutationType != MutationType.none)
     # This is pre-computed for perf: it contains the index of every element
-    # of input_info that corresponds to a mutation
+    # of input_info that corresponds to a mutation (data or metadata or both)
     mutated_inp_indices: List[int]
+    # length = len(x for x in output_info if x.output_type != OutputType.non_alias)
+    # This is pre-computed for perf: it contains the index of every element
+    # of output_info that corresponds to an alias (either of an input or intermediate)
+    aliased_out_indices: List[int]
     # length = the number of intermediate bases appended as outputs to the end of the forward graph.
     # Note: this is not necessarily the same thing as:
     #   len([x for x in output_info if x.output_type == OutputType.alias_of_intermediate])
@@ -209,7 +465,6 @@ class TensorAlias:
     alias: torch.Tensor
     requires_grad: bool
 
-
 def has_same_metadata(t1, t2):
     return t1.size() == t2.size() and t1.stride() == t2.stride() and t1.storage_offset() == t2.storage_offset()
 
@@ -219,7 +474,15 @@ def is_data_mutation(m: MutationType):
     return m in {MutationType.data, MutationType.data_and_metadata}
 
 def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires_grad):
-    # handle R2C and C2R
+    # Try to do view-replay if possible.
+    # fall back to .as_strided() if we can't.
+    if target_meta_tensor._base is not None:
+        # The base that we want to replay our view off of might have a different shape than the view's original base.
+        b = target_meta_tensor._base
+        reshaped_base_tensor = aliased_base_tensor.as_strided(b.size(), b.stride(), b.storage_offset())
+        out = target_meta_tensor._view_func(reshaped_base_tensor)
+        out.requires_grad_(target_requires_grad)
+        return out
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
@@ -404,11 +667,13 @@ def run_functionalized_fw_and_collect_metadata(f) -> Tuple[ViewAndMutationMeta, 
 
         # pre-compute the indices of the inputs that are mutated
         mutated_inp_indices = [i for i, m in enumerate(input_info) if m.mutation_type != MutationType.none]
+        aliased_out_indices = [i for i, m in enumerate(output_info) if m.output_type != OutputType.non_alias]
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             requires_grad_info=requires_grad_info,
             output_info=output_info,
             mutated_inp_indices=mutated_inp_indices,
+            aliased_out_indices=aliased_out_indices,
             num_intermediate_bases=len(intermediate_bases),
         )
         return metadata, pytree.tree_map(from_fun, f_tangents)
@@ -425,7 +690,7 @@ def create_joint_forward_backward_functionalized(
     fn,
     *,
     meta: ViewAndMutationMeta,
-    synthetic_base_info: Optional[List[Union[int, Tuple[int, List[Any]]]]],
+    synthetic_base_info: Optional[List[Union[int, Tuple[int, torch.Tensor]]]],
 ):
     # What's happening here? For any inputs in the graph that are mutated, we need to clone them first
     # (and similarly for metadata-only mutations, we need to view them first).
@@ -451,9 +716,9 @@ def create_joint_forward_backward_functionalized(
                 # For every argument index in the outer calling convention (before synthetic bases)
                 # find its index in the inner calling convention.
                 # if it matches the index of our current arg (idx), track the outer argument's index (i)
-                i for i, outer_idx_or_lambda in enumerate(synthetic_base_info)
-                if (isinstance(outer_idx_or_lambda, int) and outer_idx_or_lambda == idx)
-                or (isinstance(outer_idx_or_lambda, tuple) and outer_idx_or_lambda[0] == idx)
+                i for i, outer_idx_or_tuple in enumerate(synthetic_base_info)
+                if (isinstance(outer_idx_or_tuple, int) and outer_idx_or_tuple == idx)
+                or (isinstance(outer_idx_or_tuple, tuple) and outer_idx_or_tuple[0] == idx)
             ]
         if any(is_data_mutation(meta.input_info[i].mutation_type) for i in outer_aliased_indices_of_current_base_arg):
             # Make sure the primal we pass to autograd.grad()
@@ -471,17 +736,13 @@ def create_joint_forward_backward_functionalized(
             return primals
 
         f_args_inner = []
-        for outer_idx_or_lambda in synthetic_base_info:
-            if isinstance(outer_idx_or_lambda, int):
-                f_args_inner.append(primals[outer_idx_or_lambda])
+        for outer_idx_or_tuple in synthetic_base_info:
+            if isinstance(outer_idx_or_tuple, int):
+                f_args_inner.append(primals[outer_idx_or_tuple])
             else:
-                outer_base_idx, strided_args = outer_idx_or_lambda
+                outer_base_idx, view_tensor = outer_idx_or_tuple
                 outer_base = primals[outer_base_idx]
-                # TODO: we could consider storing and executing view replay logic here,
-                # instead of a general as_strided() call.
-                # This could also improve perf, since today this will cause
-                # more as_strided_scatter() ops in the graph.
-                view_arg = outer_base.as_strided(*strided_args)
+                view_arg = gen_alias_from_base(outer_base, view_tensor, view_tensor.requires_grad)
                 f_args_inner.append(view_arg)
         return f_args_inner
 
@@ -834,7 +1095,7 @@ def same_dtype_views(view1, view2):
 def merge_view_inputs(
     fwd_inputs: List[Any],
     mutated_input_info: List[InputAliasInfo]
-) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, Tuple[Any]]]]]]:
+) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
     base_args = []
@@ -848,9 +1109,9 @@ def merge_view_inputs(
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
-    # - idx, *args, where we can generate the new output with old_args[idx].as_strided(*args)
+    # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, List[Any]]]] = {}
+    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -895,13 +1156,9 @@ def merge_view_inputs(
         for curr_view_idx in aliased_input_indices:
             curr_view = fwd_inputs[curr_view_idx]
             base_idx = len(base_args) - 1
-            size_ = curr_view.size()
-            stride_ = curr_view.stride()
-            storage_offset_ = curr_view.storage_offset()
             # We store just enough info here so that we can regenerate the view later.
-            # Regeneration: args[base_idx].as_strided(size_, stride_, storage_offset_)
-            # If we want view replay instead of as_strided() calls, this will need to change.
-            inner_calling_convention_meta[curr_view_idx] = (base_idx, (size_, stride_, storage_offset_))
+            # Regeneration: curr_view._view_func(args[base_idx])
+            inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
     if len(base_args) == 0:
         assert len(other_args) == len(fwd_inputs)
         # If no synthetic bases are necessary, just return the original inputs.
@@ -1330,51 +1587,53 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 ctx.save_for_backward(*fw_outs[num_forward_returns:])
                 ctx.symints = []
 
-            raw_returns = tuple(fw_outs[0:num_forward_returns])
+            raw_returns = fw_outs[0:num_forward_returns]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
             if num_mutated_metadata_only_inputs > 0:
-                user_mutated_inputs_raw = raw_returns[0:num_mutated_inputs]
-                user_mutated_inputs_req_grad = CompiledFunction.fw_metadata.requires_grad_info[0:num_mutated_inputs]
-                mutation_input_infos = [x for x in CompiledFunction.fw_metadata.input_info if x.mutation_type != MutationType.none]
-                assert len(user_mutated_inputs_raw) == len(mutation_input_infos)
-                user_mutated_inputs = [
-                    TensorAlias(x, req_grad) if info.mutation_type == MutationType.metadata_only else x
-                    for x, info, req_grad in zip(user_mutated_inputs_raw, mutation_input_infos, user_mutated_inputs_req_grad)
-                ]
-            else:
-                user_mutated_inputs = raw_returns[0:num_mutated_inputs]
+                for i, idx in enumerate(CompiledFunction.fw_metadata.mutated_inp_indices):
+                    # We could make this faster by only looping over inputs with metadata-only mutations
+                    # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
+                    info = CompiledFunction.fw_metadata.input_info[idx]
+                    req_grad = CompiledFunction.fw_metadata.requires_grad_info[idx]
+                    if info.mutation_type == MutationType.metadata_only:
+                        raw_returns[i] = TensorAlias(raw_returns[i], req_grad)
+
+                # debug asserts:
+                # user_mutated_inputs_raw = raw_returns[0:num_mutated_inputs]
+                # mut_inp_infos = [x for x in CompiledFunction.fw_metadata.input_info if x.mutation_type != MutationType.none]
+                # assert len(user_mutated_inputs_raw) == len(mut_inp_infos)
 
             if num_outputs_aliased > 0:
-                user_fw_outs_raw = raw_returns[num_mutated_inputs:]
-                user_fw_outs_req_grad = CompiledFunction.fw_metadata.requires_grad_info[num_mutated_inputs:]
-                assert len(user_fw_outs_raw) == len(CompiledFunction.fw_metadata.output_info)
-                user_fw_outs = [
-                    TensorAlias(x, req_grad) if info.output_type != OutputType.non_alias else x
-                    for x, info, req_grad in zip(user_fw_outs_raw, CompiledFunction.fw_metadata.output_info, user_fw_outs_req_grad)
-                ]
-            else:
-                user_fw_outs = raw_returns[num_mutated_inputs:]
+                for idx in CompiledFunction.fw_metadata.aliased_out_indices:
+                    raw_return_idx = num_mutated_inputs + idx
+                    req_grad = CompiledFunction.fw_metadata.requires_grad_info[raw_return_idx]
+                    raw_returns[raw_return_idx] = TensorAlias(raw_returns[raw_return_idx], req_grad)
 
-            fw_outs_to_return = *user_mutated_inputs, *user_fw_outs
+                # debug asserts:
+                # user_fw_outs_raw = raw_returns[num_mutated_inputs:]
+                # assert len(user_fw_outs_raw) == len(CompiledFunction.fw_metadata.output_info)
+
             fw_outs_not_requiring_grad = [
-                x for (i, x) in enumerate(fw_outs_to_return)
+                x for (i, x) in enumerate(raw_returns)
                 if isinstance(x, torch.Tensor) and not CompiledFunction.fw_metadata.requires_grad_info[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
-            return fw_outs_to_return
+            return tuple(raw_returns)
 
         @staticmethod
         def backward(ctx, *flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
-            # - for every output of the fw that does *not* alias an input
-            # - for every updated_input generated by the fw that does *not* alias an input
-            # - for every size/stride metadata value for aliased outputs.
-            #   These are returned by the forward, but we just drop them in the backward.
-            #   We need to return them in the forward, but unfortunately there's no way to specify
-            #   in autograd.Function that certain non-tensor forward outputs shouldn't show up in the backward.
+            # - for every output of the fw that does *not* alias an input or graph intermediate
+            # - for every updated_input generated by the fw that does *not* alias an input (aka only data-mutations)
+            # - for every graph intermediate that we need to use to generate an output later.
+            # The other outputs in the autograd.Function.forward that do *not* show up in the backward include:
+            # - outputs that alias inputs or graph intermediates
+            # - updated inputs due to metadata-only mutations.
+            # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
+            # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
             expected_grad_outs = CompiledFunction.num_outputs + CompiledFunction.num_mutated_inputs
             num_mutated_inps = CompiledFunction.num_mutated_inputs
 
@@ -1384,22 +1643,28 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # input_info contains info on *every* input,
                 # But in the backward(), we are only given grad outputs for every mutated input.
                 # We then need to filter out the grad outputs that correspond to metadata-only mutations.
-                mutated_inp_info = [x for x in CompiledFunction.fw_metadata.input_info if x.mutation_type != MutationType.none]
-                assert len(inp_tangents) == len(mutated_inp_info)
+                mutated_inp_indices = CompiledFunction.fw_metadata.mutated_inp_indices
+                input_info = CompiledFunction.fw_metadata.input_info
+                assert len(inp_tangents) == len(mutated_inp_indices)
                 inp_tangents_filtered = [
-                    x for x, info in zip(inp_tangents, mutated_inp_info) if is_data_mutation(info.mutation_type)]
-                metadata_only_inps = [
-                    x for x, info in zip(inp_tangents, mutated_inp_info) if not is_data_mutation(info.mutation_type)]
+                    x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
+                    if is_data_mutation(input_info[info_idx].mutation_type)
+                ]
                 # We also need to filter out grad outputs that correspond to outputs aliasing inputs/intermediates
                 out_info = CompiledFunction.fw_metadata.output_info
                 out_tangents_filtered = [
                     x for x, info in zip(out_tangents, out_info) if info.output_type == OutputType.non_alias]
-                aliased_outputs = [
-                    x for x, info in zip(out_tangents, out_info) if info.output_type != OutputType.non_alias]
                 flat_bw_args = inp_tangents_filtered + out_tangents_filtered
+
                 # sanity asserts
-                assert all(x is None for x in metadata_only_inps)
-                assert all(x is None for x in aliased_outputs)
+                # metadata_only_inps = [
+                #     x for x, info_idx in zip(inp_tangents, mutated_inp_indices)
+                #     if not is_data_mutation(input_info[info_idx].mutation_type)
+                # ]
+                # aliased_outputs = [
+                #     x for x, info in zip(out_tangents, out_info) if info.output_type != OutputType.non_alias]
+                # assert all(x is None for x in metadata_only_inps)
+                # assert all(x is None for x in aliased_outputs)
             else:
                 flat_bw_args = flat_args
 
@@ -1500,7 +1765,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                     aliased_base_tensor = args[info.base_idx]
                     if info.is_input_tensor:
                         # Special case for when an output *is* an input (just return the input, don't generate a view)
-                        # Note: we can't just detec this at runtime, because of this case:
+                        # Note: we can't just detect this at runtime, because of this case:
                         # def f(x):
                         #     x.mul_(2)
                         #     return x
@@ -1511,8 +1776,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 else:
                     assert info.output_type == OutputType.alias_of_intermediate
                     aliased_base_tensor = all_outs[info.base_idx]
-                    # TODO: can we... just directly return o? Might need to stop doing the TensorAlias thing for it
-                    assert o_._base is not None and o_._base is aliased_base_tensor
+
                     # TODO: handle the custom autograd function case here.
                     # We need a way to check whether a tensor came from a custom autograd fn from python,
                     # AND a way to replay that custom view fn.
