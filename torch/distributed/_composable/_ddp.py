@@ -592,20 +592,6 @@ class DistributedDataParallel(Module):
         finally:
             DistributedDataParallel._active_ddp_module = None
 
-    def _run_ddp_forward(self, *inputs, **kwargs):
-        if self.device_ids:
-            inputs, kwargs = _to_kwargs(
-                inputs,
-                kwargs,
-                self.device_ids[0],
-                self.use_side_stream_for_tensor_copies,
-            )
-            with self._inside_ddp_forward():
-                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
-        else:
-            with self._inside_ddp_forward():
-                return self.module(*inputs, **kwargs)
-
     def pre_forward(self):
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.pre_forward"
@@ -708,7 +694,19 @@ class DistributedDataParallel(Module):
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.forward"
         ):
-            output = self._run_ddp_forward(*inputs, **kwargs)
+            if self.device_ids:
+                inputs, kwargs = _to_kwargs(
+                    inputs,
+                    kwargs,
+                    self.device_ids[0],
+                    self.use_side_stream_for_tensor_copies,
+                )
+                with self._inside_ddp_forward():
+                    output = self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
+            else:
+                with self._inside_ddp_forward():
+                    output = self.module(*inputs, **kwargs)
+
         output = self.post_forward(output)
         return output
 
@@ -1025,10 +1023,10 @@ class DistributedDataParallel(Module):
         )
         try:
             overlapped_optim.register_ddp(self)
-        except NotImplementedError:
+        except NotImplementedError as e:
             raise RuntimeError(
                 f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
-            )
+            ) from e
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0

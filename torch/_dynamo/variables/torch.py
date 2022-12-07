@@ -377,6 +377,21 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif (
+            self.value == torch.addcdiv
+            and len(args) == 3
+            and "value" in kwargs
+            and len(kwargs) == 1
+        ):
+            # decompose addcdiv into constituent ops, prevents a graph break due to converting
+            # value to a scalar
+            result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return TorchVariable(torch.add, **options).call_function(
+                tx, [args[0], result], {}
+            )
         else:
             any_symints_or_symfloats = any(
                 [isinstance(x, DynamicShapeVariable) for x in args]
@@ -705,6 +720,23 @@ class TorchPyOperator(VariableTracker):
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
+
+            # The current recursive export() implementation will
+            # not "see" any side effect updates from the enclosing
+            # context, which can result in possibly incorrect
+            # export.  This assert ensures that there were no
+            # outstanding side effects at the time cond() was called.
+            #
+            # TODO: This assert may be too aggressive; I'm landing it
+            # to see if it is or not.
+            assert tx.output.side_effects.is_empty(), (
+                "Handling a cond operator when there are outstanding "
+                "side effects in the trace is not currently supported.  "
+                "Please file a bug to PyTorch requesting this functionality.  "
+                "You may be able to unblock by removing side effects (e.g., "
+                "mutating Python variables/data structures/etc) from your "
+                "model."
+            )
 
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
