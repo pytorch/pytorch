@@ -36,9 +36,12 @@ def profile_function(name, f, inp):
 
     print(f"{name}, {avg_cuda_time_f}, {avg_cuda_time_g}, {num_node_decrease}, {len(fx_g.graph.nodes)}")
 
-g_gpu = torch.Generator(device='cuda')
-g_gpu.manual_seed(2147483647)
-inp = torch.randn(2**20, device='cuda', generator=g_gpu)
+# g_gpu = torch.Generator(device='cuda')
+# g_gpu.manual_seed(2147483647)
+# generator = torch.Generator(device='cuda').manual_seed(2147483647)
+generator = torch.manual_seed(2147483647, device='cuda')
+# inp = torch.randn(2**20, device='cuda', generator=g_gpu)
+inp = torch.randn(2**20, device='cuda', generator=generator)
 
 def f1(x):
     return x.cos().cos()
