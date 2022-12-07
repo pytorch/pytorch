@@ -122,16 +122,6 @@ FILENAME_ALLOWLIST = {
     torch.set_rng_state.__code__.co_filename,
 }
 
-# Include optimizer code for tracing
-FILENAME_ALLOWLIST |= set(
-    [
-        inspect.getfile(obj)
-        for obj in torch.optim.__dict__.values()
-        if inspect.isclass(obj)
-    ]
-)
-
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
@@ -143,7 +133,6 @@ if HAS_PRIMS_REFS:
         torch._refs.nn.functional.__file__,
     }
 
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 SKIP_DIRS_RE = None
 
@@ -157,7 +146,10 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    module_spec = importlib.util.find_spec(import_name)
+    try:
+        module_spec = importlib.util.find_spec(import_name)
+    except Exception:
+        return
     if not module_spec:
         return
     origin = module_spec.origin
@@ -200,6 +192,7 @@ for _name in (
     "tvm",
     "fx2trt_oss",
     "xarray",
+    "torchrec.distributed",
 ):
     add(_name)
 
