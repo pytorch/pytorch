@@ -518,10 +518,6 @@ class TestOperators(TestCase):
         # This is expected to fail as the operator
         # expects last dim to have stride=1
         xfail('view_as_complex'),
-        # RuntimeError: query: last dimension must be contiguous
-        # NOTE: This passes on Windows!
-        decorate('nn.functional._scaled_dot_product_attention',
-                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
