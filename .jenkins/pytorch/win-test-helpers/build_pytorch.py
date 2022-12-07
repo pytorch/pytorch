@@ -237,7 +237,8 @@ else:
 
     # export test times so that potential sharded tests that'll branch off this build will use consistent data
     subprocess.call('conda run -n test_env' + ' python tools/stats/export_test_times.py', shell=True)
-    shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
+    # shutil.copy(".pytorch-test-times.json", os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
+    shutil.copy(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN'] + '\\.pytorch-test-times.json', os.environ['PYTORCH_FINAL_PACKAGE_DIR'])
 
     # Also save build/.ninja_log as an artifact
     shutil.copy("build\\.ninja_log", os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\')
