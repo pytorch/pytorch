@@ -78,24 +78,24 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py'
 subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 try:
-    subprocess.run(['conda', 'env', 'list'])
-    subprocess.run(['echo', 'running conda succeded'])
+    subprocess.run(['conda', 'env', 'list'], shell=True)
+    subprocess.run(['echo', 'running conda succeded'], shell=True)
 except Exception as e:
-    subprocess.run(['echo', 'running conda failed'])
-    subprocess.run(['echo', e])
+    subprocess.run(['echo', 'running conda failed'], shell=True)
+    subprocess.run(['echo', e], shell=True)
 
     try:
         os.environ['PATH'] = os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Library\\bin;' + os.environ['CONDA_PARENT_DIR'] +\
             '\\Miniconda3;' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts;' + os.environ['PATH']
 
-        subprocess.run(['conda', 'env', 'list'])
+        subprocess.run(['conda', 'env', 'list'], shell=True)
 
     except Exception as e:
         None
 
 # Install ninja and other deps
 if 'REBUILD' not in os.environ:
-    subprocess.run(['conda', 'run', '-n', 'test_env', 'pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses', 'typing_extensions', "expecttest==0.1.3"])
+    subprocess.run(['conda', 'run', '-n', 'test_env', 'pip', 'install', '-q', "ninja==1.10.0.post1", 'dataclasses', 'typing_extensions', "expecttest==0.1.3"], shell=True)
 
 # Override VS env here
 with pushd('.'):
@@ -117,7 +117,7 @@ if os.environ['USE_CUDA'] == '1':
     # version transformer, for example 10.1 to 10_1.
     if '.' not in os.environ['CUDA_VERSION']:
         subprocess.run(['echo', 'CUDA version ' + cuda_version +
-            'format isn\'t correct, which doesn\'t contain \'.\''])
+            'format isn\'t correct, which doesn\'t contain \'.\''], shell=True)
 
         sys.exit(1)
 
@@ -217,7 +217,7 @@ if 'REBUILD' not in os.environ and 'BUILD_ENVIRONMENT' in os.environ:
         '\"C:\\Users\\circleci\\Desktop\\Restore PyTorch Environment.lnk\"'])
 
 
-subprocess.call('conda run -n test_env' + " python setup.py bdist_wheel", shell=Tru)
+subprocess.call('conda run -n test_env' + " python setup.py bdist_wheel", shell=True)
 subprocess.call("sccache --show-stats", shell=True)
 subprocess.call('conda run -n test_env' + ' python -c \"import os, glob; os.system(\'python -mpip install \'' +
     ' + glob.glob(\'dist/*.whl\')[0] + \'[opt-einsum]\')\"', shell=True)
