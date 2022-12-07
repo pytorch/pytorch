@@ -352,5 +352,5 @@ def _multi_tensor_radam(
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
 
     denom = [torch.ones_like(exp_av, memory_format=torch.preserve_format) for exp_av in exp_avgs]
-    step_size = torch.tensor([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
+    step_size = torch.stack([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)

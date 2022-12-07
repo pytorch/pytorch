@@ -197,7 +197,7 @@ class Adam(Optimizer):
                     state['step'] = (
                         torch.zeros((1,), dtype=torch.float, device=p.device)
                         if self.defaults['capturable'] or self.defaults['fused']
-                        else torch.tensor(0., dtype=torch.float64)
+                        else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
@@ -415,7 +415,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t
+            step = step_t.type(dtype=torch.float64)
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
