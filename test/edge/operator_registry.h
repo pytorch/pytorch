@@ -43,7 +43,7 @@ bool hasOpsFn(const char* name);
 OpFunction& getOpsFn(const char* name);
 
 
-bool register_operators(const ArrayRef<Operator>&);
+[[nodiscard]] bool register_operators(const ArrayRef<Operator>&);
 
 struct OperatorRegistry {
  public:

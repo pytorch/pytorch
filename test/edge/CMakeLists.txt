@@ -34,7 +34,7 @@ add_custom_command(
         ${TEST_ROOT}/templates/Functions.h
         ${TEST_ROOT}/templates/NativeFunctions.h
         ${TEST_ROOT}/templates/RegisterCodegenUnboxedKernels.cpp
-        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+        WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
 
@@ -58,7 +58,19 @@ set(TEST_DEPENDENCIES gtest unbox_lib)
 target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}
 )
-
+if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang")
+  target_link_options(test_edge_op_registration PRIVATE
+          -Wl,-force_load
+          $<TARGET_FILE:unbox_lib>
+          )
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  target_link_options(test_edge_op_registration PRIVATE
+          -Wl,--no-as-needed
+          $<TARGET_FILE:unbox_lib>
+          -Wl,--as-needed
+          )
+endif()
 if(INSTALL_TEST)
   install(TARGETS test_edge_op_registration DESTINATION bin)
 endif()
