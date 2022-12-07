@@ -2552,7 +2552,7 @@ TensorView* gather(
   return out_tv;
 }
 
-TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
+TensorView* viewAsScalar(TensorView* inp) {
   auto inp_type = inp->getDataType().value();
   TORCH_CHECK(
       isVectorType(inp_type),

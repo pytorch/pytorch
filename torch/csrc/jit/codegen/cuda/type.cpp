@@ -1038,13 +1038,13 @@ std::ostream& operator<<(
   return out << load_store_type2string(load_store_type);
 }
 
-TORCH_CUDA_CU_API std::ostream& operator<<(
+std::ostream& operator<<(
     std::ostream& out,
     const IterType bt) {
   return out << iter_type2string(bt);
 }
 
-TORCH_CUDA_CU_API std::ostream& operator<<(
+std::ostream& operator<<(
     std::ostream& os,
     const Swizzle2DType& swizzle) {
   switch (swizzle) {
@@ -1073,7 +1073,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
   return os;
 }
 
-TORCH_CUDA_CU_API std::ostream& operator<<(
+std::ostream& operator<<(
     std::ostream& os,
     const SwizzleMode& swizzle) {
   switch (swizzle) {
@@ -1093,7 +1093,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
   return os;
 }
 
-TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
+c10::optional<std::string> inline_op_str(
     const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
@@ -1223,7 +1223,7 @@ size_t dataTypeSize(DataType type, DataType index_type) {
   return dataTypeSize(type);
 }
 
-TORCH_CUDA_CU_API std::ostream& operator<<(
+std::ostream& operator<<(
     std::ostream& os,
     const DoubleBufferLoopStage loop_stage) {
   switch (loop_stage) {

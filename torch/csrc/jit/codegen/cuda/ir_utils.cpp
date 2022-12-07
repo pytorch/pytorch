@@ -231,7 +231,7 @@ std::vector<T*> uniqueEntries(const std::vector<T*>& tv_deuqe) {
 } // namespace
 
 // Return immediate producers of val
-TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val) {
+std::vector<Val*> producerValsOf(Val* val) {
   if (val->definition() == nullptr) {
     return {};
   }
@@ -240,7 +240,7 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val) {
 }
 
 // Return immediate consumers of val
-TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
+std::vector<Val*> consumerValsOf(Val* val) {
   std::vector<Val*> consumer_vals;
   for (auto use_expr : val->uses()) {
     auto outputs = use_expr->outputs();
@@ -250,7 +250,7 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
 }
 
 // Return immediate siblings of val
-TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val) {
+std::vector<Val*> siblingValsOf(Val* val) {
   std::vector<Val*> sibling_vals;
   auto def = val->definition();
   if (def != nullptr) {
@@ -266,7 +266,7 @@ TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val) {
 }
 
 // Return immediate producers of val
-TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
+std::vector<Val*> producerValsOf(
     const std::vector<Val*>& vals) {
   std::vector<Val*> all_producer_vals;
   for (auto val : vals) {
@@ -279,7 +279,7 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
 }
 
 // Return immediate consumers of val
-TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
+std::vector<Val*> consumerValsOf(
     const std::vector<Val*>& vals) {
   std::vector<Val*> all_consumer_vals;
   for (auto val : vals) {
@@ -303,7 +303,7 @@ std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
   return {consumer_tvs.begin(), consumer_tvs.end()};
 }
 
-TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv) {
+std::vector<TensorView*> siblingTvsOf(TensorView* tv) {
   auto sibling_vals = siblingValsOf(tv);
   auto sibling_tvs = ir_utils::filterByType<TensorView>(sibling_vals);
   return {sibling_tvs.begin(), sibling_tvs.end()};
@@ -545,7 +545,7 @@ bool isReductionTvOp(const Expr* expr) {
   return ir_utils::isTvOp(expr) && isReductionOp(expr);
 }
 
-TORCH_CUDA_CU_API std::vector<ViewOp*> getViewOps(Fusion* fusion) {
+std::vector<ViewOp*> getViewOps(Fusion* fusion) {
   auto all_exprs = fusion->exprs();
 
   auto all_view_ops = ir_utils::filterByType<ViewOp>(all_exprs);

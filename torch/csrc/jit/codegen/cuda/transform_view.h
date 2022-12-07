@@ -39,7 +39,7 @@ struct AnalyzeViewResult {
   std::vector<std::shared_ptr<ViewTransform>> transforms;
 };
 
-struct TORCH_API AnalyzeViewConstraint {
+struct TORCH_CUDA_CU_API AnalyzeViewConstraint {
   // 1 if size 1 dimension, otherwise 0;
   std::vector<int64_t> original_constraint;
   std::vector<int64_t> new_constraint;
