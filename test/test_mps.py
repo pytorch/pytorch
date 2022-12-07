@@ -8392,7 +8392,6 @@ class TestConsistency(TestCase):
         'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'var': ['f32'],
         'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8400,9 +8399,24 @@ class TestConsistency(TestCase):
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nonzero': ['f32', 'i16', 'i32', 'i64'],
-        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'std': ['f16','f32'],
+        'var': ['f16','f32'],
+        'amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'mean': ['f16', 'f32'],
+        'count_nonzero': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.std': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked.var': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8601,6 +8615,11 @@ class TestConsistency(TestCase):
         '__rpow__': [torch.int64],
         'masked.std': [torch.int32],
         'masked.var': [torch.int32],
+
+        # Failures due to inconsistency between CPU and GPU for `inf` case
+        'masked.argmax': ['f16', 'f32', 'i32'],
+        'masked.argmin': ['f16', 'f32', 'i32'],
+
         'as_strided_scatter': [torch.uint8],
         'atan2': [torch.int64],
         'bfloat16': None,
@@ -8717,6 +8736,7 @@ class TestConsistency(TestCase):
         'masked.softmax': [torch.float32],
         'masked.softmin': [torch.float32],
         'masked.log_softmax': [torch.float32],
+        'masked.var': ['f16'],
         'dot': [torch.int64],
     }
 
