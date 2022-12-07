@@ -89,9 +89,15 @@ class SideEffects:
             ok_itv = other.id_to_variable.keys()
             if sk_itv != ok_itv:
                 return f"id_to_variable keys: {sk_itv} != {ok_itv}"
-            return "id_to_variable"
+            # Feel free to augment this with more fancy diffing logic
+            # if needed for debugging
+            return "id_to_variable: unknown diff"
         elif self.store_attr_mutations != other.store_attr_mutations:
-            return "store_attr_mutations"
+            sk_sam = self.store_attr_mutations.keys()
+            ok_sam = other.store_attr_mutations.keys()
+            if sk_sam != ok_sam:
+                return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
+            return "store_attr_mutations: unknown diff"
         else:
             return None
 
