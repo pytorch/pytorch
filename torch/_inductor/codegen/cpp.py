@@ -788,13 +788,12 @@ class CppVecKernel(CppKernel):
         new_index = self.transform_index(index)
 
         if expanded_index == new_index:
-            if index == 0:
-                if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
-                    g_tmp_buf = f"g_tmp_buffer_{var}"
-                    nelements = 1
-                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
-                    self.loads.writeline(f"to_float({var}, {g_tmp_buf}, {nelements});")
-                    line = f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(index)}])"
+            if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
+                g_tmp_buf = f"g_tmp_buffer_{var}"
+                nelements = 1
+                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                self.loads.writeline(f"to_float({var}, {g_tmp_buf}, {nelements});")
+                line = f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(index)}])"
             else:
                 line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
