@@ -1,6 +1,8 @@
 import contextlib
 import dataclasses
 import functools
+import math
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
@@ -16,6 +18,7 @@ from ..utils import sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
+    CppWrapperKernelArgs,
     DeferredIndentedBuffer,
     ExprPrinter,
     IndentedBuffer,
@@ -36,6 +39,20 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
 }
+
+DTYPE_TO_ATEN = {
+    torch.float32: "at::ScalarType::Float",
+    torch.float64: "at::ScalarType::Double",
+    torch.float16: "at::ScalarType::Half",
+    torch.int64: "at::ScalarType::Long",
+    torch.int32: "at::ScalarType::Int",
+    torch.int16: "at::ScalarType::Short",
+    torch.int8: "at::ScalarType::Char",
+    torch.uint8: "at::ScalarType::Byte",
+    torch.bool: "at::ScalarType::Bool",
+    torch.bfloat16: "at::ScalarType::BFloat16",
+}
+
 INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
@@ -207,6 +224,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.exp()"
 
     @staticmethod
+    def erf(x):
+        return f"{x}.erf()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
@@ -268,6 +289,8 @@ class CppVecOverrides(OpOverrides):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
             quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({str(val).lower()})"
         else:
@@ -378,6 +401,14 @@ class CppOverrides(OpOverrides):
         return f"1 / std::sqrt({x})"
 
     @staticmethod
+    def log1p(x):
+        return f"std::log1p({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"std::expm1({x})"
+
+    @staticmethod
     def signbit(x):
         return f"std::signbit({x})"
 
@@ -439,11 +470,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"std::min({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -459,6 +490,8 @@ class CppOverrides(OpOverrides):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
             return ops.to_dtype(str(val).lower(), dtype)
         return ops.to_dtype(repr(val), dtype)
@@ -1202,10 +1235,18 @@ class CppKernelProxy(CppKernel):
 class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def get_kernel_group(self):
+        from .wrapper import CppWrapperCodeGen
+
+        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+            self.kernel_group = CppWrapperKernelGroup()
+        else:
+            self.kernel_group = KernelGroup()
 
     @staticmethod
     def can_fuse_horizontal(node1, node2):
@@ -1331,7 +1372,7 @@ class CppScheduling:
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
 
 class KernelGroup:
@@ -1361,11 +1402,27 @@ class KernelGroup:
         if self.count == 0:
             return
 
-        arg_defs, call_args = self.args.cpp_argdefs()
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
+        arg_types = ",".join(arg_types)
         code = BracesBuffer()
+        # TODO: support kernel profile on other platforms
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
+            code.writelines(["#include <ATen/record_function.h>"])
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            if enable_kernel_profile:
+                graph_id = V.graph.graph_id
+                prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
+                code.writelines(
+                    [
+                        f'RECORD_FUNCTION("{prefix + kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
+                    ]
+                )
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
@@ -1375,17 +1432,20 @@ class KernelGroup:
         codecache_def.splice(code)
         codecache_def.writeline("''')")
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-
+        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
-        wrapper.writeline(
-            "{}({})".format(kernel_name, ", ".join(call_args)),
-        )
+        wrapper.generate_kernel_call(kernel_name, call_args)
+
+
+class CppWrapperKernelGroup(KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = CppWrapperKernelArgs()
 
 
 class WorkSharing:
