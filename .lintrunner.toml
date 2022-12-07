@@ -155,6 +155,7 @@ code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
