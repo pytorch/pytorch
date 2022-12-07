@@ -9,7 +9,6 @@ namespace torch_dispatch_mode {
 void push_onto_dispatch_stack(std::shared_ptr<at::SafePyObject> mode);
 std::shared_ptr<at::SafePyObject> pop_dispatch_stack();
 
-
 struct StashTorchDispatchModeGuard {
  public:
   StashTorchDispatchModeGuard() {

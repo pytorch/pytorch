@@ -8,7 +8,8 @@ namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
-void TorchDispatchModeTLS::unsafe_push_onto_stack(std::shared_ptr<SafePyObject> mode) {
+void TorchDispatchModeTLS::unsafe_push_onto_stack(
+    std::shared_ptr<SafePyObject> mode) {
   if (torchDispatchModeState.stack_.size() == 0) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
