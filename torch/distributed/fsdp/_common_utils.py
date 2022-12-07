@@ -14,7 +14,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import StateDictType
+from .api import FullStateDictConfig, StateDictConfig, StateDictType
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -27,6 +27,7 @@ class _FSDPState(_State):
         self._use_orig_params: bool = False
         self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
+        self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self.rank: int = 0
 
 
