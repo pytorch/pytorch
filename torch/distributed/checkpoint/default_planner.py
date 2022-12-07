@@ -152,7 +152,7 @@ class DefaultSavePlanner(SavePlanner):
 
 class DefaultLoadPlanner(LoadPlanner):
     """
-    LoadPlanner that adds multiple features on top of DefaultLoadPlanner.
+    DefaultLoadPlanner that adds multiple features on top of LoadPlanner.
 
     In particular it adds the following:
 
