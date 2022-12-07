@@ -576,6 +576,11 @@ class BuiltinVariable(VariableTracker):
             return b.__class__(
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
+        # TODO this doesn't generalize in other builtin operators.
+        elif isinstance(a, variables.ConstantVariable) and isinstance(
+            b, DynamicShapeVariable
+        ):
+            return b.call_method(tx, "__rmul__", [a], {})
         else:
             return a.call_method(tx, "__mul__", [b], {})
 
