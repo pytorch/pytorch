@@ -873,8 +873,11 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
