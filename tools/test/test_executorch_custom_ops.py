@@ -1,7 +1,3 @@
-#!/usr/bin/env fbpython
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
-import unittest
 from typing import Dict
 
 from torch.testing._internal.common_utils import (
@@ -16,6 +12,7 @@ from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
 from torchgen.model import Location, NativeFunction
 
 SPACES = "    "
+
 
 def _get_native_function_from_yaml(yaml_obj: Dict[str, object]) -> NativeFunction:
     native_function, _ = NativeFunction.from_yaml(
