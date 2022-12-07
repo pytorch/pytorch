@@ -9,7 +9,7 @@ from torch._C._functorch import (
     _unwrap_for_grad,
     _unwrap_batched,
 )
-from functorch._src.vmap import (
+from torch._functorch.vmap import (
     _broadcast_to_and_flatten,
     _create_batched_inputs,
 )
