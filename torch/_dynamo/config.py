@@ -187,8 +187,13 @@ class _AccessLimitingConfig(ModuleType):
             from .logging import set_loggers_level
 
             set_loggers_level(value)
+            print("log_level set to", value)
         return object.__setattr__(self, name, value)
 
 
 _allowed_config_names = {*globals().keys()}
 sys.modules[__name__].__class__ = _AccessLimitingConfig
+
+from .config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(sys.modules[__name__])

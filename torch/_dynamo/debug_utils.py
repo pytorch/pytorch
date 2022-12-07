@@ -154,6 +154,17 @@ def _cuda_system_info_comment():
     return model_str
 
 
+def generate_config_string():
+    return textwrap.dedent(
+        f"""\
+import {config.dynamo_import}.config
+import {config.inductor_import}.config
+{config.dynamo_import}.config.load_config({repr(torch._dynamo.config.save_config())})
+{config.inductor_import}.config.load_config({repr(torch._inductor.config.save_config())})
+        """
+    )
+
+
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
 
@@ -166,6 +177,8 @@ def generate_compiler_repro_string(gm, args):
         from {config.dynamo_import}.testing import rand_strided
         from math import inf
         from torch.fx.experimental.proxy_tensor import make_fx
+
+        {generate_config_string()}
 
         {TEST_REPLACEABLE_COMMENT}
 
@@ -636,6 +649,8 @@ from {config.dynamo_import}.testing import rand_strided
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.debug_utils import same_two_models
 
+{generate_config_string()}
+
 {TEST_REPLACEABLE_COMMENT}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -825,6 +840,8 @@ import {config.dynamo_import}
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
+
+{generate_config_string()}
 
 {TEST_REPLACEABLE_COMMENT}
 
