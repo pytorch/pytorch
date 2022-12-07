@@ -283,7 +283,7 @@ def _compare_onnx_pytorch_outputs_in_np(
 @_beartype.beartype
 def _compare_onnx_pytorch_outputs(
     onnx_outs: _OutputsType,
-    pt_outs: Union[_NumericType, _OutputsType],
+    pt_outs: Any,
     options: VerificationOptions,
 ):
     """
