@@ -107,6 +107,10 @@ class ContextWrappingVariable(VariableTracker):
         super(ContextWrappingVariable, self).__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
+        self.recursively_contains = (
+            set()
+        )  # This var doesn't contain any child vars and doesn't support clone() properly,
+        # so don't populate this automatically
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -277,7 +281,7 @@ class GradModeVariable(ContextWrappingVariable):
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
         torch._C._set_grad_enabled(value)
@@ -294,7 +298,7 @@ class GradModeVariable(ContextWrappingVariable):
 
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, kwargs):
+    def create(target_values, kwargs):
         values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
@@ -322,10 +326,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         else:
             values.append(variables.ConstantVariable(None))
 
-        var = AutocastModeVariable(tx, target_values, initial_values=None, **kwargs)
+        var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, tx, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs):
         super(AutocastModeVariable, self).__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -333,12 +337,12 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.mode = None
 
     def exit(self, tx, *args):
-        tx.output.graph.create_node(
+        tx.output.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
     def enter(self, tx):
-        self.mode = tx.output.graph.create_node(
+        self.mode = tx.output.create_node(
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
@@ -455,9 +459,19 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return variables.UserFunctionVariable(
-            self.fn_cls.forward, **options
-        ).call_function(tx, args, kwargs)
+        fn = self.fn_cls.forward
+        if isinstance(fn, types.FunctionType):
+            return variables.UserFunctionVariable(fn, **options).call_function(
+                tx, args, kwargs
+            )
+        elif isinstance(fn, types.MethodType):
+            return variables.UserMethodVariable(
+                fn.__func__, variables.UserDefinedClassVariable(self.fn_cls), **options
+            ).call_function(tx, args, kwargs)
+        else:
+            unimplemented(
+                f"non-function or method in subclass of torch.autograd.Function: {fn}"
+            )
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -653,6 +667,12 @@ class TypingVariable(VariableTracker):
                 **VariableTracker.propagate(self, args),
             )
         unimplemented("typing")
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
 
 
 class NumpyVariable(VariableTracker):
