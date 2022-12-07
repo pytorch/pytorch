@@ -7,6 +7,7 @@ from itertools import product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
@@ -1557,7 +1558,7 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
 @reduction_complex_to_real
 def std_decomposition(
     x: Tensor,
-    dim: Optional[List[int]],
+    dim: Optional[List[int]] = None,
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
@@ -1928,6 +1929,21 @@ def norm(
     return torch.linalg.vector_norm(
         self.to(computation_dtype), p, dim, keepdim, dtype=dtype
     ).to(result_dtype)
+
+
+@register_decomposition(aten.uniform)
+def uniform(
+    x: Tensor,
+    low: Union[bool, int, float] = 0.0,
+    high: Union[bool, int, float] = 1.0,
+):
+    return prims._uniform_helper(
+        x.shape,
+        low=sym_float(low),
+        high=sym_float(high),
+        dtype=x.dtype,
+        device=x.device,
+    )
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
