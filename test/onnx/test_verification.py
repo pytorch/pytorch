@@ -230,7 +230,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         for leaf_info in mismatch_leaves:
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                leaf_info.pretty_print_mismatch()
+                leaf_info.pretty_print_mismatch(graph=True)
             self.assertRegex(
                 f.getvalue(),
                 r"(.|\n)*" r"aten::relu.*/torch/nn/functional.py:[0-9]+(.|\n)*",
@@ -265,10 +265,11 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         self.assertTrue(len(mismatch_leaves) > 0)
         leaf_info = mismatch_leaves[0]
         with tempfile.TemporaryDirectory() as temp_dir:
-            repro_dir = leaf_info.export_repro(temp_dir.name)
+            repro_dir = leaf_info.export_repro(temp_dir)
 
             with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
-                verification.OnnxTestCaseRepro(repro_dir).validate(self.onnx_backend)
+                options = verification.VerificationOptions(backend=self.onnx_backend)
+                verification.OnnxTestCaseRepro(repro_dir).validate(options)
 
 
 if __name__ == "__main__":

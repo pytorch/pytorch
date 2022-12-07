@@ -1260,17 +1260,22 @@ class GraphInfo:
         """
         GraphInfoPrettyPrinter(self).pretty_print()
 
-    def pretty_print_mismatch(self):
-        """Pretty print details of the mismatch between torch and ONNX."""
+    def pretty_print_mismatch(self, graph: bool = False):
+        """Pretty print details of the mismatch between torch and ONNX.
+
+        Args:
+            graph: If True, print the ATen JIT graph and ONNX graph.
+        """
         print(f" Mismatch info for graph partition {self.id}: ".center(80, "="))
-        print(" ATen JIT graph ".center(80, "="))
-        # TODO: A more compact graph printer.
-        #   * Drop stride, grad, device information.
-        #   * Show source location on a separate line.
-        print(self.graph)
-        if self._onnx_graph is not None:
-            print(" ONNX graph ".center(80, "="))
-            print(self._onnx_graph)
+        if graph:
+            print(" ATen JIT graph ".center(80, "="))
+            # TODO: A more compact graph printer.
+            #   * Drop stride, grad, device information.
+            #   * Show source location on a separate line.
+            print(self.graph)
+            if self._onnx_graph is not None:
+                print(" ONNX graph ".center(80, "="))
+                print(self._onnx_graph)
         if self.has_mismatch():
             print(" Mismatch error ".center(80, "="))
             print(self.mismatch_error)
@@ -1341,6 +1346,15 @@ class GraphInfo:
         """Export the subgraph to ONNX along with the input/output data for repro.
 
         The repro directory will contain the following files:
+
+            dir
+            ├── test_<name>
+            │   ├── model.onnx
+            │   └── test_data_set_0
+            │       ├── input_0.pb
+            │       ├── input_1.pb
+            │       ├── output_0.pb
+            │       └── output_1.pb
 
         Args:
             repro_dir: The directory to export the repro files to. Defaults to current
@@ -1764,6 +1778,7 @@ def find_mismatch(
             ),
         )
         graph_info.find_mismatch(options)
+        graph_info.pretty_print_mismatch()
         graph_info.pretty_print_tree()
 
         return graph_info
