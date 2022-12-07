@@ -12,7 +12,8 @@ from .eval_frame import (
     run,
     skip,
 )
-from .utils import compilation_metrics, guard_failures, is_tracing, orig_code_map
+from .external_utils import is_tracing
+from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
     "allow_in_graph",

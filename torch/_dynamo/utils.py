@@ -1183,7 +1183,3 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode is flat_input.fake_mode
     return fake_mode
-
-
-def is_tracing():
-    return False

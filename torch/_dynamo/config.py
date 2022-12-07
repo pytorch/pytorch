@@ -7,7 +7,7 @@ from types import ModuleType
 import torch
 
 # needed so that CODE is registered as a level in logging
-from . import logging as torchdynamo_logging  # noqa: F401
+from . import external_utils, logging as torchdynamo_logging  # noqa: F401
 
 try:
     import torch._prims
@@ -59,6 +59,7 @@ constant_functions = {
     torch._C._get_tracing_state: None,
     torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
+    external_utils.is_tracing: True,
 }
 
 

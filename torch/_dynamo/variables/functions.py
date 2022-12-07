@@ -10,7 +10,7 @@ from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, GetItemSource
-from ..utils import is_tracing, make_cell
+from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
@@ -192,11 +192,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), options, args, kwargs
             )
-
-        if self.fn == is_tracing:
-            from .constant import ConstantVariable
-
-            return ConstantVariable(True)
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
 
