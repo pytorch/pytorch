@@ -13034,7 +13034,12 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=False,
-                   supports_sparse_csr=False),
+                   supports_sparse_csr=False,
+                   skips=(
+                       # Inductor upcasts integral inputs to float.
+                       # AssertionError: The values for attribute 'dtype' do not match: torch.float32 != torch.int64.
+                       DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo',
+                                    'test_comprehensive', dtypes=(torch.int32, torch.int64)),)),
     UnaryUfuncInfo('round',
                    ref=np.round,
                    variant_test_name='decimals_3',
@@ -13056,6 +13061,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_normal",
                                     device_type="cuda"),
+                       # Inductor upcasts integral inputs to float.
+                       # AssertionError: The values for attribute 'dtype' do not match: torch.float32 != torch.int64.
+                       DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo',
+                                    'test_comprehensive', dtypes=(torch.int32, torch.int64)),
                    ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -13076,6 +13085,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
+                       # Inductor upcasts integral inputs to float.
+                       # AssertionError: The values for attribute 'dtype' do not match: torch.float32 != torch.int64.
+                       DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo',
+                                    'test_comprehensive', dtypes=(torch.int32, torch.int64)),
                    ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
