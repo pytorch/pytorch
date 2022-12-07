@@ -2,50 +2,84 @@ from typing import List, Dict, Set
 import torch
 import dataclasses
 
+"""
+Parent structure for guard env expressions.
+
+A GuardEnvExpr can have any subtype.
+
+Note: All subtypes must be handled exhaustively in
+torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
+"""
 class GuardEnvExpr():
     pass
 
+"""
+A class representing a pair of duplicate inputs.
+
+arg_a and arg_b are argument names in the traced scope.
+"""
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
     arg_a: str
     arg_b: str
 
+
+"""
+A GuardEnv is philosophically equivalent to a SymbolicShapeEnv in that it:
+
+1) Accumulates behaviors (ex: register_duplicates)
+2) Produces internal guard representations
+3) Can be consumed by guarding systems to create guards
+
+It differs significantly in how it represents guards.
+
+See: https://docs.google.com/document/d/1VbiXkIhKy744Q7Lx2e8UUBvP_5RH_WU0FEc3VadVX4U/edit?usp=sharing for
+a document explaining this structure in greater detail.
+
+Note - while this feels like it should live in dynamo's guards.py, it feels better from a layering perspective.
+To have it here, especially as aot_autograd knows about this and registers new guards here.
+"""
 class GuardEnv:
-    guards : List[GuardEnvExpr] = []
-    fake_tensor_to_names : Dict[torch._subclasses.FakeTensor, Set[str]] = {}
+    _guards : List[GuardEnvExpr] = []
+    _tensor_to_names : Dict[torch.Tensor, Set[str]] = {}
 
-    def register_duplicates(self, dupe_arg: torch._subclasses.FakeTensor, kept_arg: torch._subclasses.FakeTensor):
-        names_for_dupe = self.fake_tensor_to_names[dupe_arg]
-        names_for_kept = self.fake_tensor_to_names[kept_arg]
+    def register_duplicates(self, dupe_arg: torch.Tensor, kept_arg: torch.Tensor):
+        # Note: This is a little onerous - one could imagine that registration implies assoication.
+        # HOWEVER - I loathe to allow this to be easier, as we want the dynamo layer to associate and
+        # lower levels to register things with associated tensors. If we ever end up registering something
+        # that does not have prior knowlege in association... we just re-invented a new flavor of the
+        # symbolic-expression-not-found problem, and I would rather we not do that, or at least, identify it
+        # where we make the guard, as opposed to where we go to process it when we call .guards().
+        assert dupe_arg in self._tensor_to_names, "Tensor not found - did you forget to call .associate()?"
 
-        # Instead of a quadratic association of every-equal-to-every, we can chain
-        all_names = list(names_for_dupe.union(names_for_kept))
+        assert dupe_arg is kept_arg, "Register_duplicates args must pass identity check."
 
-        # Two iter does not cover this, edge case
-        for i in range(0, len(all_names), 2):
-            name_a = all_names[i]
-            name_b = all_names[i + 1]
+        names_for_dupe = list(self._tensor_to_names[dupe_arg].keys())
+
+        for i in range(0, len(names_for_dupe), 2):
+            name_a = names_for_dupe[i]
+            name_b = names_for_dupe[i + 1]
             dupe_inputs = DuplicateInputs(arg_a=name_a, arg_b=name_b)
-            self.guards.append(dupe_inputs)
+            self._guards.append(dupe_inputs)
 
-    def associate(self, fake_tensor: torch._subclasses.FakeTensor, name: str):
-        if fake_tensor not in self.fake_tensor_to_names:
-            self.fake_tensor_to_names[fake_tensor] = set()
+    def associate(self, tensor: torch.Tensor, name: str):
+        if tensor not in self._tensor_to_names:
+            # Note: Dict for determinism
+            self._tensor_to_names[tensor] = dict()
 
-        self.fake_tensor_to_names[fake_tensor].add(name)
+        self._tensor_to_names[tensor].update({name: None})
 
-    # This is a func because we don't want users just reading .guards for now
+    # This is a func because we don't want users just reading ._guards for now
     # we may do simplification or other things here.
-    def get_guards(self):
-        return self.guards
+    def get_guards(self) -> List[GuardEnvExpr]:
+        return self._guards
 
     def clear(self):
-        self.guards = []
-        self.fake_tensor_to_names = {}
+        self._guards = []
+        self._tensor_to_names = {}
 
-# TODO(voz): This is super lame, but keeping it global for the sake of the prototype
-# allows me to punt dealing with kwargs, piping stuff around backends, etc
-# We may or may not want to land like this, TBD, but for now it allows me to focus
-# on implementation. We got away with reading the fake_mode off of tensors, so maybe we
-# will do the same here. Maybe not.
+# TODO(voz): This is not hacky, but it is kinda lame, but we do not have a great piping or kwargs
+# story, and this is a nice way to get access to it everywhere.
+# The only icurred mental overhead is rememebring to clear it, and that should happen right after we
+# extract guards out.
 GUARD_ENV = GuardEnv()

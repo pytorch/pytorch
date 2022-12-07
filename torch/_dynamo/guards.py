@@ -16,7 +16,7 @@ import numpy as np
 import sympy
 
 import torch
-from torch.fx.experimental.guard_env import DuplicateInputs, GUARD_ENV
+from torch.fx.experimental.guard_env import DuplicateInputs, GUARD_ENV, GuardEnvExpr
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -40,9 +40,8 @@ TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 
-# TODO(voz): DO NOT LAND LIKE THIS
-# THE EQUALITY CRITERIA MUST MATCH AOT_AUTOGRAD DEDUPE EQUALITY CRITERIA
-def hacky_do_not_land_tensor_eq(a, b):
+
+def tensor_identity_match(a, b):
     return a is b
 
 
@@ -56,7 +55,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("___tensor_eq", hacky_do_not_land_tensor_eq),
+        ("___tensor_identity_match", tensor_identity_match),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -670,11 +669,18 @@ class CheckFunctionManager:
         )
         self._seen_ids.clear()
 
-    def _parse_guard_env_guards(self, guards):
+    """
+    The role of this function is to take a list of guards and produce a
+    string for appending to the evaluated guard code structure.
+
+    Any addition to GuardEnvExpr types must be added here, or we will raise.
+    """
+
+    def _parse_guard_env_guards(self, guards: List[GuardEnvExpr]) -> Optional[str]:
         guard_str = ""
         for guard in guards:
             if isinstance(guard, DuplicateInputs):
-                guard_str += f"___tensor_eq({guard.arg_a}, {guard.arg_b})"
+                guard_str += f"___tensor_identity_match({guard.arg_a}, {guard.arg_b})"
             else:
                 raise RuntimeError(f"Unexpected guard type {guard}")
 
