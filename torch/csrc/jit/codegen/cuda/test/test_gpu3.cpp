@@ -6695,7 +6695,7 @@ TEST_F(NVFuserTest, FusionPropagateVectorizePredicate_CUDA) {
           auto index_it =
               std::find(cond_inputs.begin(), cond_inputs.end(), loop_index);
           auto vec_factor_it = std::find_if(
-              cond_inputs.begin(), cond_inputs.end(), [](Val* inp) {
+              cond_inputs.begin(), cond_inputs.end(), [&](Val* inp) {
                 auto int_val = inp->getInt();
                 return int_val.has_value() && int_val.value() == vec_factor - 1;
               });
