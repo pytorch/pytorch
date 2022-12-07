@@ -1,15 +1,22 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
+import functools
 import sys
-from typing import Optional
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
+from torch.distributed.fsdp._common_utils import (
+    _all_handles,
+    _FSDPState,
+    _is_fsdp_flattened,
+)
+from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
@@ -205,10 +212,9 @@ class TestFSDPRuntime(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    def test_training(self):
-        """Tests training (forward, backward, optimizer)."""
-        device = torch.device("cuda")
+    def _init_models_and_optims(
+        self, device: torch.device
+    ) -> Tuple[nn.Module, torch.optim.Optimizer, nn.Module, torch.optim.Optimizer]:
         local_model = CompositeParamModel(device=device)
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
@@ -220,13 +226,29 @@ class TestFSDPRuntime(FSDPTest):
             composable_module,
             policy=ModuleWrapPolicy({UnitModule}),
         )
-        del local_model  # not needed anymore
         LR = 1e-2
         fsdp_wrapped_optim = torch.optim.Adam(fsdp_wrapped_model.parameters(), lr=LR)
         composable_optim = torch.optim.Adam(composable_module.parameters(), lr=LR)
+        return (
+            composable_module,
+            composable_optim,
+            fsdp_wrapped_model,
+            fsdp_wrapped_optim,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_training(self):
+        """Tests training (forward, backward, optimizer)."""
+        device = torch.device("cuda")
+        (
+            composable_module,
+            composable_optim,
+            fsdp_wrapped_model,
+            fsdp_wrapped_optim,
+        ) = self._init_models_and_optims(device)
         for _ in range(5):
             inp = torch.randn(2, 100, device="cuda")
-            losses = []
+            losses: List[torch.Tensor] = []
             for model, optim in (
                 (fsdp_wrapped_model, fsdp_wrapped_optim),
                 (composable_module, composable_optim),
@@ -238,6 +260,151 @@ class TestFSDPRuntime(FSDPTest):
                 loss.backward()
                 optim.step()
             self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_unshard_reshard_order(self):
+        """
+        Tests that the unshard/reshard order matches between ``fully_shard``
+        and ``FullyShardedDataParallel`` for the same policy.
+
+        NOTE: We use FQNs as the proxy for checking the order across the two
+        versions. See ``_check_same_param_handles()`` for details.
+        """
+        device = torch.device("cuda")
+        (
+            composable_module,
+            composable_optim,
+            fsdp_wrapped_model,
+            fsdp_wrapped_optim,
+        ) = self._init_models_and_optims(device)
+        # Before checking the unshard/reshard order, sanity check that the
+        # assumption about wrapper FQN being a suffix of composable FQN holds
+        all_composable_handles = _all_handles(fully_shard.state(composable_module))
+        all_wrapped_handles = _all_handles(fsdp_wrapped_model)
+        self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
+        num_handles = len(all_composable_handles)
+
+        orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
+        orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
+        UnshardReshardEvent = Tuple[str, _HandlesKey]
+
+        def patched_unshard(
+            unshard_reshard_order: List[UnshardReshardEvent],
+            state: _FSDPState,
+            handles: List[FlatParamHandle],
+            *args,
+            **kwargs,
+        ):
+            handles_key = tuple(handles)
+            unshard_reshard_order.append(("unshard", handles_key))
+            return orig_unshard(state, handles, *args, **kwargs)
+
+        def patched_reshard(
+            unshard_reshard_order: List[UnshardReshardEvent],
+            state: _FSDPState,
+            handles: List[FlatParamHandle],
+            *args,
+            **kwargs,
+        ):
+            handles_key = tuple(handles)
+            unshard_reshard_order.append(("reshard", handles_key))
+            return orig_reshard(state, handles, *args, **kwargs)
+
+        @contextlib.contextmanager
+        def patch_unshard(_patched_unshard: Callable):
+            _orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
+            torch.distributed.fsdp._runtime_utils._unshard = _patched_unshard
+            try:
+                yield
+            finally:
+                torch.distributed.fsdp._runtime_utils._unshard = _orig_unshard
+
+        @contextlib.contextmanager
+        def patch_reshard(_patched_reshard: Callable):
+            _orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
+            torch.distributed.fsdp._runtime_utils._reshard = _patched_reshard
+            try:
+                yield
+            finally:
+                torch.distributed.fsdp._runtime_utils._unshard = _orig_reshard
+
+        composable_order: List[UnshardReshardEvent] = []
+        wrapped_order: List[UnshardReshardEvent] = []
+
+        inp = torch.randn(2, 100, device="cuda")
+        losses: List[torch.Tensor] = []
+
+        for order, model, optim in (
+            (composable_order, composable_module, composable_optim),
+            (wrapped_order, fsdp_wrapped_model, fsdp_wrapped_optim),
+        ):
+            with patch_unshard(
+                functools.partial(patched_unshard, order)
+            ), patch_reshard(functools.partial(patched_reshard, order)):
+                optim.zero_grad(set_to_none=True)
+                out = model(inp)
+                loss = out.sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+        self.assertEqual(losses[0], losses[1])
+
+        # Sanity check that the unshard/reshard events were recorded, where we
+        # expect one unshard/reshard pair for forward, one pair for backward,
+        # and possibly some extra unshards from backward prefetching (in this
+        # case, we expect exactly 2 extra since there are 3 handles)
+        self.assertGreaterEqual(len(composable_order), 2 * 2 * num_handles)
+        self.assertGreaterEqual(len(wrapped_order), 2 * 2 * num_handles)
+        self.assertGreaterEqual(
+            len([e for e in composable_order if e[0] == "unshard"]), 2 * num_handles
+        )
+        self.assertGreaterEqual(
+            len([e for e in wrapped_order if e[0] == "unshard"]), 2 * num_handles
+        )
+        self.assertGreaterEqual(
+            len([e for e in composable_order if e[0] == "reshard"]), 2 * num_handles
+        )
+        self.assertGreaterEqual(
+            len([e for e in wrapped_order if e[0] == "reshard"]), 2 * num_handles
+        )
+
+        # Check that the unshard/reshard order matches
+        self.assertEqual(len(composable_order), len(wrapped_order))
+        for (
+            (composable_event, composable_handles_key),
+            (wrapped_event, wrapped_handles_key),
+        ) in zip(composable_order, wrapped_order):
+            self.assertEqual(composable_event, wrapped_event)
+            self._check_same_param_handles(composable_handles_key, wrapped_handles_key)
+
+    def _check_same_param_handles(
+        self,
+        composable_handles: Iterable[FlatParamHandle],
+        wrapped_handles: Iterable[FlatParamHandle],
+    ) -> None:
+        """
+        Checks that ``composable_handles`` matches ``wrapped_handles`` by
+        checking FQNs.
+
+        For ``fully_shard``, each ``FlatParamHandle`` 's saved FQNs are
+        prefixed from the local FSDP root, while for wrapper FSDP, they are
+        prefixed from its owning FSDP instance, which may not be the local FSDP
+        root. Thus, we relax the check to only that the wrapper FQN is a suffix
+        of the composable FQN.
+
+        If this check passes for the entire model and we separately unit-test
+        parity for wrapping policies, then we can be sure that the handles
+        actually match.
+        """
+        self.assertEqual(len(composable_handles), len(wrapped_handles))
+        for composable_handle, wrapped_handle in zip(
+            composable_handles, wrapped_handles
+        ):
+            composable_fqns = composable_handle.flat_param._fqns
+            wrapped_fqns = wrapped_handle.flat_param._fqns
+            self.assertEqual(len(composable_fqns), len(wrapped_fqns))
+            for composable_fqn, wrapped_fqn in zip(composable_fqns, wrapped_fqns):
+                self.assertTrue(composable_fqn.endswith(wrapped_fqn))
 
 
 if __name__ == "__main__":

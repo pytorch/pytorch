@@ -122,9 +122,12 @@ class TestFSDPCheckpoint(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_use_reentrant(self):
+        # Escape the brackets like `\[` since `[` has special meaning in regex
         with self.assertRaisesRegex(
-            AssertionError,
-            "Expects `Tensor` to have been saved in forward",
+            RuntimeError,
+            r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+            "offset 0, and itemsize 4 requiring a storage size of 40000 are "
+            "out of bounds for storage of size 0",
         ):
             self._test_checkpoint_fsdp_submodules(True)
 
