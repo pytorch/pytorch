@@ -467,7 +467,7 @@ def run_meta_crossref(
         # they're not tested outside of gradcheck which only checks
         # torch.float64 and torch.complex128 (which this second one
         # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken")
+        raise unittest.SkipTest("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
