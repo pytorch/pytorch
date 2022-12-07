@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import os
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -510,6 +511,10 @@ def in_kernel_invocation_manager(fake_mode):
         del guard
 
 
+class FakeTensorConfig:
+    debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
+
+
 class FakeTensor(torch.Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -569,6 +574,10 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
+        if FakeTensorConfig.debug:
+            import traceback
+
+            self._debug_trace = traceback.extract_stack()
 
     @staticmethod
     def from_tensor(t, fake_mode):
