@@ -105,7 +105,7 @@ class HandleShardingStrategy(Enum):
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
     HYBRID_SHARD = auto()
-    HYBRID_SHARD_ZERO2 = auto()
+    _HYBRID_SHARD_ZERO2 = auto()
 
 
 @dataclass

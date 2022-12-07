@@ -193,8 +193,9 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
             This is the process group used for collective communications and
             the one over which the model is sharded. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD`` or ``ShardingStrategy.HYBRID_SHARD_ZERO2``, users can
-            pass in a tuple of process groups representing the sharding and data parallel groups.
+            ``ShardingStrategy.HYBRID_SHARD`` or ``ShardingStrategy._HYBRID_SHARD_ZERO2``, users can
+            pass in a tuple of process groups representing the groups to shard and replicate across,
+            respectively.
         sharding_strategy (Optional[ShardingStrategy]):
             This configures the sharding strategy used by FSDP, which may trade
             off memory saving and communication overhead. See
@@ -370,7 +371,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Initializes self.process_group, along with rank and world size. This will
         # also set another attribute, _inter_node_pg, to control the process group
-        # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, HYBRID_SHARD_ZERO2}.
+        # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
         _init_process_group_state(self, process_group, sharding_strategy, auto_wrap_policy)

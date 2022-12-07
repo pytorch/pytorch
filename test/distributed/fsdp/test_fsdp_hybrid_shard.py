@@ -96,13 +96,13 @@ class TestFSDPHybridShard(FSDPTest):
             model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD)
 
         with err_ctx:
-            model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD_ZERO2)
+            model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
 
 
     @skip_if_lt_x_gpu(2)
     def test_hybrid_shard_mismatch_in_modules_raises(self):
         for sharding_strategy in [
-            ShardingStrategy.HYBRID_SHARD_ZERO2,
+            ShardingStrategy._HYBRID_SHARD_ZERO2,
             ShardingStrategy.HYBRID_SHARD
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
@@ -123,7 +123,7 @@ class TestFSDPHybridShard(FSDPTest):
         model = MyModel().cuda()
         intra_pg = self.process_group
         inter_pg = dist.new_group(ranks=[self.rank])
-        # Mismatched process groups
+        # Mismatched process groups for intra-node
         model.lin1 = FSDP(
             model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD
         )
@@ -132,7 +132,18 @@ class TestFSDPHybridShard(FSDPTest):
         )
         # Errors during lazy_init
         inp = torch.randn(4, 10)
-        with self.assertRaisesRegex(AssertionError, "do not match"):
+        with self.assertRaisesRegex(ValueError, "intra-node process groups do not match"):
+            model(inp)
+
+        # Mismatched process groups for inter-node
+        model = MyModel().cuda()
+        model.lin1 = FSDP(
+            model.lin1, process_group=(intra_pg, inter_pg), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+        )
+        model = FSDP(
+            model, process_group=(intra_pg, dist.new_group()), sharding_strategy=ShardingStrategy.HYBRID_SHARD
+        )
+        with self.assertRaisesRegex(ValueError, "inter-node process groups do not match"):
             model(inp)
 
     @skip_if_lt_x_gpu(2)
@@ -156,13 +167,13 @@ class TestFSDPHybridShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_hybrid_shard_basic_setup(self):
         """
-        Tests basic functionality of HYBRID_SHARD and HYBRID_SHARD_ZERO2:
+        Tests basic functionality of HYBRID_SHARD and _HYBRID_SHARD_ZERO2:
             1. Inter and intra-node process groups are correctly setup
             2. Process groups are the same across FSDP wrapped units
             3. reduce_scatter and allreduce called the expected no. of times
         """
         for sharding_strategy in [
-            ShardingStrategy.HYBRID_SHARD, ShardingStrategy.HYBRID_SHARD_ZERO2
+            ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
                 auto_wrap_policy = functools.partial(

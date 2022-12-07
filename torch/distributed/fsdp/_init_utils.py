@@ -72,12 +72,12 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
     ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
-    ShardingStrategy.HYBRID_SHARD_ZERO2: HandleShardingStrategy.HYBRID_SHARD_ZERO2,
+    ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
 
 HYBRID_SHARDING_STRATEGIES = {
     ShardingStrategy.HYBRID_SHARD,
-    ShardingStrategy.HYBRID_SHARD_ZERO2,
+    ShardingStrategy._HYBRID_SHARD_ZERO2,
 }
 
 
@@ -95,7 +95,7 @@ def _init_process_group_state(
     if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
         if process_group is None and policy is None:
             # Raise an error here, since this is manual wrapping with no process group
-            # passed in, there is no way to ensure all wrapped FSDP units use the same
+            # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
                 f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
@@ -110,10 +110,7 @@ def _init_process_group_state(
             raise ValueError(
                 f"process_group should be None or dist.ProcessGroup, but got {type(process_group)}"
             )
-        if process_group is None:
-            state.process_group = _get_default_group()
-        else:
-            state.process_group = process_group
+        state.process_group = process_group if process_group is not None else _get_default_group()
 
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
@@ -121,7 +118,7 @@ def _init_process_group_state(
     return state
 
 @no_type_check
-def _init_process_group_state_for_hybrid_shard(state, process_group) -> _FSDPState:
+def _init_process_group_state_for_hybrid_shard(state: _FSDPState, process_group) -> _FSDPState:
     if process_group is None:
         default_group = _get_default_group()
         intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(default_group)
@@ -131,8 +128,7 @@ def _init_process_group_state_for_hybrid_shard(state, process_group) -> _FSDPSta
         state._inter_node_pg = inter_node_group
     else:
         # Check type and assign state.process_group and state._inter_node_pg.
-        valid = _validate_hybrid_shard_pg_type(process_group)
-        if valid:
+        if _is_valid_hybrid_shard_pg_type(process_group):
             # Assuming that user passed in as intra node group and inter node group
             # as documented.
             state.process_group, state._inter_node_pg = process_group
@@ -148,7 +144,7 @@ def _init_process_group_state_for_hybrid_shard(state, process_group) -> _FSDPSta
     return state
 
 @no_type_check
-def _validate_hybrid_shard_pg_type(process_group: Any) -> bool:
+def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
     return (
         isinstance(process_group, tuple)
         and len(process_group) == 2
@@ -158,14 +154,19 @@ def _validate_hybrid_shard_pg_type(process_group: Any) -> bool:
 @no_type_check
 def _init_intra_node_process_group() -> dist.ProcessGroup:
     """
-    Returns a process group across the current machine.
-    For example, given each row is a distinct machine:
-    0 3
-    1 4
-    2 5
+    Returns a process group across the current node.
+    For example, given each column is a distinct node:
+    0 8
+    1 9
+    2 10
+    3 11
+    4 12
+    5 13
+    6 14
+    7 15
     This API would return an intra-node subgroup across
-    {0, 1, 2} or {3, 4, 5}, depending on the process's rank.
-    For example, rank 3 would get {3, 4, 5}.
+    [0, 7] or [8, 15] depending on the process's rank.
+    For example, rank 3 would get [0, 7].
     """
     intra_node_subgroup, _ = dist.new_subgroups()
     return intra_node_subgroup
@@ -176,12 +177,18 @@ def _init_inter_node_process_group(
 ) -> dist.ProcessGroup:
     """
     Returns an inter-node process group where each contained rank has
-    the same local rank. For example, given each row is a distinct machine:
-    0 3
-    1 4
-    2 5
-    This API would return inter-node process group {0, 3}, {1, 4}, or {2, 5},
-    depending on the process's rank. For example, ranks 1 and 4 would get {1, 4}.
+    the same local rank. For example, given each column is a distinct node:
+    0 8
+    1 9
+    2 10
+    3 11
+    4 12
+    5 13
+    6 14
+    7 15
+    This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
+    depending on the process's rank. For example, rank 1 would get {1, 9}, rank 5
+    would get {5, 13}.
     """
     # the inter-node pg that is returned
     inter_node_pg = None
@@ -189,11 +196,11 @@ def _init_inter_node_process_group(
     world_size = dist.get_world_size(global_process_group)
     # Assuming fully homogeneous setup
     num_devices = torch.cuda.device_count()
-    num_distinct_nodes = world_size // num_devices
+    num_nodes = world_size // num_devices
     my_local_rank = dist.get_rank(global_process_group) % num_devices
     for local_rank in range(num_devices):
         ranks_for_inter_group = [
-            local_rank + (i * num_devices) for i in range(num_distinct_nodes)
+            local_rank + (i * num_devices) for i in range(num_nodes)
         ]
         # every rank always needs to call dist.new_group
         grp = dist.new_group(
@@ -213,7 +220,7 @@ def _init_intra_and_inter_node_groups(
     Initializes intra and inter-node process groups and returns the ones corresponding
     to this process's rank.
     This function can be used to initialize process groups for ``HYBRID_SHARD`` or
-    ``HYBRID_SHARD_ZERO2`` in FSDP.
+    ``_HYBRID_SHARD_ZERO2`` in FSDP.
     This function assumes each node has an equal number of CUDA-enabled devices.
     Returns:
         Tuple[dist.ProcessGroup, dist.ProcessGroup]: Intra and inter-node process group.

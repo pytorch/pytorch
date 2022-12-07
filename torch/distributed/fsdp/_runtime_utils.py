@@ -36,7 +36,7 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 }
 
 @no_type_check
-def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
+def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
     """
     Performs validation that hybrid sharding strategy is setup. In particular, we:
     1) Ensure root and passed in FSDP module have the same hybrid sharding strategy,
@@ -45,25 +45,28 @@ def _validate_hybrid_shard_setup(state: _FSDPState, fsdp_module: nn.Module):
     this FSDP module.
     """
     if (
-        state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
+        fsdp_root.sharding_strategy in HYBRID_SHARDING_STRATEGIES
         or fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES
     ):
-        if state.sharding_strategy != fsdp_module.sharding_strategy:
+        if fsdp_root.sharding_strategy != fsdp_module.sharding_strategy:
             raise ValueError(
                 "When using hybrid sharding strategy, expect sharding strategies"
-                f" to be the same, but got {state.sharding_strategy} vs {fsdp_module.sharding_strategy}"
+                f" to be the same, but got {fsdp_root.sharding_strategy} vs {fsdp_module.sharding_strategy}"
             )
 
         # Ensure inter and intra-node process groups are the same
         # TODO (rohan-varma) unclear whether these should be asserts or Exceptions
         # as they can happen due to bug in FSDP process group setup or user passing in
         # incorrect configuration.
-        assert state.process_group == fsdp_module.process_group, (
-            f"For {state.sharding_strategy} intra-node process groups do not match"
-        )
-        assert state._inter_node_pg == fsdp_module._inter_node_pg, (
-            f"For {state.sharding_strategy}, inter-node process groups do not match"
-        )
+        if fsdp_root.process_group != fsdp_module.process_group:
+            raise ValueError(
+                f"For {fsdp_root.sharding_strategy} intra-node process groups do not match"
+            )
+
+        if fsdp_root._inter_node_pg != fsdp_module._inter_node_pg:
+            raise ValueError(
+                f"For {fsdp_root.sharding_strategy}, inter-node process groups do not match"
+            )
 
 @no_type_check
 def _lazy_init(
@@ -593,10 +596,10 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in {
+                if handle._config.sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy.HYBRID_SHARD_ZERO2
-                }:
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2
+                ):
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
@@ -667,7 +670,7 @@ def _should_free_in_backward(
     # are sharded.
     free_unsharded = state._sync_gradients and handle.uses_sharded_strategy
     # For NO_SHARD we don't need to free full parameters, for Zero-2 strategies, we skip
-    # freeing in backward. Note that this also applies for HYBRID_SHARD_ZERO2.
+    # freeing in backward. Note that this also applies for _HYBRID_SHARD_ZERO2.
     return free_unsharded or (
         handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
