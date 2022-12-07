@@ -360,7 +360,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype):
-        assert dtype in [torch.float32], f"{__name__} does not support {dtype}"
+        assert dtype in [
+            torch.bool,
+            torch.float32,
+        ], f"{__name__} does not support {dtype}"
         return f"({x})"
 
 
@@ -1020,7 +1023,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype):
-                if dtype not in [torch.float32]:
+                if dtype not in [torch.bool, torch.float32]:
                     self.simd_vec = False
                 return x
 
