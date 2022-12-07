@@ -64,7 +64,7 @@ void set_params_fprop(FMHA_fprop_params &params,
                       bool is_causal) {
 
     // Reset the parameters
-    memset(&params, 0, sizeof(params));
+    params = {};
 
     params.is_bf16 = q.dtype() == at::kBFloat16;
 
