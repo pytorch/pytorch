@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.1)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
-set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/build/out)
+set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
 
 find_package(Python COMPONENTS Interpreter)
 set(PYTHONINTERP_FOUND ${Python_Interpreter_FOUND})
@@ -33,21 +33,27 @@ add_custom_command(
         ${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
         ${TEST_ROOT}/templates/Functions.h
         ${TEST_ROOT}/templates/NativeFunctions.h
-        ${TEST_ROOT}/templates/RegisterCodegenUnboxedKernels.h
+        ${TEST_ROOT}/templates/RegisterCodegenUnboxedKernels.cpp
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
 )
-add_custom_target(UNBOX_TARGET DEPENDS ${GEN_COMMAND_sources})
+add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
+
+add_library(unbox_lib STATIC
+        ${GEN_COMMAND_sources}
+        ${TEST_ROOT}/operator_registry.cpp
+        )
+target_include_directories(unbox_lib PUBLIC ${TEST_ROOT} ${ATen_CPU_INCLUDE})
+target_link_libraries(unbox_lib PUBLIC torch_cpu)
+target_compile_definitions(unbox_lib PUBLIC USE_ATEN_LIB)
+
 add_executable(test_edge_op_registration
         ${TEST_ROOT}/test_operator_registration.cpp
         ${TEST_ROOT}/test_main.cpp
-        ${UNBOX_TARGET}
         )
-
-target_include_directories(test_edge_op_registration PRIVATE ${ATen_CPU_INCLUDE})
 
 target_compile_definitions(test_edge_op_registration PRIVATE USE_GTEST)
 
-set(TEST_DEPENDENCIES torch gtest)
+set(TEST_DEPENDENCIES gtest unbox_lib)
 
 target_link_libraries(test_edge_op_registration PRIVATE
   ${TEST_DEPENDENCIES}

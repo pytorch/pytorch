@@ -2,17 +2,21 @@
 
 #include <cstring>
 
-#include <c10/ArrayRef.h>
-#include <c10/IValue.h>
+#include <c10/util/ArrayRef.h>
+#include "Evalue.h"
 #include <functional>
 #include <map>
 
 namespace torch {
 namespace executor {
 
-
-using EValue = torch::IValue;
 using OpFunction = std::function<void(EValue**)>;
+
+template<typename T>
+using ArrayRef = at::ArrayRef<T>;
+
+#define EXECUTORCH_SCOPE_PROF(x)
+
 struct Operator {
   const char* name_;
   OpFunction op_;
@@ -38,19 +42,14 @@ bool hasOpsFn(const char* name);
  */
 OpFunction& getOpsFn(const char* name);
 
-/**
- * See OperatorRegistry::getOpsArray()
- */
-ArrayRef<Operator> getOpsArray();
 
-
-void register_operators(const ArrayRef<Operator>&);
+bool register_operators(const ArrayRef<Operator>&);
 
 struct OperatorRegistry {
  public:
   OperatorRegistry() : operatorRegSize_(0) {}
 
-  void register_operators(const ArrayRef<Operator>&);
+  bool register_operators(const ArrayRef<Operator>&);
 
   /**
    * Checks whether an operator with a given name is registered

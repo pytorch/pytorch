@@ -1,10 +1,11 @@
-#include "operator_registry.h"
+#include <operator_registry.h>
 #include "Functions.h"
 
 namespace torch {
 namespace executor {
 
 namespace {
+using OpArrayRef = ::at::ArrayRef<::torch::executor::Operator>;
 
 static Operator operators_to_register[] = {
     ${unboxed_ops} // Generated operators

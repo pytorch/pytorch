@@ -1,5 +1,4 @@
 #include "operator_registry.h"
-#include <torch/torch.h>
 #include <gtest/gtest.h>
 
 namespace torch {
@@ -10,7 +9,7 @@ TEST(OperatorRegistrationTest, Add) {
     EValue values[4];
     values[0] = EValue(at::ones({2, 3}));
     values[1] = EValue(at::ones({2, 3}));
-    values[2] = EValue(1);
+    values[2] = EValue(int64_t(1));
 
     auto op = getOpsFn("aten::add.out");
     EValue* kernel_values[4];
@@ -18,8 +17,8 @@ TEST(OperatorRegistrationTest, Add) {
         kernel_values[i] = &values[i];
     }
     op(kernel_values);
-    at::Tensor expected = 2 * at::ones({2, 3});
-    ASSERT_EQ(values[3].toTensor(), expected);
+    at::Tensor expected = at::tensor({{2, 2, 2}, {2, 2, 2}});
+    ASSERT_TRUE(expected.equal(values[3].toTensor()));
 
 }
 } // namespace executor

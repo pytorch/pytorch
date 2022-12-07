@@ -1,5 +1,5 @@
 #include <c10/util/Exception.h>
-#include "operator_registry.h"
+#include <operator_registry.h>
 
 namespace torch {
 namespace executor {
@@ -9,16 +9,16 @@ OperatorRegistry& getOperatorRegistry() {
   return operator_registry;
 }
 
-void register_operators(const ArrayRef<Operator>& operators) {
-  getOperatorRegistry().register_operators(operators);
+bool register_operators(const ArrayRef<Operator>& operators) {
+  return getOperatorRegistry().register_operators(operators);
 }
 
-void OperatorRegistry::register_operators(
+bool OperatorRegistry::register_operators(
     const ArrayRef<Operator>& operators) {
   for (const auto& op : operators) {
     this->operators_map_[op.name_] = op.op_;
   }
-  return Error::Ok;
+  return true;
 }
 
 bool hasOpsFn(const char* name) {
