@@ -13,10 +13,10 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.quantization import (
     ObserverBase,
-    FakeQuantizeBase
+    FakeQuantizeBase,
 )
-from torch.ao.quantization.observer import _is_activation_post_process
 from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
