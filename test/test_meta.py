@@ -364,7 +364,7 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         if should_check_strides(func) == CheckStrides.ALL:
             same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
             test_assert(same_strides, f"but real stride was {r.stride()}")
-        if should_check_strides(func) == CheckStrides.SIGNIFICANT:
+        elif should_check_strides(func) == CheckStrides.SIGNIFICANT:
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
             test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
