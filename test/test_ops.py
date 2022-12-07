@@ -8,6 +8,7 @@ import itertools
 import torch
 import contextlib
 import re
+import os
 
 from collections import defaultdict
 from importlib import import_module
@@ -152,6 +153,8 @@ class TestCommon(TestCase):
                 )
 
     def test_pointwise_tag_coverage(self):
+
+        pytorch_dir = os.path.abspath(__file__ + "/../../")
         files = [
             "aten/src/ATen/native/UnaryOps.cpp",
             "aten/src/ATen/native/BinaryOps.cpp",
@@ -204,7 +207,7 @@ class TestCommon(TestCase):
             self.assertTrue(False)
 
         for file_name in files:
-            with open(file_name, "r") as f:
+            with open(os.path.join(pytorch_dir, file_name), "r") as f:
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
