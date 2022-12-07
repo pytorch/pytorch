@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import cast, Dict, List, Optional
+from typing import cast, Dict, List, Optional, Set
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
