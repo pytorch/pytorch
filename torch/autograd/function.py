@@ -1,3 +1,4 @@
+import contextlib
 import torch
 import torch._C as _C
 from torch._C import _functions
@@ -466,6 +467,17 @@ def traceable(fn_cls):
     """
     fn_cls.is_traceable = True
     return fn_cls
+
+
+# Private feature flag. Not user-facing.
+@contextlib.contextmanager
+def _set_autograd_function_extension_enabled(enabled=True):
+    try:
+        prev_state = torch._C._is_autograd_function_extension_enabled()
+        torch._C._set_autograd_function_extension_enabled(enabled)
+        yield
+    finally:
+        torch._C._set_autograd_function_extension_enabled(prev_state)
 
 
 class InplaceFunction(Function):
