@@ -8,18 +8,7 @@ import re
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import numpy as np
@@ -32,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .types import GuardedCode, GuardFn  # noqa: F401
+from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
     dict_param_key_ids,
@@ -865,13 +854,6 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
-class GuardFail(NamedTuple):
-    # A string repr of the piece of failed guard code we eval-ed
-    reason: str
-    # A code object where we failed a guard
-    orig_code: types.CodeType
-
-
 def guard_fail_hook(
     guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
 ) -> None:
@@ -894,7 +876,10 @@ def guard_fail_hook(
             reason = part
             break
     try:
-        guard_fn.guard_fail_fn(GuardFail(reason, orig_code_map[code]))
+        if guard_fn.guard_fail_fn is not None:
+            guard_fn.guard_fail_fn(
+                GuardFail(reason or "unknown reason", orig_code_map[code])
+            )
     except Exception as e:
         log.error(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",

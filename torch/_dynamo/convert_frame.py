@@ -506,10 +506,10 @@ def replay(filename):
             record.globals,
             record.locals,
             record.builtins,
-            eager,
-            hooks,
+            compiler_fn=eager,
             one_graph=False,
             export=False,
+            hooks=Hooks(),
             frame=None,
         )
     except Exception:

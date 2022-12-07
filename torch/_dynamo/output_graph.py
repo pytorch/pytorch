@@ -161,7 +161,9 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self._current_tx = []
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
