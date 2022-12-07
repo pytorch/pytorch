@@ -30,7 +30,9 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from torch.ao.quantization.observer import _is_activation_post_process
 
 # TODO remove this once BC is no longer required to avoid a SEV
-from torch.ao.quantization.observer import _is_activation_post_process as is_activation_post_process
+from torch.ao.quantization.observer import (   # noqa: F401
+    _is_activation_post_process as is_activation_post_process
+)
 
 __all__ = [
     "get_default_custom_config_dict",
