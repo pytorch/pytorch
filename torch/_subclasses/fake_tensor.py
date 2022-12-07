@@ -16,7 +16,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map
+from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -25,6 +25,18 @@ TensorWeakRef = Any
 aten = torch.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
+
+CONSTANT_LIFTING = False
+
+
+@contextlib.contextmanager
+def _enable_constant_lifting():
+    global CONSTANT_LIFTING
+    prev, CONSTANT_LIFTING = CONSTANT_LIFTING, True
+    try:
+        yield
+    finally:
+        CONSTANT_LIFTING = prev
 
 
 @dataclass
@@ -784,9 +796,15 @@ class FakeTensorMode(TorchDispatchMode):
             return converter(self, args[0])
 
         if self.check_for_non_fake(flat_arg_tensors):
-            raise Exception(
-                "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
+            if not CONSTANT_LIFTING:
+                raise Exception(
+                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
+                )
+            args, kwargs = tree_map_only(
+                torch.Tensor,
+                lambda x: x if isinstance(x, FakeTensor) else converter(self, x),
+                (args, kwargs),
             )
 
         # The current constant handling only support tracing systems

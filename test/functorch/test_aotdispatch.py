@@ -1215,6 +1215,47 @@ def forward(self, primals_1, primals_2):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
+    def test_real_weights_in_symbolic_mode(self):
+        from functorch.experimental import functionalize
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+
+        inp = torch.randn(2, 5)
+
+        gm = make_fx(m, tracing_mode="symbolic", _constant_lifting=True)(inp)
+        self.assertEqual(gm(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _constant_lifting=True)(inp)
+        self.assertEqual(gm_functionalized(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        inp_count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        inp_count = 0
+        for node in gm_functionalized.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        with self.assertRaisesRegex(Exception, "Invoking operators with non-Fake Tensor"):
+            make_fx(m, tracing_mode="symbolic", _constant_lifting=False)(torch.randn(2, 5))
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
