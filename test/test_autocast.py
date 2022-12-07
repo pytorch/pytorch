@@ -59,7 +59,7 @@ class TestAutocastCPU(TestCase):
             # For example, lstm_cell returns a tuple and equal returns bool.
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
-                    return torch.equal(first, second)
+                    return (first == second).all().item()
                 elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:

@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     HandleTrainingState,
     TrainingState,
 )
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
     _get_default_comm_hook,
@@ -56,7 +57,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _reshard,
     _root_pre_forward,
     _should_free_in_backward,
-    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -96,6 +96,7 @@ from ._unshard_param_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
+from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -317,7 +318,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[ProcessGroup] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -330,8 +331,11 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-
         _init_ignored_module_states(self, module, ignored_modules)
+
+        # Add module annotations for Dynamo support (see function for details)
+        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
+
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -1156,11 +1160,6 @@ class FullyShardedDataParallel(nn.Module):
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
         self._assert_state(TrainingState.IDLE)
-        _wait_for_computation_stream(
-            torch.cuda.current_stream(),
-            self._streams["unshard"],
-            self._streams["pre_unshard"],
-        )
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
@@ -1177,6 +1176,7 @@ class FullyShardedDataParallel(nn.Module):
         norm_type = float(norm_type)
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
+        grads: List[torch.Tensor] = []
         for handle in FullyShardedDataParallel._fsdp_handles(self):
             target_set = (
                 sharded_params if handle.uses_sharded_strategy else nonsharded_params
@@ -1184,14 +1184,20 @@ class FullyShardedDataParallel(nn.Module):
             if handle._use_orig_params:
                 for param in handle.flat_param._params:
                     target_set.add(param)
+                    if param.grad is not None:
+                        grads.append(param.grad)
             else:
                 target_set.add(handle.flat_param)
+                if handle.flat_param.grad is not None:
+                    grads.append(handle.flat_param.grad)
         for param in self.parameters():
             not_fsdp_managed = (
                 param not in sharded_params and param not in nonsharded_params
             )
             if not_fsdp_managed:
                 nonsharded_params.add(param)
+                if param.grad is not None:
+                    grads.append(param.grad)
         local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
             self.compute_device
         )
@@ -1214,14 +1220,11 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
-        clip_coef = torch.tensor(
-            max_norm, dtype=total_norm.dtype, device=total_norm.device
-        ) / (total_norm + 1e-6)
+        clip_coef = max_norm / (total_norm + 1e-6)
         # Multiplying by the clamped coefficient is meaningless when it is
         # equal to 1, but it avoids the host-device sync that would result from
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-        grads = [param.grad for param in self.parameters() if param.grad is not None]
         for grad in grads:
             grad.detach().mul_(clip_coef_clamped.to(grad.device))
         return total_norm
