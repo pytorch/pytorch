@@ -949,7 +949,7 @@ class FSDPTest(MultiProcessTestCase):
                 **init_kwargs,
             )
         except Exception as e:
-            raise ValueError(f"Initializing {model_class} raised error {str(e)}")
+            raise ValueError(f"Initializing {model_class} raised error {str(e)}") from e
         if not isinstance(fsdp_model, FSDP):
             # Enforce that we wrap with top-level FSDP since we are comparing
             # assuming a data parallel reference and some test models may not
