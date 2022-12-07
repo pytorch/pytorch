@@ -135,6 +135,12 @@ def _init_core_state(
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
     if state.world_size == 1:
+        if sharding_strategy != ShardingStrategy.NO_SHARD:
+            warnings.warn(
+                "FSDP is switching to use `NO_SHARD` instead of "
+                f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
+                "the world size is 1."
+            )
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
@@ -152,10 +158,19 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    # Mapping from module to every `FlatParamHandle` that the module consumes,
+    # where there is an entry for every (sub)module
     _module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
     state._module_to_handles = _module_to_handles
+    # Same as `_module_to_handle` but filtered to only include keys that are
+    # root modules with respect to the `FlatParamHandle` (see `_root_modules`
+    # in `FlatParameter`)
+    _root_module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._root_module_to_handles = _root_module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -175,10 +190,6 @@ def _init_runtime_state(
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
     state._sync_gradients = True
     state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
     state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
@@ -348,6 +359,8 @@ def _init_param_handle_from_params(
     state._handles.append(handle)
     for module in handle.flat_param._modules:
         state._module_to_handles[module].append(handle)
+    for module in handle.flat_param._root_modules:
+        state._root_module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
@@ -368,8 +381,8 @@ def _get_ignored_modules(
     msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
     try:
         ignored_root_modules = set(_ignored_modules)
-    except TypeError:
-        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}")
+    except TypeError as e:
+        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}") from e
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")

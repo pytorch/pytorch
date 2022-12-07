@@ -412,7 +412,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED(_softmax);
   REDUCTION_BOXED(sort);
   REDUCTION_BOXED_ARGS(sort.stable, 2);
-  REDUCTION_BOXED(argsort);
   REDUCTION_BOXED(std_mean.correction);
   m.impl("sum", sum_decomp);
   REDUCTION_BOXED(sum.dim_IntList);

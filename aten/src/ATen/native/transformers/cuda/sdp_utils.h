@@ -40,7 +40,9 @@ inline bool check_tensor_dtype(
          allowed_dtypes.end()))) {
     TORCH_CHECK(
         !debug,
-        "Expected query, key and value to be of dtype float16 or bfloat16 but got Query dtype: ",
+        "Expected query, key and value to all be of dtype: {",
+        c10::Join(", ", allowed_dtypes), "}. Got ",
+        "Query dtype: ",
         params.query.dtype(),
         ", Key dtype: ",
         params.key.dtype(),
@@ -162,6 +164,25 @@ inline bool check_head_dim_size(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
+  const int64_t query_size_last = params.query.size(-1);
+  if (!(query_size_last == params.key.size(-1) &&
+        query_size_last == params.value.size(-1) && query_size_last >= 8)) {
+    TORCH_CHECK(
+        !debug,
+        "Mem efficient attention requires last dimension of inputs to be >= 8.",
+        "Got Query.size(-1): ",
+        query_size_last,
+        ", Key.size(-1): ",
+        params.key.size(-1),
+        ", Value.size(-1): ",
+        params.value.size(-1),
+        " instead.");
+    return false;
+  }
+  return true;
+}
+
 inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
@@ -259,13 +280,14 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
+      check_head_dim_size_mem_efficient,
       check_for_seq_len_1_nested_tensor,
       check_for_non_zero_dropout}};
   for (auto& constraint : constraints) {

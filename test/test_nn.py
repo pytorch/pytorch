@@ -1749,7 +1749,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         vector_to_parameters(vec, model.parameters())
 
         sample = next(model.parameters())[0, 0, 0]
-        self.assertEqual(sample.data, vec.data[:5], rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
@@ -5119,9 +5119,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Forward random tensor
         _ = bn(torch.rand(input_size))
         # Ensure none of the buffers has been updated
-        self.assertEqual(num_batches, bn.num_batches_tracked, rtol=0, atol=0, exact_device=True)
-        self.assertEqual(running_mean, bn.running_mean, rtol=0, atol=0, exact_device=True)
-        self.assertEqual(running_var, bn.running_var, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(num_batches, bn.num_batches_tracked))
+        self.assertTrue(torch.equal(running_mean, bn.running_mean))
+        self.assertTrue(torch.equal(running_var, bn.running_var))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_batchnorm_nhwc_cuda(self):
@@ -5133,7 +5133,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             inp2 = inp1.contiguous(memory_format=torch.channels_last)
             out1 = model(inp1)
             out2 = model(inp2)
-            self.assertEqual(out1, out2, rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(out1, out2))
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -6375,12 +6375,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             outf = m(inputf)
             out = m(input)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0.0)
+            self.assertEqual(out, outf.to(dtype), atol=0.1, rtol=0.0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
         for device in ['cpu']:
@@ -6400,7 +6398,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
         # note we allocated grad_output to be larger so out of bound access
-        # woudl be visible in grad_input
+        # would be visible in grad_input
         grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
         grad = grad[:, :, :out_s]
 
@@ -6712,12 +6710,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.log_softmax(inputf, dim=dim)
             out = F.log_softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
             self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
     def test_softmax_cpu(self, dtype=torch.bfloat16):
@@ -6726,12 +6722,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.softmax(inputf, dim=dim)
             out = F.softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=1e-3, rtol=0)
+            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
     def test_adaptive_log_softmax(self):
@@ -6842,12 +6836,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         outf = loss_cpu(inputf, target)
         out = loss_cpu(input, target)
-        self.assertEqual(out.dtype, dtype)
         self.assertEqual(out, outf.to(dtype=dtype), atol=1e-1, rtol=0)
 
         outf.backward()
         out.backward()
-        self.assertEqual(input.grad.dtype, dtype)
         self.assertEqual(input.grad, inputf.grad.to(dtype=dtype), atol=1e-1, rtol=0)
 
     def test_cross_entropy_loss_precision(self):
