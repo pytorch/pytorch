@@ -101,14 +101,15 @@ def _get_submodule_to_states(
     # Record the modules to wrap without actually wrapping
     wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
     wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
-    _recursive_wrap(
-        root_module,
-        auto_wrap_policy=auto_wrap_policy.policy,
-        wrapper_cls=wrapper_cls,
-        ignored_modules=ignored_modules,
-        ignored_params=ignored_params,
-        only_wrap_children=False,
-    )
+    if auto_wrap_policy is not None:
+        _recursive_wrap(
+            root_module,
+            auto_wrap_policy=auto_wrap_policy.policy,
+            wrapper_cls=wrapper_cls,
+            ignored_modules=ignored_modules,
+            ignored_params=ignored_params,
+            only_wrap_children=False,
+        )
     # Always include the root module even if not wrapped by the given policy
     if root_module not in wrapped_modules:
         wrapped_modules.append(root_module)
