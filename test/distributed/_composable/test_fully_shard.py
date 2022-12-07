@@ -10,12 +10,10 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._runtime_utils import _root_pre_forward
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -75,20 +73,19 @@ class TestFSDPInitialization(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    def test_auto_wrap_policy(self):
+    def _test_auto_wrap_policy(self, auto_wrap_policy):
         """Tests passing an ``auto_wrap_policy``."""
 
         local_model = Model(device=torch.device("cuda"))
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
-            auto_wrap_policy=Model.policy(),
+            auto_wrap_policy=auto_wrap_policy,
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
         fully_shard(
             composable_module,
-            policy=Model.policy(),
+            policy=auto_wrap_policy,
         )
 
         # Check that the composable module has the same names as the local
@@ -125,6 +122,13 @@ class TestFSDPInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
+
+    @skip_if_lt_x_gpu(2)
+    def test_auto_wrap_policy(self):
+        self.run_subtests(
+            {"auto_wrap_policy": [None, Model.policy()]},
+            self._test_auto_wrap_policy,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):
@@ -244,24 +248,13 @@ class TestFSDPRuntime(FSDPTest):
                 (composable_module, composable_optim),
             ):
                 optim.zero_grad(set_to_none=True)
-                # TODO (awgu): Remove this after resolving the root pre-forward
-                # hook registration, currently blocked by kwarg support
-                if model is composable_module:
-                    args, kwargs = _root_pre_forward(
-                        fully_shard.state(composable_module), composable_module, *inp
-                    )
-                else:
-                    args = inp
-                    kwargs = {}
-                out = model(*args, **kwargs)
+                out = model(*inp)
                 loss = out.sum()
                 losses.append(loss)
                 loss.backward()
                 optim.step()
             self.assertEqual(losses[0], losses[1])
 
-
-instantiate_parametrized_tests(TestFSDPInitialization)
 
 if __name__ == "__main__":
     run_tests()

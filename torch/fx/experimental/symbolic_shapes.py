@@ -1,11 +1,13 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import operator
 import builtins
 import math
 import functools
+import threading
+from contextlib import contextmanager
 from functools import lru_cache, partial
 import traceback
 import collections
@@ -146,11 +148,18 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None):
+    def __init__(self, expr, shape_env, pytype, constant=None, symbol=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         self.constant = constant
+        # Unlike expr, sympy.Symbol is guaranteed to either be a
+        # symbol or its negation a symbol, and it never gets simplified into a
+        # constant or another symbol.  This only exists for freshly
+        # create_symint; intermediate values are None.  The usage of this
+        # property is fairly short-lived: it lives long enough so that Dynamo
+        # can get its hands on symbols and setup Source associations
+        self.symbol: Optional[sympy.Expr] = symbol
 
     @property
     def expr(self):
@@ -175,7 +184,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
+        return self
 
     def str(self):
         return f"{self.expr}"
@@ -260,9 +269,6 @@ reflectable_magic_methods = {
     'truediv': lambda a, b: a / b,
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
-
-def _nyi():
-    raise NotImplementedError()
 
 magic_methods = {
     **reflectable_magic_methods,
@@ -442,6 +448,20 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.tls = threading.local()
+        # Set holds symbols which definitely are not 0 or 1.
+        self.definitely_not_01: Set["sympy.Symbol"] = set()
+
+    def _suppress_guards_tls(self):
+        return getattr(self.tls, "suppress_guards", False)
+
+    @contextmanager
+    def suppress_guards(self):
+        self.tls.suppress_guards = True
+        try:
+            yield
+        finally:
+            self.tls.suppress_guards = False
 
     def _get_key(self):
         """
@@ -450,7 +470,7 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -486,29 +506,60 @@ class ShapeEnv(object):
                 )
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+        sym_size = [self.create_symintnode(i) for i in size]
+        sym_stride = []
+        for stride_expr in stride:
+            # NB: Don't duck size the stride; instead use the expression
+            # we computed
+            # TODO: We actually allocated an unnecessary extra symbol
+            # here in the smallest unbound stride case, but it's not
+            # a big deal because the non-0/1 symbol immediately
+            # evaporates from its duck-sizing simplification
+            s = self.create_symbol(val, simplify=False)
+            assert stride_expr is not None
+            assert isinstance(s, sympy.Symbol)
+            self.replacements[s] = stride_expr
+            sym_stride.append(self.create_symintnode(s))
+        sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset()))
+        return sym_size, sym_stride, sym_storage_offset
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        return SymInt(SymNode(expr, self, int))
+    def create_symintnode(self, sym: "sympy.Expr"):
+        assert isinstance(sym, sympy.Symbol) or isinstance(-sym, sympy.Symbol)
+        return SymInt(SymNode(sym.xreplace(self.replacements), self, int, symbol=sym))
 
-    def create_symbol(self, val: int) -> "sympy.Expr":
+    # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
+    # but there may be a replacement that allows it to be immediately
+    # simplified
+    def create_symbol(self, val: int, *, simplify: bool = True) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
+
         if val < 0:
-            # all sympy base variables must be positive and > 1
-            return -self.create_symbol(-val)
+            return -self.create_symbol(-val, simplify=simplify)
+
+        symbol = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+        self.var_to_val[symbol] = sympy.Integer(val)
+
+        if not simplify:
+            return symbol
+
+        # Now attempt to simplify this symbol
+        # TODO: Create a guard whenever this happens
+        # TODO: Do this duck sizing lazily later
+
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
-        # TODO: Create a guard whenever this happens
-        # TODO: But how do I represent the guard in this case?
-        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
-        # this also ensures that all symbols are > 1
-        if val in self.val_to_var:
-            return self.val_to_var[val]
-        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-        self.var_to_val[sympy_expr] = sympy.Integer(val)
-        self.val_to_var[val] = sympy_expr
-        return sympy_expr
+        if val not in self.val_to_var:
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            self.val_to_var[val] = sympy_expr
+            self.definitely_not_01.add(sympy_expr)
+
+        self.replacements[symbol] = self.val_to_var[val]
+
+        # Return the *symbol*; you're expected to apply the replacement to get
+        # the simplified variable
+        return symbol
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
@@ -554,6 +605,7 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
+            if k in self.definitely_not_01
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
@@ -676,11 +728,12 @@ class ShapeEnv(object):
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
-        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        if concrete_val is sympy.true:
-            self.guards.append((expr, stack))
-        elif concrete_val is sympy.false:
-            self.guards.append((sympy.Not(expr), stack))
-        else:
-            self.guards.append((sympy.Eq(expr, concrete_val), stack))
+        if not self._suppress_guards_tls():
+            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+            if concrete_val is sympy.true:
+                self.guards.append((expr, stack))
+            elif concrete_val is sympy.false:
+                self.guards.append((sympy.Not(expr), stack))
+            else:
+                self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val
