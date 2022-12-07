@@ -229,7 +229,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         for leaf_info in mismatch_leaves:
             f = io.StringIO()
             with contextlib.redirect_stdout(f):
-                leaf_info.pretty_print_mismatch()
+                leaf_info.pretty_print_mismatch(graph=True)
             self.assertRegex(
                 f.getvalue(),
                 r"(.|\n)*" r"aten::relu.*/torch/nn/functional.py:[0-9]+(.|\n)*",
