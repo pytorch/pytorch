@@ -258,14 +258,20 @@ def cache_on_self(fn):
 def get_fused_kernel_name(node_schedule):
     return "_".join(
         ["fused"]
-        + [
-            str(origin.name)
-            for origin in functools.reduce(
-                operator.or_,
-                [node.node.origins for node in node_schedule if hasattr(node, "node")],
-            )
-            if origin.op == "call_function"
-        ][0 : config.kernel_name_max_ops]
+        + sorted(
+            [
+                str(origin.name)
+                for origin in functools.reduce(
+                    operator.or_,
+                    [
+                        node.node.origins
+                        for node in node_schedule
+                        if hasattr(node, "node")
+                    ],
+                )
+                if origin.op == "call_function"
+            ]
+        )[0 : config.kernel_name_max_ops]
     )
 
 
@@ -374,4 +380,10 @@ def fresh_inductor_cache(cache_entries=None):
 
 
 def argsort(seq):
-    return sorted(range(len(seq)), key=seq.__getitem__)
+    # preserve original order for equal strides
+    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+
+
+@functools.lru_cache(8)
+def get_dtype_size(dtype):
+    return torch.empty((), dtype=dtype).element_size()
