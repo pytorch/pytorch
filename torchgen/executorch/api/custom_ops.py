@@ -14,7 +14,8 @@ from torchgen.api.types import DispatcherSignature  # isort:skip
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, FileManager, mapMaybe, Target
 
-# Generates RegisterKernelStub.cpp, which provides placeholder kernels for custom operators. This will be used at model authoring side.
+# Generates RegisterKernelStub.cpp, which provides placeholder kernels for custom operators. This will be used at
+# model authoring side.
 @dataclass(frozen=True)
 class ComputeNativeFunctionStub:
     @method_with_native_function
@@ -132,7 +133,7 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
         },
     )
     cpu_fm.write_with_template(
-        f"RegisterKernelStub.cpp",
+        "RegisterKernelStub.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
         lambda: {
             "ops_headers": "",
