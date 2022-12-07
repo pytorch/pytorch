@@ -70,7 +70,7 @@ class TestFSDPCheckpoint(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [True, False])
     def test_wrap_same_submodule(self, use_reentrant: bool):
-        model = UnitModule().to("cuda")
+        model = UnitModule(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
@@ -93,7 +93,7 @@ class TestFSDPCheckpoint(FSDPTest):
         )
 
     def _test_checkpoint_fsdp_submodules(self, use_reentrant):
-        model = CompositeModel().to(torch.device("cuda"))
+        model = CompositeModel(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
@@ -134,7 +134,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_with_param(self):
-        model = CompositeParamModel().to(torch.device("cuda"))
+        model = CompositeParamModel(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
@@ -155,7 +155,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_with_param_no_shard(self):
-        model = CompositeParamModel().to(torch.device("cuda"))
+        model = CompositeParamModel(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
