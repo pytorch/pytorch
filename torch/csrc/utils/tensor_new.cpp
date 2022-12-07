@@ -228,6 +228,7 @@ void recursive_store(
     torch::utils::store_scalar(data, scalarType, obj);
     return;
   }
+
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
   if (!seq)
