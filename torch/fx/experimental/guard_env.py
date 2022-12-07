@@ -58,7 +58,9 @@ class GuardEnv:
 
         names_for_dupe = list(self._tensor_to_names[dupe_arg].keys())
 
-        for i in range(0, len(names_for_dupe), 2):
+        traverse_len = len(names_for_dupe)
+
+        for i in range(0, traverse_len - 1):
             name_a = names_for_dupe[i]
             name_b = names_for_dupe[i + 1]
             dupe_inputs = DuplicateInputs(arg_a=name_a, arg_b=name_b)

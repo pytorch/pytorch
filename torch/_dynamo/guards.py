@@ -682,17 +682,19 @@ class CheckFunctionManager:
     Any addition to GuardEnvExpr types must be added here, or we will raise.
     """
 
-    def _parse_guard_env_guards(self, guards: List[GuardEnvExpr]) -> Optional[str]:
-        guard_str = ""
+    def _parse_guard_env_guards(
+        self, guards: List[GuardEnvExpr]
+    ) -> Optional[List[str]]:
+        guard_strs = set()
         for guard in guards:
             if isinstance(guard, DuplicateInputs):
-                guard_str += f"{guard.arg_a} is {guard.arg_b}"
+                guard_strs.add(f"{guard.arg_a} is {guard.arg_b}")
             else:
                 raise RuntimeError(f"Unexpected guard type {guard}")
 
-        if guard_str == "":
+        if len(guard_strs) == 0:
             return None
-        return guard_str
+        return guard_strs
 
     """
     This is a complex bit of logic. The outline here is brief. For a line by line breakdown, see
@@ -805,7 +807,7 @@ class CheckFunctionManager:
                 tensor_check_names, tensor_check_ids
             )
 
-            aot_autograd_expression = self._parse_guard_env_guards(
+            aot_autograd_expressions = self._parse_guard_env_guards(
                 torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.get_guards()
             )
 
@@ -824,9 +826,9 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
-            if aot_autograd_expression:
-                code_parts.append(aot_autograd_expression)
-                verbose_code_parts.append(aot_autograd_expression)
+            if aot_autograd_expressions:
+                code_parts.extend(aot_autograd_expressions)
+                verbose_code_parts.extend(aot_autograd_expressions)
 
             if symbolic_shape_expression:
                 code_parts.append(symbolic_shape_expression)
