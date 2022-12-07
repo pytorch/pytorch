@@ -2485,6 +2485,67 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         )
         self.assertTrue(isinstance(qconfig_multi_mapping.__repr__(), str))
 
+    def test_custom_functions_and_tracer(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+                self.fc2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(2, 2),)
+
+        qconfig_mappings = QConfigMultiMapping().set_global(
+            [torch.quantization.default_qat_qconfig]
+        )
+
+        custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(
+            ["fc2"], []
+        )
+
+        custom_prepare_fn = torch.ao.quantization.quantize_fx.prepare_qat_fx
+
+        def custom_convert_fn(module, to_print):
+            print(to_print)
+            mod = torch.ao.quantization.quantize_fx.convert_fx(module)
+            return mod
+
+        backend_config = get_native_backend_config()
+
+        # test that input is valid
+        _ = m(*example_inputs)
+
+        kwargs = {"to_print": "working"}
+
+        msp = prepare_n_shadows_model(
+            m,
+            example_inputs,
+            qconfig_mappings,
+            backend_config,
+            custom_prepare_fn=custom_prepare_fn,
+            custom_prepare_kwargs=None,
+            custom_tracer=custom_tracer,
+        )
+
+        for _ in range(2):
+            msp(*example_inputs)
+
+        msq = convert_n_shadows_model(
+            msp, custom_convert_fn=custom_convert_fn, custom_convert_kwargs=kwargs
+        )
+        print(msq)
+        loggers_set_enabled(msq, True)
+        msq(*example_inputs)
+
+        results = extract_results_n_shadows_model(msq)
+        print_comparisons_n_shadows_model(results)
+
+
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
     Tests numeric suite core APIs on non-toy models.
