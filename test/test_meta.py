@@ -289,8 +289,7 @@ CHECK_STRIDES = {
 }
 
 CHECK_ALL_STRIDES = {
-    torch.Tensor.expand,
-    torch.unsqueeze
+    aten.unsqueeze.default
 }
 
 CHECK_STRIDES_SKIPS = {
@@ -363,7 +362,6 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
         # See https://github.com/pytorch/pytorch/issues/78050
         if should_check_strides(func) == CheckStrides.ALL:
-            print("strides", meta_r.stride(), r.stride())
             same_strides, _ = torch._prims_common.check_all_strides(meta_r, r)
             test_assert(same_strides, f"but real stride was {r.stride()}")
         if should_check_strides(func) == CheckStrides.SIGNIFICANT:
