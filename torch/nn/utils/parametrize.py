@@ -657,7 +657,7 @@ def remove_parametrizations(
                                            "for a parameter that is an instance of a tensor subclass requires "
                                            "set_() to be implemented correctly for the tensor subclass. Either "
                                            "set leave_parametrized=False or provide a working implementation for "
-                                           "set_() in the tensor subclass.")
+                                           "set_() in the tensor subclass.") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

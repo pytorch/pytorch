@@ -1,10 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import List, Callable, Dict, Tuple, Optional, cast
+from typing import Callable, cast, Dict, List, Optional, Tuple
 
 import torch
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torchgen.model import FunctionSchema, SchemaKind
 
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -16,6 +14,7 @@ from torch.distributed._tensor.utils import (
     unwrap_schema,
     wrap,
 )
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 """
@@ -67,21 +66,20 @@ class OpSchema(object):
           placements will get implicitly changed and it's error-prone.
     """
 
-    func_schema: FunctionSchema
+    func_schema: torch._C.FunctionSchema
     args_schema: Tuple[object, ...]
     kwargs_schema: Dict[str, object]
+
     is_inplace: bool = False
     is_out_variant: bool = False
 
+
     def __post_init__(self) -> None:
-        schema_kind = self.func_schema.kind()
-        self.is_inplace = (
-            schema_kind
-            == SchemaKind.inplace  # pyre-ignore [16] pyre bad at enum
-        )
-        self.is_out_variant = (
-            schema_kind == SchemaKind.out  # pyre-ignore [16] pyre bad at enum
-        )
+        # simple analysis of function schema to determine
+        # if this is an inplace/out variant, it might not
+        # be entirely correct, but it's good enough for now.
+        self.is_inplace = self.func_schema.name[-1] == "_"
+        self.is_out_variant = "out" in self.func_schema.overload_name
 
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
@@ -92,9 +90,7 @@ class OpSchema(object):
         """
         # filter out non-relavant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
-        return tuple(
-            item for item in self.args_schema if isinstance(item, DTensorSpec)
-        )
+        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
     def __repr__(self) -> str:
         return (
@@ -149,9 +145,9 @@ def _reshape_alias(
     return torch.ops.aten.view(x, shape)
 
 
-_CURRENT_DECOMPOSITION_TABLE: Dict[
-    Callable[..., object], Callable[..., object]
-] = {torch.ops.aten._reshape_alias.default: _reshape_alias}
+_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
+    torch.ops.aten._reshape_alias.default: _reshape_alias,
+}
 
 
 def propagate_input_sharding(
@@ -160,20 +156,16 @@ def propagate_input_sharding(
     kwargs: Dict[str, object],
     op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]],
 ) -> Tuple[OpSchema, bool, Optional[OutputSharding]]:
-    # parse the operator schema
-    func_schema = FunctionSchema.parse(str(op_call._schema))
     # unwrap the args/kwargs schema
     args_schema = tree_map(unwrap_schema, args)
     kwargs_schema = tree_map(unwrap_schema, kwargs)
 
-    op_schema = OpSchema(func_schema, args_schema, kwargs_schema)
+    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
 
     if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
         print(f"{op_call}({op_schema})")
         local_shapes = tree_map(
-            lambda t: t.to_local().shape
-            if isinstance(t, dtensor.DTensor)
-            else None,
+            lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
             args,
         )
         print(f"    local shapes: {local_shapes}")
@@ -292,10 +284,15 @@ def operator_dispatch(
             else output_sharding.output_spec
         )
         out_dts = []
-        for i, out in enumerate(target_schema.func_schema.arguments.out):
-            out_dt = cast(dtensor.DTensor, kwargs[out.name])
-            out_dt._spec = cast(DTensorSpec, output_specs[i])
-            out_dts.append(out_dt)
+        spec_idx = 0
+        for arg in target_schema.func_schema.arguments:
+            if arg.is_out:
+                out_dt = cast(dtensor.DTensor, kwargs[arg.name])
+                out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
+                out_dts.append(out_dt)
+                spec_idx += 1
+
+        assert len(out_dts) >= 1, "out variant should have at least one out arg"
         return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
     else:
         return wrap(local_results, output_sharding.output_spec)

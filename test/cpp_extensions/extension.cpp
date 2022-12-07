@@ -27,6 +27,10 @@ bool function_taking_optional(c10::optional<torch::Tensor> tensor) {
   return tensor.has_value();
 }
 
+torch::Tensor random_tensor() {
+  return torch::randn({1});
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sigmoid_add", &sigmoid_add, "sigmoid(x) + sigmoid(y)");
   m.def(
@@ -37,4 +41,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def(py::init<int, int>())
       .def("forward", &MatrixMultiplier::forward)
       .def("get", &MatrixMultiplier::get);
+
+  m.def("get_complex", []() { return c10::complex<double>(1.0, 2.0); });
+  m.def("get_device", []() { return at::device_of(random_tensor()).value(); });
+  m.def("get_generator", []() { return at::detail::getDefaultCPUGenerator(); });
+  m.def("get_intarrayref", []() { return at::IntArrayRef({1, 2, 3}); });
+  m.def("get_memory_format", []() { return c10::get_contiguous_memory_format(); });
+  m.def("get_storage", []() { return random_tensor().storage(); });
+  m.def("get_symfloat", []() { return c10::SymFloat(1.0); });
+  m.def("get_symint", []() { return c10::SymInt(1); });
+  m.def("get_symint_symbolic", []() { return c10::SymInt(c10::SymInt::UNCHECKED, INT64_MIN); });
+  m.def("get_symintarrayref", []() { return at::SymIntArrayRef({1, 2, 3}); });
+  m.def("get_tensor", []() { return random_tensor(); });
 }
