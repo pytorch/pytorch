@@ -133,6 +133,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
 ]
 
 
+CI_SKIP_OPTIMIZER = {
+    # TIMM
+    "hrnet_w18",  # accuracy
+    "gernet_l",  # accuracy
+}
+
+
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
 
@@ -889,8 +896,8 @@ class BenchmarkRunner:
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
-    def init_optimizer(self, device, params):
-        if device == "cuda" and self.args.training:
+    def init_optimizer(self, name, device, params):
+        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             self.optimizer = torch.optim.SGD(params, lr=0.01)
         else:
             self.optimizer = None
@@ -1082,7 +1089,7 @@ class BenchmarkRunner:
                 deepcopy_and_maybe_ddp(model),
                 clone_inputs(example_inputs),
             )
-            self.init_optimizer(current_device, model_fp64.parameters())
+            self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(f"fp64 golden ref were not generated for {name}")
