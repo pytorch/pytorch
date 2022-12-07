@@ -981,6 +981,20 @@ class TestAutograd(TestCase):
             self.assertEqual(pre_counter[0], 4)
             self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
 
+    def test_autograd_function_extension_feature_flag(self):
+        try:
+            prev = torch._C._is_autograd_function_extension_enabled()
+
+            torch._C._set_autograd_function_extension_enabled(True)
+            state = torch._C._is_autograd_function_extension_enabled()
+            self.assertTrue(state)
+
+            torch._C._set_autograd_function_extension_enabled(False)
+            state = torch._C._is_autograd_function_extension_enabled()
+            self.assertFalse(state)
+        finally:
+            torch._C._set_autograd_function_extension_enabled(prev)
+
     def test_grad_fn_prehooks_multiple_outputs(self):
         # Compute gradients without hooks
         b = torch.rand(3, 3, requires_grad=True)
