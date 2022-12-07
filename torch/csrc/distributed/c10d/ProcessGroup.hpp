@@ -358,10 +358,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
     deviceTypeToBackendType_[deviceType] = backendType;
-    // check if backend has value
-    if (backend.has_value()) {
-      deviceTypeToBackend_[deviceType] = backend.value();
-      backendTypeToBackend_[backendType] = backend.value();
+    // if the backendType is already set then reuse it for this device
+    if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+      auto existingBackend = backendTypeToBackend_.at(backendType);
+      deviceTypeToBackend_[deviceType] = existingBackend;
+    }
+    else {
+      // check if backend has value
+      if (backend.has_value()) {
+        deviceTypeToBackend_[deviceType] = backend.value();
+        backendTypeToBackend_[backendType] = backend.value();
+      }
     }
   }
 

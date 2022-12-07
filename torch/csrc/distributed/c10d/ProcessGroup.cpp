@@ -107,7 +107,6 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     c10::DeviceType deviceType) {
   // If there is a backend associated with this device type then return it
   if (deviceTypeToBackend_.find(deviceType) != deviceTypeToBackend_.end()) {
-    std::cout << "Found backend for device type and returning" << std::endl;
     return deviceTypeToBackend_.at(deviceType);
   }
 
@@ -126,6 +125,8 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   } else {
+    // TODO: finish implementing this for lazy initialization
+#ifdef USE_C10D_GLOO
     std::cout << "C++ initializing the backend for "
               << backendTypeToStr(backendType) << std::endl;
     // initialize the backend
@@ -154,7 +155,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     if (dist_debug_level_ >= DebugLevel::Detail) {
       // create new prefix store for the wrapper
       auto wrapperPrefixStore = c10::make_intrusive<PrefixStore>(
-          backendTypeToStr(backendType) + "/wrapped", store_);
+          backendTypeToStr(backendType) + "/wrapper", store_);
       auto wrapperBackend = ProcessGroupGloo::createProcessGroupGloo(
           wrapperPrefixStore, rank_, size_, options_->timeout);
       backend =
@@ -177,6 +178,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     // } else {
     //   TORCH_CHECK(false, "Unknown backend type: ", backendType);
     // }
+#endif // USE_C10D_GLOO
   }
 
   TORCH_CHECK(

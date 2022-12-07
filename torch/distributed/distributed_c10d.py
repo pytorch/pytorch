@@ -994,8 +994,7 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
-            # backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
-            backend_pg = None
+            backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
             backend_pg_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
