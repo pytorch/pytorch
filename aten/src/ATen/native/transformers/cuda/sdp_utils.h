@@ -146,8 +146,7 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
 
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
-  if (!(query_size_last == params.key.size(-1) &&
-        query_size_last == params.value.size(-1) && query_size_last % 8 == 0 &&
+  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
         query_size_last <= 128)) {
     TORCH_CHECK(
         !debug,
@@ -164,13 +163,44 @@ inline bool check_head_dim_size(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool use_tensor_cores(
+    sdp_params params,
+    cudaDeviceProp* dprops,
+    bool is_half) {
+  if (dprops->major >= 8) {
+    return true;
+  }
+  if (dprops->major >= 7) {
+    return is_half;
+  }
+  return false;
+}
+inline int64_t minimum_gemm_alignment(sdp_params params) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+  bool use_tc = use_tensor_cores(params, dprops, is_half);
+  int64_t matmul_alignment_mn = 1;
+  if (dprops->major >= 8) {
+    matmul_alignment_mn = 4;
+  }
+  int64_t bits_per_scalar = is_half ? 16 : 32;
+  if (use_tc) {
+    matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
+  }
+  return matmul_alignment_mn;
+}
+
 inline bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t alignment = minimum_gemm_alignment(params);
   if (!(query_size_last == params.key.size(-1) &&
-        query_size_last == params.value.size(-1) && query_size_last >= 8)) {
+        query_size_last % alignment == 0)) {
     TORCH_CHECK(
         !debug,
-        "Mem efficient attention requires last dimension of inputs to be >= 8.",
+        "Mem efficient attention requires last dimension of inputs to be divisible by ",
+        alignment,
+        ".",
         "Got Query.size(-1): ",
         query_size_last,
         ", Key.size(-1): ",
