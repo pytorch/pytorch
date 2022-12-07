@@ -727,9 +727,9 @@ class TestHistogramObserver(QuantizationTestCase):
         obs(test_input)
 
     def test_histogram_observer_correct_numel(self):
-        for i in range(1,10):
+        for i in range(1, 10):
             obs = HistogramObserver()
-            obs(torch.randn(i,i))
+            obs(torch.randn(i, i))
             self.assertEqual(obs.histogram.sum().item(), i**2)
 
 
