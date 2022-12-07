@@ -39,8 +39,7 @@ from common_utils import (
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
 )
-
-torch._C._set_autograd_function_extension_enabled(True)
+from torch.autograd.function import _set_autograd_function_extension_enabled
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -296,7 +295,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    xfail('NumpyExpAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 }
 
 aliasing_ops = {
@@ -344,6 +343,7 @@ aliasing_ops_list_return = {
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
@@ -420,6 +420,7 @@ class TestOperators(TestCase):
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
+        xfail('as_strided', 'partial_views'),
         decorate('linalg.det', 'singular',
                  decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
     }))
@@ -515,6 +516,7 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
+    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
@@ -532,6 +534,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('as_strided_scatter'),
         xfail('_softmax_backward_data', device_type='cpu'),
+        xfail('as_strided', 'partial_views'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -589,6 +592,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
+    @_set_autograd_function_extension_enabled()
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
@@ -661,6 +665,7 @@ class TestOperators(TestCase):
         skip("atleast_3d"),  # Takes too long
         skip("ormqr"),  # Takes too long
         xfail("as_strided"),  # incorrect output
+        xfail("as_strided", "partial_views"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -741,6 +746,9 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
+    @skipOps('TestOperators', 'test_vmapvjpvjp', {
+        xfail('as_strided', 'partial_views'),
+    })
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
         # for this test, we just verify that vmap
@@ -808,6 +816,7 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('as_strided', 'partial_views'),
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -857,7 +866,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
-    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
+    @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
+        xfail('as_strided', 'partial_views'),
+    }))
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -905,6 +916,7 @@ class TestOperators(TestCase):
         decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
+        xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -1194,7 +1206,6 @@ class TestOperators(TestCase):
         xfail('svd_lowrank', ''),
         xfail('pca_lowrank', ''),
         xfail('clamp'),
-        xfail('cross'),  # The defaults of this op are *very* weird. No wonder it doesn't work
         # something weird happening with channels_last
         xfail('bfloat16'),
         xfail('double'),
@@ -1207,6 +1218,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        xfail('as_strided', 'partial_views'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1389,6 +1401,7 @@ class TestOperators(TestCase):
 
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
+        xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format

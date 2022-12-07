@@ -39,8 +39,7 @@ from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
-
-torch._C._set_autograd_function_extension_enabled(True)
+from torch.autograd.function import _set_autograd_function_extension_enabled
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -981,6 +980,7 @@ class TestGradTransform(TestCase):
 
 
 class TestAutogradFunction(TestCase):
+    @_set_autograd_function_extension_enabled()
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1007,6 +1007,7 @@ class TestAutogradFunction(TestCase):
         grad(f)(y, x)
         grad(grad(f))(y, x)
 
+    @_set_autograd_function_extension_enabled()
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod
@@ -1049,6 +1050,7 @@ class TestAutogradFunction(TestCase):
 
         return NumpyCubeNotComposable
 
+    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_autograd_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 
@@ -1069,6 +1071,7 @@ class TestAutogradFunction(TestCase):
     # (or, if impossible, figure out how to raise a nice error)
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
+    @_set_autograd_function_extension_enabled()
     def test_once_differentiable_grad_vjp(self, device):
         NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
 

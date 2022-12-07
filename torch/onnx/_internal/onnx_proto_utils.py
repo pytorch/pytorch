@@ -71,8 +71,8 @@ def _add_onnxscript_fn(
     # TODO(titaiwang): remove this when onnx becomes dependency
     try:
         import onnx
-    except ImportError:
-        raise errors.OnnxExporterError("Module onnx is not installed!")
+    except ImportError as e:
+        raise errors.OnnxExporterError("Module onnx is not installed!") from e
 
     # For > 2GB model, onnx.load_fromstring would fail. However, because
     # in _export_onnx, the tensors should be saved separately if the proto
