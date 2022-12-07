@@ -79,7 +79,11 @@ subprocess.call('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3
 
 try:
     subprocess.run(['conda', 'env', 'list'])
+    subprocess.run(['echo', 'running conda succeded'])
 except Exception as e:
+        subprocess.run(['echo', 'running conda failed'])
+        subprocess.run(['echo', e])
+
     try:
         os.environ['PATH'] = conda_parent_dir + '\\Miniconda3\\Library\\bin;' + conda_parent_dir +\
             '\\Miniconda3;' + conda_parent_dir + '\\Miniconda3\\Scripts;' + os.environ['PATH']
