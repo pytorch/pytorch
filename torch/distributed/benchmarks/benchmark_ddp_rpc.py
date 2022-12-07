@@ -335,7 +335,7 @@ if __name__ == "__main__":
         "--embedding-dim",
         type=int,
         default=EMBEDDING_DIM,
-        help="Number of embedding dimentions.",
+        help="Number of embedding dimensions.",
     )
     parser.add_argument(
         "--warmup-cycles",

@@ -140,7 +140,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse:
+        if t.is_sparse or t.is_mkldnn:
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -196,6 +196,34 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
+        # When we make as_strided calls, we end up generating a guard
+        # that the new as_strided tensor is in bounds for the old storage
+        # for the base (since as_strided calls can "bust" out of their
+        # bounding box.)  This guard is unnecessary: if a user is able
+        # to provide us a tensor with the view base setup this way, we
+        # don't need to produce a guard, because the fact that they
+        # were able to produce the view base means its in bounds.
+        #
+        # Now, ordinarily, this guard would be harmless.  However, the
+        # generated guard refers to variables bound on the base variable.
+        # At the moment, Dynamo doesn't actually guard on x._base, because
+        # according to Voz this results in a lot of spurious invalidations,
+        # and also if the user doesn't directly make use of _base, its
+        # pointless anyway (because programs should be parametric over
+        # whether or not the input tensor is a view or not--unless you're
+        # mutating the input, but that's a whole 'nother ballgame).  So
+        # for expediency, we suppress these guards so we don't have to
+        # deal with this (yet, anyway.)
+        #
+        # NB: An old version of this code suppressed guards for ALL operations
+        # happening during meta conversion, not just as_strided calls.
+        # This is too aggressive: we do duck sizing and 0/1 simplification
+        # as we allocate variables, and we do need to register guards for
+        # these cases.
+        maybe_suppress = contextlib.nullcontext()
+        if shape_env is not None:
+            maybe_suppress = shape_env.suppress_guards()
+
         make_symbolic = shape_env is not None
 
         def sym(x):
@@ -243,7 +271,20 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
-
+                elif t.is_mkldnn:
+                    is_leaf = safe_is_leaf(t)
+                    sizes, strides = sym_sizes_strides(t)
+                    r = callback(
+                        lambda: torch.empty_strided(
+                            sizes, strides, dtype=t.dtype, device="meta"
+                        )
+                    )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -308,7 +349,7 @@ class MetaConverter:
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
-                            with torch.no_grad():
+                            with torch.no_grad(), maybe_suppress:
                                 r = base.as_strided(
                                     sizes, strides, sym(t.storage_offset())
                                 )
@@ -317,7 +358,7 @@ class MetaConverter:
                         else:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
-                                with torch.enable_grad():
+                                with torch.enable_grad(), maybe_suppress:
                                     r = base.as_strided(
                                         sizes, strides, sym(t.storage_offset())
                                     )
@@ -329,7 +370,7 @@ class MetaConverter:
                                 with torch.no_grad():
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
-                                with torch.enable_grad():
+                                with torch.enable_grad(), maybe_suppress:
                                     r = mid.as_strided(
                                         sizes, strides, sym(t.storage_offset())
                                     )
@@ -431,7 +472,6 @@ class MetaConverter:
                 [
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
-                    t.is_mkldnn,
                     t.is_quantized,
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
