@@ -544,6 +544,94 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
             torch._C._will_engine_execute_node(out)
 
+    def test_custom_function_setup_context_simple(self):
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                return x ** 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return gO * 2 * x
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            x = torch.randn([], requires_grad=True)
+            y = MySquare.apply(x)
+            gx, = torch.autograd.grad(y, x)
+            self.assertEqual(gx, 2 * x)
+
+    def test_custom_function_setup_context_multi_output(self):
+        # Multiple outputs with some non-Tensor outputs.
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                two_x = x.item() * 2
+                return x ** 2, two_x
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, = inputs
+                _, two_x = outputs
+                ctx.two_x = two_x
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, gO, _):
+                return gO * ctx.two_x
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            x = torch.randn([], requires_grad=True)
+            y, _ = MySquare.apply(x)
+            gx, = torch.autograd.grad(y, x)
+            self.assertEqual(gx, 2 * x)
+
+    def test_custom_function_setup_context_multi_input(self):
+        class MyReshape(Function):
+            @staticmethod
+            def forward(x, shape, scale_forward, scale_backward):
+                return x.reshape(shape) * scale_forward
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, shape, scale_forward, scale_backward = inputs
+                ctx.scale_backward = scale_backward
+                ctx.x_shape = x.shape
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO.reshape(ctx.x_shape) * ctx.scale_backward, None, None, None
+
+        class MyReshapeRef(Function):
+            @staticmethod
+            def forward(ctx, x, shape, scale_forward, scale_backward):
+                ctx.scale_backward = scale_backward
+                ctx.x_shape = x.shape
+                return x.reshape(shape) * scale_forward
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO.reshape(ctx.x_shape) * ctx.scale_backward, None, None, None
+
+        def test(x, shape, scale_forward, scale_backward):
+            y = MyReshape.apply(x, shape, scale_forward, scale_backward).sum()
+            gx, = torch.autograd.grad(y, x)
+
+            y_expected = MyReshapeRef.apply(x, shape, scale_forward, scale_backward).sum()
+            gx_expected, = torch.autograd.grad(y_expected, x)
+
+            self.assertEqual(y_expected, y)
+            self.assertEqual(gx_expected, gx)
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
+            test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
