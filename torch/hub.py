@@ -18,9 +18,8 @@ from torch.serialization import MAP_LOCATION
 
 class Faketqdm(object):  # type: ignore[no-redef]
 
-    def __init__(self, iterable=None, total=None, disable=False,
+    def __init__(self, total=None, disable=False,
                     unit=None, *args, **kwargs):
-        self.iterable = iterable
         self.total = total
         self.disable = disable
         self.n = 0
