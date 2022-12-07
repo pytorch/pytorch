@@ -1232,7 +1232,6 @@ def _broadcast_in_dim_meta(
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            new_strides.append(0)
             if shape[idx] != 1:
                 new_strides.append(0)
             elif original_idx == a.ndim:
