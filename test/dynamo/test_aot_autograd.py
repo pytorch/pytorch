@@ -367,12 +367,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         fxx(x, x)
-        lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
-        self.assertExpectedRaisesInline(
-            AssertionError,
-            lambda: fxx(x, y),
-            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
-        )
+        fxx(x, y)
+        self.assertEqual(cc.frame_count, 2)
 
 
 if __name__ == "__main__":

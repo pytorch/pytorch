@@ -588,6 +588,7 @@ class VariableBuilder:
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
+                    name=self.name,
                 )
 
             fake_tensor_value = None
@@ -681,19 +682,20 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items).add_options(obj)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, **options):
+def wrap_fx_proxy(tx, proxy, example_value=None, name=None, **options):
     return wrap_fx_proxy_cls(
         target_cls=TensorVariable,
         tx=tx,
         proxy=proxy,
         example_value=example_value,
+        name=name,
         **options,
     )
 
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
-def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
+def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, name=None, **options):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
@@ -724,7 +726,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             if not isinstance(example_value, torch._subclasses.FakeTensor):
                 proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-                example_value = fake_wrapper(example_value)
+                example_value = fake_wrapper(example_value, name=name)
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)

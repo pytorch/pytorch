@@ -16,6 +16,7 @@ import numpy as np
 import sympy
 
 import torch
+from torch.fx.experimental.guard_env import DuplicateInputs, GUARD_ENV
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -33,10 +34,16 @@ from .utils import (
     tuple_iterator_len,
 )
 
+
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
+
+# TODO(voz): DO NOT LAND LIKE THIS
+# THE EQUALITY CRITERIA MUST MATCH AOT_AUTOGRAD DEDUPE EQUALITY CRITERIA
+def hacky_do_not_land_tensor_eq(a, b):
+    return a is b
 
 
 CLOSURE_VARS = collections.OrderedDict(
@@ -49,6 +56,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("___tensor_eq", hacky_do_not_land_tensor_eq),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -662,6 +670,18 @@ class CheckFunctionManager:
         )
         self._seen_ids.clear()
 
+    def _parse_guard_env_guards(self, guards):
+        guard_str = ""
+        for guard in guards:
+            if isinstance(guard, DuplicateInputs):
+                guard_str += f"___tensor_eq({guard.arg_a}, {guard.arg_b})"
+            else:
+                raise RuntimeError(f"Unexpected guard type {guard}")
+
+        if guard_str == "":
+            return None
+        return guard_str
+
     """
     This is a complex bit of logic. The outline here is brief. For a line by line breakdown, see
     the code comments below.
@@ -772,6 +792,14 @@ class CheckFunctionManager:
             symbolic_shape_expression = self._parse_symbolic_shape_expressions(
                 tensor_check_names, tensor_check_ids
             )
+
+            aot_autograd_expression = self._parse_guard_env_guards(
+                GUARD_ENV.get_guards()
+            )
+
+            # We are done with the guards made for this frame.
+            GUARD_ENV.clear()
+
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -786,6 +814,11 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+
+            if aot_autograd_expression:
+                code_parts.append(aot_autograd_expression)
+                verbose_code_parts.append(aot_autograd_expression)
+
             if symbolic_shape_expression:
                 code_parts.append(symbolic_shape_expression)
                 verbose_code_parts.append(symbolic_shape_expression)
