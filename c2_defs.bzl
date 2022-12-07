@@ -221,25 +221,12 @@ def get_c2_fbobjc_ios_frameworks():
     frameworks = []
 
     if get_c2_mpscnn():
-        frameworks.append(
+        frameworks.extend([
             "$SDKROOT/System/Library/Frameworks/Metal.framework",
-        )
+            "$SDKROOT/System/Library/Frameworks/MetalPerformanceShaders.framework",
+        ])
 
     return frameworks
-
-def get_c2_fbobjc_linker_flags():
-    flags = []
-
-    if get_c2_mpscnn():
-        # Need linker flags as no platform_frameworks exist, and we can't
-        # use MPSCNN on x86_64.
-        # We use weak_framework as it's iOS 10
-        flags = [
-            "-L$SDKROOT/System/Library/Frameworks/MetalPerformanceShaders.framework",
-            "-weak_framework",
-            "MetalPerformanceShaders",
-        ]
-    return flags
 
 def get_c2_fbobjc_exported_preprocessor_flags():
     flags = []
@@ -311,12 +298,6 @@ def get_c2_default_cxx_args():
             STATIC_LIBRARY_IOS_CONFIG,
             extra_target_config = C2_FBOBJC_EXTRA_TARGET_CONFIG,
         ),
-        fbobjc_exported_platform_linker_flags = [
-            (
-                "iphoneos",
-                get_c2_fbobjc_linker_flags(),
-            ),
-        ],
         fbobjc_exported_platform_preprocessor_flags = [
             (
                 "iphoneos",
