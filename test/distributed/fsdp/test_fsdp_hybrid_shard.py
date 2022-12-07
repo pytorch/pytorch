@@ -15,7 +15,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -100,7 +100,7 @@ class TestFSDPHybridShard(FSDPTest):
 
 
     @skip_if_lt_x_gpu(2)
-    def test_hybrid_shard_mismatch_in_modules_raises(self):
+    def test_hybrid_shard_strategy_mismatch_raises(self):
         for sharding_strategy in [
             ShardingStrategy._HYBRID_SHARD_ZERO2,
             ShardingStrategy.HYBRID_SHARD
@@ -130,7 +130,7 @@ class TestFSDPHybridShard(FSDPTest):
         model = FSDP(
             model, process_group=(dist.new_group(), dist.new_group()), sharding_strategy=ShardingStrategy.HYBRID_SHARD
         )
-        # Errors during lazy_init
+        # Errors during _lazy_init
         inp = torch.randn(4, 10)
         with self.assertRaisesRegex(ValueError, "intra-node process groups do not match"):
             model(inp)
@@ -161,7 +161,7 @@ class TestFSDPHybridShard(FSDPTest):
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD
             )
 
-    # TODO - add test for Zero-2 style sharding ensure params are not
+    # TODO - add test for ZeRO-2 style sharding ensure params are not
     # resharded after forward.
 
     @skip_if_lt_x_gpu(2)
@@ -169,16 +169,15 @@ class TestFSDPHybridShard(FSDPTest):
         """
         Tests basic functionality of HYBRID_SHARD and _HYBRID_SHARD_ZERO2:
             1. Inter and intra-node process groups are correctly setup
-            2. Process groups are the same across FSDP wrapped units
+            2. Process groups are the same across FSDP wrapped instances
             3. reduce_scatter and allreduce called the expected no. of times
         """
         for sharding_strategy in [
             ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
-                auto_wrap_policy = functools.partial(
-                    transformer_auto_wrap_policy,
-                    transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+                auto_wrap_policy = ModuleWrapPolicy(
+                    {TransformerEncoderLayer, TransformerDecoderLayer},
                 )
                 fsdp_kwargs = {
                     "auto_wrap_policy": auto_wrap_policy,
@@ -197,7 +196,7 @@ class TestFSDPHybridShard(FSDPTest):
                 intra_node_pgs = set()
                 inter_node_pgs = set()
                 for mod in fsdp_model.fsdp_modules(fsdp_model):
-                    # process_group should be across the machine, which is just the
+                    # process_group should be across the node, which is just the
                     # whole world here.
                     self.assertEqual(
                         dist.get_world_size(mod.process_group),

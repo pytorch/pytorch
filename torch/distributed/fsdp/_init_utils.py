@@ -155,15 +155,9 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 def _init_intra_node_process_group() -> dist.ProcessGroup:
     """
     Returns a process group across the current node.
-    For example, given each column is a distinct node:
-    0 8
-    1 9
-    2 10
-    3 11
-    4 12
-    5 13
-    6 14
-    7 15
+    For example, given each row is a distinct node:
+    0 1 2 3 4 5 6 7 8
+    9 10 11 12 13 14 15
     This API would return an intra-node subgroup across
     [0, 7] or [8, 15] depending on the process's rank.
     For example, rank 3 would get [0, 7].
@@ -178,14 +172,8 @@ def _init_inter_node_process_group(
     """
     Returns an inter-node process group where each contained rank has
     the same local rank. For example, given each column is a distinct node:
-    0 8
-    1 9
-    2 10
-    3 11
-    4 12
-    5 13
-    6 14
-    7 15
+    0 1 2 3 4 5 6 7 8
+    9 10 11 12 13 14 15
     This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
     depending on the process's rank. For example, rank 1 would get {1, 9}, rank 5
     would get {5, 13}.

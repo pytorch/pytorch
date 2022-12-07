@@ -317,7 +317,7 @@ class TransformerWithSharedParams(FSDPTestModel):
                 "sharding_strategy" in fsdp_kwargs
                 and fsdp_kwargs["sharding_strategy"] in {
                     ShardingStrategy.HYBRID_SHARD,
-                    ShardingStrategy.HYBRID_SHARD_ZERO2
+                    ShardingStrategy._HYBRID_SHARD_ZERO2
                 } and not isinstance(group, tuple)
             ):
                 fsdp_pg = None

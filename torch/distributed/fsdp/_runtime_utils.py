@@ -669,8 +669,8 @@ def _should_free_in_backward(
     # We always free if we are syncing gradients (i.e. not in no_sync) and parameters
     # are sharded.
     free_unsharded = state._sync_gradients and handle.uses_sharded_strategy
-    # For NO_SHARD we don't need to free full parameters, for Zero-2 strategies, we skip
-    # freeing in backward. Note that this also applies for _HYBRID_SHARD_ZERO2.
+    # For NO_SHARD we don't need to free full parameters, for ZeRO-2 strategies, we skip
+    # freeing in backward.
     return free_unsharded or (
         handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
