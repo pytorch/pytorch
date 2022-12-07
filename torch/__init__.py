@@ -167,9 +167,9 @@ def _load_global_deps():
 
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-    except OSError as e:
-        if 'libcublas.so.11' not in e.args[0]:
-            raise e
+    except OSError as err:
+        if 'libcublas.so.11' not in err.args[0]:
+            raise err
         _preload_cuda_deps()
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
