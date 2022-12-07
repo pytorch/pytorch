@@ -1105,7 +1105,7 @@ class BenchmarkRunner:
             # Get results of native pytorch
             reset_rng_state()
             model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(current_device, model_copy.parameters())
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
@@ -1113,7 +1113,7 @@ class BenchmarkRunner:
             # Rerun native pytorch
             reset_rng_state()
             model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(current_device, model_copy.parameters())
+            self.init_optimizer(name, current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
@@ -1132,7 +1132,7 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
-                self.init_optimizer(current_device, model_copy.parameters())
+                self.init_optimizer(name, current_device, model_copy.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
