@@ -9,6 +9,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/functorch/DynamicLayer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>

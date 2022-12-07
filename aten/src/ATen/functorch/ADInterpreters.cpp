@@ -44,12 +44,17 @@ Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
+static Tensor base_lift(const Tensor& tensor, int64_t level) {
+  auto tensor_ = unwrapIfDead(tensor);
+  return materializeGradWrappers(tensor_, level);
+}
+
 Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 static void autogradBasedTransformProcess(
