@@ -8,7 +8,18 @@ import re
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from weakref import ReferenceType
 
 import numpy as np
@@ -854,6 +865,13 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
+class GuardFail(NamedTuple):
+    # A string repr of the piece of failed guard code we eval-ed
+    reason: str
+    # A code object where we failed a guard
+    orig_code: types.CodeType
+
+
 def guard_fail_hook(
     guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
 ) -> None:
@@ -864,25 +882,27 @@ def guard_fail_hook(
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
-    reasons = []
+    reason = None
     for part in guard_fn.verbose_code_parts:
         fail_reason = eval(part, guard_fn.global_scope, scope)
         # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
         # is updated to return a string explaining the failure.
         if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
+            reason = fail_reason
             break
         elif isinstance(fail_reason, bool) and not fail_reason:
-            reasons.append(part)
+            reason = part
             break
     try:
-        guard_fn.guard_fail_fn((reasons, orig_code_map[code]))
+        guard_fn.guard_fail_fn(GuardFail(reason, orig_code_map[code]))
     except Exception as e:
         log.error(
-            "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval"
+            "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
+            exc_info=True,
         )
 
-    guard_failures[orig_code_map[code]].append(reasons)
+    if last:
+        guard_failures[orig_code_map[code]].append(reason)
 
 
 def guard_error_hook(

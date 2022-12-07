@@ -73,20 +73,19 @@ class TestFSDPInitialization(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
-    def test_auto_wrap_policy(self):
+    def _test_auto_wrap_policy(self, auto_wrap_policy):
         """Tests passing an ``auto_wrap_policy``."""
 
         local_model = Model(device=torch.device("cuda"))
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
-            auto_wrap_policy=Model.policy(),
+            auto_wrap_policy=auto_wrap_policy,
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
         fully_shard(
             composable_module,
-            policy=Model.policy(),
+            policy=auto_wrap_policy,
         )
 
         # Check that the composable module has the same names as the local
@@ -123,6 +122,13 @@ class TestFSDPInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
+
+    @skip_if_lt_x_gpu(2)
+    def test_auto_wrap_policy(self):
+        self.run_subtests(
+            {"auto_wrap_policy": [None, Model.policy()]},
+            self._test_auto_wrap_policy,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):

@@ -306,13 +306,14 @@ def _isint(x):
     else:
         return isinstance(x, int)
 
-def _warn_typed_storage_removal():
+def _warn_typed_storage_removal(stacklevel=2):
     message = (
         "TypedStorage is deprecated. It will be removed in the future and "
         "UntypedStorage will be the only storage class. This should only matter "
-        "to you if you are using storages directly."
+        "to you if you are using storages directly.  To access UntypedStorage "
+        "directly, use tensor._storage() instead of tensor.storage()"
     )
-    warnings.warn(message, UserWarning)
+    warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
 
 class TypedStorage:
     is_sparse = False
@@ -471,7 +472,7 @@ class TypedStorage:
     @property
     def is_cuda(self):
         _warn_typed_storage_removal()
-        return self.device.type == 'cuda'
+        return self._untyped_storage.device.type == 'cuda'
 
     def untyped(self):
         """Returns the internal :class:`torch.UntypedStorage`"""
@@ -738,8 +739,8 @@ class TypedStorage:
     def _pickle_storage_type(self):
         try:
             return _dtype_to_storage_type_map()[self.dtype]
-        except KeyError:
-            raise KeyError(f'dtype {self.dtype} is not recognized')
+        except KeyError as e:
+            raise KeyError(f'dtype {self.dtype} is not recognized') from e
 
     def __reduce__(self):
         b = io.BytesIO()
@@ -996,6 +997,6 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:
         return _storage_type_to_dtype_map()[pickle_storage_type]
-    except KeyError:
+    except KeyError as e:
         raise KeyError(
-            f'pickle storage type "{pickle_storage_type}" is not recognized')
+            f'pickle storage type "{pickle_storage_type}" is not recognized') from e
