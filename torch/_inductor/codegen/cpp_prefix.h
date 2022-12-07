@@ -68,11 +68,3 @@ void to_float(const T* src, float* dst, int64_t n) {
     dst[i] = static_cast<float>(src[i]);;
   }
 }
-
-template <>
-void to_float(const unsigned char* src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    dst[i] = *(src + i) ? 1 : 0;
-  }
-}
