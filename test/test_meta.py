@@ -467,7 +467,7 @@ def run_meta_crossref(
         # they're not tested outside of gradcheck which only checks
         # torch.float64 and torch.complex128 (which this second one
         # often skipped as well).
-        raise unittest.SkipTest("Original OpInfo is broken")
+        raise unittest.SkipTest("Original OpInfo is broken") from e
 
 
     # TODO: also handle cases where func raise an exception
@@ -1294,6 +1294,17 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    def test_cdist_forward(self, device):
+        to_meta = MetaConverter()
+        x1 = torch.rand([3, 2], device=device)
+        x2 = torch.rand([2, 2], device=device)
+        p = 2.0
+        for compute_mode in (None, 1, 2):
+            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
+            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
+            self.assertEqual(res.device.type, 'meta')
+            self.assertEqual(ref.shape, res.shape)
 
     # opinfo test is using aten.fill_, it's not testing aten.fill
     @onlyCUDA

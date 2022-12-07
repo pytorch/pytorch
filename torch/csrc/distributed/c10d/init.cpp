@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
@@ -607,17 +608,26 @@ This class does not support ``__members__`` property.)");
   // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
   // I define some member methods.
   reduce_op
+      // todo(crcrpar): Support `RedOpType == ReduceOp`.
       .def(
+          // This calls `operator==(const ReduceOp::RedOpType)`
           "__eq__",
           [](const ::c10d::ReduceOp& self,
              const ::c10d::ReduceOp::RedOpType& other) {
             return self == other;
           })
       .def(
+          // This calls `operator==(const ReduceOp)` for the future support of
+          // `PREMUL_SUM` comparison
           "__eq__",
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
-            return self == other.op_;
+            return self == other;
           })
+      .def(
+          // With the above custom `__eq__`'s, I have to manually support the
+          // other types.
+          "__eq__",
+          [](const ::c10d::ReduceOp& self, py::object) { return false; })
       .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
@@ -1564,6 +1574,22 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
+
+#ifndef _WIN32
+  module.def(
+      "_round_robin_process_groups",
+      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
+          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
+        if (processGroups.size() == 0) {
+          throw std::invalid_argument("Specify at least 1 process group");
+        }
+        const auto& first = processGroups.front();
+        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
+            first->getRank(), first->getSize(), std::move(processGroups));
+      },
+      py::arg("process_groups"),
+      py::call_guard<py::gil_scoped_release>());
+#endif
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
