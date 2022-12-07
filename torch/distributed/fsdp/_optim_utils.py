@@ -1319,10 +1319,10 @@ def _optim_state_dict(
 
 def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     """
-    Construct the maaping from a param's fqn to its corresponding FSDPParamInfo
-    if the param is managed by FSDP. FlatParam only stores the first FQN of a
-    shared parameter. So the keys in the mapping are guranteed to map to unique
-    parameters.
+    Construct the mapping from a param's fqn to its corresponding ``FSDPParamInfo``
+    if the param is managed by FSDP. ``FlatParameter._fqns`` only stores the first
+    FQN of a shared parameter. So the keys in the mapping are guaranteed to map
+    to unique parameters.
     """
 
     def module_fn(module, prefix, fqn_to_param_info):
@@ -1346,6 +1346,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         return fqn_to_param_info
 
     fqn_to_param_info: Dict[str, FSDPParamInfo] = {}
+    # FlatParameter._fqns stores the local fqn, starting from the root of the
+    # FSDP. Using _apply_to_modules() with model (may not be the FSDP root
+    # module) allows us to construct the global fqn.
     return _apply_to_modules(
         model,
         module_fn,
