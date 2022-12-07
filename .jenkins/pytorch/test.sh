@@ -16,6 +16,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
+export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -215,6 +216,7 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -249,26 +251,25 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
-  python test/run_test.py --include test_modules --verbose
-  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
-  # seen intest_ops_gradients.py
-  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
+  python tools/dynamo/verify_dynamo.py
+  python test/run_test.py --include test_modules test_ops test_ops_gradients --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
 }
 
-test_inductor_huggingface_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
+test_inductor_huggingface() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  python benchmarks/dynamo/huggingface.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  # Check training with --amp
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
 }
 
 test_inductor_timm_shard() {
@@ -281,10 +282,29 @@ test_inductor_timm_shard() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+  # Check inference with --float32
+  python benchmarks/dynamo/timm_models.py --ci --accuracy \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+    --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  # Check training with --amp
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+}
+
+test_inductor_torchbench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  # Check training with --amp
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
 }
 
 test_python_gloo_with_tls() {
@@ -741,25 +761,32 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor_timm* && $SHARD_NUMBER -lt 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 0
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
