@@ -8,7 +8,18 @@ import re
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from weakref import ReferenceType
 
 import numpy as np
@@ -632,6 +643,7 @@ class CheckFunctionManager:
         guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict[str, object]] = None,
         f_globals: Optional[Dict[str, object]] = None,
+        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
@@ -656,7 +668,9 @@ class CheckFunctionManager:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
+        self.check_fn = self.compile_check_fn(
+            local_builder, global_builder, guards, guard_fail_fn
+        )
         self._seen_ids.clear()
 
     """
@@ -738,7 +752,9 @@ class CheckFunctionManager:
         expression = " and ".join(finished_expressions)
         return f"({expression})"
 
-    def compile_check_fn(self, local_builder, global_builder, guards_out):
+    def compile_check_fn(
+        self, local_builder, global_builder, guards_out, guard_fail_fn
+    ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -831,6 +847,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         guard_fn.global_scope = global_builder.scope
+        guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
 
     def invalidate(self, ref):
@@ -848,28 +865,44 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
+class GuardFail(NamedTuple):
+    # A string repr of the piece of failed guard code we eval-ed
+    reason: str
+    # A code object where we failed a guard
+    orig_code: types.CodeType
+
+
 def guard_fail_hook(
     guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
 ) -> None:
     """
     called whenever a guard fails.
     """
-    if not last:
+    if not guard_fn.guard_fail_fn and not last:
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
-    reasons = []
+    reason = None
     for part in guard_fn.verbose_code_parts:
         fail_reason = eval(part, guard_fn.global_scope, scope)
         # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
         # is updated to return a string explaining the failure.
         if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
+            reason = fail_reason
             break
         elif isinstance(fail_reason, bool) and not fail_reason:
-            reasons.append(part)
+            reason = part
             break
-    guard_failures[orig_code_map[code]].append(reasons)
+    try:
+        guard_fn.guard_fail_fn(GuardFail(reason, orig_code_map[code]))
+    except Exception as e:
+        log.error(
+            "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
+            exc_info=True,
+        )
+
+    if last:
+        guard_failures[orig_code_map[code]].append(reason)
 
 
 def guard_error_hook(
