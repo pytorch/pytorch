@@ -82,9 +82,9 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
+c10::SymInt get_sub_byte_tensor_size(c10::SymIntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t element_per_byte;
+  c10::SymInt element_per_byte;
   switch(t) {
     case at::ScalarType::QUInt4x2:
       element_per_byte = 2;
@@ -100,14 +100,14 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
     return c10::multiply_integers(sizes) * dtype_itemsize;
   }
   // Consider most inner dim as cols
-  int64_t cols = sizes.at(sizes.size()-1);
-  int64_t bytes_per_row = cols * dtype_itemsize;
+  c10::SymInt cols = sizes.at(sizes.size()-1);
+  c10::SymInt bytes_per_row = cols * dtype_itemsize;
   // align qtensor most inner dim, compute ceil (bytes_per_row / element_per_byte)
-  return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
+  return c10::multiply_integers(c10::SymIntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
 }
 
 inline Tensor new_qtensor(
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
@@ -143,7 +143,7 @@ inline Tensor new_qtensor(
       typeMetaToScalarType(dtype),
       " is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
-  int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
+  c10::SymInt size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
@@ -165,7 +165,7 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      rtensor.sym_sizes(),
       rtensor.options()
           .dtype(scalar_type_)
           .memory_format(rtensor.suggest_memory_format()),
@@ -190,7 +190,7 @@ void per_tensor_affine_dequantize_impl(
 
 Tensor& PerTensorAffineQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
-  rtensor.resize_(qtensor.sizes());
+  rtensor.resize__symint(qtensor.sym_sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
       rtensor.scalar_type() == kFloat,
@@ -203,8 +203,8 @@ Tensor& PerTensorAffineQuantizer::dequantize_out(
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(const Tensor& qtensor) {
-  Tensor rtensor = at::empty(
-      qtensor.sizes(),
+  Tensor rtensor = at::empty_symint(
+      qtensor.sym_sizes(),
       qtensor.options()
           .dtype(at::kFloat)
           .memory_format(qtensor.suggest_memory_format()));
@@ -216,7 +216,7 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      rtensor.sym_sizes(),
       rtensor.options()
           .dtype(scalar_type_)
           .memory_format(rtensor.suggest_memory_format()),
@@ -240,8 +240,8 @@ void per_channel_affine_dequantize_impl(
 }
 
 Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
-  Tensor rtensor = at::empty(
-      qtensor.sizes(),
+  Tensor rtensor = at::empty_symint(
+      qtensor.sym_sizes(),
       qtensor.options()
           .dtype(at::kFloat)
           .memory_format(qtensor.suggest_memory_format()));
@@ -251,7 +251,7 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
 
 Tensor& PerChannelAffineQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
-  rtensor.resize_(qtensor.sizes());
+  rtensor.resize__symint(qtensor.sym_sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
       rtensor.scalar_type() == kFloat,
@@ -268,7 +268,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
       rtensor.scalar_type() == kFloat,
       "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
  Tensor qtensor = new_qtensor(
-      rtensor.sizes(),
+      rtensor.sym_sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
  auto rtensor_contig = rtensor.expect_contiguous();
@@ -290,7 +290,7 @@ void per_channel_affine_float_q_params_dequantize_impl(
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+  Tensor rtensor = at::empty_symint(qtensor.sym_sizes(), qtensor.options().dtype(at::kFloat));
   per_channel_affine_float_q_params_dequantize_impl(
       rtensor, qtensor, scales_, zero_points_, axis_);
   return rtensor;
@@ -298,7 +298,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) 
 
 Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
     Tensor& rtensor, const Tensor& qtensor) {
-  rtensor.resize_(qtensor.sizes());
+  rtensor.resize__symint(qtensor.sym_sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
       rtensor.scalar_type() == kFloat,

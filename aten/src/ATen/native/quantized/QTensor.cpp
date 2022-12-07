@@ -70,6 +70,15 @@ Tensor quantize_per_tensor_tensor_qparams(
   return quantizer->quantize(self);
 }
 
+Tensor quantize_per_tensor_tensor_qparams_meta(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(1.0, 0, dtype);
+  return quantizer->quantize(self);
+}
+
 std::vector<Tensor> quantize_per_tensor_list_cpu(
     TensorList tensors,
     const Tensor& scales,
