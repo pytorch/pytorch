@@ -1141,13 +1141,13 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.real, out.real, atol=0.0, rtol=1e-6)
             self.assertEqual(res.imag, out.imag, atol=0.0, rtol=1e-6)
 
-        # # test the log1p in tensor
-        # inp_lst, out_lst = [list(elmt) for elmt in zip(*inouts)]
-        # inp_tens = torch.tensor(inp_lst, dtype=dtype, device=device)
-        # out_tens = torch.tensor(out_lst, dtype=dtype, device=device)
-        # res_tens = torch.log1p(inp_tens)
-        # self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
-        # self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
+        # test the log1p in tensor
+        inp_lst, out_lst = [list(elmt) for elmt in zip(*inouts)]
+        inp_tens = torch.tensor(inp_lst, dtype=dtype, device=device)
+        out_tens = torch.tensor(out_lst, dtype=dtype, device=device)
+        res_tens = torch.log1p(inp_tens)
+        self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
+        self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
 
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
