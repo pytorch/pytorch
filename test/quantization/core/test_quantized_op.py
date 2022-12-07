@@ -4605,7 +4605,7 @@ class TestQuantizedConv(TestCase):
             assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
-        elif post_op == 'add':
+        elif post_op == 'add' or post_op == 'add_relu':
             (X_value_min, X_value_max) = (0, 4)
             X2_init = torch.randint(
                 X_value_min,
@@ -4617,6 +4617,9 @@ class TestQuantizedConv(TestCase):
             X2_q = torch.quantize_per_tensor(
                 X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype)
             result_ref = result_ref + X2
+            if post_op == 'add_relu':
+                relu = torch.nn.ReLU()
+                result_ref = relu(result_ref)
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
@@ -4629,7 +4632,7 @@ class TestQuantizedConv(TestCase):
             else:
                 W_prepack = qconv_prepack_fn(
                     W_q, bias_float, strides, pads, dilations, groups)
-            if post_op == 'add':
+            if post_op == 'add' or post_op == 'add_relu':
                 Y_q = qconv_fn(
                     X_q,
                     X2_q,
@@ -4776,7 +4779,7 @@ class TestQuantizedConv(TestCase):
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
-           post_op=st.sampled_from(["add"]),
+           post_op=st.sampled_from(["add", "add_relu"]),
            use_channelwise=st.booleans(),
            X2_scale=st.floats(1.2, 1.6),
            X2_zero_point=st.integers(0, 4),)
@@ -4819,6 +4822,8 @@ class TestQuantizedConv(TestCase):
             qconv = torch.ops.quantized.conv2d
             if post_op == "add":
                 qconv = torch.ops.quantized.conv2d_add
+            elif post_op == "add_relu":
+                qconv = torch.ops.quantized.conv2d_add_relu
             qconv_prepack = torch.ops.quantized.conv2d_prepack
             conv_op = torch.nn.Conv2d(
                 input_channels,
