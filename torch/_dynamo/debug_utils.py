@@ -364,7 +364,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
     except OSError as e:
         log.exception(e)
-        raise NotImplementedError("Could not write to {minified_repro_path}")
+        raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
 def dump_to_minify(gm, args, compiler_name: str):
