@@ -306,13 +306,14 @@ def _isint(x):
     else:
         return isinstance(x, int)
 
-def _warn_typed_storage_removal():
+def _warn_typed_storage_removal(stacklevel=2):
     message = (
         "TypedStorage is deprecated. It will be removed in the future and "
         "UntypedStorage will be the only storage class. This should only matter "
-        "to you if you are using storages directly."
+        "to you if you are using storages directly.  To access UntypedStorage "
+        "directly, use tensor._storage() instead of tensor.storage()"
     )
-    warnings.warn(message, UserWarning)
+    warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
 
 class TypedStorage:
     is_sparse = False
@@ -471,7 +472,7 @@ class TypedStorage:
     @property
     def is_cuda(self):
         _warn_typed_storage_removal()
-        return self.device.type == 'cuda'
+        return self._untyped_storage.device.type == 'cuda'
 
     def untyped(self):
         """Returns the internal :class:`torch.UntypedStorage`"""
