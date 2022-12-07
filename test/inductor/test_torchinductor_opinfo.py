@@ -198,6 +198,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.pinv.singular": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
+    "masked.var": {f16},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
