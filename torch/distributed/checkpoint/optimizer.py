@@ -34,7 +34,7 @@ from torch.distributed.checkpoint.default_planner import (
 )
 from torch.distributed._shard.api import _shard_tensor
 
-from torch.distributed.checkpoint.nested_dict import unflatten_state_dict
+from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
     _element_wise_add,
     _element_wise_sub,

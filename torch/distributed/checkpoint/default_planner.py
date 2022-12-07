@@ -39,17 +39,17 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_default_metadata_only_plan,
 )
 
-from torch.distributed.checkpoint.nested_dict import (
+from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
-from torch.distributed.checkpoint.nested_tensor import flatten_sharded_tensors
-from torch.distributed.checkpoint.dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint._nested_tensor import flatten_sharded_tensors
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
     find_tensor_shard,
 )
-from torch.distributed.checkpoint.traverse import set_element, get_element
+from torch.distributed.checkpoint._traverse import set_element, get_element
 
 logger: logging.Logger = logging.getLogger(__file__)
 
