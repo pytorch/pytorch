@@ -105,8 +105,10 @@ class MemoryTracker:
             # the memory stats tracked here may not completely accurate.
             h1 = m.register_forward_pre_hook(self._create_pre_forward_hook(name))
             h2 = m.register_forward_hook(self._create_post_forward_hook(name))
-            h3 = m.register_backward_hook(self._create_backward_hook(name))
-            self._hooks.extend([h1, h2, h3])
+            # it does not work well with jagged tensor somehow, the root cause is not
+            # clear and remove it for now as it does not really capture important info.
+            # h3 = m.register_backward_hook(self._create_backward_hook(name))
+            self._hooks.extend([h1, h2])
         torch.cuda.empty_cache()
         assert getattr(self, "profile_mode", None) is None
         self.profile_mode = MemoryProfileDispatchMode(self)
