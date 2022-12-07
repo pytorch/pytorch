@@ -9,13 +9,14 @@ import unittest
 import unittest.mock
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
+import numpy as np
+
 import onnx
 import onnx.numpy_helper
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-import numpy as np
 from torch.onnx import OperatorExportTypes, symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
