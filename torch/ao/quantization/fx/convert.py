@@ -40,7 +40,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
 )
-from torch.ao.observer import _is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 from .graph_module import (
     QuantizedGraphModule,
     _is_observed_module,
