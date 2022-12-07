@@ -111,8 +111,8 @@ class _DDPSink(Function):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
         if (
-            ctx.state_dict["static_graph"]
-            and ctx.state_dict["num_iterations"] == 1
+            state_dict["static_graph"]
+            and state_dict["num_iterations"] == 1
         ):
             Variable._execution_engine.queue_callback(
                 ctx.reducer._delay_all_reduce
