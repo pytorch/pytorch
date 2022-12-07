@@ -284,6 +284,10 @@ class Vectorized<ComplexDbl> {
     return ret.elwise_mult(vd_log10e_inv);
   }
 
+  Vectorized<ComplexDbl> log1p() const {
+    return map(std::log1p);
+  }
+
   Vectorized<ComplexDbl> asin() const {
     // asin(x)
     // = -i*ln(iz + sqrt(1 -z^2))
@@ -478,10 +482,6 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> igammac(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> log1p() const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
