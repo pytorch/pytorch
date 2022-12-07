@@ -336,6 +336,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
             def forward(self, x, y):
+                x.t_()
+                y.t_()
                 return (x + y,)
 
         x = torch.randn(3, 3, requires_grad=True).clone()
@@ -350,8 +352,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             failure_reason = failure[0][0]
 
         fxy = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
-        compare_equal_outs_and_grads(self, F(), fxy, (x, y))
+        fxy(x, y)
+        fxy(x, y)
 
         self.assertTrue(failure_reason is None)
 
@@ -364,13 +366,13 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         fxx = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-
-        compare_equal_outs_and_grads(self, F(), fxx, (x, x))
-        compare_equal_outs_and_grads(self, F(), fxx, (x, y))
-        compare_equal_outs_and_grads(self, F(), fxx, (y, y))
-
-        self.assertEqual(cc.frame_count, 1)
-        self.assertTrue(failure_reason is None)
+        fxx(x, x)
+        lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch.""",
+        )
 
 
 if __name__ == "__main__":
