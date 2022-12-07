@@ -204,6 +204,13 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     def test_after_aot_cuda_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 4, TRITON_ACCURACY_ERROR)
 
+    @unittest.mock.patch.object(torch._inductor.config.cpp, "threads", 5)
+    def test_inductor_config_serialization(self):
+        data = torch._inductor.config.save_config()
+        torch._inductor.config.cpp.threads = 10
+        torch._inductor.config.load_config(data)
+        self.assertEqual(torch._inductor.config.cpp.threads, 5)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

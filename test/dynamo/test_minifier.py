@@ -313,6 +313,15 @@ class MinifierTests(MinifierTestBase):
         self.assertIsNotNone(match)
         self.assertLess(match.group(0).count("\n"), 5)
 
+    @unittest.mock.patch.object(torch._dynamo.config, "log_level", 5)
+    def test_dynamo_config_serialization(self):
+        self.assertEqual(torch._dynamo.logging.get_loggers()[0].level, 5)
+        data = torch._dynamo.config.save_config()
+        torch._dynamo.config.log_level = 3
+        self.assertEqual(torch._dynamo.logging.get_loggers()[0].level, 3)
+        torch._dynamo.config.load_config(data)
+        self.assertEqual(torch._dynamo.logging.get_loggers()[0].level, 5)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
