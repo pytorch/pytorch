@@ -284,7 +284,7 @@ autograd_function_db = [
         supports_out=False,
     ),
     OpInfo(
-        'NumpyExpAutogradFunction',
+        'NumpyExpMarkDirtyAutogradFunction',
         op=lambda x: NumpyExp_.apply(x.clone()),
         inplace_variant=NumpyExp_.apply,
         supports_forward_ad=True,

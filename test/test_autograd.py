@@ -1805,7 +1805,7 @@ class TestAutograd(TestCase):
                     self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
-                except UnrecoverableException:
+                except UnrecoverableException :
                     self.assertTrue(torch.is_grad_enabled())
                     raise SecondaryException
 
