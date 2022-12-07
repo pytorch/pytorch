@@ -428,7 +428,7 @@ def _lru_cache(fn, maxsize=None):
 
 # This stub exists so we can easily add metadata to sympy symbols
 class Symbol(sympy.Symbol):
-    __slots__ = []
+    __slots__: List[str] = []
 
 
 class ShapeEnv(object):
@@ -506,6 +506,7 @@ class ShapeEnv(object):
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
+            assert stride_expr is not None
             sym_stride.append(self.create_symintnode(stride_expr))
         sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset(), sname=f"{sname}.storage_offset()"))
         return sym_size, sym_stride, sym_storage_offset
