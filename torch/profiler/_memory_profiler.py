@@ -30,6 +30,9 @@ from torch._C._profiler import (
 from torch._utils import _element_size
 from torch.profiler import _utils
 
+from typing_extensions import Literal
+
+KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
 
 
@@ -48,6 +51,11 @@ class Action(enum.Enum):
     CREATE = enum.auto()
     INCREMENT_VERSION = enum.auto()
     DESTROY = enum.auto()
+
+
+@dataclasses.dataclass(eq=True, unsafe_hash=False, frozen=True)
+class Key:
+    device: torch.device
 
 
 @dataclasses.dataclass
@@ -72,7 +80,7 @@ class _Storage:
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
-class TensorKey:
+class TensorKey(Key):
     """Hashable identifier for a storage which has been asigned an ID.
 
     A detailed description of Tensor IDs and why they are needed is given in
@@ -84,7 +92,6 @@ class TensorKey:
 
     id: int
     storage: _Storage
-    device: torch.device
 
     def __repr__(self) -> str:
         return f"id={self.id}: {repr(self.storage):<24} ({self.device})"
@@ -104,7 +111,7 @@ class TensorKey:
             and storage_ptr is not None
             and allocation_id is not None
         ):
-            return TensorKey(tensor_id, _Storage(storage_ptr, allocation_id), device)
+            return TensorKey(device, tensor_id, _Storage(storage_ptr, allocation_id))
         return None
 
     @classmethod
@@ -646,21 +653,38 @@ class MemoryProfile:
         self._set_autograd_detail()
 
     @property
-    def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID, int], ...]:
+    def timeline(self) -> Tuple[Tuple[int, Action, KeyAndID, int], ...]:
+        output: List[Tuple[int, Action, KeyAndID, int]] = []
         t0 = min(event.start_time_ns for event in self._op_tree.dfs())
         allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
+        live_unknown: Dict[Tuple[int, torch.device], Literal[True]] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
+                alloc_size = alloc_fields.alloc_size
+                is_allocation = alloc_size > 0
+                t = event.start_time_ns - t0
+
                 key = TensorKey.from_allocation(alloc_fields)
                 if key is not None:
-                    is_allocation = alloc_fields.alloc_size > 0
-                    allocation_times[(key, is_allocation)] = event.start_time_ns - t0
+                    allocation_times[(key, is_allocation)] = t
+
+                else:
+                    key = Key(alloc_fields.device)
+                    ptr_and_device = (alloc_fields.ptr, key.device)
+                    if is_allocation:
+                        assert ptr_and_device not in live_unknown
+                        live_unknown[ptr_and_device] = True
+                        output.append((t, Action.CREATE, (key, 0), alloc_size))
+                    else:
+                        output.append((t, Action.DESTROY, (key, 0), -alloc_size))
+                        if not live_unknown.pop(ptr_and_device, False):
+                            output.append((-1, Action.PREEXISTING, (key, 0), -alloc_size))
 
         snapshot = self._category_snapshot()
         last_version = {key: version for key, version in sorted(snapshot.keys())}
 
-        events: List[Tuple[int, Action, TensorAndID]] = [
+        events: List[Tuple[int, Action, Optional[TensorAndID]]] = [
             (-1, Action.PREEXISTING, (key, version))
             for key, version in snapshot.keys()
             if (key, True) not in allocation_times and version == 0
@@ -682,11 +706,13 @@ class MemoryProfile:
                     t = allocation_times[(key, False)]
                     events.append((t, Action.DESTROY, (key, last_version[key])))
 
-        events.sort(key=lambda x: (x[0], x[1].value))
-        return tuple(
+        output.extend(
             (time, action, (key, version), self._size_map[key])
             for time, action, (key, version) in events
         )
+
+        output.sort(key=lambda x: (x[0], x[1].value))
+        return tuple(output)
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
