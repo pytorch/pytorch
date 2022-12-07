@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import functools
 from functools import partial
 from collections import Counter
 import sys
