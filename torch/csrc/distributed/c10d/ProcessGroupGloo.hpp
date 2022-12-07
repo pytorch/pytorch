@@ -214,6 +214,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // falls back to binding to the loopback address.
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
+  // Create ProcessGroupGloo instance.
+  static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
+    const c10::intrusive_ptr<Store>& store,
+    int rank,
+    int size,
+    std::chrono::milliseconds timeout);
+
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,
       int rank,

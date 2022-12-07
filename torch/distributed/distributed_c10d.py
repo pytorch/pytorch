@@ -994,7 +994,8 @@ def _new_process_group_helper(
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
-            backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
+            # backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
+            backend_pg = None
             backend_pg_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -1040,9 +1041,11 @@ def _new_process_group_helper(
 
                 backend_pg = creator_fn(dist_backend_opts, pg_options)
 
-        # Set sequence numbers for gloo and nccl backends.
-        if backend_str in [Backend.GLOO, Backend.NCCL]:
-            backend_pg._set_sequence_number_for_group()
+        # TODO: remove _set_sequence_number_for_group() after lazy initialization is supported
+        if backend_pg is not None:
+            # Set sequence numbers for gloo and nccl backends.
+            if backend_str in [Backend.GLOO, Backend.NCCL]:
+                backend_pg._set_sequence_number_for_group()
 
         # If the type is a sublcass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
@@ -1051,27 +1054,29 @@ def _new_process_group_helper(
             pg = backend_pg
             break
 
-        # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
-            # In debug mode and if GLOO is available, wrap in a wrapper PG that
-            # enables enhanced collective checking for debuggability.
-            if get_debug_level() == DebugLevel.DETAIL:
-                if not _GLOO_AVAILABLE:
-                    logger.info(
-                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
-                                GLOO is not available. Build with Gloo to
-                                create a wrapper process group in debug mode
-                                to aid collective desynchronization debugging."""
-                    )
-                else:
-                    backend_pg = _create_process_group_wrapper(
-                        wrapped_pg=backend_pg,
-                        store_prefix=group_name,
-                        store=prefix_store,
-                        rank=group_rank,
-                        world_size=group_size,
-                        timeout=timeout,
-                    )
+        # TODO: remove process group wrapper code after lazy initialization is supported
+        if backend_pg is not None:
+            # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
+            if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+                # In debug mode and if GLOO is available, wrap in a wrapper PG that
+                # enables enhanced collective checking for debuggability.
+                if get_debug_level() == DebugLevel.DETAIL:
+                    if not _GLOO_AVAILABLE:
+                        logger.info(
+                            """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                    GLOO is not available. Build with Gloo to
+                                    create a wrapper process group in debug mode
+                                    to aid collective desynchronization debugging."""
+                        )
+                    else:
+                        backend_pg = _create_process_group_wrapper(
+                            wrapped_pg=backend_pg,
+                            store_prefix=group_name,
+                            store=prefix_store,
+                            rank=group_rank,
+                            world_size=group_size,
+                            timeout=timeout,
+                        )
 
         print("set backend")
         pg._set_backend(torch.device(device), backend_pg_type, backend_pg)

@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 namespace c10d {
 
@@ -111,6 +112,11 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Get the backend type associated with the device
+  TORCH_CHECK(
+      deviceTypeToBackendType_.find(deviceType) !=
+          deviceTypeToBackendType_.end(),
+      "No backend type associated with device type ",
+      deviceType);
   ProcessGroup::BackendType backendType =
       deviceTypeToBackendType_.at(deviceType);
 
@@ -120,26 +126,45 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
   } else {
-    std::cout << "C++ initializing the backend for " << backendType
-              << std::endl;
+    std::cout << "C++ initializing the backend for "
+              << backendTypeToStr(backendType) << std::endl;
     // initialize the backend
 
     // create a separate prefix store for the newly created backend
-    auto prefixStore =
-        c10::make_intrusive<PrefixStore>(backendTypeToStr(backendType), store_);
+    auto prefixStore = c10::make_intrusive<PrefixStore>(
+        backendTypeToStr(backendType) + "/", store_);
+    c10::intrusive_ptr<Backend> backend;
 
-    // if backend is gloo then initialize a gloo backend
+    // TODO: we should move this into its own function for each respective
+    // backend if backend is gloo then initialize a gloo backend
     if (backendType == ProcessGroup::BackendType::GLOO) {
       // create ProcessGroupGloo options
-      auto glooOptions =
-          c10::make_intrusive<ProcessGroupGloo::Options>(options_->timeout);
-      auto backend = c10::make_intrusive<ProcessGroupGloo>(
-          store_, rank_, size_, glooOptions);
-      // auto backend = nullptr;
-      deviceTypeToBackend_[deviceType] = backend;
-      backendTypeToBackend_[backendType] = backend;
-      return backend;
+      backend = ProcessGroupGloo::createProcessGroupGloo(
+          prefixStore, rank_, size_, options_->timeout);
     }
+
+    // if backend is nccl or gloo then set sequence number
+    if (backendType == ProcessGroup::BackendType::NCCL ||
+        backendType == ProcessGroup::BackendType::GLOO) {
+      backend->setSequenceNumberForGroup();
+    }
+
+    // if using torch_distributed_debug, then wrap backend with
+    // ProcessGroupWrapper
+    if (dist_debug_level_ >= DebugLevel::Detail) {
+      // create new prefix store for the wrapper
+      auto wrapperPrefixStore = c10::make_intrusive<PrefixStore>(
+          backendTypeToStr(backendType) + "/wrapped", store_);
+      auto wrapperBackend = ProcessGroupGloo::createProcessGroupGloo(
+          wrapperPrefixStore, rank_, size_, options_->timeout);
+      backend =
+          c10::make_intrusive<ProcessGroupWrapper>(backend, wrapperBackend);
+    }
+
+    // set internal state and return
+    deviceTypeToBackend_[deviceType] = backend;
+    backendTypeToBackend_[backendType] = backend;
+    return backend;
 
     // if (backendType == ProcessGroup::BackendType::MPI) {
     //   auto backend = c10::make_intrusive<ProcessGroupMPI>();

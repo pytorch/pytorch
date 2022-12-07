@@ -106,16 +106,6 @@ namespace c10d {
 
 namespace {
 
-std::vector<std::string> split(char separator, const std::string& string) {
-  std::vector<std::string> pieces;
-  std::stringstream ss(string);
-  std::string item;
-  while (std::getline(ss, item, separator)) {
-    pieces.push_back(std::move(item));
-  }
-  return pieces;
-}
-
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -1966,7 +1956,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
             if (ifnameEnv && strlen(ifnameEnv) > 1) {
-              for (const auto& iface : split(',', ifnameEnv)) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }

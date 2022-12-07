@@ -7743,6 +7743,7 @@ class DistributedTest:
 
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
+            print(f"Rank {self.rank} calling barrier for group_gloo {group_gloo}")
             dist.barrier(group_gloo)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
