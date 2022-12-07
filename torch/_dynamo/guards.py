@@ -52,10 +52,6 @@ check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 
 
-def tensor_identity_match(a, b):
-    return a is b
-
-
 CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
@@ -66,7 +62,6 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("___tensor_identity_match", tensor_identity_match),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -691,7 +686,7 @@ class CheckFunctionManager:
         guard_str = ""
         for guard in guards:
             if isinstance(guard, DuplicateInputs):
-                guard_str += f"___tensor_identity_match({guard.arg_a}, {guard.arg_b})"
+                guard_str += f"{guard.arg_a} is {guard.arg_b}"
             else:
                 raise RuntimeError(f"Unexpected guard type {guard}")
 

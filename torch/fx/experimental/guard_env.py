@@ -11,6 +11,7 @@ A GuardEnvExpr can have any subtype.
 Note: All subtypes must be handled exhaustively in
 torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
+@dataclasses.dataclass
 class GuardEnvExpr():
     pass
 
