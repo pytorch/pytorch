@@ -515,7 +515,7 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.CODE:
+            if config.log_level <= logging.INFO and config.output_code:
                 graph_str = (
                     gm.print_readable()
                     if config.output_graph_code
@@ -579,6 +579,8 @@ class OutputGraph(fx.Tracer):
                 config.repro_after is not None and config.repro_level == 4
             )
             if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
