@@ -1133,8 +1133,8 @@ class OnnxTestCaseRepro:
             repro_dir
         )
 
-    @_beartype.beartype
     @classmethod
+    @_beartype.beartype
     def create_test_case_repro(
         cls, proto: bytes, inputs, outputs, dir: str, name: Optional[str] = None
     ):
