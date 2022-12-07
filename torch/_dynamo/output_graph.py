@@ -44,7 +44,6 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 
-
 log = logging.getLogger(__name__)
 
 
@@ -497,7 +496,6 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        # breakpoint()
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
