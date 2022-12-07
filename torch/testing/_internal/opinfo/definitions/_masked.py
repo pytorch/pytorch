@@ -931,6 +931,17 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_reference_masked",
             ),
+            # nvfuser error: https://github.com/csarofeen/pytorch/issues/2241
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -975,11 +986,16 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # nvfuser error: https://github.com/csarofeen/pytorch/issues/2241
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
-                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
             ),
         ),
         decorators=[
