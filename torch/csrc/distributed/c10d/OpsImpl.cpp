@@ -399,6 +399,36 @@ c10::intrusive_ptr<Work> alltoall_cuda_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> alltoall_base_cpu_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> alltoall_base_cuda_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> barrier_cpu(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -556,6 +586,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("alltoall_", alltoall_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("alltoall_base_", alltoall_base_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("alltoall_base_", alltoall_base_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {

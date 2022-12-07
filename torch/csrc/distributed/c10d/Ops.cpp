@@ -173,6 +173,21 @@ c10::intrusive_ptr<Work> alltoall_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> alltoall_base_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -271,6 +286,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "alltoall_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
+  m.def(
+      "alltoall_base_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_base_));
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
@@ -521,6 +539,31 @@ c10::intrusive_ptr<Work> alltoall(
                            int64_t)>();
   return op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count());
+}
+
+c10::intrusive_ptr<Work> alltoall_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& output,
+    at::Tensor& input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    const AllToAllOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::alltoall_base_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::Tensor&,
+                           at::Tensor&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           std::vector<int64_t>,
+                           std::vector<int64_t>,
+                           int64_t)>();
+  return op.call(
+      output,
+      input,
+      process_group,
+      output_split_sizes,
+      input_split_sizes,
+      opts.timeout.count());
 }
 
 void monitored_barrier(

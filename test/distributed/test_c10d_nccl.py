@@ -2950,6 +2950,11 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
 
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
+    def test_all_to_all_single(self):
+        self._test_all_to_all_single(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
     def test_allgather_base(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
