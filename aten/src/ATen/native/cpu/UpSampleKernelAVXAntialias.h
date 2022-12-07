@@ -60,16 +60,8 @@ static __m256i inline mm256_cvtepu8_epi32(void* ptr) {
 
 namespace {
 
-static inline double bilinear_filter(double x) {
-  // TODO: Same as aa_filter()
-  if (x < 0.0) {
-    x = -x;
-  }
-  if (x < 1.0) {
-    return 1.0 - x;
-  }
-  return 0.0;
-}
+
+typedef double (*aa_filter_fn_t )(double x); // TODO: use aa_filter_fn_t from UpSampleKernel.cpp file instead?
 
 void unpack_rgb(
     uint8_t* unpacked,
@@ -113,7 +105,10 @@ int precompute_coeffs( // TODO: This is redundant with
     int inSize,
     int outSize,
     int** boundsp,
-    double** kkp) {
+    double** kkp,
+    aa_filter_fn_t filter,
+    int interp_size
+    ) {
   double support, scale, filterscale;
   double center, ww, ss;
   int xx, x, ksize, xmin, xmax;
@@ -126,8 +121,7 @@ int precompute_coeffs( // TODO: This is redundant with
     filterscale = 1.0;
   }
   /* determine support size (length of resampling filter) */
-  // support = filterp->support * filterscale;
-  support = filterscale; // bilinear filter support is 1 for pil-simd
+  support = filterscale * interp_size / 2;
 
   /* maximum number of coeffs */
   ksize = (int)ceil(support) * 2 + 1;
@@ -174,7 +168,7 @@ int precompute_coeffs( // TODO: This is redundant with
     xmax -= xmin;
     k = &kk[xx * ksize];
     for (x = 0; x < xmax; x++) {
-      double w = bilinear_filter((x + xmin - center + 0.5) * ss);
+      double w = filter((x + xmin - center + 0.5) * ss);
       k[x] = w;
       ww += w;
     }
@@ -352,7 +346,9 @@ UINT32* ImagingResampleInner(
     int xin,
     int yin,
     int xout,
-    int yout) {
+    int yout,
+    aa_filter_fn_t filter,
+    int interp_size) {
   int i, need_horizontal, need_vertical;
   int ybox_first, ybox_last;
   int ksize_horiz, ksize_vert;
@@ -364,12 +360,12 @@ UINT32* ImagingResampleInner(
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
 
-  ksize_horiz = precompute_coeffs(xin, xout, &bounds_horiz, &kk_horiz);
+  ksize_horiz = precompute_coeffs(xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
   // if (!ksize_horiz) {
   //     return NULL;
   // }
 
-  ksize_vert = precompute_coeffs(yin, yout, &bounds_vert, &kk_vert);
+  ksize_vert = precompute_coeffs(yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
   // if (!ksize_vert) {
   //     free(bounds_horiz);
   //     free(kk_horiz);
@@ -457,7 +453,7 @@ UINT32* ImagingResampleInner(
   return unpacked_output_p;
 }
 
-void beepidiboop(const at::Tensor& input, const at::Tensor& output) {
+void beepidiboop(const at::Tensor& input, const at::Tensor& output, aa_filter_fn_t filter, int interp_size) {
   // Assume shape is 1, 3, H, W  and layout is channels_last
 
   auto batch_size = input.size(0);
@@ -481,7 +477,7 @@ void beepidiboop(const at::Tensor& input, const at::Tensor& output) {
         num_channels);
 
     UINT32* unpacked_output_p =
-        ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout);
+        ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout, filter, interp_size);
 
     uint8_t* packed_output_p = (uint8_t*)output[i].data_ptr<uint8_t>();
     pack_rgb(

@@ -1075,18 +1075,13 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     std::vector<Tensor> indices_weights;
 
-    // float scale = area_pixel_compute_scale<float>(
-    //     input_size, output_size, align_corners, opt_scale);
     double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
     auto interp_size = HelperInterpLinear::interp_size;
 
-    // float support =
-    //     (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
     double support =
         (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-    // interp_size = (int)ceilf(support) * 2 + 1;
     interp_size = (int)ceil(support) * 2 + 1;
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
@@ -1103,7 +1098,6 @@ struct HelperInterpLinear : public HelperInterpBase {
     {
       // Weights
       new_shape[reshape_dim] = output_size * interp_size;
-    //   auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
       auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<double>()));
       auto strides = wts.strides().vec();
       strides[reshape_dim] = 0;
@@ -1118,7 +1112,6 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
     int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
     int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
-    // float* wt_ptr = indices_weights[3].data_ptr<float>();
     double* wt_ptr = indices_weights[3].data_ptr<double>();
     int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
 
@@ -1132,7 +1125,6 @@ struct HelperInterpLinear : public HelperInterpBase {
           support,
           wt_ptr + i * interp_size,
           interp_size,
-        //   HelperInterpLinear::aa_filter<float>,
           HelperInterpLinear::aa_filter<double>,
           xmin,
           xmax);
@@ -1146,14 +1138,11 @@ struct HelperInterpLinear : public HelperInterpBase {
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f32 = indices_weights[3];
-    // float * data_f32 = weights_f32.data_ptr<float>();
     double * data_f32 = weights_f32.data_ptr<double>();
     int64_t weights_f32_size = output_size * interp_size;
     // can't use weights_f32.max() here as tensor is restrided
-    // float w_max = data_f32[0];
     double w_max = data_f32[0];
     for (const auto i : c10::irange(weights_f32_size)) {
-        // float v = data_f32[i];
         double v = data_f32[i];
         if (w_max < v) {
             w_max = v;
@@ -1182,7 +1171,6 @@ struct HelperInterpLinear : public HelperInterpBase {
       }
     //   std::cout << "(" << v << ", " << data_i16[i] << ") ";
     //   std::cout << std::endl;
-
     }
     return indices_weights;
   }
@@ -1310,25 +1298,14 @@ struct HelperInterpCubic : public HelperInterpBase {
 
     std::vector<Tensor> indices_weights;
 
-    float scale = area_pixel_compute_scale<float>(
+    double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
     auto interp_size = HelperInterpCubic::interp_size;
 
-    // indices_weights = HelperInterpCubic::_compute_indices_weights_aa<float>(
-    //     input_size,
-    //     output_size,
-    //     stride,
-    //     ndims,
-    //     reshape_dim,
-    //     scale,
-    //     interp_size,
-    //     &HelperInterpCubic::aa_filter<float>);
-    // COPY-PASTE FROM _compute_indices_weights_aa
-
-    float support =
+    double support =
         (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-    interp_size = (int)ceilf(support) * 2 + 1;
+    interp_size = (int)ceil(support) * 2 + 1;
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
@@ -1344,7 +1321,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     {
       // Weights
       new_shape[reshape_dim] = output_size * interp_size;
-      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<float>()));
+      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<double>()));
       auto strides = wts.strides().vec();
       strides[reshape_dim] = 0;
       new_shape[reshape_dim] = output_size;
@@ -1358,7 +1335,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
     int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
     int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
-    float* wt_ptr = indices_weights[3].data_ptr<float>();
+    double * wt_ptr = indices_weights[3].data_ptr<double>();
     int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
 
     int64_t xmin, xmax;
@@ -1371,7 +1348,7 @@ struct HelperInterpCubic : public HelperInterpBase {
           support,
           wt_ptr + i * interp_size,
           interp_size,
-          HelperInterpLinear::aa_filter<float>,
+          HelperInterpCubic::aa_filter<double>,
           xmin,
           xmax);
 
@@ -1384,7 +1361,16 @@ struct HelperInterpCubic : public HelperInterpBase {
 
     // Rescale float weights to int16 and compute weights precision
     auto weights_f32 = indices_weights[3];
-    float w_max = weights_f32.max().item<float>();
+    double * data_f32 = weights_f32.data_ptr<double>();
+    int64_t weights_f32_size = output_size * interp_size;
+    // can't use weights_f32.max() here as tensor is restrided
+    double w_max = data_f32[0];
+    for (const auto i : c10::irange(weights_f32_size)) {
+        double v = data_f32[i];
+        if (w_max < v) {
+            w_max = v;
+        }
+    }
 
     // Copied from PIL-SIMD, https://github.com/uploadcare/pillow-simd/blob/668aa48d12305b8f093958792a5e4f690c2583d6/src/libImaging/Resample.c
     for (weights_precision = 0; weights_precision < 22; weights_precision += 1) {
@@ -1394,15 +1380,17 @@ struct HelperInterpCubic : public HelperInterpBase {
     }
 
     // rescale float values to int16, we use the same buffer as PIL-SIMD
-    float * data_f32 = weights_f32.data_ptr<float>();
     short * data_i16 = (short *) data_f32;
-    for (int i=0; i<weights_f32.numel(); i++) {
-      float v = data_f32[i];
+    for (const auto i : c10::irange(weights_f32_size)) {
+      double v = data_f32[i];
       if (v < 0) {
           data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
       } else {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
+
+    //   std::cout << "(" << v << ", " << data_i16[i] << ") ";
+    //   std::cout << std::endl;
     }
     return indices_weights;
   }
@@ -1800,7 +1788,8 @@ void upsample_bilinear2d_kernel_impl(
   }
 }
 
-void upsample_bilinear2d_aa_kernel_impl(
+template <class F>
+void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
     const Tensor& output,
     const Tensor& input,
     bool align_corners,
@@ -1811,17 +1800,33 @@ void upsample_bilinear2d_aa_kernel_impl(
   // TODO: add more assumptions as needed
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
     input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
-    beepidiboop(input, output);
+    beepidiboop(input, output, &F::aa_filter, F::interp_size);
     // std::cout << "fast path" << std::endl;
   } else {
     // std::cout << "slow path" << std::endl;
-    separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+    separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
         output, input, align_corners, {scales_h, scales_w});
   }
 #else // CPU_CAPABILITY_AVX2
-  separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+  separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
       output, input, align_corners, {scales_h, scales_w});
 #endif // CPU_CAPABILITY_AVX2
+
+//   std::cout << std::endl;
+//   std::cout << std::endl;
+//   std::cout << std::endl;
+//   std::cout << std::endl;
+}
+
+void upsample_bilinear2d_aa_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+    maybe_dispatch_to_avx_for_bilinear_or_bicubic<HelperInterpLinear>(
+        output, input, align_corners, scales_h, scales_w
+    );
 }
 
 void upsample_trilinear3d_kernel_impl(
@@ -1858,8 +1863,9 @@ void upsample_bicubic2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
-      output, input, align_corners, {scales_h, scales_w});
+    maybe_dispatch_to_avx_for_bilinear_or_bicubic<HelperInterpCubic>(
+        output, input, align_corners, scales_h, scales_w
+    );
 }
 
 template <
