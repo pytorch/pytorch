@@ -1,6 +1,5 @@
 import copy
 import torch
-import operator
 import warnings
 from torch.fx import (
     GraphModule,
