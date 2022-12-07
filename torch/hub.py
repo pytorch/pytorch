@@ -18,16 +18,19 @@ from torch.serialization import MAP_LOCATION
 
 class Faketqdm(object):  # type: ignore[no-redef]
 
-    def __init__(self, total=None, disable=False,
+    def __init__(self, iterable=None, total=None, disable=False,
                     unit=None, *args, **kwargs):
+        self.iterable = iterable
         self.total = total
         self.disable = disable
         self.n = 0
         # Ignore all extra *args and **kwargs lest you want to reinvent tqdm
-
+    
     def __iter__(self):
-        # Do something here
-        return None
+        return self.iterable.__iter__()
+    
+    def __next__(self):
+        self.update(self.n + 1)
 
     def update(self, n):
         if self.disable:
@@ -53,9 +56,9 @@ class Faketqdm(object):  # type: ignore[no-redef]
         sys.stderr.write('\n')
 
 try:
-    from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
+    from tqdm import tqdm # If tqdm is installed use it, otherwise use the fake wrapper
 except ImportError:
-    tqdm = Faketqdm()
+    tqdm = Faketqdm
 
 __all__ = [
     'download_url_to_file',
