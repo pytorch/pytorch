@@ -948,9 +948,20 @@ static Tensor make_offset2bag(
     const Tensor& offsets,
     const int64_t mode,
     const c10::optional<Tensor>& per_sample_weights,
-    const int64_t padding_idx) {
+    const int64_t padding_idx,
+    bool include_last_offset = false) {
   Tensor offset2bag = at::empty({0}, offsets.options());
-  make_offset2bag_out(offset2bag, output, weight, indices, offsets, mode, per_sample_weights, padding_idx);
+  // when include_last_offset is true, ignore the last index in offset.
+  //
+  // fix runtime erro when include_last_offset is true and offsets[-1] != indices.size(0)
+  // see https://github.com/pytorch/pytorch/issues/89677 for more details.
+  //
+  Tensor _offsets = offsets;
+  if (include_last_offset) {
+    _offsets = offsets.clone();
+    _offsets[-1] = indices.size(0);
+  }
+  make_offset2bag_out(offset2bag, output, weight, indices, _offsets, mode, per_sample_weights, padding_idx);
   return offset2bag;
 }
 
@@ -1105,7 +1116,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
        weight.sizes()[1]},
       weight.options());
 
-  Tensor offset2bag = make_offset2bag(output, weight, indices, offsets, mode, per_sample_weights, padding_idx);
+  Tensor offset2bag = make_offset2bag(output, weight, indices, offsets, mode, per_sample_weights, padding_idx, include_last_offset);
 
   Tensor bag_size = make_bag_size(offsets, indices, mode, include_last_offset, requires_grad);
 
