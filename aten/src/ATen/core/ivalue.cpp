@@ -371,6 +371,8 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(*v.toTuple());
     case Tag::Device:
       return c10::get_hash(v.toDevice());
+    case Tag::ComplexDouble:
+      return c10::hash<c10::complex<double>>()(v.toComplexDouble());
     case Tag::GenericDict:
     case Tag::GenericList:
     case Tag::Blob:
@@ -381,7 +383,6 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
-    case Tag::ComplexDouble:
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
