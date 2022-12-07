@@ -3950,6 +3950,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_reduction_batch_rule")):
             escaped.argmin()
 
+        a = torch.zeros([4, 4, 4, 4])
+        b = torch.zeros([4, 4, 4, 4], dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_all_tensors_have_optional_bdim")):
+            torch.ops.aten.adaptive_max_pool2d_backward(escaped, a, b)
+
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
             torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
