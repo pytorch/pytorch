@@ -1109,22 +1109,6 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@register_meta([aten.diag.default, aten.diag.out])
-@out_wrapper()
-def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
-    if self.dim() == 1:
-        sz = self.size(0) + abs(dim)
-        return self.new_empty((sz, sz))
-
-    # case: dim is 2
-    if dim >= 0:
-        sz = min(self.size(0), self.size(1) - dim)
-    else:
-        sz = min(self.size(0) + dim, self.size(1))
-    return self.new_empty((sz,))
-
-
 @register_meta(aten.diagonal_scatter.default)
 def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
     return clone_preserve_strides(self)
