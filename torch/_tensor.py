@@ -113,7 +113,8 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
+                or self.device.type
+                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == "privateuseone"
