@@ -176,9 +176,7 @@ struct RawAllocation {
 };
 
 // For performance.
-static_assert(
-    std::is_pod<RawAllocation>::value,
-    "Non-POD member of RawAllocation.");
+static_assert(c10::is_pod_v<RawAllocation>, "Non-POD member of RawAllocation.");
 
 template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
@@ -204,7 +202,7 @@ struct ExtraFields<EventType::OutOfMemory> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    c10::is_pod_v<ExtraFields<EventType::OutOfMemory>>,
     "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
