@@ -73,7 +73,6 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             dist_cp.load_state_dict(
                 state_dict=state_dict,
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-                # planner=ap.AdvLoadPlanner(),
                 planner=DefaultLoadPlanner(
                     flatten_state_dict=True,
                     flatten_sharded_tensors=True,
