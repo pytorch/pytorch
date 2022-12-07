@@ -1483,6 +1483,44 @@ def set_correction(
     return correction
 
 
+def compute_required_storage_length(
+    shape: ShapeType, strides: StrideType, storage_offset: int
+) -> int:
+    """Computes the minimum storage size to hold the given tensor geometry.
+
+    Example
+    =======
+
+    This is the size of a newly allocated tensor's storage, in units of elements
+
+    >>> t = torch.empty((10, 20))
+    >>> compute_required_storage_length(t.shape, t.stride(), t.storage_offset())
+    200
+
+    >>> t2 = torch.empty_strided((1, 2, 3), (5, 7, 11))
+    >>> size = compute_required_storage_length(t2.shape, t2.stride(), t2.storage_offset())
+    >>> size == t.storage().size()
+    True
+
+    A valid tensor may have a larger storage size, but never smaller
+
+    >>> slice = torch.empty(100)[20:40]
+    >>> slice.storage().size()
+    100
+
+    >>> compute_required_storage_length(slice.shape, slice.stride(), slice.storage_offset())
+    40
+
+    """
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape, 1) == 0:
+        return 0
+
+    max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
+    # +1 to account for the first element which offsets are taken from
+    return 1 + storage_offset + max_offset
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -1490,17 +1528,8 @@ def check_in_bounds_for_storage(
     Determines if the given shape, strides, and offset are valid for the given storage.
     """
 
-    # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
-        return
-
-    length = a.size() - storage_offset
-    max_offset = 0
-    for x, y in zip(shape, strides):
-        max_offset = max_offset + (x - 1) * y
-
-    if max_offset >= length:
-        required_length = max_offset + storage_offset
+    required_length = compute_required_storage_length(shape, strides, storage_offset)
+    if a.size() < required_length:
         msg = (
             "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
             "which requires a storage of size {4}".format(
