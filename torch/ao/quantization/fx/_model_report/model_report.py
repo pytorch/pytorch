@@ -385,7 +385,7 @@ class ModelReport:
                         module_fqns_to_features[module_fqn] = {**new_info, **present_info}
                     else:
                         error_str = "You have the same key with different values across detectors. "
-                        error_str += "Someone incorrectly implemented a detector with conflicting keys to exisiting detectors."
+                        error_str += "Someone incorrectly implemented a detector with conflicting keys to existing detectors."
                         raise ValueError(error_str)
                 else:
                     # we just set it
