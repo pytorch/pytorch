@@ -2933,7 +2933,7 @@ class DynamicScalar(IRNode):
         return ()
 
 def get_callable_name(callable):
-    return = f"{callable.__name__}_{callable.__hash__()}"
+    return f"{callable.__name__}_{callable.__hash__()}"
 
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
