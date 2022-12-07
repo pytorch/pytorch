@@ -41,6 +41,7 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
+USE_LEGACY_PATTERN_FORMAT_DICT_KEY = "use_legacy_pattern_format"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -241,7 +242,7 @@ class BackendConfig:
             weight_dtype=torch.qint8,
             bias_dtype=torch.float)
 
-        def fuse_conv2d_relu(is_qat, relu, conv):
+        def fuse_conv2d_relu(is_qat, conv, relu):
             return torch.ao.nn.intrinsic.ConvReLU2d(conv, relu)
 
         # For quantizing Linear
@@ -253,7 +254,7 @@ class BackendConfig:
             .set_reference_quantized_module(torch.ao.nn.quantized.reference.Linear)
 
         # For fusing Conv2d + ReLU into ConvReLU2d
-        conv_relu_config = BackendPatternConfig((torch.nn.ReLU, torch.nn.Conv2d)) \
+        conv_relu_config = BackendPatternConfig((torch.nn.Conv2d, torch.nn.ReLU)) \
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
             .set_fused_module(torch.ao.nn.intrinsic.ConvReLU2d) \
@@ -354,6 +355,7 @@ class BackendPatternConfig:
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
+        self._use_legacy_pattern_format = False
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
@@ -421,9 +423,13 @@ class BackendPatternConfig:
         Set the function that specifies how to fuse the pattern for this pattern.
 
         The first argument of this function should be `is_qat`, and the rest of the arguments
-        should be the items in the tuple pattern, e.g. (`torch.nn.ReLU`, `torch.nn.Linear`)
-        will have a function with three arguments, `is_qat`, `relu`, and `linear`.
-        The return value of this function should be the resulting fused module.
+        should be the items in the tuple pattern. The return value of this function should be
+        the resulting fused module.
+
+        For example, the fuser method for the pattern `(torch.nn.Linear, torch.nn.ReLU)` can be:
+
+            def fuse_linear_relu(is_qat, linear, relu):
+                return torch.ao.nn.intrinsic.LinearReLU(linear, relu)
         """
         self.fuser_method = fuser_method
         return self
@@ -449,6 +455,10 @@ class BackendPatternConfig:
         self._input_output_observed = input_output_observed
         return self
 
+    def _set_use_legacy_pattern_format(self, use_legacy_pattern_format: bool) -> BackendPatternConfig:
+        self._use_legacy_pattern_format = use_legacy_pattern_format
+        return self
+
     @classmethod
     def from_dict(cls, backend_pattern_config_dict: Dict[str, Any]) -> BackendPatternConfig:
         """
@@ -464,6 +474,7 @@ class BackendPatternConfig:
             implementation for this pattern's root module.
             "fused_module": a :class:`torch.nn.Module` that represents the fused implementation for this pattern
             "fuser_method": a function that specifies how to fuse the pattern for this pattern
+            "use_legacy_pattern_format": whether to use the legacy reversed nested tuple pattern format
 
         """
         def _get_dtype_config(obj: Any) -> DTypeConfig:
@@ -495,6 +506,7 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
+        conf._set_use_legacy_pattern_format(backend_pattern_config_dict.get(USE_LEGACY_PATTERN_FORMAT_DICT_KEY, None))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -527,4 +539,5 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
+        backend_pattern_config_dict[USE_LEGACY_PATTERN_FORMAT_DICT_KEY] = self._use_legacy_pattern_format
         return backend_pattern_config_dict
