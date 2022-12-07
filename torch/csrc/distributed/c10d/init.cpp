@@ -1164,6 +1164,7 @@ Arguments:
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
+          .def("_fake_work", &::c10d::ProcessGroup::_fake_work)
 
           .def(
               "broadcast",

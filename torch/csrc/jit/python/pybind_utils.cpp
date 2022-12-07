@@ -55,6 +55,7 @@ IValue listToIValue(py::handle obj) {
 }
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+  std::cout << "toIvalue top" << std::endl;
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
@@ -179,6 +180,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::BoolType:
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
+      std::cout << "toIvalue TupleType" << std::endl;
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
       auto tuple_type = type->cast<TupleType>();
@@ -319,6 +321,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
+      std::cout << "toIvalue OptionalType" << std::endl;
       // check if it's a none obj since optional accepts NoneType
       if (obj.is_none()) {
         // check if it's a none obj since optional accepts NoneType
@@ -328,25 +331,37 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return toIValue(obj, type->expectRef<OptionalType>().getElementType(), N);
     }
     case TypeKind::ClassType: {
+      std::cout << "toIvalue ClassType" << std::endl;
       auto classType = type->expect<ClassType>();
+      std::cout << "classType" << classType << std::endl;
       auto object = py::cast<py::object>(obj);
+      std::cout << "object" << object << std::endl;
       if (auto mod = as_module(object)) {
+        std::cout << "as_module -> return existing Scriptmodule value" << std::endl;
         // if obj is already a ScriptModule, just return its ivalue
         return mod.value()._ivalue();
       }
+      std::cout << "as_module failed" << std::endl;
 
       // Check if the obj is a ScriptObject.
       if (auto script_obj = as_object(object)) {
+        std::cout << "script_obj" << std::endl;
         return script_obj.value()._ivalue();
       }
+      std::cout << "script_obj failed" << std::endl;
 
       // otherwise is a normal class object, we create a fresh
       // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
+      std::cout << "classType"  << classType << std::endl;
+      
       const size_t numAttrs = classType->numAttributes();
+      std::cout << "numAttrs"  << numAttrs << std::endl;
       auto cu = classType->compilation_unit();
+      std::cout << "cu"  << cu << std::endl;
       auto userObj = c10::ivalue::Object::create(
           c10::StrongTypePtr(cu, classType), numAttrs);
+      std::cout << "userObj"  << userObj << std::endl;
 
       // 2. copy all the contained types
       for (const auto slot : c10::irange(numAttrs)) {
@@ -378,6 +393,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return userObj;
     }
     case TypeKind::InterfaceType: {
+      std::cout << "toIvalue InterfaceType" << std::endl;
       auto interfaceType = type->expect<InterfaceType>();
       // When converting an pyobj to an interface, we check if rhs
       // is module or normal torchscript class, get the type and ivalue
@@ -452,6 +468,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
     }
     case TypeKind::RRefType: {
+      std::cout << "toIvalue RRefType" << std::endl;
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
@@ -459,12 +476,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
 #endif
     } break;
     case TypeKind::PyObjectType: {
+      std::cout << "toIvalue PyObjectType" << std::endl;
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
+      std::cout << "toIvalue CapsuleType" << std::endl;
       return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
+      std::cout << "toIvalue FutureType" << std::endl;
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
     case TypeKind::AnyType:

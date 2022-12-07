@@ -318,6 +318,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), " does not support barrier"));
   }
 
+  virtual c10::intrusive_ptr<Work> _fake_work();
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

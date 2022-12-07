@@ -68,4 +68,14 @@ void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
       fmt::format("c10d.process_group_{}", getBackendName()));
 }
+
+class FakeWork : public Work {
+ public:
+  FakeWork() {}
+};
+
+c10::intrusive_ptr<Work> ProcessGroup::_fake_work() {
+  return c10::make_intrusive<Work>();
+}
+
 } // namespace c10d

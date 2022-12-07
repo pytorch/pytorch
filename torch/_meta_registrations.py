@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 
 import torch
 import torch._prims_common as utils
+import torch.distributed as dist
 from torch import Tensor
 from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
 from torch._ops import OpOverload
@@ -1962,7 +1963,9 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 @register_meta(c10d.allreduce_)
 def allreduce__meta(tensors, process_group, reduce_op, timeout):
     out_tensors = [torch.empty_like(t) for t in tensors]
-    return (out_tensors, None)
+    fake_work = dist.group.WORLD._fake_work()
+    breakpoint()
+    return (out_tensors, fake_work)
 
 
 # We must also trigger meta registrations from PrimTorch ref

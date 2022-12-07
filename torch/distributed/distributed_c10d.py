@@ -1594,6 +1594,8 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.allreduce([tensor], opts)
     else:
+        default_pg = _get_default_group()
+        # work = torch.ops.c10d.allreduce_([tensor], group)
         work = group.allreduce([tensor], opts)
 
     if async_op:
