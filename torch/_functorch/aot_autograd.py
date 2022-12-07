@@ -1261,13 +1261,14 @@ def aot_wrapper_dedupe(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, 
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    # TODO(voz): This structure is 1:1, we could consider an alternate structure like
-    # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
-    # which feels like needless complexity for a tiny bit of efficiency at this point.
-    for dupe_arg_pos, kept_pos in add_dupe_map.items():
-        # Edge case, only happens for identity
-        if dupe_arg_pos != kept_pos:
-            torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.register_duplicates(flat_args[dupe_arg_pos], flat_args[kept_pos])
+    if torch.fx.experimental.guard_env.CURRENT_GUARD_ENV:
+        # TODO(voz): This structure is 1:1, we could consider an alternate structure like
+        # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
+        # which feels like needless complexity for a tiny bit of efficiency at this point.
+        for dupe_arg_pos, kept_pos in add_dupe_map.items():
+            # Edge case, only happens for identity
+            if dupe_arg_pos != kept_pos:
+                torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.register_duplicates(flat_args[dupe_arg_pos], flat_args[kept_pos])
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
