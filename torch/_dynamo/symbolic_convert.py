@@ -12,7 +12,8 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, Iterable, List
+from collections.abc import Sized
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1429,7 +1430,7 @@ class InstructionTranslatorBase(object):
         graphstate = self.checkpoint[1][1:]
         state = (*output_graphstate, *graphstate)
         for obj in state:
-            if isinstance(obj, Iterable):
+            if isinstance(obj, Sized):
                 if len(obj) != 0:
                     return False
         return True
