@@ -99,11 +99,6 @@ from .torch import (
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
-# Names of attributes used to annotate modules for FSDP + Dynamo
-_FSDP_MANAGED_MODULE = "_is_fsdp_managed_module"
-_FSDP_USE_ORIG_PARAMS = "_fsdp_use_orig_params"
-
-
 class _missing:
     pass
 
@@ -324,14 +319,14 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
-            elif getattr(value, _FSDP_MANAGED_MODULE, False) or issubclass(
+            elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
-                if getattr(value, _FSDP_MANAGED_MODULE, False):
+                if getattr(value, "_is_fsdp_managed_module", False):
                     # Note: we can't do this assert inside FSDP constructor,
                     # since we don't know yet whether dynamo will be used
                     assert getattr(
-                        value, _FSDP_USE_ORIG_PARAMS, False
+                        value, "_fsdp_use_orig_params", False
                     ), "Dynamo only supports FSDP with use_orig_params=True"
 
                 # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
@@ -569,46 +564,75 @@ class VariableBuilder:
                 # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
+
+        if is_constant_source(self.get_source()):
+            return self.tx.output.register_attr_or_module(
+                value,
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                source=None,
+                # Guards are added inside register_attr_or_module
+            )
+
+        if type(value) in config.traceable_tensor_subclasses:
+            # Ordinarily, we would fakeify a tensor so that it can get dynamic
+            # shapes and be computed on without triggering actual operations.
+            # However, how can we fakeify a tensor subclass?  Ordinary
+            # inheritance (nor multiple inheritance) won't work work.
+            #
+            # Instead, our plan is to *manually simulate* the tensor subclass
+            # inheriting from a fake tensor with dynamo.  This means our
+            # data representation for a tensor subclass will be a fake tensor
+            # + tensor subclass type + any extra data the subclass may have
+            # been storing on the tensor.  Because all Python accesses are
+            # mediated through TensorWithTFOverrideVariable, we can ensure
+            # that we dispatch differently, e.g., according to
+            # __torch_function__
+            #
+            # To simplify things for now, the __dict__ tracking bits haven't
+            # been implemented yet, but they can be added into this design at
+            # a later point in time.
+            ignore_subclass = True
         else:
-            # Disable __torch_function__ to prevent cloning of `value` to hit
-            # us
-            with torch._C.DisableTorchFunction():
-                if is_constant_source(self.get_source()):
-                    return self.tx.output.register_attr_or_module(
-                        value,
-                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                        source=None,
-                        # Guards are added inside register_attr_or_module
-                    )
-                tensor_variable = wrap_fx_proxy(
-                    tx=self.tx,
-                    proxy=self.tx.output.create_graph_input(
-                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                    ),
-                    example_value=value,
-                    guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
-                    should_specialize=self.tensor_should_specialize(),
-                    name=self.name,
-                )
+            assert type(value) in (torch.Tensor, torch.nn.Parameter)
+            ignore_subclass = False
 
-            fake_tensor_value = None
-            example_value = tensor_variable.proxy.node.meta["example_value"]
-            if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                fake_tensor_value = example_value
+        tensor_variable = wrap_fx_proxy(
+            tx=self.tx,
+            proxy=self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            ),
+            example_value=value,
+            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+            should_specialize=self.tensor_should_specialize(),
+            ignore_subclass=ignore_subclass,
+            name=self.name,
+        )
 
-            graph_arg = GraphArg(self.get_source(), value, False, fake_tensor_value)
-            self.tx.output.graphargs.append(graph_arg)
+        # TODO: I think the result is guaranteed to be fake with
+        # ignore_subclass changes
+        fake_tensor_value = None
+        example_value = tensor_variable.proxy.node.meta["example_value"]
+        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+            fake_tensor_value = example_value
 
-            if torch.overrides.has_torch_function_unary(value):
-                subclass_torch_function__func = value.__torch_function__.__func__
-                subclass_type = type(value)
-                return TensorWithTFOverrideVariable(
-                    tensor_variable,
-                    self.get_source(),
-                    subclass_torch_function__func,
-                    subclass_type,
-                )
-            return tensor_variable
+        self.tx.output.graphargs.append(
+            GraphArg(self.get_source(), value, False, fake_tensor_value)
+        )
+
+        if type(value) in config.traceable_tensor_subclasses:
+            subclass_torch_function__func = value.__torch_function__.__func__
+            subclass_type = type(value)
+            # NB: This is slightly misnamed, a tensor subclass might not have
+            # any explicit __torch_function__ implementation and is relying
+            # on the default inherited from torch.Tensor
+            return TensorWithTFOverrideVariable(
+                tensor_variable,
+                self.get_source(),
+                subclass_torch_function__func,
+                subclass_type,
+            )
+
+        return tensor_variable
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
@@ -695,12 +719,21 @@ def wrap_fx_proxy(tx, proxy, example_value=None, name=None, **options):
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
-def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, name=None, **options):
+def wrap_fx_proxy_cls(
+    target_cls,
+    tx,
+    proxy,
+    example_value=None,
+    ignore_subclass=False,
+    name=None,
+    **options,
+):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
     assert "example_value" not in proxy.node.meta
     if not config.dynamic_propagation:
+        # TODO: This probably doesn't handle subclass correctly
         if isinstance(example_value, torch.Tensor):
             options.update(target_cls.specialize(example_value))
         return target_cls(proxy, **options)
@@ -723,10 +756,25 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, name=None, **op
             # Note: Unfortunately, this can happen during tracing, and is valid enough for now to allow.
             # TODO(voz): Find all the callsites and burn this down.
             # Flipping it to an assert fails dozens of tests.
+            # TODO(ezyang): should attempt this burndown again
             if not isinstance(example_value, torch._subclasses.FakeTensor):
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-                example_value = fake_wrapper(example_value, name=name)
+                # We shouldn't be doing this at all, see
+                # https://github.com/pytorch/torchdynamo/issues/1950
+                # But assuming we're doing it, the legacy behavior for
+                # subclasses was to perform a clone WITHOUT preserving
+                # the subclass.  It's not clear to me that's what you actually
+                # want, but whatever, I wouldn't have this cache at all.
+                with torch._C.DisableTorchFunction():
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
+                # NB: If we're ignoring subclass, then the expectation is you will
+                # take the returned TensorVariable and wrap it into a more
+                # accurate TensorVariable that is able to track subclass-ness;
+                # otherwise this is wrong!
+                example_value = wrap_to_fake_tensor_and_record(
+                    example_value, name=name, tx=tx, ignore_subclass=ignore_subclass
+                )
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -736,10 +784,14 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, name=None, **op
         else:
             specialized_value = None
 
+        # NB: In most (all?) cases, this does not actually do a clone.
+        # (WARNING: this means that if we mutate metadata on the fake
+        # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+            # NB: This will be wrong for ignore_subclass; fix it up later!
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else torch.Tensor
             )
