@@ -415,7 +415,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t.type(dtype=torch.float64)
+            step = step_t.type(torch.float64)
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
