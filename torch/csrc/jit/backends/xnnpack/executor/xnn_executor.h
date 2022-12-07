@@ -1,5 +1,5 @@
 // (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
+#pragma once
 #include <xnnpack.h>
 #include <memory>
 #include <vector>
@@ -11,14 +11,15 @@ namespace delegate {
 
 class XNNExecutor {
  private:
-  std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> runtime_;
+  std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> runtime_{
+      nullptr,
+      &xnn_delete_runtime};
   std::vector<uint32_t> input_ids_;
   std::vector<uint32_t> output_ids_;
   std::vector<xnn_external_value> externals_;
 
  public:
-  XNNExecutor(xnn_runtime_t runtime_ptr)
-      : runtime_(runtime_ptr, xnn_delete_runtime){};
+  XNNExecutor() = default;
 
   template <typename T>
   bool set_inputs(std::vector<T*>& inputs, std::vector<T*>& outputs) {
@@ -41,7 +42,7 @@ class XNNExecutor {
     }
 
     return true;
-  };
+  }
 
   bool forward() {
     xnn_status status =
@@ -58,7 +59,7 @@ class XNNExecutor {
     }
 
     return true;
-  };
+  }
 
   friend class XNNCompiler;
 };
