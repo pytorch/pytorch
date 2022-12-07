@@ -170,17 +170,16 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def unpack_var_sequence(self, tx):
-        options = VariableTracker.propagate(self)
-        if self.size:
-            return [
-                variables.BuiltinVariable(operator.getitem, **options).call_function(
-                    tx, [self, variables.ConstantVariable(i)], {}
-                )
-                for i in range(self.size[0])
-            ]
+    def unpack_var_sequence(self, tx, idxes=None):
+        from .builder import wrap_fx_proxy
 
-        return super(TensorVariable, self).unpack_var_sequence(tx)
+        if idxes is None:
+            if self.size:
+                idxes = range(self.size[0])
+            else:
+                return super(TensorVariable, self).unpack_var_sequence(tx)
+        options = VariableTracker.propagate(self)
+        return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def call_method(
         self,
@@ -206,7 +205,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -224,13 +222,23 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 memory_format in self.is_contiguous, **options
             )
-        elif name == "type" and self.dtype is not None and len(args) == 0:
+        elif (
+            name == "type"
+            and self.dtype is not None
+            and len(args) == 0
+            and isinstance(self.device, torch.device)
+        ):
             tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
                 0
             ]
-            constant_result = ConstantVariable(
-                f"torch.{tensortype.__name__}", **options
-            )
+            if self.device.type == "cuda":
+                constant_result = ConstantVariable(
+                    f"torch.cuda.{tensortype.__name__}", **options
+                )
+            else:
+                constant_result = ConstantVariable(
+                    f"torch.{tensortype.__name__}", **options
+                )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
@@ -264,7 +272,10 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
+                        "call_method",
+                        "item",
+                        (self.as_proxy(),),
+                        {},
                     ),
                     example_value=example_value,
                     **options,
@@ -279,7 +290,10 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
+                        "call_function",
+                        len,
+                        (self.as_proxy(),),
+                        {},
                     ),
                     **options,
                 )
@@ -289,7 +303,6 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + list(args), kwargs),
-                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         elif name in ("resize_", "resize_as_"):
@@ -321,7 +334,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -341,7 +353,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -397,7 +408,6 @@ class DynamicShapeVariable(VariableTracker):
                 "call_method",
                 name,
                 *proxy_args_kwargs([self] + list(args), kwargs),
-                current_tx=tx,
             ),
             **options,
         )
@@ -435,6 +445,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         # insert unwrapped version of self as the first argument
+        # TODO: This is wrong!  When you call the internal __torch_function__,
+        # you still get the wrapped version of self, and if you call functions
+        # inside __torch_function__, they should come back here.  If we unwrap
+        # the tensor immediately, that will not happen.
+        # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
         args.insert(0, self.tensor_variable)
         func_var = GetAttrVariable(self.tensor_variable, name)
