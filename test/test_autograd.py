@@ -62,6 +62,59 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def test_copy_slices_graph_task_updates(self):
+        def f1(x, y):
+            out = x.clone().view(-1)
+            out += y
+            return out
+
+        def f2(x, y):
+            out = x.clone().view(-1)
+            b = out * 2
+            out += y
+            return out + b
+
+        x = torch.rand(2, requires_grad=True)
+        y = torch.rand(2, requires_grad=True)
+
+        y_safe = torch._C._functions.DelayedError("Boom!", 1)(y)
+
+        for f in [f1, f2]:
+            # Ensure that the error Node works
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                out.sum().backward()
+
+            out = f(x, y_safe)
+            with self.assertRaisesRegex(RuntimeError, "Boom!"):
+                torch.autograd.grad(out.sum(), y)
+
+            # Ensure that if we don't ask for y, it doesn't crash
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), x)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), y_safe)
+
+            out = f(x, y_safe)
+            torch.autograd.grad(out.sum(), (x, y_safe))
+
+        # Ensure that we don't run extra view Node
+        def f3(x, y):
+            out = x.clone().view(-1)
+
+            def hook(*args):
+                # This should never be called!
+                self.assertTrue(False)
+            out.register_hook(hook)
+
+            b = out + y
+            out += y
+            return out + b, b
+
+        out, b = f3(x, y_safe)
+        torch.autograd.grad(out.sum(), (b, y_safe))
+
 
     def test_grad_mode_class_decoration(self):
         # Decorating class is deprecated and should not be used
@@ -1650,7 +1703,7 @@ class TestAutograd(TestCase):
                     self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
-                except UnrecoverableException:
+                except UnrecoverableException :
                     self.assertTrue(torch.is_grad_enabled())
                     raise SecondaryException
 
@@ -2160,7 +2213,7 @@ class TestAutograd(TestCase):
     def test_mark_non_differentiable_none(self):
         # This used to segfault because MyFunction would send back null
         # gradients to MulBackward, which is implemented in C++. C++
-        # implemented functions expect incoming  grad_ouptuts to be non-null.
+        # implemented functions expect incoming grad_outputs to be non-null.
         class MyFunction(Function):
             @staticmethod
             def forward(ctx, input):
@@ -2404,7 +2457,7 @@ class TestAutograd(TestCase):
         with self.assertWarnsRegex(DeprecationWarning, "should not be instantiated"):
             f = Id()
 
-        # # After raising warning, should still return an instance
+        # After raising warning, should still return an instance
         self.assertIsInstance(f, Id)
         x = torch.zeros(1, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "non-static forward method is deprecated"):
@@ -2573,7 +2626,7 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, torch.ones(10, 10) * 2)
         self.assertEqual(y.grad, torch.ones(10, 10) * 2)
 
-        # in-place deatch on a view raises an exception
+        # in-place detach on a view raises an exception
         view = x.narrow(0, 1, 4)
         self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
@@ -4095,20 +4148,32 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         check(fast_mode=True)
         check(fast_mode=False)
 
-    @unittest.expectedFailure
     def test_gradcheck_sparse_csr_input(self):
         def check(fast_mode):
             def fn(sparse_csr):
                 return torch.clone(sparse_csr).to_dense()
 
-            # Fails because gradcheck can't work with sparse csr inputs yet
             gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=True,
                       check_batched_grad=False, fast_mode=fast_mode)
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
                           check_batched_grad=False, fast_mode=fast_mode)
-        # check(fast_mode=True) # Segmentation fault
+        # check(fast_mode=True) # RuntimeError: sparse_mask_sparse_csr expects self to be 2D
+        check(fast_mode=False)
+
+    def test_gradcheck_sparse_csc_input(self):
+        def check(fast_mode):
+            def fn(sparse_csc):
+                return torch.clone(sparse_csc).to_dense()
+
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=False,
+                          check_batched_grad=False, fast_mode=fast_mode)
+        # check(fast_mode=True) # RuntimeError: Expected result Tensor to be of format CSR
         check(fast_mode=False)
 
     def test_gradcheck_nondeterministic(self):
@@ -8443,8 +8508,7 @@ class TestAutogradDeviceType(TestCase):
         outputs = Broadcast.apply(list(range(len(devices))), x)
         y = outputs[-1] * 2
         y.sum().backward()
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(x.grad, torch.ones(5, 5) * 2)
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
 
     @deviceCountAtLeast(2)
     def test_backward_device(self, devices):
