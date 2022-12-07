@@ -149,8 +149,8 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             raise RuntimeError(msg)
 
 
-def check_significant_strides(
-    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+def _check_strides_helper(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
 ) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
@@ -158,10 +158,21 @@ def check_significant_strides(
     # and for tensors with more than one element
     if (not only_cuda or a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
         for idx in range(a.ndim):
-            if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
+            check = not significant_only or a.shape[idx] > 1
+            if a.stride()[idx] != b.stride()[idx] and check:
                 return False, idx
 
     return True, None
+
+def check_significant_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
+
+def check_all_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp

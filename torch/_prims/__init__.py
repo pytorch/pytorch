@@ -1233,6 +1233,12 @@ def _broadcast_in_dim_meta(
             original_idx = original_idx + 1
         else:
             new_strides.append(0)
+            if shape[idx] != 1:
+                new_strides.append(0)
+            elif original_idx == a.ndim:
+                new_strides.append(1)
+            else:
+                new_strides.append(a.stride()[original_idx] * a.size()[original_idx])
 
     return a.as_strided(shape, new_strides, a.storage_offset())
 
