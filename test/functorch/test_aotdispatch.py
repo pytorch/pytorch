@@ -1694,7 +1694,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
-    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+    def _test_aot_module_simplified_fake_tensor_gm_raises(self, debug):
         class MockModule(torch.nn.Module):
             def __init__(self, y):
                 super().__init__()
@@ -1723,15 +1723,31 @@ class TestAOTModuleSimplified(AOTTestCase):
         graph = tracer.trace(MockModule(fake_y))
         mod_fake = torch.fx.GraphModule(tracer.root, graph)
 
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
-            """Unexpected fake buffer y"""
-        )
+        if debug:
+            inner_message = "FAKE TENSOR CREATION TRACEBACK:"
+        else:
+            inner_message = "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
+        message = f"""Unexpected fake buffer y {inner_message}"""
+
+        with self.assertRaisesRegex(
+            AssertionError, message
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
+
         # Counterfactual to ensure that the raise is only due to real vs fake
         # Run the same exact thing except with a real buffer.
         graph = tracer.trace(MockModule(real_y))
         mod_real = torch.fx.GraphModule(tracer.root, graph)
         aot_module_simplified(MockModule(real_y), (real_x,), nop)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", True)
+    def test_aot_module_simplified_fake_tensor_gm_raises_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=True)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", False)
+    def test_aot_module_simplified_fake_tensor_gm_raises_no_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=False)
 
     def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
         class MockModule(torch.nn.Module):
@@ -1752,10 +1768,11 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
+        with self.assertRaisesRegex(
+            AssertionError,
             """Unexpected fake param linear.weight"""
-        )
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
 
 
 # entries in here don't work and need to be fixed.
@@ -1776,7 +1793,6 @@ aot_autograd_failures = {
     xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
-    xfail('as_strided', 'partial_views'),
 
     # Too annoying to generate random inputs
     xfail('cholesky'),

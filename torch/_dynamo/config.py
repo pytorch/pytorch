@@ -6,9 +6,6 @@ from types import ModuleType
 
 import torch
 
-# needed so that CODE is registered as a level in logging
-from . import logging as torchdynamo_logging  # noqa: F401
-
 try:
     import torch._prims
     import torch._refs
@@ -20,12 +17,13 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
-# logging.INFO print the steps that dynamo is running
+# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
+
+output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
@@ -174,6 +172,10 @@ else:
     base_dir = dirname(dirname(abspath(__file__)))
 
 debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
+
+# this is to resolve a import problem in fbcode, we will be deleting
+# this very shortly
+DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
 class _AccessLimitingConfig(ModuleType):
