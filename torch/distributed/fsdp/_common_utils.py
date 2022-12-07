@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Any, Callable, cast, Dict, List, no_type_check, Union, Optional
+from typing import Callable, Dict, List, no_type_check, Set, Optional
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -28,14 +28,7 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     state = _get_module_state(module)
     if state is None or not isinstance(state, _FSDPState):
         return None
-    return cast(_FSDPState, state)
-
-
-# We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches. The `Any` represents
-# the `_State` object in _composable/contract.py, but we do not import it to
-# avoid circular imports.
-# _FSDPState = Union[nn.Module, Any]
+    return state
 
 
 class TrainingState(Enum):
@@ -213,3 +206,27 @@ def _assert_in_training_states(
             print(f"ERROR: {msg}")
             traceback.print_stack()
         raise ValueError(msg)
+
+
+def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
+    """
+    Returns:
+        Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
+        parent-less) with respect to the modules in the set itself. In other
+        words, these are the modules in ``modules`` that are not the child of
+        any other module in ``modules``.
+    """
+    root_modules: Set[nn.Module] = set()
+    module_to_submodules = {module: set(module.modules()) for module in modules}
+    for candidate_module in modules:
+        is_root_module = True
+        for module, submodules in module_to_submodules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in submodules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.add(candidate_module)
+    return root_modules

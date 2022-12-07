@@ -23,7 +23,6 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
-    get_stride_order,
     IndexingConstant,
     IndexingDiv,
     PermuteView,
@@ -38,6 +37,7 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings = {}
+layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -51,6 +51,14 @@ def add_needs_realized_inputs(fn):
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
             needs_realized_inputs.add(getattr(fn, overload))
+
+
+def add_layout_constraint(fn, constraint):
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        for overload in fn.overloads():
+            layout_constraints[getattr(fn, overload)] = constraint
+    else:
+        layout_constraints[fn] = constraint
 
 
 add_needs_realized_inputs(
@@ -1006,6 +1014,20 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
+        if torch._C.has_mkl:
+
+            @register_lowering(torch.ops.mkl._mkl_linear)
+            def mkl_packed_linear(
+                x: TensorBox,
+                packed_w: TensorBox,
+                orig_w: TensorBox,
+                b: TensorBox,
+                batch_size,
+            ):
+                return TensorBox.create(
+                    ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+                )
+
     else:
         pass
 
@@ -1013,12 +1035,10 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel, inps_hook=None):
+def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        if inps_hook is not None:
-            args, kwargs = inps_hook(*args, **kwargs)
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
@@ -1026,7 +1046,7 @@ def fallback_handler(kernel, inps_hook=None):
     return handler
 
 
-def make_fallback(kernel, inps_hook=None):
+def make_fallback(kernel, layout_constraint=None):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -1036,9 +1056,9 @@ def make_fallback(kernel, inps_hook=None):
         )
 
     add_needs_realized_inputs(kernel)
-    return register_lowering(kernel, type_promotion_kind=None)(
-        fallback_handler(kernel, inps_hook)
-    )
+    if layout_constraint is not None:
+        add_layout_constraint(kernel, layout_constraint)
+    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -1189,72 +1209,14 @@ def philox_rand_like(x, seed, offset):
     )
 
 
-def conv_backward(*args, **kwargs):
-    # output striding complex and has a lot of build dependent options,
-    # take the output strides to determine what to set the inputs
-    with torch._subclasses.FakeTensorMode():
-        args_fake, kwargs_fake = pytree.tree_map_only(
-            ir.IRNode,
-            lambda t: ir.ir_node_to_tensor(t, guard_shape=False),
-            (args, kwargs),
-        )
-        output = aten.convolution_backward(*args_fake, **kwargs_fake)
-
-    def constraints(
-        grad_output,
-        input,
-        weight,
-        bias_sizes,
-        stride,
-        padding,
-        dilation,
-        transposed,
-        output_padding,
-        groups,
-        output_mask,
-    ):
-        out = (
-            output[0]
-            if output[0] is not None
-            else output[1]
-            if output[1] is not None
-            else output[2]
-        )
-        if out is not None:
-            stride_order = get_stride_order(out.stride())
-            grad_output = ir.ExternKernel.require_stride_order(
-                grad_output, stride_order
-            )
-            weight = ir.ExternKernel.require_stride_order(weight, stride_order)
-            # Only make input contiguous when it is necessary for the backwards computation
-            if output_mask[1]:
-                input = ir.ExternKernel.require_stride_order(input, stride_order)
-
-        return (
-            grad_output,
-            input,
-            weight,
-            bias_sizes,
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
-            output_mask,
-        ), {}
-
-    return constraints(*args, **kwargs)
-
-
-def require_dense(*args, **kwargs):
+def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
     )
     return args, kwargs
 
 
-def require_contiguous(*args, **kwargs):
+def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
     )
@@ -1264,26 +1226,42 @@ def require_contiguous(*args, **kwargs):
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
+
+def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def apply_constraint(arg, fx_arg):
+        if isinstance(arg, ir.IRNode):
+            stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
+        return arg
+
+    args = [apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)]
+    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    return args, kwargs
+
+
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
-make_fallback(aten.convolution_backward, inps_hook=conv_backward)
+make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
-make_fallback(aten._cudnn_rnn_backward, inps_hook=require_contiguous)
-make_fallback(aten.cumsum, inps_hook=require_dense)
-make_fallback(aten._embedding_bag, inps_hook=require_contiguous)
-make_fallback(aten._embedding_bag_forward_only, inps_hook=require_contiguous)
+make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.cumsum, require_dense)
+make_fallback(aten._embedding_bag, require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
-make_fallback(aten.grid_sampler_2d_backward, inps_hook=require_dense)
+make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten._thnn_fused_lstm_cell, inps_hook=require_dense)
+make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
-make_fallback(aten.upsample_bicubic2d_backward, inps_hook=require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, inps_hook=require_dense)
+make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten.upsample_bilinear2d_backward, require_dense)
+
+
+add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
 @register_lowering(aten.convolution)
@@ -2029,14 +2007,37 @@ def scatter(x, dim: int, index, src, **kwargs):
     return scatter_(clone(x), dim, index, src, **kwargs)
 
 
+def scatter_fallback(
+    fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
+):
+
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        self.realize()
+        return fallback_handler(fn)(
+            self, dim, index, src, reduce=reduce, include_self=include_self
+        )
+
+    return None
+
+
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
+
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
     else:
         assert reduce is None
+
+    fallback_result = scatter_fallback(
+        aten.scatter_, self, dim, index, src, reduce=reduce
+    )
+
+    if fallback_result:
+        return fallback_result
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -2062,15 +2063,18 @@ fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
-    # TODO: Need to support more reduction type
-    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
-    if reduce not in {None, "sum"} or (
-        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
-    ):
-        self.realize()
-        return fallback_scatter_reduce_(
-            self, dim, index, src, reduce, include_self=include_self
-        )
+    fallback_result = scatter_fallback(
+        aten.scatter_reduce_,
+        self,
+        dim,
+        index,
+        src,
+        reduce=reduce,
+        include_self=include_self,
+    )
+
+    if fallback_result:
+        return fallback_result
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
@@ -2554,6 +2558,9 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
+fallback_max_pool2d_with_indices = fallback_handler(aten.max_pool2d_with_indices)
+
+
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
 def max_pool2d_with_indices(
     x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
@@ -2582,6 +2589,13 @@ def max_pool2d_with_indices(
         x_loader = x.make_loader()
 
     new_size = list(batch) + [h_out, w_out]
+    window_size = kernel_size[0] * kernel_size[1]
+
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
 
     def fn(idx, return_index):
         *prefix, bh, bw = idx
@@ -2591,12 +2605,15 @@ def max_pool2d_with_indices(
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
             val = x_loader([*prefix, ih, iw])
-            index = ops.index_expr(ih * w + iw, torch.int64)
+            if return_index:
+                index = ops.index_expr(ih * w + iw, torch.int64)
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
             if maxval is None:
-                maxindex = index
                 maxval = val
             else:
-                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
                 maxval = ops.maximum(val, maxval)
         if return_index:
             return maxindex
@@ -2617,6 +2634,11 @@ def max_pool2d_with_indices(
     )
     # TODO(jansel): should we force these to be realized?
     return r1, r2
+
+
+fallback_max_pool2d_with_indices_backward = fallback_handler(
+    aten.max_pool2d_with_indices_backward
+)
 
 
 @register_lowering(aten.max_pool2d_with_indices_backward, type_promotion_kind=None)
@@ -2658,6 +2680,14 @@ def max_pool2d_with_indices_backward(
             for w in range(kernel_size[1] * 2)
         ]
     )
+
+    window_size = h_window_size * w_window_size
+
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
 
     def fn(idx):
         *prefix, h, w = idx
@@ -2781,6 +2811,9 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
+fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d)
+
+
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
     assert isinstance(x, TensorBox)
@@ -2819,6 +2852,11 @@ def _adaptive_avg_pool2d(x, output_size):
 
     w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
     w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
+
+    window_size = h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_avg_pool2d(x, output_size)
 
     fn_sum = _adaptive_pooling_idx_sum(
         [h_kernel_max, w_kernel_max],
@@ -2890,6 +2928,9 @@ def upsample_nearest2d_backward(
     return rv
 
 
+fallback_avg_pool2d = fallback_handler(aten.avg_pool2d)
+
+
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
 def avg_pool2d(
     x,
@@ -2926,6 +2967,19 @@ def avg_pool2d(
 
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
+
+    window_size = kernel_size[0] * kernel_size[1]
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_avg_pool2d(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        )
 
     def fn_sum(idx, loader):
         *prefix, bh, bw = idx
@@ -2964,6 +3018,9 @@ def avg_pool2d(
     )
     # TODO(jansel): should we force these to be realized?
     return rv
+
+
+fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -3018,6 +3075,20 @@ def avg_pool2d_backward(
             for w in range(kernel_size[1] * 2)
         ]
     )
+
+    window_size = h_window_size * w_window_size
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_avg_pool2d_backward(
+            grad_output,
+            x,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        )
 
     def compute_pool_size_without_padding(ph, pw):
         """
@@ -3221,7 +3292,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
 
 
 @register_lowering([aten.var, prims.var])
-def var_(x, axis, correction=1, keepdim=False):
+def var_(x, axis=None, correction=1, keepdim=False):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     diffs = square(sub(x, mean(x, axis, keepdim=True)))
@@ -3236,7 +3307,7 @@ def var_(x, axis, correction=1, keepdim=False):
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
+def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     if correction is None:
         correction = int(unbiased)
     return [
@@ -3246,7 +3317,7 @@ def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
 
 
 @register_lowering(aten.std)
-def std(x, axis, correction=1, keepdim=False):
+def std(x, axis=None, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
 
 
@@ -3364,7 +3435,7 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@register_lowering(aten.div.Tensor_mode)
+@register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
@@ -3380,23 +3451,6 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.div], broadcast=True)
-def div(a, b):
-    def fn(*args):
-        return ops.div(*args)
-
-    dtype = get_promoted_dtype(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    # truediv produces a float tensor even if both operands are integer types
-    if is_integer_type(a) and is_integer_type(b):
-        dtype = torch.get_default_dtype()
-    return make_pointwise(fn, override_return_dtype=dtype)(
-        a if isinstance(a, Number) else to_dtype(a, dtype),
-        b if isinstance(b, Number) else to_dtype(b, dtype),
-    )
-
-
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
     both_bool = is_boolean_type(a) and is_boolean_type(b)
@@ -3407,21 +3461,29 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
-# TODO(lezcano) I believe the casting behaviour of prims.div is wrong
-# https://github.com/pytorch/pytorch/issues/84412
-# div prim performs truncation division on integer inputs
-#   and true division for floating and complex inputs
+# NOTE: prims.div maps to a / b in C, so performs truncation division on
+#   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
-        return div_mode(a, b, rounding_mode="floor")
-    else:
-        return div(a, b)
+        return truncdiv(a, b)
+
+    def fn(*args):
+        return ops.div(*args)
+
+    return make_pointwise(fn)(a, b)
 
 
-@register_lowering([aten.fmod, prims.fmod])
+div = register_lowering(
+    [aten.true_divide, aten.div.Tensor],
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)(div_prim)
+
+
+@register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
@@ -3438,18 +3500,16 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-# TODO - enable builtin and disable decomp to lower to ptx instruction
-# Causes compilation to not complete on timm_vision_transformers inference
-# @register_lowering(aten.rsqrt)
-# def rsqrt(x):
-#     dtype = x.get_dtype()
-#     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-#         x = to_dtype(x, torch.get_default_dtype())
-#
-#     def _rsqrt(x):
-#         return ops.rsqrt(x)
-#
-#     return make_pointwise(_rsqrt)(x)
+@register_lowering(aten.rsqrt)
+def rsqrt(x):
+    dtype = x.get_dtype()
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        x = to_dtype(x, torch.get_default_dtype())
+
+    def _rsqrt(x):
+        return ops.rsqrt(x)
+
+    return make_pointwise(_rsqrt)(x)
 
 
 @register_lowering([aten.sum, prims.sum])
@@ -3515,6 +3575,23 @@ register_pointwise(aten.bitwise_xor)
 register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
+erf = register_pointwise(
+    aten.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_lowering(
+    aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)(erf)
+
+register_pointwise(
+    aten.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
 register_pointwise(
     aten.log,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -3567,7 +3644,8 @@ def register_inplace(aten_op, outplace_op):
 
 register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
-register_inplace(aten.div_, div)
+register_inplace(aten.div_.Tensor, div)
+register_inplace(aten.div_.Tensor_mode, div_mode)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
@@ -3601,3 +3679,9 @@ def op_floordiv(a, b):
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
+
+
+@register_lowering(aten._test_inductor_realize)
+def _realize(x):
+    x.realize()
+    return clone(x)
