@@ -8,7 +8,6 @@ psutil
 pyyaml
 requests
 setuptools
-packaging
 six
 types-dataclasses
 typing_extensions
