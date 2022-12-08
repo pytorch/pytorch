@@ -768,7 +768,6 @@ def torchxla_trace_once(subgraph):
         nonlocal subgraph
         nonlocal compiled_graph
         if compiled_graph is None:
-            model = subgraph.model
             compiled_graph = integration.extract_compiled_graph(model, args)
             del subgraph
         return compiled_graph(*args)
