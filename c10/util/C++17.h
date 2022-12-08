@@ -11,22 +11,6 @@
 #include <type_traits>
 #include <utility>
 
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 5
-#error \
-    "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
-#endif
-
-#if defined(__clang__) && __clang_major__ < 4
-#error \
-    "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
-#endif
-
-#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || \
-    (!defined(_MSC_VER) && __cplusplus < 201402L)
-#error You need C++14 to compile PyTorch
-#endif
-
 #if defined(_WIN32) && (defined(min) || defined(max))
 #error Macro clash with min and max -- define NOMINMAX when compiling your program on Windows
 #endif
@@ -40,11 +24,7 @@ namespace c10 {
 // in c++17 std::result_of has been superceded by std::invoke_result.  Since
 // c++20, std::result_of is removed.
 template <typename F, typename... args>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
 using invoke_result = typename std::invoke_result<F, args...>;
-#else
-using invoke_result = typename std::result_of<F && (args && ...)>;
-#endif
 
 template <typename F, typename... args>
 using invoke_result_t = typename invoke_result<F, args...>::type;
@@ -53,11 +33,7 @@ using invoke_result_t = typename invoke_result<F, args...>::type;
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
 template <typename T>
-#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
 using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-#else
-using is_pod = std::is_pod<T>;
-#endif
 
 template <typename T>
 constexpr bool is_pod_v = is_pod<T>::value;
@@ -73,8 +49,6 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
-
 template <class... B>
 using conjunction = std::conjunction<B...>;
 template <class... B>
@@ -84,54 +58,9 @@ using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
 
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/conjunction
-template <class...>
-struct conjunction : std::true_type {};
-template <class B1>
-struct conjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct conjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), conjunction<Bn...>, B1> {};
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/disjunction
-template <class...>
-struct disjunction : std::false_type {};
-template <class B1>
-struct disjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
-
-// Implementation taken from
-// http://en.cppreference.com/w/cpp/types/integral_constant
-template <bool B>
-using bool_constant = std::integral_constant<bool, B>;
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/negation
-template <class B>
-struct negation : bool_constant<!bool(B::value)> {};
-
-#endif
-
-#ifdef __cpp_lib_void_t
-
 template <class T>
 using void_t = std::void_t<T>;
 
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/void_t
-// (it takes CWG1558 into account and also works for older compilers)
-template <typename... Ts>
-struct make_void {
-  typedef void type;
-};
-template <typename... Ts>
-using void_t = typename make_void<Ts...>::type;
-
-#endif
 
 #if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
@@ -140,7 +69,7 @@ using void_t = typename make_void<Ts...>::type;
 #define CUDA_HOST_DEVICE C10_HOST_DEVICE
 #endif
 
-#ifdef __cpp_lib_apply
+#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__)
 
 template <class F, class Tuple>
 CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
@@ -386,7 +315,6 @@ decltype(auto) if_constexpr(
 
 template <bool Condition, class ThenCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
-#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -401,11 +329,6 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
       return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
-#else
-  // C++14 implementation of if constexpr
-  return if_constexpr<Condition>(
-      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
-#endif
 }
 
 // GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's
