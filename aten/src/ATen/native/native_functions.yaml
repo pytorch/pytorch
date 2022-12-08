@@ -7886,6 +7886,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+  tags: canonical
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -7902,6 +7903,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+  tags: canonical
 
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: ne.Scalar_out
@@ -7962,6 +7964,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+  tags: canonical
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -7995,6 +7998,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ge_quantized_cpu
+  tags: canonical
 
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: ge.Scalar_out
@@ -8055,6 +8059,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+  tags: canonical
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: le.Scalar_out
@@ -8115,6 +8120,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: gt_quantized_cpu
+  tags: canonical
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: gt.Scalar_out
@@ -8175,6 +8181,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: lt_quantized_cpu
+  tags: canonical
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: lt.Scalar_out
