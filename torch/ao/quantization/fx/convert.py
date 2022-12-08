@@ -12,11 +12,11 @@ from torch.fx.graph import (
     Argument,
 )
 from ..utils import (
-    _activation_is_statically_quantized,
-    _weight_is_quantized,
-    _get_qparam_dict,
+    activation_is_statically_quantized,
+    weight_is_quantized,
+    get_qparam_dict,
     _parent_name,
-    _get_swapped_custom_module_class,
+    get_swapped_custom_module_class,
 )
 from ..qconfig import (
     QConfigAny,
@@ -694,8 +694,8 @@ def convert_weighted_module(
     if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
         return
 
-    # TODO: rename _weight_is_statically_quantized to weight_is_int8_quantized
-    is_weight_quantized = _weight_is_quantized(qconfig)
+    # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
+    is_weight_quantized = weight_is_quantized(qconfig)
 
     # the condition for swapping the module to reference quantized module is:
     # weights need to be quantized
@@ -717,8 +717,8 @@ def convert_weighted_module(
         weight_post_process_hh = qconfig.weight()  # type: ignore[union-attr, operator]
         weight_post_process_ih(float_module.weight_ih)
         weight_post_process_hh(float_module.weight_hh)
-        weight_qparams_ih = _get_qparam_dict(weight_post_process_ih)
-        weight_qparams_hh = _get_qparam_dict(weight_post_process_hh)
+        weight_qparams_ih = get_qparam_dict(weight_post_process_ih)
+        weight_qparams_hh = get_qparam_dict(weight_post_process_hh)
         wq_or_wq_dict = {
             "weight_ih": weight_qparams_ih,
             "weight_hh": weight_qparams_hh,
@@ -732,7 +732,7 @@ def convert_weighted_module(
                 weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
                 if weight_post_process.dtype == torch.qint8:  # type: ignore[union-attr]
                     weight_post_process(weight)  # type: ignore[operator, misc]
-                wq_or_wq_dict[wn] = _get_qparam_dict(weight_post_process)
+                wq_or_wq_dict[wn] = get_qparam_dict(weight_post_process)
     else:
         # weight_post_process is None means the original module is not a QAT module
         # we need to get weight_post_process from qconfig in this case
@@ -743,7 +743,7 @@ def convert_weighted_module(
         # In the future, we should require the user to calibrate the model after calling prepare
         # Issue: https://github.com/pytorch/pytorch/issues/73941
         weight_post_process(float_module.weight)  # type: ignore[operator]
-        wq_or_wq_dict = _get_qparam_dict(weight_post_process)
+        wq_or_wq_dict = get_qparam_dict(weight_post_process)
 
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
     # root_module_to_quantized_reference_module: module mapping from root (floating point) module class
@@ -810,7 +810,7 @@ def convert_custom_module(
     observed_custom_module = modules[str(node.target)]
     maybe_obs = maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
-    if _activation_is_statically_quantized(qconfig):
+    if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
         if _is_custom_module_lstm(node, modules):
             # The inputs are tuples in the form (input, (hidden0, hidden1))
@@ -838,7 +838,7 @@ def convert_custom_module(
             observed_custom_module.activation_post_process = activation_post_process
 
     # swap the observed custom module to quantized custom module
-    quantized_custom_module_class = _get_swapped_custom_module_class(
+    quantized_custom_module_class = get_swapped_custom_module_class(
         observed_custom_module, custom_module_class_mapping, qconfig)
     quantized_custom_module = \
         quantized_custom_module_class.from_observed(observed_custom_module)
