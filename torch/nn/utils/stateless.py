@@ -1,9 +1,8 @@
 import contextlib
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Union, Set, Optional
 
 import torch
 from torch import Tensor
-import itertools
 
 __all__ = ["functional_call"]
 
@@ -48,11 +47,13 @@ def _create_tied_weights_map(module, names):
     #   - then loop through the values of this map (name_given_by_user and set(all_tied_names))
     #     - for each element of all_tied_names, add {tied_name: name_given_by_user} to a new map
 
-    weight_to_name_and_tied_names = {}
-    for name, t in itertools.chain(module.named_parameters(remove_duplicate=False), module.named_buffers(remove_duplicate=False)):
+    weight_to_name_and_tied_names: Dict[torch.Tensor, Tuple[Optional[str], Set[str]]] = {}
+
+    def add_to_name_map(name, t):
         if t in weight_to_name_and_tied_names:
             if name in names and weight_to_name_and_tied_names[t][0]:
-                raise ValueError(f"functional_call got values for both {name} and {weight_to_name_and_tied_names[t][0]}, which are tied.")
+                first_seen_name = weight_to_name_and_tied_names[t][0]
+                raise ValueError(f"functional_call got values for both {name} and {first_seen_name}, which are tied.")
             if name in names:
                 weight_to_name_and_tied_names[t] = (name, weight_to_name_and_tied_names[t][1])
             else:
@@ -60,9 +61,16 @@ def _create_tied_weights_map(module, names):
         else:
             weight_to_name_and_tied_names[t] = (name, set()) if name in names else (None, {name})
 
+    for name, t in module.named_parameters(remove_duplicate=False):
+        add_to_name_map(name, t)
+
+    for name, t in module.named_buffers(remove_duplicate=False):
+        add_to_name_map(name, t)
+
+    # make {tied_name: name_given_by_user} from pairs of (name_given_by_user, set(all_tied_names))
     tied_weights_to_given_name = {}
     for name, tied_names in weight_to_name_and_tied_names.values():
-        if name is None:
+        if name is None:  # no mapping was passed for this tensor, use original tensor
             continue
         for tied_name in tied_names:
             tied_weights_to_given_name[tied_name] = name
