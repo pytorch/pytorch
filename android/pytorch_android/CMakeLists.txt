@@ -14,7 +14,7 @@ endif()
 
 include(GNUInstallDirs)
 
-set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 message(STATUS "ANDROID_STL:${ANDROID_STL}")
 
