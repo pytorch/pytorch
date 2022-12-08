@@ -14,7 +14,8 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform, Compo
                                             LowerCholeskyTransform, PowerTransform,
                                             ReshapeTransform, SigmoidTransform, TanhTransform,
                                             SoftmaxTransform, SoftplusTransform, StickBreakingTransform,
-                                            identity_transform, Transform, _InverseTransform)
+                                            identity_transform, Transform, _InverseTransform,
+                                            PositiveDefiniteTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 
 
@@ -43,6 +44,7 @@ def get_transforms(cache_size):
         StickBreakingTransform(cache_size=cache_size),
         LowerCholeskyTransform(cache_size=cache_size),
         CorrCholeskyTransform(cache_size=cache_size),
+        PositiveDefiniteTransform(cache_size=cache_size),
         ComposeTransform([
             AffineTransform(torch.randn(4, 5),
                             torch.randn(4, 5),
@@ -118,10 +120,15 @@ def generate_data(transform):
         domain = domain.base_constraint
     codomain = transform.codomain
     x = torch.empty(4, 5)
-    if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
-        x = torch.empty(6, 6)
-        x = x.normal_()
+    positive_definite_constraints = [constraints.lower_cholesky, constraints.positive_definite]
+    if domain in positive_definite_constraints:
+        x = torch.randn(6, 6)
+        x = x.tril(-1) + x.diag().exp().diag_embed()
+        if domain is constraints.positive_definite:
+            return x @ x.T
         return x
+    elif codomain in positive_definite_constraints:
+        return torch.randn(6, 6)
     elif domain is constraints.real:
         return x.normal_()
     elif domain is constraints.real_vector:
@@ -189,6 +196,7 @@ def test_with_cache(transform):
 @pytest.mark.parametrize('test_cached', [True, False])
 def test_forward_inverse(transform, test_cached):
     x = generate_data(transform).requires_grad_()
+    assert transform.domain.check(x).all()  # verify that the input data are valid
     try:
         y = transform(x)
     except NotImplementedError:

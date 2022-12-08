@@ -3188,8 +3188,6 @@ class TestDistributions(DistributionsTestCase):
             self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
 
     def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
-        if isinstance(dist, Wishart):
-            return
         # We perturb the mode in the unconstrained space and expect the log probability to decrease.
         num_points = 10
         transform = transform_to(dist.support)
