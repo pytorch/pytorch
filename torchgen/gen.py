@@ -1418,7 +1418,7 @@ def get_native_function_declarations(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
     native_function_decl_gen: Callable[
-        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], Optional[str]
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
     ],
 ) -> List[str]:
     declarations: List[str] = []
