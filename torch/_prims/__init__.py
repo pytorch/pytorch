@@ -199,7 +199,7 @@ __all__ = [
     # Randomness Prims
     #
     "normal",
-    "uniform",
+    "_uniform_helper",
     #
     # FFT prims
     #
@@ -2707,7 +2707,7 @@ _uniform_doc = """
 """
 
 # TODO: we should more seriously review randomness modeling and prims
-uniform = _make_prim(
+_uniform_helper = _make_prim(
     schema=(
         "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),
