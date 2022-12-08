@@ -675,6 +675,8 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    # See https://github.com/pytorch/pytorch/pull/89557. Will be fixed by @kurtamohler
+    @unittest.expectedFailure
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
         if torch.cuda.is_available():
