@@ -98,6 +98,14 @@ CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
     "eca_halonext26ts",
     "hrnet_w18",
     "levit_128",
+    "pit_b_224",
+    "poolformer_m36",
+    "regnety_002",
+    "sebotnet33ts_256",
+    "swin_base_patch4_window7_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "volo_d1_224",
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -1705,8 +1713,8 @@ def run(runner, args, original_dir=None):
         if args.backend == "aot_eager":
             args.exclude = (
                 CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
-                if args.training and args.dynamic_shapes else
-                CI_SKIP_AOT_EAGER_TRAINING
+                if args.training and args.dynamic_shapes
+                else CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
                 else CI_SKIP_AOT_EAGER_INFERENCE
             )
