@@ -698,6 +698,7 @@ class TestHistogramObserver(QuantizationTestCase):
            qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),
            reduce_range=st.booleans())
     def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range):
+
         ref_obs = _ReferenceHistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
         my_obs = HistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
 
@@ -712,10 +713,10 @@ class TestHistogramObserver(QuantizationTestCase):
         ref_qparams = ref_obs.calculate_qparams()
         my_qparams = my_obs.calculate_qparams()
 
-        for i in range(0,bins,200):
-            for j in range(i+5, bins, 200):
-                ref_qe = ref_obs._compute_quantization_error(i,j)
-                qe = my_obs._compute_quantization_error(i,j)
+        for i in range(0, bins, 200):
+            for j in range(i + 5, bins, 200):
+                ref_qe = ref_obs._compute_quantization_error(i, j)
+                qe = my_obs._compute_quantization_error(i, j)
                 self.assertEqual(ref_qe, qe)
 
         self.assertEqual(ref_qparams, my_qparams)
