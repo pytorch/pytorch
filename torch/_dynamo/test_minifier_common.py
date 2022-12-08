@@ -55,9 +55,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
         if repro_dir_match is not None:
-            # Print repro directory for debugging generated code.
-            # Make sure to comment out `shutil.rmtree...` above as well.
-            print("repro dir:", repro_dir_match.group(1))
             return proc, repro_dir_match.group(1)
         return proc, None
 
@@ -87,6 +84,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             cwd=repro_dir,
         )
 
+        print(launch_code)
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`, patched with `patch_code`
@@ -123,6 +121,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     def _run_full_test(self, run_code, repro_after, repro_level, patch_code):
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
         test_proc, repro_dir = self._run_test_code(test_code)
+        print(test_code)
+        print(test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
         launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
         repro_proc, repro_code = self._run_repro(patch_code, repro_dir)

@@ -204,12 +204,55 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     def test_after_aot_cuda_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 4, TRITON_ACCURACY_ERROR)
 
-    @unittest.mock.patch.object(torch._inductor.config.cpp, "threads", 5)
     def test_inductor_config_serialization(self):
-        data = torch._inductor.config.save_config()
-        torch._inductor.config.cpp.threads = 10
-        torch._inductor.config.load_config(data)
-        self.assertEqual(torch._inductor.config.cpp.threads, 5)
+        run_code = textwrap.dedent(
+            """\
+            import torch._inductor.config
+            torch._inductor.config.cpp.threads = 5
+            data = torch._inductor.config.save_config()
+            torch._inductor.config.cpp.threads = 10
+            torch._inductor.config.load_config(data)
+            assert torch._inductor.config.cpp.threads == 5
+            """
+        )
+        proc, _ = self._run_test_code(run_code)
+        self.assertEqual(proc.returncode, 0)
+
+    def _test_after_aot_with_modified_config(self, backend_code, repro_level):
+        lines = backend_code.split("\n")
+        lines.insert(1, "    assert torch._inductor.config.cpp.threads == 10")
+        backend_code = "\n".join(lines)
+        run_code = textwrap.dedent(
+            """\
+torch._inductor.config.cpp.threads = 10
+@torch._dynamo.optimize("inductor")
+def inner(x):
+    for _ in range(3):
+        x = torch.sin(x)
+    x = torch.relu(x)
+    for _ in range(3):
+        x = torch.cos(x)
+    return x
+
+inner(torch.randn(20, 20).to("cpu"))
+        """
+        )
+        patch_code = self._gen_codegen_fn_patch_code("relu", backend_code, "cpu")
+        self.assertIsNotNone(patch_code)
+        (test_proc, _, repro_proc), _ = self._run_full_test(
+            run_code, "aot", repro_level, patch_code
+        )
+        return (test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8"))
+
+    def test_after_aot_with_modified_config_compile_error(self):
+        tb1, tb2 = self._test_after_aot_with_modified_config(CPP_COMPILE_ERROR, 2)
+        self.assertIn("CppCompileError", tb1)
+        self.assertIn("CppCompileError", tb2)
+
+    def test_after_aot_with_modified_config_accuracy_error(self):
+        tb1, tb2 = self._test_after_aot_with_modified_config(CPP_ACCURACY_ERROR, 4)
+        self.assertIn("AccuracyError", tb1)
+        self.assertIn("AccuracyError", tb2)
 
 
 if __name__ == "__main__":
