@@ -1,11 +1,18 @@
-from collections import defaultdict, abc as container_abcs
+from collections import OrderedDict, defaultdict, abc as container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
 
-__all__ = ['Optimizer']
+from typing import Callable, Dict
+
+import torch.utils.hooks as hooks
+from torch.utils.hooks import RemovableHandle
+
+__all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
+_global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
@@ -13,7 +20,6 @@ class _RequiredParameter(object):
         return "<required parameter>"
 
 required = _RequiredParameter()
-
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
@@ -25,6 +31,44 @@ def _use_grad_for_differentiable(func):
             torch.set_grad_enabled(prev_grad)
         return ret
     return _use_grad
+
+
+def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a pre hook common to all optimizers. The hook should have the following
+    signature::
+
+        hook(optimizer, args, kwargs) -> None or modified args and kwargs
+
+    Args:
+        hook (Callable): A user defined hook which is registered on all optimizers.
+
+    Returns:
+        :class:`torch.utils.hooks.RemoveableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_pre_hooks)
+    _global_optimizer_pre_hooks[handle.id] = hook
+    return handle
+
+
+def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a post hook common to all optimizers. The hook should have the following
+    signature::
+
+        hook(optimizer, args, kwargs) -> None
+
+    Args:
+        hook (Callable): A user defined hook which is registered on all optimizers.
+
+    Returns:
+        :class:`torch.utils.hooks.RemoveableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_post_hooks)
+    _global_optimizer_post_hooks[handle.id] = hook
+    return handle
 
 
 class Optimizer(object):
@@ -45,8 +89,10 @@ class Optimizer(object):
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
+        self._optimizer_step_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._optimizer_step_post_hooks: Dict[int, Callable] = OrderedDict()
 
-        self._hook_for_profile()
+        self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -80,7 +126,11 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        if '_optimizer_step_pre_hooks' not in self.__dict__:
+            self._optimizer_step_pre_hooks = OrderedDict()
+        if '_optimizer_step_post_hooks' not in self.__dict__:
+            self._optimizer_step_post_hooks = OrderedDict()
+        self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
@@ -127,26 +177,83 @@ class Optimizer(object):
         """
         pass
 
-    def _hook_for_profile(self):
+    @staticmethod
+    def profile_hook_step(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            self, *_ = args
+            profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
+            with torch.autograd.profiler.record_function(profile_name):
+                # call optimizer step pre hooks
+                for pre_hook in chain(_global_optimizer_pre_hooks.values(), self._optimizer_step_pre_hooks.values()):
+                    result = pre_hook(self, args, kwargs)
+                    if result is not None:
+                        if isinstance(result, tuple) and len(result) == 2:
+                            args, kwargs = result
+                        else:
+                            raise RuntimeError(f"{func} must return None or a tuple of (new_args, new_kwargs),"
+                                               f"but got {result}.")
+
+                out = func(*args, **kwargs)
+                self._optimizer_step_code()
+
+                # call optimizer step post hooks
+                for post_hook in chain(self._optimizer_step_post_hooks.values(), _global_optimizer_post_hooks.values()):
+                    post_hook(self, args, kwargs)
+
+                return out
+
+        return wrapper
+
+    def _patch_step_function(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
-
-        def profile_hook_step(func):
-
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                obj, *_ = args
-                profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
-                with torch.autograd.profiler.record_function(profile_name):
-                    out = func(*args, **kwargs)
-                    obj._optimizer_step_code()
-                    return out
-
-            return wrapper
-
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
-            self.__class__.step = profile_hook_step(self.__class__.step)
+            self.__class__.step = self.profile_hook_step(self.__class__.step)
             self.__class__.step.hooked = True
+
+    def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step pre hook which will be called before
+        optimizer step. It should have the following signature::
+
+            hook(optimizer, args, kwargs) -> None or modified args and kwargs
+
+        The ``optimizer`` argument is the optimizer instance being used. If
+        args and kwargs are modified by the pre-hook, then the transformed
+        values are returned as a tuple containing the new_args and new_kwargs.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_pre_hooks)
+        self._optimizer_step_pre_hooks[handle.id] = hook
+        return handle
+
+    def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step post hook which will be called after optimizer step.
+        It should have the following signature::
+
+            hook(optimizer, args, kwargs) -> None
+
+        The ``optimizer`` argument is the optimizer instance being used.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_post_hooks)
+        self._optimizer_step_post_hooks[handle.id] = hook
+        return handle
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -261,7 +368,7 @@ class Optimizer(object):
         foreach = self.defaults.get('foreach', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
-            self._hook_for_profile()
+            self._patch_step_function()
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
