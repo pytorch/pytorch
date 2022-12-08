@@ -567,6 +567,9 @@ Tensor sparse_compressed_to_dense(
 
   if (self.layout() == kSparseCsr || self.layout() == kSparseCsc
       || self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+    auto compressed_rows = self.layout() == kSparseCsr || self.layout() == kSparseBsr;
+    auto block_sparse = self.layout() == kSparseBsr || self.layout() == kSparseBsc;
+
     Tensor compressed_indices;
     Tensor plain_indices;
     std::tie(compressed_indices, plain_indices) =
@@ -583,7 +586,7 @@ Tensor sparse_compressed_to_dense(
       values.unsqueeze_(0);
       dense.unsqueeze_(0);
     }
-    if (batch_ndim > 0) {
+    if (batch_ndim > 1) {
       // Flatten batch dims
       compressed_indices = compressed_indices.flatten(0, batch_ndim - 1);
       plain_indices = plain_indices.flatten(0, batch_ndim - 1);
@@ -601,44 +604,53 @@ Tensor sparse_compressed_to_dense(
     }
 
     int64_t nrows, ncols;
-    std::array<int64_t, 2> blocksize = {1, 1};
-    if (self.layout() == kSparseCsr || self.layout() == kSparseCsc) {
+    auto dense_reshaped_size = dense.sizes().vec();
+    if (!block_sparse) {
       nrows = self.size(batch_ndim);
       ncols = self.size(batch_ndim + 1);
-
-      dense = dense.flatten(1, 2);
-    }
-    else {
-      blocksize = {values.size(batch_ndim + 2), values.size(batch_ndim + 3)};
+      dense_reshaped_size.erase(dense_reshaped_size.begin());
+      dense_reshaped_size.erase(dense_reshaped_size.begin());
+    } else {
+      std::array<int64_t, 2> blocksize = {self.size(batch_ndim + 2), self.size(batch_ndim + 3)};
       nrows = self.size(batch_ndim) / blocksize[0];
       ncols = self.size(batch_ndim + 1) / blocksize[1];
+      dense_reshaped_size[1] = blocksize[0];
+      dense_reshaped_size[2] = blocksize[1];
+    }
+    dense_reshaped_size[0] = n_batch * nrows * ncols;
+    dense = dense.reshape(dense_reshaped_size);
 
-      auto dense_reshaped_size = dense.sizes().vec();
-      dense_reshaped_size.insert(dense_reshaped_size.begin() + 1, nrows * ncols);
-      dense_reshaped_size[2] = blocksize[0];
-      dense_reshaped_size[3] = blocksize[1];
-      dense = dense.reshape(dense_reshaped_size);
+    int64_t nnz_per_batch = values.size(1);
+    auto options = compressed_indices.options();
+    auto batch_indices = at::arange(0, n_batch, options).repeat_interleave(nnz_per_batch);
+    auto ncompressed = compressed_rows ? nrows : ncols;
+    auto compressed_indices_over_all_batches =
+      at::cat({compressed_indices.slice(1, 0, ncompressed).flatten()
+              + nnz_per_batch * at::arange(0, n_batch, options).repeat_interleave(ncompressed),
+              n_batch * nnz_per_batch * at::ones({1}, options)});
+    Tensor indices = at::_convert_indices_from_csr_to_coo(
+        compressed_indices_over_all_batches,
+        plain_indices.flatten(),
+        false,
+        !compressed_rows);
+    auto row_indices = indices.select(0, 0);
+    auto col_indices = indices.select(0, 1);
+    if (compressed_rows) {
+      row_indices -= batch_indices * nrows;
+    } else {
+      col_indices -= batch_indices * ncols;
     }
-    for (auto batch : c10::irange(n_batch)) {
-      Tensor batch_indices = at::_convert_indices_from_csr_to_coo(
-          compressed_indices[batch],
-          plain_indices[batch],
-          false,
-          self.layout() == kSparseCsc || self.layout() == kSparseBsc);
-      auto batch_row_indices = batch_indices.select(0, 0);
-      auto batch_col_indices = batch_indices.select(0, 1);
-      auto offsets = batch_col_indices + batch_row_indices * ncols;
-      dense[batch].index_add_(0, offsets, values[batch]);
-    }
+    auto offsets = col_indices + row_indices * ncols + batch_indices * nrows * ncols;
+    dense.index_add_(0, offsets, values.flatten(0, 1));
 
     // un-tile the result, NOTE: The final reshape uses the original
     // self.sizes() which will squeeze out the extra batch dim if we
     // put one in
-    if (self.layout() == kSparseCsr || self.layout() == kSparseCsc) {
+    if (!block_sparse) {
       return dense.reshape(self.sizes());
     } else {
       return dense
-        .unflatten(1, {nrows, ncols})
+        .unflatten(0, {-1, nrows, ncols})
         .transpose(2, 3)
         .reshape(self.sizes());
     }
