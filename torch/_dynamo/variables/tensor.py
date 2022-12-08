@@ -264,7 +264,10 @@ class TensorVariable(VariableTracker):
             unimplemented("dynamic Tensor.repeat")
         elif name in ("tolist", "numpy", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
-        elif name == "nonzero" and not config.dynamic_shapes:
+        elif (
+            name in ("nonzero", "argwhere", "unique", "unique_consecutive")
+            and not config.dynamic_shapes
+        ):
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
