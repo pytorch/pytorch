@@ -2995,9 +2995,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 0)
 
-    def test_is_tracing(self):
+    def test_is_compiling(self):
         def f():
-            if torch._dynamo.is_tracing():
+            if torch._dynamo.is_compiling():
                 return torch.ones(2, 2)
             else:
                 return torch.zeros(2, 2)
