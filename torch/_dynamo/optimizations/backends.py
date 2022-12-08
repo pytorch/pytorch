@@ -754,7 +754,7 @@ def torchxla_trace_once(subgraph):
         model = subgraph.model
         if compiled_graph is None:
             compiled_graph = integration.extract_compiled_graph(model, args)
-            del subgraph
+            #del subgraph
         return compiled_graph(*args)
 
     return fwd
