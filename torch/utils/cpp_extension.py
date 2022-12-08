@@ -431,7 +431,7 @@ class BuildExtension(build_ext, object):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++14``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++17``) as well as mixed
     C++/CUDA compilation (and support for CUDA files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -535,12 +535,12 @@ class BuildExtension(build_ext, object):
         else:
             original_compile = self.compiler._compile
 
-        def append_std14_if_no_std_present(cflags) -> None:
+        def append_std17_if_no_std_present(cflags) -> None:
             # NVCC does not allow multiple -std to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
             cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
             cpp_flag_prefix = cpp_format_prefix.format('std')
-            cpp_flag = cpp_flag_prefix + 'c++14'
+            cpp_flag = cpp_flag_prefix + 'c++17'
             if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
                 cflags.append(cpp_flag)
 
@@ -585,7 +585,7 @@ class BuildExtension(build_ext, object):
                     cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
-                append_std14_if_no_std_present(cflags)
+                append_std17_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -634,7 +634,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = list(extra_postargs)
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -649,7 +649,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
-                append_std14_if_no_std_present(cuda_post_cflags)
+                append_std17_if_no_std_present(cuda_post_cflags)
                 cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
                 cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
@@ -785,7 +785,7 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            append_std14_if_no_std_present(post_cflags)
+            append_std17_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
             cuda_cflags = None
@@ -1994,7 +1994,7 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
@@ -2013,7 +2013,7 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++14')
+                cuda_flags.append('-std=c++17')
             if os.getenv("CC") is not None:
                 cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
     else:
