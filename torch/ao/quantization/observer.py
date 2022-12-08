@@ -1446,10 +1446,10 @@ def _is_observer_script_module(mod, obs_type_name):
     return False
 
 
-def _is_activation_post_process(module):
+def is_activation_post_process(module):
     return (
         isinstance(module, torch.ao.quantization.ObserverBase)
-        or isinstance(module, torch.ao.quantization.FakeQuantizeBase)
+        or isinstance(module, torch.ao.quantization.FakeQuantize)
         or _is_observer_script_module(module, "quantization.observer")
     )
 
@@ -1493,7 +1493,7 @@ def load_observer_state_dict(mod, obs_dict):
     unexpected_keys: List[str] = []
     for name, module in mod.named_modules():
         prefix = name + "."
-        if _is_activation_post_process(module):
+        if is_activation_post_process(module):
             if _is_per_channel_script_obs_instance(module):
                 # For per-channel observers we need to call a custom load_from_state_dict to resize the tensor.
                 # However this is not called when the module is scripted and we end up calling the default one in module.py
