@@ -343,10 +343,17 @@ std::vector<ExceptionCleanup> LazyGraphExecutor::DeviceLockerArena::LockDevices(
 }
 
 ExceptionCleanup LazyGraphExecutor::DeviceLockerArena::LockDevice(const BackendDevice& device) {
-  auto locker = DeviceLockerArena::Get()->GetLocker(device);
-  locker->Lock();
-  return ExceptionCleanup(
-      [locker = std::move(locker)](ExceptionCleanup::StatusType status) {
+  VLOG(4) << "Waiting on device barrier for device " << device << " ...";
+  std::shared_ptr<DeviceLocker> locker;
+  {
+    TORCH_LAZY_TIMED("DeviceLockWait");
+    locker = DeviceLockerArena::Get()->GetLocker(device);
+    locker->Lock();
+  }
+  VLOG(4) << "Waiting on device barrier for device " << device << " done!";
+  return torch::lazy::ExceptionCleanup(
+      [locker = std::move(locker)](
+          torch::lazy::ExceptionCleanup::StatusType status) {
         locker->Unlock(std::move(status));
       });
 }
