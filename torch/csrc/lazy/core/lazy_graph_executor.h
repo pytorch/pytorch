@@ -87,7 +87,7 @@ class TORCH_API LazyGraphExecutor {
   // All the tensors must be on the same device.
   std::vector<at::Tensor> GetTensors(std::vector<LazyTensorPtr>* tensors);
 
-  size_t IncTrimCounter();
+  size_t IncTrimCounter() const;
 
   // Dumps the backend specific text of the computation accumulated in the graph
   // which is attached the tensors.
@@ -160,6 +160,8 @@ class TORCH_API LazyGraphExecutor {
     std::vector<BackendDataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;
   };
+
+  void ResetTrimCounter() const;
 
  private:
   struct CompilationResult {

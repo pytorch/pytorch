@@ -473,7 +473,7 @@ void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
   TORCH_LAZY_COUNTER("MarkStep", 1);
   DeviceContextArena::Get()->MarkStep(device);
   ScopePusher::ResetScopes();
-  g_tls_data.Reset();
+  ResetTrimCounter();
   // Move TrieCache's current pointer back to its root
   TrieCache::Get()->ResetCurrent();
 }
@@ -503,7 +503,11 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensors(
   return GetTensorsFused(tensors);
 }
 
-size_t LazyGraphExecutor::IncTrimCounter() {
+void LazyGraphExecutor::ResetTrimCounter() const {
+  g_tls_data.Reset();
+}
+
+size_t LazyGraphExecutor::IncTrimCounter() const {
   return ++g_tls_data.trim_counter;
 }
 
