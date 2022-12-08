@@ -1374,6 +1374,9 @@ class CppScheduling:
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
 
+    def codegen_sync(self):
+        pass
+
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
         self.get_kernel_group()
