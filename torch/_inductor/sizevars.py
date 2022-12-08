@@ -409,7 +409,9 @@ class SizeVarAllocator(object):
         assert all(isinstance(v, sympy.Symbol) or v == 0 for v in vars)
         var_symbols = [v for v in vars if isinstance(v, sympy.Symbol)]
 
-        stride_symbols = [sympy.Wild(f"stride{i}") for i in range(len(var_symbols))]
+        stride_symbols = [
+            sympy.Wild(f"stride{i}", exclude=vars) for i in range(len(var_symbols))
+        ]
         var_to_stride = {v: s for v, s in zip(var_symbols, stride_symbols)}
         offset_symbol = sympy.Wild("offset")
         index_pattern = offset_symbol + sympy_dot(var_symbols, stride_symbols)

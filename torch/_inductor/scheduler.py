@@ -1041,7 +1041,6 @@ class Scheduler:
                 if self.can_fuse(node1, new_node):
                     possible_fusions.add((node1, new_node))
 
-        print(possible_fusions)
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
