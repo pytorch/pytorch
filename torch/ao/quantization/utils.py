@@ -627,7 +627,7 @@ def _get_lstm_with_individually_observed_parts(
 
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    torch.ao.quantization.add_observer_(
+    torch.ao.quantization._add_observer_(
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
     )
