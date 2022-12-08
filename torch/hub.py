@@ -19,7 +19,7 @@ from torch.serialization import MAP_LOCATION
 class Faketqdm(object):  # type: ignore[no-redef]
 
     def __init__(self, total=None, disable=False,
-                    unit=None, *args, **kwargs):
+                 unit=None, *args, **kwargs):
         self.total = total
         self.disable = disable
         self.n = 0
@@ -49,7 +49,7 @@ class Faketqdm(object):  # type: ignore[no-redef]
         sys.stderr.write('\n')
 
 try:
-    from tqdm import tqdm # If tqdm is installed use it, otherwise use the fake wrapper
+    from tqdm import tqdm  # If tqdm is installed use it, otherwise use the fake wrapper
 except ImportError:
     tqdm = Faketqdm
 

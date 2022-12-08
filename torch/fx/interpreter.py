@@ -119,7 +119,9 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
-        pbar = tqdm(total= len(self.module.graph.nodes), desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
+        pbar = tqdm(total=len(self.module.graph.nodes),
+                    desc=f"{self.name}: {str(list(self.module.graph.nodes)) if config.verbose_progress else ''}",
+                    initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
         for node in self.module.graph.nodes:
             pbar.update(1)
