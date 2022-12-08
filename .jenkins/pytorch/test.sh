@@ -274,6 +274,10 @@ test_inductor_benchmark() {
   python benchmarks/dynamo/$1.py --ci --training --accuracy \
     --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # Check training with symbolic shapes (not actually inductor)
+  TORCHDYNAMO_DYNAMIC_SHAPES=1 AOT_DYNAMIC_SHAPES=1 python benchmarks/dynamo/$1.py --ci --training --accuracy \
+    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_huggingface.csv
 }
 
 test_inductor_huggingface() {
