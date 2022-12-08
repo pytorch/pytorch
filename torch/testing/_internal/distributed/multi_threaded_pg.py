@@ -31,9 +31,6 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 """
 
 
-# TODO: what's the good formula for Collective's timeout from test deadline (TIMEOUT_DEFAULT)?
-COLLECTIVE_TIMEOUT_DEFAULT = 1
-
 def flatten_list(lst):
     return tree_flatten(lst)[0]
 
