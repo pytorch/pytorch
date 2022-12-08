@@ -4729,6 +4729,21 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
 
+    # Test inverse
+    def test_inverse(self):
+        def helper(n):
+            cpu_input = torch.randn(n, n, device='cpu')
+            mps_input = cpu_input.to('mps')
+
+            cpu_result = torch.linalg.inv(cpu_input)
+            mps_result = torch.linalg.inv(mps_input)
+            self.assertEqual(cpu_result, mps_result)
+
+        helper(2)
+        helper(6)
+        helper(3)
+        helper(8)
+
     # Test tril
     def test_tril(self):
         def helper(shape, diag=0):
@@ -7448,6 +7463,7 @@ class TestConsistency(TestCase):
         'isreal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'kron': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.matrix_norm': ['f16'],
+        'linalg.inv': ['f32'],
         'linalg.svd': ['f32'],
         'linalg.vector_norm': ['f16', 'f32'],
         'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
