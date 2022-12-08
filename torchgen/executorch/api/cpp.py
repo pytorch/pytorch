@@ -1,29 +1,23 @@
+from dataclasses import dataclass
+
 from typing import List, Optional, Sequence, Set, Union
 
 from torchgen import local
-from torchgen.executorch.api.types import (
+
+from torchgen.api.types import (
+    ArgName,
     ArrayCType,
-    ArrayRefCType,
-    BaseTypeToCppMapping,
+    BaseCType,
+    Binding,
     ConstRefCType,
-    intArrayRefT,
+    CType,
     longT,
     MutRefCType,
-    OptionalCType,
-    scalarT,
-    tensorT,
-    tensorListT,
+    NamedCType,
+    SpecialArgName,
     TupleCType,
     VectorCType,
     voidT,
-)
-from torchgen.api.types_base import (
-    ArgName,
-    BaseCType,
-    Binding,
-    CType,
-    NamedCType,
-    SpecialArgName,
 )
 
 from torchgen.model import (
@@ -41,6 +35,17 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
+
+from .types import (
+    ArrayRefCType,
+    BaseTypeToCppMapping,
+    intArrayRefT,
+    OptionalCType,
+    scalarT,
+    tensorListT,
+    tensorT,
+)
+
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add,
@@ -159,17 +164,9 @@ def argumenttype_type(
         elif str(t.elem) == "Scalar":
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
-            optionalIntArrayRefT = BaseTypeToCppMapping.get(
-                BaseTy.OptionalIntArrayRef, None
-            )
-            assert optionalIntArrayRefT != None, "Optional IntArrayRef not supported"
-            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
+            raise NotImplementedError("Need to implement type resolution for int[]?")
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "SymInt":
-            optionalIntArrayRefT = BaseTypeToCppMapping.get(
-                BaseTy.OptionalIntArrayRef, None
-            )
-            assert optionalIntArrayRefT != None, "Optional IntArrayRef not supported"
-            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
+            raise NotImplementedError("Need to implement type resolution for SymInt[]?")
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
@@ -189,7 +186,7 @@ def argumenttype_type(
         elif str(t.elem) == "Scalar":
             return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
         elif str(t.elem) == "Dimname":
-            raise NotImplementedError
+            raise NotImplementedError("Need to implement type resolution for Dimname")
         elif str(t.elem) == "Tensor?":
             return NamedCType(binds, ArrayRefCType(OptionalCType(BaseCType(tensorT))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
@@ -296,6 +293,7 @@ JIT_TO_CPP_DEFAULT = {
     "long": "torch::executorch::kLong",
 }
 
+
 # Convert a JIT default into C++ expression representing the default
 def default_expr(d: str, t: Type) -> str:
     if d == "None" and str(t) == "Tensor?":
@@ -377,7 +375,7 @@ def argument(
             )
         ]
     elif isinstance(a, TensorOptionsArguments):
-        raise NotImplementedError
+        raise NotImplementedError("Need to implement type resolution for TensorOptions")
     elif isinstance(a, SelfArgument):
         if method:
             # Caller is responsible for installing implicit this in context!
@@ -413,3 +411,58 @@ def arguments(
             cpp_no_default_args=cpp_no_default_args,
         )
     ]
+
+
+@dataclass(frozen=True)
+class CppSignature:
+    """
+    This signature is merely a CppSignature with Executorch types. The inline definition
+    of CppSignature is generated in Functions.h and it's used by unboxing functions.
+    """
+
+    # The schema this signature is derived from
+    func: FunctionSchema
+
+    # The set of C++ arguments which should not have defaults applied to them
+    cpp_no_default_args: Set[str]
+
+    # Allows you to prepend an arbitrary prefix to the signature name.
+    # This is useful for parts of the codegen that generate wrappers around kernels,
+    # and need to avoid naming collisions.
+    prefix: str = ""
+
+    def arguments(self) -> List[Binding]:
+        return arguments(
+            self.func.arguments,
+            faithful=True,  # always faithful, out argument at the end
+            method=False,  # method not supported
+            cpp_no_default_args=self.cpp_no_default_args,
+        )
+
+    def name(self) -> str:
+        return self.prefix + name(
+            self.func,
+            faithful_name_for_out_overloads=True,
+        )
+
+    def decl(self, name: Optional[str] = None) -> str:
+        args_str = ", ".join(a.decl() for a in self.arguments())
+        if name is None:
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
+
+    def defn(self, name: Optional[str] = None) -> str:
+        args = [a.defn() for a in self.arguments()]
+        args_str = ", ".join(args)
+        if name is None:
+            name = self.name()
+        return f"{self.returns_type().cpp_type()} {name}({args_str})"
+
+    def returns_type(self) -> CType:
+        return returns_type(self.func.returns)
+
+    @staticmethod
+    def from_native_function(f: NativeFunction, *, prefix: str = "") -> "CppSignature":
+        return CppSignature(
+            func=f.func, prefix=prefix, cpp_no_default_args=f.cpp_no_default_args
+        )
