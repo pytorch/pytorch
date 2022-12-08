@@ -750,7 +750,7 @@ def torchxla_trace_once(subgraph):
     compiled_graph = None
 
     def fwd(*args):
-        nonlocal subgraph 
+        nonlocal subgraph
         nonlocal compiled_graph
         if compiled_graph is None:
             model = subgraph.model
