@@ -83,6 +83,7 @@ def fully_shard(
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
     _register_root_pre_forward_hook(state, module)  # prepend last
-    for submodule in state._module_to_handles.keys():
-        _insert_module_state(submodule, state)
+    for submodule in module.modules():
+        if ignored_modules is not None and submodule not in ignored_modules:
+            _insert_module_state(submodule, state)
     return module
