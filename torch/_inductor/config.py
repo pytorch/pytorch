@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 
 # add some debug printouts
 debug = False
@@ -64,13 +63,10 @@ unroll_reductions_threshold = 8
 comment_origin = False
 
 
-@lru_cache(1)
 def is_fbcode():
-    try:
-        import torch.fb  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    import torch
+
+    return not hasattr(torch.version, "git_version")
 
 
 compile_threads = (

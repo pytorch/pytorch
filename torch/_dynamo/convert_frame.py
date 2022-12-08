@@ -409,26 +409,25 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        log.log(
-            logging.CODE,  # type: ignore[attr-defined]
-            format_bytecode(
-                "ORIGINAL BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            ),
-        )
-        log.log(
-            logging.CODE,  # type: ignore[attr-defined]
-            format_bytecode(
-                "MODIFIED BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                out_code,
-            ),
-        )
+        if config.output_code:
+            log.info(
+                format_bytecode(
+                    "ORIGINAL BYTECODE",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    code,
+                ),
+            )
+            log.info(
+                format_bytecode(
+                    "MODIFIED BYTECODE",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    out_code,
+                ),
+            )
 
         assert output is not None
         assert output.guards is not None
@@ -436,10 +435,13 @@ def _compile(
         check_fn = CheckFunctionManager(output, output.guards, locals, globals)
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
-        guard_str = "GUARDS:\n"
-        guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(logging.CODE, guard_str)  # type: ignore[attr-defined]
+        if config.output_code:
+            guard_str = "GUARDS:\n"
+            guard_str += "\n".join(
+                [f" - {str(guard)}" for guard in sorted(output.guards)]
+            )
+            log.info(guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)
