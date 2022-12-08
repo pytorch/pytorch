@@ -57,6 +57,7 @@ class TORCH_API LTCTensorImpl : public c10::TensorImpl {
 
  private:
   void setup_size_properties();
+  LTCTensorImpl* get_impl_copy();
 
   LazyTensorPtr tensor_;
   mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;

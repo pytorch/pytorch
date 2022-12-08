@@ -100,12 +100,12 @@ LTCTensorImpl::LTCTensorImpl(
           c10::DispatchKeySet{dispatch_key, autograd_dispatch_key},
           data_type,
           device),
-      tensor_(c10::make_intrusive<LazyTensor>(std::move(*tensor))) {
+      tensor_(tensor) {
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
-  tensor_ = c10::make_intrusive<LazyTensor>(*lazy_tensor);
+  tensor_ = lazy_tensor;
   generation_ = 0;
 }
 
@@ -113,6 +113,16 @@ c10::intrusive_ptr<c10::TensorImpl> LTCTensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<LTCTensorImpl>(tensor_);
+  // Update impl if handling XLATensor
+  if (dynamic_cast<XLATensor*>(tensor_)) {
+    impl = c10::make_intrusive<LTCTensorImpl>(
+        tensor_,
+        c10::DispatchKey::XLA,
+        c10::DispatchKey::AutogradXLA,
+        c10::scalarTypeToTypeMeta(tensor.dtype()),
+        backendDeviceToAtenDevice(tensor.GetDevice()));
+  }
+
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -172,6 +182,18 @@ void LTCTensorImpl::setup_size_properties() {
     }
     generation_ = generation;
   }
+}
+
+LTCTensorImpl* LTCTensorImpl::get_impl_copy() {
+  if (dynamic_cast<XLATensor*>(tensor_)) {
+    return c10::make_intrusive<LTCTensorImpl>(
+        tensor_,
+        c10::DispatchKey::XLA,
+        c10::DispatchKey::AutogradXLA,
+        c10::scalarTypeToTypeMeta(tensor.dtype()),
+        backendDeviceToAtenDevice(tensor.GetDevice()));
+  }
+  return c10::make_intrusive<LTCTensorImpl>(tensor_)
 }
 
 at::IntArrayRef LTCTensorImpl::sizes_custom() const {
