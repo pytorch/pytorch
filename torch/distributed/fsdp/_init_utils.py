@@ -106,12 +106,6 @@ def _init_process_group_state(
             assert state._inter_node_pg is not None, "Expected to populate state._inter_node_pg for hybrid shard"
             assert state._inter_node_state is not None, "Expected to populate state._inter_node_state for hybrid shad."
     else:
-        if process_group is not None and (
-            not isinstance(process_group, dist.ProcessGroup) and not issubclass(type(process_group), dist.ProcessGroup)
-        ):
-            raise ValueError(
-                f"process_group should be None or dist.ProcessGroup, but got {type(process_group)}"
-            )
         state.process_group = process_group if process_group is not None else _get_default_group()
 
     state.rank = state.process_group.rank()
