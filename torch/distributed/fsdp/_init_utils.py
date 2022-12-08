@@ -381,8 +381,8 @@ def _get_ignored_modules(
     msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
     try:
         ignored_root_modules = set(_ignored_modules)
-    except TypeError:
-        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}")
+    except TypeError as e:
+        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}") from e
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")

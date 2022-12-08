@@ -10,6 +10,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/FractionalMaxPooling.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -139,6 +140,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   const Tensor& output,
   const Tensor& indices
 ) {
+  fractional_max_pool_check_shape</*ndim*/ 2>(input, randomSamples);
+
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
