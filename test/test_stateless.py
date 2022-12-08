@@ -21,6 +21,17 @@ class MockModule(torch.nn.Module):
     def forward(self, x):
         return self.l1(x) + self.buffer
 
+class MockTiedModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(1, 1)
+        self.tied_bias = self.l1.bias
+        self.register_buffer('buffer', torch.ones(1))
+        self.register_buffer('tied_buffer', self.buffer)
+
+    def forward(self, x):
+        return self.l1(x) + self.tied_bias + self.buffer + self.tied_buffer
+
 
 class TestStatelessFunctionalAPI(TestCase):
     def _run_call_with_mock_module(self, module, device='cpu', prefix=''):
@@ -130,7 +141,7 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.m.buffer': buffer}
         prev_weight = module.l1.weight.clone()
         prev_buffer = module.buffer.clone()
-        res = stateless.functional_call(module, parameters, x)
+        res = stateless.functional_call(module, parameters, x, tie_weights=False)
         self.assertEqual(x, res)
         # check that the weights remain unmodified and were correctly accesed
         cur_weight = module.l1.weight
@@ -176,10 +187,34 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(orig_sn_weight, module.l1.weight)
 
 
-    def test_tied_weights_warns(self):
-        module = MockModule()
-        module.tied_bias = module.l1.bias
-        module.register_buffer("tied_buffer", module.buffer)
+    def test_reparamertize_tie_weights(self):
+        module = MockTiedModule()
+        weight = torch.tensor([[2.0]],)
+        bias = torch.tensor([5.0])
+        buffer = torch.tensor([3.0])
+
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        out = stateless.functional_call(module, parameters, x)
+        # x * weight + bias + tied_bias + buffer + tied_buffer
+        self.assertEqual(out, x * 2. + 5. + 5. + 3. + 3.)
+
+    def test_reparamertize_tie_some_weights(self):
+        module = MockTiedModule()
+        weight = torch.tensor([[2.0]],)
+        buffer = torch.tensor([3.0])
+
+        parameters = {'l1.weight': weight,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        out = stateless.functional_call(module, parameters, x)
+        # x * weight + bias + tied_bias + buffer + tied_buffer
+        self.assertEqual(out, x * 2. + module.l1.bias + module.tied_bias + 3. + 3.)
+
+    def test_tied_weights_errors(self):
+        module = MockTiedModule()
         weight = torch.tensor([[1.0]],)
         bias = torch.tensor([0.0])
         buffer = torch.tensor([0.0])
@@ -193,16 +228,15 @@ class TestStatelessFunctionalAPI(TestCase):
         # if tied values are the same tensors, shouldn't warn
         parameters['tied_bias'] = bias
         parameters['tied_buffer'] = buffer
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x))
         del parameters['tied_bias']
         del parameters['tied_buffer']
 
-        with self.assertWarnsOnceRegex(UserWarning, "functional_call was passed multiple values"):
+        with self.assertRaisesRegex(ValueError, "functional_call got values for both (l1.bias|tied_bias)"):
             parameters['tied_bias'] = torch.tensor([5.0])
             stateless.functional_call(module, parameters, x)
         del parameters['tied_bias']
 
-        with self.assertWarnsOnceRegex(UserWarning, "functional_call was passed multiple values"):
+        with self.assertRaisesRegex(ValueError, "functional_call got values for both (buffer|tied_buffer)"):
             parameters['tied_buffer'] = torch.tensor([5.0])
             stateless.functional_call(module, parameters, x)
 
