@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <cstddef>
@@ -503,6 +504,7 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
 
 std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
   ExtraFilesMap extra_files;
+  register_flatbuffer_all();
   Module torch_script =
       torch::jit::load(input_model_stream, c10::nullopt, extra_files);
   std::stringstream intermediate_model_stream;

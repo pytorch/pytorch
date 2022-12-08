@@ -87,7 +87,6 @@ def check_files(
     filenames: List[str],
     config: str,
     retries: int,
-    code: str,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
@@ -101,7 +100,7 @@ def check_files(
                 path=None,
                 line=None,
                 char=None,
-                code=code,
+                code="MYPY",
                 severity=LintSeverity.ERROR,
                 name="command-failed",
                 original=None,
@@ -119,7 +118,7 @@ def check_files(
             char=int(match["column"])
             if match["column"] is not None and not match["column"].startswith("-")
             else None,
-            code=code,
+            code="MYPY",
             severity=severities.get(match["severity"], LintSeverity.ERROR),
             original=None,
             replacement=None,
@@ -143,11 +142,6 @@ def main() -> None:
         "--config",
         required=True,
         help="path to an mypy .ini config file",
-    )
-    parser.add_argument(
-        "--code",
-        default="MYPY",
-        help="the code this lint should report as",
     )
     parser.add_argument(
         "--verbose",
@@ -188,7 +182,7 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_files(list(filenames), args.config, args.retries, args.code)
+    lint_messages = check_files(list(filenames), args.config, args.retries)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 

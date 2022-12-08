@@ -1538,22 +1538,14 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
 
 def _std_var(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims,
-    unbiased: Optional[bool],
+    dim: DimOrDims = None,
+    unbiased: Optional[bool] = False,
     *,
-    correction: Optional[int],
-    keepdim: Optional[bool],
-    dtype: Optional[DType],
-    mask: Optional[Tensor],
-    take_sqrt: Optional[bool],
+    keepdim: Optional[bool] = False,
+    dtype: Optional[DType] = None,
+    mask: Optional[Tensor] = None,
+    take_sqrt: Optional[bool] = False,
 ) -> Tensor:
-    assert (unbiased is None or correction is None), "Only one of unbiased and correction may be given"
-    correction_int = 1
-    if unbiased is not None:
-        correction_int = 1 if unbiased else 0
-    if correction is not None:
-        correction_int = correction
-
     if dtype is None:
         dtype = input.dtype
         if not (dtype.is_floating_point or dtype.is_complex):
@@ -1592,8 +1584,8 @@ def _std_var(
             )
         if not keepdim:
             count = count.reshape(total.shape)
-        if correction_int != 0:
-            count = torch.subtract(count, correction_int)
+        if unbiased:
+            count = torch.subtract(count, 1)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)
         if take_sqrt:
@@ -1609,9 +1601,8 @@ def _std_var(
 def var(
     input: Union[Tensor, MaskedTensor],
     dim: DimOrDims = None,
-    unbiased: Optional[bool] = None,
+    unbiased: Optional[bool] = False,
     *,
-    correction: Optional[int] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1628,7 +1619,6 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
-        correction=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,
@@ -1640,9 +1630,8 @@ fully masked-out elements, have ``nan`` values.
 def std(
     input: Union[Tensor, MaskedTensor],
     dim: DimOrDims = None,
-    unbiased: Optional[bool] = None,
+    unbiased: Optional[bool] = False,
     *,
-    correction: Optional[int] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1659,7 +1648,6 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
-        correction=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,
