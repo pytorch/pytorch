@@ -788,19 +788,34 @@ class CppVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.transform_index(index)
 
-        if expanded_index == new_index:
+        def load_help(load_index, nelements):
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
-                nelements = 1
                 if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
                     self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
                 self.loads.writeline(
-                    f"to_float<double>({var}, {g_tmp_buf}, {nelements});"
+                    f"to_float({var} + {cexpr(load_index)}, {g_tmp_buf}, {nelements});"
                 )
-                line = f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(index)}])"
+                if nelements == 1:
+                    line = (
+                        f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(load_index)}])"
+                    )
+                else:
+                    line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
             else:
-                line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
+                if nelements == 1:
+                    line = f"at::vec::Vectorized<float>({var}[{cexpr(load_index)}])"
+                else:
+                    line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(load_index)})"
+            return line
+
+        if expanded_index == new_index:
+            nelements = 1
+            line = load_help(index, nelements)
         else:
+            nelements = codecache.pick_vec_isa().nelements()
+            line = load_help(new_index, nelements)
+            """
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
@@ -811,7 +826,10 @@ class CppVecKernel(CppKernel):
                 )
                 line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
             else:
+                import pdb
+                pdb.set_trace()
                 line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+            """
 
         return self.cse.generate(self.loads, line)
 
