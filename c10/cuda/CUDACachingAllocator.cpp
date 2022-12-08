@@ -1956,7 +1956,8 @@ class DeviceCachingAllocator {
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
   static bool force_uncached =
-      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+    getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr &&
+    strcmp(getenv("PYTORCH_NO_CUDA_MEMORY_CACHING"), "1") == 0;
   return force_uncached;
 }
 
