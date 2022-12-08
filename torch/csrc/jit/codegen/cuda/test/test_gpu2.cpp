@@ -9050,7 +9050,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
   i145 = i143 % i95;
   int64_t i147;
   i147 = i145 % i94;
-  if ((i143 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  if ((i143 < (T0.size[0] * i95))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
@@ -9261,7 +9261,8 @@ TEST_F(NVFuserTest, FusionIssue1133_CUDA) {
         // There should be no allocation other than those for tv1 and tv2 and
         // hoisted indices
         TORCH_CHECK(
-            alloc->buffer()->isIntegralScalar(), "Invalid allocation detected");
+            alloc->buffer()->isIntegralScalar() || alloc->buffer()->isABool(),
+            "Invalid allocation detected");
       }
       TORCH_CHECK(size->isA<Int>(), "Invalid allocation size");
       TORCH_CHECK(size->as<Int>()->isConst(), "Allocation not constant");

@@ -1493,7 +1493,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       } else {
         strided_inds[i] = strided_ind;
       }
-      strided_inds[i] = GpuLower::current()->commonIndexMap().hoistIndex(
+      strided_inds[i] = GpuLower::current()->commonScalarMap().hoistScalar(
           strided_inds[i], loops);
     }
   }
@@ -1751,7 +1751,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     } else {
       strided_inds[i] = root_ind_i;
     }
-    strided_inds[i] = GpuLower::current()->commonIndexMap().hoistIndex(
+    strided_inds[i] = GpuLower::current()->commonScalarMap().hoistScalar(
         strided_inds[i], loops);
   }
 
@@ -1872,7 +1872,7 @@ std::vector<Val*> Index::getRootIndices(
     root_inds[i] = root_ind;
 
     root_inds[i] =
-        GpuLower::current()->commonIndexMap().hoistIndex(root_inds[i], loops);
+        GpuLower::current()->commonScalarMap().hoistScalar(root_inds[i], loops);
   }
   return root_inds;
 }
@@ -2013,7 +2013,7 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     } else {
       strided_inds[i] = root_ind_i;
     }
-    strided_inds[i] = GpuLower::current()->commonIndexMap().hoistIndex(
+    strided_inds[i] = GpuLower::current()->commonScalarMap().hoistScalar(
         strided_inds[i], loops);
   }
 
@@ -2791,10 +2791,8 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
       start_magic_zero_info = stop_magic_zero_info;
     }
 
-    start_index = GpuLower::current()->commonIndexMap().hoistIndex(
-        start_magic_zero_info.index, loops);
-    stop_index = GpuLower::current()->commonIndexMap().hoistIndex(
-        stop_magic_zero_info.index, loops);
+    start_index = start_magic_zero_info.index;
+    stop_index = stop_magic_zero_info.index;
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0
@@ -2852,7 +2850,7 @@ Val* Index::arange(
   start = castOp(dtype, start);
   step = castOp(dtype, step);
   auto result = add(start, mul(step, linear_index));
-  GpuLower::current()->commonIndexMap().hoistIndex(result, loops);
+  GpuLower::current()->commonScalarMap().hoistScalar(result, loops);
   return result;
 }
 
@@ -2863,7 +2861,7 @@ Val* Index::eye(
   auto indices = Index::getPerDimLogicalIndex(consumer_tv, loops);
   TORCH_INTERNAL_ASSERT(indices.size() == 2);
   auto result = castOp(dtype, eq(indices[0], indices[1]));
-  GpuLower::current()->commonIndexMap().hoistIndex(result, loops);
+  GpuLower::current()->commonScalarMap().hoistScalar(result, loops);
   return result;
 }
 

@@ -9,9 +9,9 @@
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_fused_reduction.h>
-#include <torch/csrc/jit/codegen/cuda/lower_index_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate_elimination.h>
+#include <torch/csrc/jit/codegen/cuda/lower_scalar_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
@@ -134,8 +134,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return double_buffer_info_;
   }
 
-  CommonIndexMap& commonIndexMap() {
-    return common_index_map_;
+  CommonScalarMap& commonScalarMap() {
+    return common_scalar_map_;
   }
 
   const auto& vectorizedAccesses() const {
@@ -210,7 +210,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   PartialSplitMap partial_split_map_;
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
-  CommonIndexMap common_index_map_;
+  CommonScalarMap common_scalar_map_;
   FusedReductionInfo fused_reduction_info_;
   std::shared_ptr<const SyncMap> sync_map_;
   kir::KernelPerformanceProfile profile_;

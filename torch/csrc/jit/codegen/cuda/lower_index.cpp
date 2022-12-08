@@ -127,7 +127,7 @@ void IndexLowering::handle(const FullOp* fop) {
   // TensorIndex for writing output.
   const auto out = lowerDstIndex(out_tv);
   auto result = castOp(fop->dtype(), fop->getFillValue());
-  GpuLower::current()->commonIndexMap().hoistIndex(result, for_loops_);
+  GpuLower::current()->commonScalarMap().hoistScalar(result, for_loops_);
 
   auto lowered = IrBuilder::create<UnaryOp>(UnaryOpType::Set, out, result);
   pushBack(lowered);

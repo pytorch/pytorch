@@ -768,6 +768,7 @@ void IrPrinter::handle(const kir::Allocate* node) {
   indent();
   handle(node->buffer());
   os_ << " = ALLOCATE("
+      << "buffer=" << node->buffer()->toString() << ", "
       << "mem_type=" << node->memoryType() << ", "
       << "size=";
   print_inline(node->size());

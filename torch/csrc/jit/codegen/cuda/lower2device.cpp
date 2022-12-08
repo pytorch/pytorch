@@ -416,9 +416,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_conditional_loops =
       generateConditionalFromPredicate(exprs_with_fused_broadcast);
 
-  dumpExprsIfEnabled(exprs_conditional_loops, "Before allocateCommonIndices");
+  dumpExprsIfEnabled(exprs_conditional_loops, "Before allocateCommonScalars");
   const auto exprs_common_index_allocated =
-      allocateCommonIndices(exprs_conditional_loops);
+      allocateCommonScalars(exprs_conditional_loops);
 
   std::vector<Expr*> exprs_welford_vectorized;
   if (!isOptionDisabled(DisableOption::WelfordVectorization)) {
