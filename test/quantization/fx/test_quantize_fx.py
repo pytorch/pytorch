@@ -56,6 +56,7 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_mapping,
     get_default_qat_qconfig_mapping,
+    is_activation_post_process,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -145,7 +146,6 @@ from torch.ao.quantization.observer import (
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     MinMaxObserver,
-    _is_activation_post_process,
 )
 
 # test utils
@@ -711,6 +711,22 @@ class TestQuantizeFx(QuantizationTestCase):
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
+    def test_pattern_match_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x, _ = torch.ops.aten.max_pool2d_with_indices.default(x)
+                return x
+
+        pattern = (operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0)
+        m = torch.fx.symbolic_trace(M())
+        # eliminate the code that get the second output of maxpool, so that the pattern
+        # can be matched
+        m.graph.eliminate_dead_code()
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == operator.getitem:
                 self.assertTrue(is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
@@ -3276,7 +3292,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
                 self.assertTrue(
-                    not _is_activation_post_process(getattr(model, arg_node.target)),
+                    not is_activation_post_process(getattr(model, arg_node.target)),
                     "Arg: {0} of node: {1} is observed but is not a float tensor".format(
                         arg_node, node
                     ),
@@ -5035,7 +5051,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
                 for name, mod in m.named_modules():
-                    if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
+                    if is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
                             upper_bnd = 127
