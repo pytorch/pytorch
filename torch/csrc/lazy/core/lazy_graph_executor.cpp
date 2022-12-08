@@ -243,17 +243,18 @@ auto LazyGraphExecutor::DeviceLockerArena::Get() -> DeviceLockerArena* {
   return arena;
 }
 
-auto LazyGraphExecutor::DeviceLockerArena::GetLocker(const BackendDevice& device) -> std::shared_ptr<DeviceLocker> {
+auto LazyGraphExecutor::DeviceLockerArena::GetLocker(
+    const BackendDevice& device) -> std::shared_ptr<DeviceLocker> {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = lockers_.find(device);
   if (it == lockers_.end()) {
-    it = lockers_.emplace(device, std::make_shared<DeviceLocker>(device))
-              .first;
+    it = lockers_.emplace(device, std::make_shared<DeviceLocker>(device)).first;
   }
   return it->second;
 }
 
-void LazyGraphExecutor::DeviceLockerArena::DeviceBarrier(const BackendDevice& device) {
+void LazyGraphExecutor::DeviceLockerArena::DeviceBarrier(
+    const BackendDevice& device) {
   auto locker = DeviceLockerArena::Get()->GetLocker(device);
   locker->Barrier();
 }
@@ -268,7 +269,8 @@ std::vector<ExceptionCleanup> LazyGraphExecutor::DeviceLockerArena::LockDevices(
   return unlocker;
 }
 
-ExceptionCleanup LazyGraphExecutor::DeviceLockerArena::LockDevice(const BackendDevice& device) {
+ExceptionCleanup LazyGraphExecutor::DeviceLockerArena::LockDevice(
+    const BackendDevice& device) {
   VLOG(4) << "Waiting on device barrier for device " << device << " ...";
   std::shared_ptr<DeviceLocker> locker;
   {
@@ -324,17 +326,20 @@ BackendDataPtr LazyGraphExecutor::DataCacheArena::GetDeviceData(
   return GetDeviceData(t, device);
 }
 
-size_t LazyGraphExecutor::DataCacheArena::TensorHasher::operator()(const at::Tensor& tensor) const {
+size_t LazyGraphExecutor::DataCacheArena::TensorHasher::operator()(
+    const at::Tensor& tensor) const {
   return HashReduce(
       HashCombine(GetEnumValue(tensor.scalar_type()), TensorHash(tensor)));
 }
 
-bool LazyGraphExecutor::DataCacheArena::TensorComparer::operator()(const at::Tensor& tensor1, const at::Tensor& tensor2)
-    const {
+bool LazyGraphExecutor::DataCacheArena::TensorComparer::operator()(
+    const at::Tensor& tensor1,
+    const at::Tensor& tensor2) const {
   return TensorCompare(tensor1, tensor2);
 }
 
-auto LazyGraphExecutor::DataCacheArena::GetDataCache(const BackendDevice& device) -> DataCache* {
+auto LazyGraphExecutor::DataCacheArena::GetDataCache(
+    const BackendDevice& device) -> DataCache* {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = device_caches_.find(device);
   if (it == device_caches_.end()) {
