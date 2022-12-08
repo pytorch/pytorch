@@ -602,7 +602,6 @@ Tensor sparse_compressed_to_dense(
     // At this point everything the batch dim was inserted, existed
     // already or was flattened from multiple batch dims
     auto n_batch = values.size(0);
-
     int64_t nrows, ncols;
     auto dense_reshaped_sizes = dense.sizes().vec();
     if (!block_sparse) {
@@ -611,7 +610,7 @@ Tensor sparse_compressed_to_dense(
       dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
       dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
     } else {
-      std::array<int64_t, 2> blocksize = {self.size(batch_ndim + 2), self.size(batch_ndim + 3)};
+      std::array<int64_t, 2> blocksize = {values.size(2), values.size(3)};
       nrows = self.size(batch_ndim) / blocksize[0];
       ncols = self.size(batch_ndim + 1) / blocksize[1];
       dense_reshaped_sizes[1] = blocksize[0];
