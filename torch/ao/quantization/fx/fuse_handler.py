@@ -38,7 +38,7 @@ class FuseHandler(ABC):
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
              is_qat: bool) -> Node:
         pass
 
@@ -56,7 +56,7 @@ class DefaultFuseHandler(FuseHandler):
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
              is_qat: bool) -> Node:
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = named_modules[str(root_node.target)]
