@@ -101,21 +101,42 @@ using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
 // Number of pipelines you want to use
 constexpr int NumStages = 3;
 
-using Gemm = cutlass::gemm::device::SparseGemm<ElementInputA,
-                                               LayoutInputA,
-                                               ElementInputB,
-                                               LayoutInputB,
-                                               ElementOutput,
-                                               LayoutOutput,
-                                               ElementAccumulator,
-                                               MMAOp,
-                                               SmArch,
-                                               cutlass::gemm::GemmShape<64, 64, 64>,
-                                               cutlass::gemm::GemmShape<32, 32, 64>,
-                                               cutlass::gemm::GemmShape<16, 8, 32>,
-                                               EpilogueOp,
-                                               SwizzleThreadBlock,
-                                               NumStages>;
+// using Gemm = cutlass::gemm::device::SparseGemm<ElementInputA,
+//                                                LayoutInputA,
+//                                                ElementInputB,
+//                                                LayoutInputB,
+//                                                ElementOutput,
+//                                                LayoutOutput,
+//                                                ElementAccumulator,
+//                                                MMAOp,
+//                                                SmArch,
+//                                                cutlass::gemm::GemmShape<64, 64, 64>,
+//                                                cutlass::gemm::GemmShape<32, 32, 64>,
+//                                                cutlass::gemm::GemmShape<16, 8, 32>,
+//                                                EpilogueOp,
+//                                                SwizzleThreadBlock,
+//                                                NumStages>;
+
+using Gemm = cutlass::gemm::device::SparseGemm<
+    cutlass::half_t,
+    cutlass::layout::RowMajor,
+    cutlass::half_t,
+    cutlass::layout::RowMajor,
+    cutlass::half_t,
+    cutlass::layout::RowMajor,
+    ElementAccumulator,
+    cutlass::arch::OpClassTensorOp,
+    cutlass::arch::Sm80,
+    cutlass::gemm::GemmShape<128, 256, 64>,
+    cutlass::gemm::GemmShape<64, 64, 64>,
+    cutlass::gemm::GemmShape<16, 8, 32>,
+    cutlass::epilogue::thread::LinearCombination<
+        float,
+        128 / cutlass::sizeof_bits<ElementOutput>::value,
+        ElementAccumulator,
+        ElementAccumulator>,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
+    3>;
 
 // Data type and layout of meta data matrix E can be inferred from template Gemm.
 using ElementInputE = typename Gemm::ElementE;
