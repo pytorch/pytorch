@@ -889,9 +889,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        if module not in state._comm_module_to_handles:
-            continue
-        module_param_handles = state._comm_module_to_handles[module]
+        module_param_handles = state._comm_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -921,9 +919,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        if module not in state._comm_module_to_handles:
-            continue
-        module_param_handles = state._comm_module_to_handles[module]
+        module_param_handles = state._comm_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
