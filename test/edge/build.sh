@@ -14,7 +14,6 @@ CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_t
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
 BUILD_LIBTORCH_PY="$PWD/tools/build_libtorch.py"
-TEST_SRC_ROOT="$PWD/test/edge"
 
 cmake . -B "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/build"
 pushd "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
@@ -26,8 +25,6 @@ export INSTALL_TEST=1
 export BUILD_TEST=1
 # Need to build libtorch because we are testing Executorch in ATen mode.
 python "${BUILD_LIBTORCH_PY}"
-
-#cmake "${TEST_SRC_ROOT}"
 
 ret=$?
 

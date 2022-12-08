@@ -4,7 +4,7 @@ import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
 from io import TextIOWrapper
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import yaml
 
@@ -65,11 +65,13 @@ def static_dispatch(
     if len(backends) == 1:
         backend_metadata = backends[0].get_kernel(f)
         if backend_metadata:
-            comma = ", "
+            args = ", ".join(a.name for a in sig.arguments())
             # Here we are assuming there's no difference between CppSignature and NativeSignature for Executorch.
-            static_block = f"return ::{backend_metadata.cpp_namespace}::{backend_metadata.kernel}({comma.join(a.name for a in sig.arguments())});"
+            static_block = f"return ::{backend_metadata.cpp_namespace}::{backend_metadata.kernel}({args});"
     else:
-        static_block = f'ET_ASSERT_UNREACHABLE_MSG("The number of native function(s) binding to {f.func.name} is {len(backends)}.");'
+        static_block = f"""
+ET_ASSERT_UNREACHABLE_MSG("The number of native function(s) binding to {f.func.name} is {len(backends)}.");
+    """
     return f"""
 // {f.namespace}::{f.func}
 TORCH_API inline {sig.decl()} {{
