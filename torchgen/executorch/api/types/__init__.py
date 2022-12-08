@@ -13,4 +13,28 @@ from .types import (
     tensorListT as tensorListT,
     tensorT as tensorT,
 )
+from torchgen.api.types import (
+    ArgName as ArgName,
+    ArrayCType as ArrayCType,
+    BaseCppType as BaseCppType,
+    BaseCType as BaseCType,
+    Binding as Binding,
+    boolT as boolT,
+    byteT as byteT,
+    charT as charT,
+    ConstRefCType as ConstRefCType,
+    CType as CType,
+    doubleT as doubleT,
+    Expr as Expr,
+    floatT as floatT,
+    int32T as int32T,
+    longT as longT,
+    MutRefCType as MutRefCType,
+    NamedCType as NamedCType,
+    shortT as shortT,
+    SpecialArgName as SpecialArgName,
+    TupleCType as TupleCType,
+    VectorCType as VectorCType,
+    voidT as voidT,
+)
 from .signatures import CppSignature as CppSignature  # isort:skip
