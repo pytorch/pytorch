@@ -153,7 +153,9 @@ class Collective:
                     self._start_cond.notify()
 
             if rank == 0:
-                self._start_cond.wait_for(lambda: self._count == self._world_size or self._pg._terminate.is_set())
+                self._start_cond.wait_for(
+                    lambda: self._count == self._world_size or self._pg._terminate.is_set()
+                )
                 if self._pg._terminate.is_set():
                     sys.exit("Test termination event occurs.")
 
@@ -362,8 +364,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
         # ignore SystemExit excpetion caused by _terminate event
         except Exception as ex:
             exception_queue.put((rank, sys.exc_info()))
-            # thread cleanup
-            world.default_pg.exception_handle(ex)
+            world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
         finally:
             if world_is_valid():
                 dist.destroy_process_group()
@@ -375,15 +376,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
         for thread in threads:
             thread.start()
 
-        # we want to have a as close to MultiProcessTestCase._join_processes()
-        # as possible logic
-
-        # all test threads must join within `deadline`
-        # otherwise it is a timeout error
-        start_time = time.time()
-        subthread_error = False
         deadline = time.time() + timeout
-
         for idx, thread in enumerate(threads):
             thread.join(max(0, deadline - time.time()))
             if thread.is_alive():

@@ -884,7 +884,7 @@ def _run_test_with_mt_pg(self, timeout, world_size, callback):
         for line in traceback.format_exception(*exc_info):
             sys.stdout.write(line)
     if failed_ranks:
-        raise failed_ranks[0][1][1]  # re-throw the exception
+        raise failed_ranks[0][1][1]  # re-throw the first exception
 
 
 def spawn_threads_and_init_comms(

@@ -32,7 +32,7 @@ class TestCollectivesWithWrapper(TestCase):
         def _test_method(self):
             input_tensor = torch.ones(3, 3) * dist.get_rank()  # perform 1st all gather
             output_tensors = [torch.empty_like(input_tensor) for _ in range(dist.get_world_size())]
-            dist.all_gather(output_tensors, input_tensor)  # TODO: investigate why error here on rank 0
+            dist.all_gather(output_tensors, input_tensor)
 
             if dist.get_rank() == 0:
                 raise AssertionError("Mimic real test failure.")  # fail on rank 0
