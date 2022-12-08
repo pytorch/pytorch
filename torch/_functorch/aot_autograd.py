@@ -23,9 +23,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 
-import logging
-
-
 from functorch import make_fx
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
@@ -1454,6 +1451,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         [x for x in _fw_metadata.metadata_mutation_input_info if x is not None]
     )
     _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
+
 
     if isinstance(out, (list, tuple)):
         _num_non_aliased_outs = len(out[_num_mutated_data_inputs:])
