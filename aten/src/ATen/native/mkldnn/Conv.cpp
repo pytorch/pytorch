@@ -647,14 +647,14 @@ Tensor _mkldnn_convolution_transpose(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-  bool is_channels_last = use_channels_last || input_t.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
 
   std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
 
   auto memory_format =
       mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
 
-  auto input = input_t.to(memory_format);
+  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
 
   auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding, output_padding, stride, dilation, groups);
   auto output = at::empty({0}, input.options());
@@ -662,23 +662,23 @@ Tensor _mkldnn_convolution_transpose(
   const ideep::tensor x = itensor_from_tensor(input);
 
   ideep::tensor w;
-  if (weight_t.is_mkldnn()) {
-    // weight_t is the prepacked mkldnn tensor
-    w = itensor_from_tensor(weight_t);
+  if (weight.is_mkldnn()) {
+    // weight is the prepacked mkldnn tensor
+    w = itensor_from_tensor(weight);
   } else {
     // aten tensor with the shape of the prepacked tensor
     at::Tensor origin_weight_t;
     if (groups > 1) {
-      origin_weight_t = weight_t.transpose(0, 1).reshape(weight_IOHW_sizes);
+      origin_weight_t = weight.transpose(0, 1).reshape(weight_IOHW_sizes);
     } else {
-      origin_weight_t = weight_t.transpose(0, 1);
+      origin_weight_t = weight.transpose(0, 1);
     }
     w = itensor_from_tensor(origin_weight_t);
     w.transpose_(0, 1);
   }
 
   ideep::tensor y;
-  if (is_channels_last) {
+  if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
   }
@@ -712,7 +712,7 @@ Tensor _mkldnn_convolution_transpose(
   }
   if (input.is_mkldnn()) {
     return MKLDNNTensor(y, input.options());
-  } else if (!is_channels_last) {
+  } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
     TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
