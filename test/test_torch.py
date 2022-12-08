@@ -8576,7 +8576,7 @@ def add_neg_dim_tests():
         elif len(decl) == 5:
             name, tensor_arg, arg_constr, types, extra_dim = decl
 
-        test_name = 'test_' + name + '_neg_dim'
+        test_name = 'test_' + name +  '_neg_dim'
 
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
