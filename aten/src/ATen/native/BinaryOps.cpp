@@ -1056,8 +1056,12 @@ Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto self_dev = self.to(device_);
+  self_dev.unsafeGetTensorImpl()->set_wrapped_number(self.unsafeGetTensorImpl()->is_wrapped_number());
+  auto other_dev = other.to(device_);
+  other_dev.unsafeGetTensorImpl()->set_wrapped_number(other.unsafeGetTensorImpl()->is_wrapped_number());
   auto meta_out = at::_ops::add_Tensor::redispatch(
-      meta_dks, self.to(device_), other.to(device_), alpha);
+      meta_dks, self_dev, other_dev, alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
