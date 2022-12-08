@@ -16,7 +16,6 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
-    _is_activation_post_process
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
@@ -79,6 +78,7 @@ from .utils import (
 )
 
 from torch.ao.quantization.quantize import (
+    is_activation_post_process,
     convert
 )
 
@@ -118,9 +118,9 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
-def _is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
+def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
-        _is_activation_post_process(modules[str(node.target)])
+        is_activation_post_process(modules[str(node.target)])
 
 def _is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -445,7 +445,7 @@ def _get_arg_target_dtype_as_output(
     custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, modules)
     if custom_module_lstm_node is not None:
         return node_name_to_target_dtype_info[custom_module_lstm_node.name]["output_activation_dtype"][0]  # type: ignore[index]
-    elif _is_activation_post_process_node(arg, modules):
+    elif is_activation_post_process_node(arg, modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
         return node_name_to_target_dtype_info[observed_arg.name]["output_activation_dtype"][0]  # type: ignore[index]
@@ -990,7 +990,7 @@ def _maybe_make_input_output_share_observers(
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
-    while not _is_activation_post_process_node(first_arg_arg, modules):
+    while not is_activation_post_process_node(first_arg_arg, modules):
         if not isinstance(first_arg_arg, Node):
             return False
         # did not find an activation_post_process for the op
@@ -1021,7 +1021,7 @@ def _maybe_make_input_output_share_observers(
             if input_idx == 0:
                 continue
             iteration_guard = 0
-            while not _is_activation_post_process_node(input_arg, modules):
+            while not is_activation_post_process_node(input_arg, modules):
                 # failed to trace back since no input arg for the current node
                 if len(input_arg.args) < 1:
                     return False
@@ -1035,7 +1035,7 @@ def _maybe_make_input_output_share_observers(
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
-        assert _is_activation_post_process_node(output_obs_node, modules)
+        assert is_activation_post_process_node(output_obs_node, modules)
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(modules[parent_name], name, obs_mod_to_use)
 
@@ -1048,7 +1048,7 @@ def _remove_output_observer(
         modules: Dict[str, torch.nn.Module]):
     items = list(node.users.items())
     for output_obs_node, _ in items:
-        assert _is_activation_post_process_node(output_obs_node, modules)
+        assert is_activation_post_process_node(output_obs_node, modules)
         output_obs_node.replace_all_uses_with(node)
         model.graph.erase_node(output_obs_node)  # type: ignore[union-attr, operator]
 
