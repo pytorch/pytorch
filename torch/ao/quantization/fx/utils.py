@@ -26,7 +26,7 @@ from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
     _activation_is_statically_quantized,
 )
-from torch.ao.quantization.observer import is_activation_post_process
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 

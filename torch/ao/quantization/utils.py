@@ -271,6 +271,9 @@ def _get_qconfig_dtypes(qconfig):
     act_is_dynamic = activation.is_dynamic if hasattr(activation, 'is_dynamic') else False
     return (activation.dtype, weight.dtype, act_is_dynamic)
 
+# TODO remove this once BC no longer needed
+get_qconfig_dtypes = _get_qconfig_dtypes
+
 def _get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
@@ -626,7 +629,7 @@ def _get_lstm_with_individually_observed_parts(
 
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    torch.ao.quantization.add_observer_(
+    torch.ao.quantization._add_observer_(
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
     )

@@ -111,7 +111,6 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "is_activation_post_process",
-||||||| base
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
