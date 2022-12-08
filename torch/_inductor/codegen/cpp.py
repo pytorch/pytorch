@@ -789,15 +789,16 @@ class CppVecKernel(CppKernel):
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
                 if var not in self.var_vec_buf_map:
                     self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
-                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                    self.loads.writeline(
+                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
+                    )
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
 
