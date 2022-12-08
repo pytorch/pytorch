@@ -540,8 +540,8 @@ def ExtractPredictorNet(
                 'StopGradient'
             ]
         )
-    except ValueError:
-        raise Exception("No ops with input={}".format(input_blobs))
+    except ValueError as e:
+        raise Exception("No ops with input={}".format(input_blobs)) from e
     try:
         last_op_with_output = max(
             [
@@ -549,8 +549,8 @@ def ExtractPredictorNet(
                 if output_blobs.intersection(ops[j].output)
             ]
         )
-    except ValueError:
-        raise Exception("No ops with output={}".format(output_blobs))
+    except ValueError as e:
+        raise Exception("No ops with output={}".format(output_blobs)) from e
 
     def validate_op(op):
         # Check that the op does not have is_test = 0 set. This is a common
