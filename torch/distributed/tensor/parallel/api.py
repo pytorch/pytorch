@@ -9,7 +9,9 @@ from torch.distributed._tensor import (
     distribute_tensor,
     Replicate,
     Shard,
+    DTensor,
 )
+from torch.distributed.tensor.parallel._caching_prop import CachingPropagator
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.multihead_attention_tp import (
     TensorParallelMultiheadAttention,
@@ -26,6 +28,8 @@ __all__ = [
     "parallelize_module",
 ]
 
+
+DTensor._propagator = CachingPropagator(DTensor._propagator.op_to_rules)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,

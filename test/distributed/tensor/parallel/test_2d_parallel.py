@@ -174,21 +174,26 @@ class Test2dParallelIntegration(DTensorTestBase):
             optim = torch.optim.Adam(model.parameters(), lr=0.01)
             optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
-        for i in range(5):
-            # Ensure all input across TP ranks are same.
-            torch.manual_seed(i + dist.get_rank(dp_pg))
-            input = torch.rand(4, 5).cuda(self.rank)
-            output = model(input)
-            output_2d = model_2d(input)
-            self.assertEqual(output, output_2d)
-            output.sum().backward()
-            output_2d.sum().backward()
-            optim.step()
-            optim_2d.step()
-            self.assertEqual(model(input), model_2d(input))
+        from torch.profiler import profile, record_function, ProfilerActivity
+
+        torch.manual_seed(dist.get_rank(dp_pg))
+        input = torch.rand(4, 5).cuda(self.rank)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            for i in range(5):
+                # Ensure all input across TP ranks are same.
+                # output = model(input)
+                output_2d = model_2d(input)
+                # self.assertEqual(output, output_2d)
+                # output.sum().backward()
+                output_2d.sum().backward()
+                # optim.step()
+                optim_2d.step()
+                # self.assertEqual(model(input), model_2d(input))
+
+        prof.export_chrome_trace("trace.json")
 
         # Ensure all params are still the same after optimizer update.
-        self._compare_params(model, model_2d)
+        # self._compare_params(model, model_2d)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

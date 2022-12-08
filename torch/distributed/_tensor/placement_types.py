@@ -320,6 +320,13 @@ class DTensorSpec(object):
             if placement.is_partial()
         ]
 
+    def __hash__(self):
+        spec_str = str(self.mesh) + str(self.placements) + str(self.shape)
+        return hash(spec_str)
+
+    def __eq__(self, __o: object) -> bool:
+        return self.mesh == __o.mesh and self.placements == __o.placements and self.shape == __o.shape
+
     @property
     def local_shape(self) -> Tuple[int, ...]:
         """

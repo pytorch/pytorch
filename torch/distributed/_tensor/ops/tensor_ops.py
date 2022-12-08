@@ -10,7 +10,7 @@ from torch.distributed._tensor.api import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.prop import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
 
@@ -105,16 +105,16 @@ new_factory_ops = [
 no_shard_prop_ops = ["aten._local_scalar_dense.default"]
 
 for op in default_prop_ops:
-    DTensor._op_to_rules[op] = default_prop_rule
+    DTensor._propagator.register_sharding_prop_rule(op, default_prop_rule)
 
 for op in create_like_ops:
-    DTensor._op_to_rules[op] = prop_create_like
+    DTensor._propagator.register_sharding_prop_rule(op, prop_create_like)
 
 for op in no_shard_prop_ops:
-    DTensor._op_to_rules[op] = no_shard_prop_rule
+    DTensor._propagator.register_sharding_prop_rule(op, no_shard_prop_rule)
 
 for op in new_factory_ops:
-    DTensor._op_to_rules[op] = new_factory_rule
+    DTensor._propagator.register_sharding_prop_rule(op, new_factory_rule)
 
 
 @register_prop_rule("aten.bucketize.Tensor")

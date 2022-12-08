@@ -6,6 +6,7 @@ from typing import Callable, cast, Dict, Optional, Sequence
 import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
+from torch.distributed._tensor.prop import ShardingPropagator
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -133,9 +134,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     # class attribute that handles operator placements propagation
     # rules, keyed by aten op name, value is propagation func
-    _op_to_rules: Dict[
-        str, Callable[["op_dispatch.OpSchema"], "op_dispatch.OutputSharding"]
-    ] = {}
+    # _op_to_rules: Dict[
+    #     str, Callable[["op_dispatch.OpSchema"], "op_dispatch.OutputSharding"]
+    # ] = {}
+    _propagator = ShardingPropagator()
 
     # class attribute that handles custom registered ops, all handled
     # custom ops should appear in this table, and overriding the default
@@ -233,7 +235,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             func,
             args,
             kwargs,
-            DTensor._op_to_rules,
+            DTensor._propagator,
             DTensor._custom_dispatch_ops,
         )
 
