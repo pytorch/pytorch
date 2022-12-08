@@ -141,10 +141,6 @@ inductor_skips["cuda"] = {
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "T": {b8, f16, f32, f64, i32, i64},
-    "H": {b8, f16, f32, f64, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
@@ -251,10 +247,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "T": {b8, f16, f32, f64, i32, i64},
-    "H": {b8, f16, f32, f64, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
