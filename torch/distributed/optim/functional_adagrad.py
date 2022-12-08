@@ -1,10 +1,11 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
 
-__all__ : List[str] = []
+__all__: List[str] = []
 
 # Define a TorchScript compatible Functional Adagrad Optimizer
 # where we use these optimizer in a functional way.
@@ -62,7 +63,7 @@ class _FunctionalAdagrad(object):
             }
 
     def step(self, gradients: List[Optional[Tensor]]):
-        params = self.param_group['params']
+        params = self.param_group["params"]
         params_with_grad = []
         grads = []
         state_sums = []
@@ -76,25 +77,27 @@ class _FunctionalAdagrad(object):
             )
 
         has_sparse_grad = False
-        for param, gradient in zip(self.param_group['params'], gradients):
+        for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
                 if gradient.is_sparse:
                     has_sparse_grad = True
                 params_with_grad.append(param)
                 grads.append(gradient)
                 state = self.state[param]
-                state_sums.append(state['sum'])
-                state_steps.append(state['step'])
+                state_sums.append(state["sum"])
+                state_steps.append(state["step"])
 
         with torch.no_grad():
-            F.adagrad(params,
-                      grads,
-                      state_sums,
-                      state_steps,
-                      lr=self.defaults['lr'],
-                      weight_decay=self.defaults['weight_decay'],
-                      lr_decay=self.defaults['lr_decay'],
-                      eps=self.defaults['eps'],
-                      has_sparse_grad=has_sparse_grad,
-                      foreach=self.foreach,
-                      maximize=self.maximize)
+            F.adagrad(
+                params,
+                grads,
+                state_sums,
+                state_steps,
+                lr=self.defaults["lr"],
+                weight_decay=self.defaults["weight_decay"],
+                lr_decay=self.defaults["lr_decay"],
+                eps=self.defaults["eps"],
+                has_sparse_grad=has_sparse_grad,
+                foreach=self.foreach,
+                maximize=self.maximize,
+            )
