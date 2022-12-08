@@ -121,9 +121,9 @@ class FakeSymbolicTensor(torch.Tensor):
         raise RuntimeError(f"operator {func_overload} not supported")
 
 
-def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
-    sym_shapes, sym_strides = shape_env.create_symbolic_sizes_strides(arg)
-    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, storage_offset)
+def create_symbolic_tensor(name, arg, shape_env):
+    sym_shapes, sym_strides, sym_storage_offset = shape_env.create_symbolic_sizes_strides_storage_offset(arg)
+    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i):
     return shape_env.create_symintnode(shape_env.create_symbol(i))
@@ -179,15 +179,9 @@ class TestPySymInt(TestCase):
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), SymInt))
 
-        offset = create_symint(shape_env, 2)
-        y = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env, offset)
+        y = create_symbolic_tensor("x", torch.randn(5, 4, 3)[1:], shape_env)
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
-        self.assertTrue(y.storage_offset() == 2)
-
-        offset = 2
-        z = create_symbolic_tensor("z", torch.randn(5, 4, 3), shape_env, offset)
-        self.assertTrue(isinstance(z.storage_offset(), int))
-        self.assertTrue(z.storage_offset() == 2)
+        self.assertTrue(y.storage_offset() == 12)
 
     @skipIfNoSympy
     def test_binary(self):
@@ -285,7 +279,7 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op = shape_env.guards[0][0]
+        gt_op, _bt = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
