@@ -3851,13 +3851,6 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             kernel=kernel,
         )
 
-    def apply_constraint(self):
-        x = self.inputs[0]
-        # FixedLayout of input
-        x = self.require_stride_order(x, self.layout.preferred_stride_order)
-        self.inputs[0] = x
-        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
-
 
 @dataclasses.dataclass
 class MutableBox(IRNode):
