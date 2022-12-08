@@ -1280,7 +1280,7 @@ class TestTransformers(NNTestCase):
         model(x, x, x)
         # completes without error
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater, "CUDA unavailable")
     def test_unaligned_tensors(self):
         device = 'cuda'
         dtype = torch.float16
