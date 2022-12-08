@@ -3238,7 +3238,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
-        xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
         skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -3302,6 +3301,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
+        xfail('as_strided', 'partial_views'),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3317,6 +3317,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        xfail('as_strided', 'partial_views'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
@@ -3918,6 +3919,31 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
             return vmap(torch.linalg.multi_dot)(inputs)
 
+    def test_vmap_escaped_error(self):
+        escaped = None
+
+        def f(x):
+            nonlocal escaped
+            escaped = x
+            return x ** 2
+
+        x = torch.randn(3)
+        vmap(f)(x)
+
+        common_message = r"your tensor may have escaped from inside a function being vmapped.*{0}.*"
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing")):
+            escaped.sin()
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_tensor_inputs_batch_rule")):
+            escaped.sin_()
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_inplace_plumbing")):
+            escaped.mul_(1)
+
+        vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
+        with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
+            torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):

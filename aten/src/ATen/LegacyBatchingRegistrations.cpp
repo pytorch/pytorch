@@ -1,7 +1,7 @@
 #include <torch/library.h>
 #include <ATen/RedispatchFunctions.h>
-#include <ATen/VmapTransforms.h>
-#include <ATen/BatchedFallback.h>
+#include <ATen/LegacyVmapTransforms.h>
+#include <ATen/LegacyBatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
 #include <ATen/core/IListRef.h>

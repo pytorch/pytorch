@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 
 # add some debug printouts
 debug = False
@@ -64,13 +63,10 @@ unroll_reductions_threshold = 8
 comment_origin = False
 
 
-@lru_cache(1)
 def is_fbcode():
-    try:
-        import torch.fb  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    import torch
+
+    return not hasattr(torch.version, "git_version")
 
 
 compile_threads = (
@@ -119,12 +115,12 @@ class cpp:
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
-        "g++-12",
-        "g++-11",
-        "g++-10",
-        "clang++",
+        # "g++-12",
+        # "g++-11",
+        # "g++-10",
+        # "clang++",
         "g++",
-        "g++.par",
+        # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
