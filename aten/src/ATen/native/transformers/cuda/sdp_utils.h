@@ -204,7 +204,7 @@ inline bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
         !debug,
         "Mem efficient attention requires last dimension of inputs to be divisible by ",
         alignment,
-        ".",
+        ". ",
         "Got Query.size(-1): ",
         query_size_last,
         ", Key.size(-1): ",
