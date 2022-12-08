@@ -256,20 +256,28 @@ test_inductor() {
   PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
 }
 
-test_inductor_huggingface() {
+test_inductor_benchmark() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  PARTITION_FLAGS=""
+  if [[ ! -z "$NUM_TEST_SHARDS" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id \"$2\""
+  fi
   mkdir -p "$TEST_REPORTS_DIR"
   # Check inference with --float32
-  python benchmarks/dynamo/huggingface.py --ci --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  python benchmarks/dynamo/$1.py --ci --accuracy \
+    --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
   # Check training with --amp
-  python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
+  python benchmarks/dynamo/$1.py --ci --training --accuracy \
+    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+}
+
+test_inductor_huggingface() {
+  test_inductor_benchmark huggingface
 }
 
 test_inductor_timm_shard() {
@@ -277,34 +285,11 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  # Use test-reports directory under test folder will allow the CI to automatically pick up
-  # the test reports and upload them to S3. Need to use full path here otherwise the script
-  # will bark about file not found later on
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  # Check inference with --float32
-  python benchmarks/dynamo/timm_models.py --ci --accuracy \
-    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
-  # Check training with --amp
-  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+  test_inductor_benchmark timm_models "$1"
 }
 
 test_inductor_torchbench() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-  # Check inference with --float32
-  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
-  # Check training with --amp
-  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
-    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
+  test_inductor_benchmark torchbench
 }
 
 test_python_gloo_with_tls() {
