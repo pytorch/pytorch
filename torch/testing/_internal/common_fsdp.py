@@ -290,11 +290,16 @@ class TransformerWithSharedParams(FSDPTestModel):
                 across constructions.
             add_bn (bool): Whether to include batch norm in the model.
         """
+
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            if isinstance(group, tuple):
+                pg = group[0]
+            else:
+                pg = group
             return TransformerWithSharedParams(
-                group, cuda_init_mode, add_bn, deterministic
+                pg, cuda_init_mode, add_bn, deterministic
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Default to the `ModuleWrapPolicy`
@@ -307,11 +312,28 @@ class TransformerWithSharedParams(FSDPTestModel):
                 )
             else:
                 auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")
+
+            if (
+                "sharding_strategy" in fsdp_kwargs
+                and fsdp_kwargs["sharding_strategy"] in {
+                    ShardingStrategy.HYBRID_SHARD,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2
+                } and not isinstance(group, tuple)
+            ):
+                fsdp_pg = None
+            else:
+                fsdp_pg = group
+
+            if isinstance(group, tuple):
+                tformer_pg = group[0]
+            else:
+                tformer_pg = group
+
             fsdp_model = FSDP(
                 TransformerWithSharedParams(
-                    group, cuda_init_mode, add_bn, deterministic
+                    tformer_pg, cuda_init_mode, add_bn, deterministic
                 ),
-                group,
+                fsdp_pg,
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,
             )
