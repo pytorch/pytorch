@@ -173,12 +173,15 @@ def _common_unshard_post_state_dict_hook(
 
     # TODO: removing this pop causes some test failures, such as
     # python test/distributed/fsdp/test_fsdp_state_dict.py -v "TestFSDPStateDict.test_save_and_load_after_forward_state_dict_state_dict_type_state_dict_mixed_precision_False_state_dict_rank0_and_offload_True"
+    # although, it is not clear why only some keys exist:
     # Recursively, we:
     # try to pop: _fsdp_wrapped_module.0._flat_param
     # try to pop: _flat_param
     # but only the latter exists.
+    #
     if not fsdp_state._use_orig_params:
         try:
+            if dist.get_rank() == 0: print(f"Trying to pop: {prefix}{FLAT_PARAM}")
             state_dict.pop(f"{prefix}{FLAT_PARAM}")
         except:
             pass

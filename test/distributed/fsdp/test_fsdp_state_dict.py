@@ -217,6 +217,7 @@ class TestFSDPStateDict(FSDPTest):
     ):
         if state_dict_rank0_and_offload:
             if self.rank == 0:
+                print(f"Rank 0 contents {list(fsdp_state_dict.keys())}")
                 self.assertNotEqual(fsdp_state_dict, {})
                 for key, tensor in fsdp_state_dict.items():
                     if ignore_keys and key in ignore_keys:
@@ -230,6 +231,7 @@ class TestFSDPStateDict(FSDPTest):
                 # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
                 # so bypass the check for now.
                 if isinstance(model, FSDP):
+                    print(f"rank {dist.get_rank()} contents: {list(fsdp_state_dict.keys())} ")
                     self.assertEqual(
                         fsdp_state_dict, {}, f"Expected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}"
                     )
