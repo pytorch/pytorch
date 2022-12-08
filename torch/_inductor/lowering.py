@@ -370,64 +370,12 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-@register_lowering(aten._to_copy)
-def _to_copy(
-    x,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    non_blocking=False,
-    memory_format=None,
-):
-    assert not layout or layout == torch.strided, "TODO"
-    assert not pin_memory, "TODO"
-    assert not memory_format, "TODO"
-    if device:
-        device = decode_device(device)
-    if device is not None and device != x.get_device():
-        if dtype is not None and device.type == "cpu":
-            # CPU can do fewer type conversions
-            x = to_dtype(x, decode_dtype(dtype))
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, decode_dtype(dtype))
-    return x
-
-
-@register_lowering(aten.to)
-def to(
-    x,
-    device_or_dtype=None,
-    non_blocking=False,
-    copy=False,
-    memory_format=None,
-    device=None,
-    dtype=None,
-    layout=None,
-):
-    assert not memory_format, "TODO"
-    assert layout in (None, torch.strided)
-    if isinstance(device_or_dtype, torch.dtype):
-        return to_dtype(x, device_or_dtype)
-    elif isinstance(device_or_dtype, torch.device):
-        return to_device(x, device_or_dtype)
-    else:
-        assert device_or_dtype is None, device_or_dtype
-
-    if device is not None:
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    return x
 
 
 def ops_wrapper(name):
@@ -1600,9 +1548,9 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 def as_tensor(data, dtype=None, device=None):
     if isinstance(data, TensorBox):
         if dtype is not None:
-            data = to(data, dtype)
+            data = to_dtype(data, dtype)
         if device is not None:
-            data = to(data, device)
+            data = to_device(data, device)
         return data
     return tensor(data, dtype=dtype, device=device)
 

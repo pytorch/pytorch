@@ -165,12 +165,12 @@ def _init_core_state(
     ] = collections.defaultdict(list)
     state._module_to_handles = _module_to_handles
     # Same as `_module_to_handle` but filtered to only include keys that are
-    # root modules with respect to the `FlatParamHandle` (see `_root_modules`
-    # in `FlatParameter`)
-    _root_module_to_handles: Dict[
+    # "communication modules", which are responsible for the unshard/reshard
+    # for their `FlatParamHandle`s
+    _comm_module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
-    state._root_module_to_handles = _root_module_to_handles
+    state._comm_module_to_handles = _comm_module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -266,7 +266,7 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             root_module, managed_params, state.process_group
         )
-    _init_param_handle_from_params(state, managed_params, root_module)
+    _init_param_handle_from_params(state, managed_params, root_module, root_module)
     return state
 
 
@@ -323,7 +323,7 @@ def _init_param_handles_from_module(
             _sync_module_states(params, buffers, state.process_group)
         # Pass `root_module` to have internal FQN metadata prefix starting from
         # it instead of `submodule`
-        _init_param_handle_from_params(state, params, root_module)
+        _init_param_handle_from_params(state, params, root_module, submodule)
     # Reverse to preserve top-down order like `_fsdp_handles()`
     state._handles.reverse()
     return state
@@ -334,6 +334,7 @@ def _init_param_handle_from_params(
     state: _FSDPState,
     params: List[nn.Parameter],
     root_module: nn.Module,
+    comm_module: nn.Module,
 ):
     if len(params) == 0:
         return
@@ -347,6 +348,7 @@ def _init_param_handle_from_params(
     handle = FlatParamHandle(
         params,
         root_module,
+        comm_module,
         state.compute_device,
         handle_config,
         state.process_group,
@@ -359,8 +361,12 @@ def _init_param_handle_from_params(
     state._handles.append(handle)
     for module in handle.flat_param._modules:
         state._module_to_handles[module].append(handle)
-    for module in handle.flat_param._root_modules:
-        state._root_module_to_handles[module].append(handle)
+    state._comm_module_to_handles[handle._comm_module].append(handle)
+    num_comm_module_handles = len(state._comm_module_to_handles[handle._comm_module])
+    assert num_comm_module_handles == 1, (
+        "The current design assumes a module manages at most one "
+        f"`FlatParamHandle` but got {num_comm_module_handles}"
+    )
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
