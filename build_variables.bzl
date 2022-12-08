@@ -1027,7 +1027,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
 aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/AccumulateType.cpp",
-    "aten/src/ATen/BatchedTensorImpl.cpp",
+    "aten/src/ATen/LegacyBatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
@@ -1061,8 +1061,8 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/FuncTorchTLS.cpp",
     "aten/src/ATen/Utils.cpp",
     "aten/src/ATen/Version.cpp",
-    "aten/src/ATen/VmapMode.cpp",
-    "aten/src/ATen/VmapTransforms.cpp",
+    "aten/src/ATen/LegacyVmapMode.cpp",
+    "aten/src/ATen/LegacyVmapTransforms.cpp",
     "aten/src/ATen/core/BackendSelectFallbackKernel.cpp",
     "aten/src/ATen/core/DeprecatedTypeProperties.cpp",
     "aten/src/ATen/core/DeprecatedTypePropertiesRegistry.cpp",
@@ -1291,7 +1291,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/Batching.cpp",
+    "aten/src/ATen/native/LegacyBatching.cpp",
     "aten/src/ATen/native/BinaryOps.cpp",
     "aten/src/ATen/native/Blas.cpp",
     "aten/src/ATen/native/BlasKernel.cpp",
