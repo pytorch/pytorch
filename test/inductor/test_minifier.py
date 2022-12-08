@@ -253,7 +253,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         self.assertIn("AccuracyError", tb2)
 
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
