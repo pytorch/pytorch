@@ -131,7 +131,10 @@ class TORCH_API LazyGraphExecutor {
 
   hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
 
- private:
+ protected:
+  // TODO(alanwaketan): Revisit if all of them need to be accessible to
+  // derived classes.
+
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
     // the IR graph above them).
@@ -158,6 +161,7 @@ class TORCH_API LazyGraphExecutor {
     std::vector<size_t> parameter_sequence;
   };
 
+ private:
   struct CompilationResult {
     BackendDevice device;
     size_t emitted_nodes = 0;
