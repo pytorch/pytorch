@@ -815,21 +815,6 @@ class CppVecKernel(CppKernel):
         else:
             nelements = codecache.pick_vec_isa().nelements()
             line = load_help(new_index, nelements)
-            """
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
-                g_tmp_buf = f"g_tmp_buffer_{var}"
-                nelements = codecache.pick_vec_isa().nelements()
-                if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
-                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
-                self.loads.writeline(
-                    f"to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
-                )
-                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
-            else:
-                import pdb
-                pdb.set_trace()
-                line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
-            """
 
         return self.cse.generate(self.loads, line)
 
