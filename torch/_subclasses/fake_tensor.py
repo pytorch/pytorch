@@ -26,18 +26,6 @@ aten = torch.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
-CONSTANT_LIFTING = False
-
-
-@contextlib.contextmanager
-def _enable_constant_lifting():
-    global CONSTANT_LIFTING
-    prev, CONSTANT_LIFTING = CONSTANT_LIFTING, True
-    try:
-        yield
-    finally:
-        CONSTANT_LIFTING = prev
-
 
 @dataclass
 class UnsupportedFakeTensorException(RuntimeError):
@@ -709,6 +697,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_meta=False,
         throw_on_data_dependent_ops=True,
+        allow_non_fake_inputs=False,
         shape_env=None,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -717,6 +706,10 @@ class FakeTensorMode(TorchDispatchMode):
 
         # TODO: delete arg and default to true. waiting on dynamo perf regression testing
         self.throw_on_data_dependent_ops = throw_on_data_dependent_ops
+        
+        # A flag that controls, whether we want to invoke ops on mix of
+        # real weights/global variables and fake inputs
+        self.allow_non_fake_inputs = allow_non_fake_inputs
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
@@ -796,7 +789,7 @@ class FakeTensorMode(TorchDispatchMode):
             return converter(self, args[0])
 
         if self.check_for_non_fake(flat_arg_tensors):
-            if not CONSTANT_LIFTING:
+            if (torch.Tag.inplace_view in func.tags) or (not self.allow_non_fake_inputs):
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
                     f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"

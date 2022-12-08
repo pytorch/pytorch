@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
-from torch._subclasses.fake_tensor import FakeTensorMode, _enable_constant_lifting
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -627,7 +627,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _constant_lifting=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -641,18 +641,16 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _constant_lifting=
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True, allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, allow_non_fake_inputs=_allow_non_fake_inputs, shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
         if tracing_mode == "symbolic":
             python_dispatcher_mode = enable_python_dispatcher()
-
-        constant_lifting_mode = _enable_constant_lifting() if _constant_lifting else nullcontext()
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
@@ -681,7 +679,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _constant_lifting=
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache(), constant_lifting_mode:  # type: ignore[attr-defined]
+             sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way

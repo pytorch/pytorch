@@ -1231,10 +1231,10 @@ def forward(self, primals_1, primals_2):
 
         inp = torch.randn(2, 5)
 
-        gm = make_fx(m, tracing_mode="symbolic", _constant_lifting=True)(inp)
+        gm = make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
         self.assertEqual(gm(torch.ones(2, 5)), m(torch.ones(2, 5)))
 
-        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _constant_lifting=True)(inp)
+        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
         self.assertEqual(gm_functionalized(torch.ones(2, 5)), m(torch.ones(2, 5)))
 
         inp_count = 0
@@ -1254,7 +1254,25 @@ def forward(self, primals_1, primals_2):
         self.assertEqual(inp_count, 1)
 
         with self.assertRaisesRegex(Exception, "Invoking operators with non-Fake Tensor"):
-            make_fx(m, tracing_mode="symbolic", _constant_lifting=False)(torch.randn(2, 5))
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
+
+    def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
+        from functorch.experimental import functionalize
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 5))
+
+            def forward(self, x):
+                self.buffer.resize_([6, 5])
+                return x.sum() + self.buffer.sum()
+
+        m = M().eval()
+        inp = torch.randn(2, 5)
+        # inplace mutation on attr is not allowed
+        with self.assertRaisesRegex(Exception, "Invoking operators with non-Fake Tensor"):
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
 
 def extract_graph(fx_g, _, graph_cell):
