@@ -648,7 +648,7 @@ class PackageExporter:
                         field = arg
                         memo[memo_count] = arg
                     elif (
-                        opcode.name == "BINGET_LONG"
+                        opcode.name == "LONG_BINGET"
                         or opcode.name == "BINGET"
                         or opcode.name == "GET"
                     ):
@@ -658,6 +658,9 @@ class PackageExporter:
                     elif opcode.name == "MEMOIZE":
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
+                        if module is None:
+                            # If not module was passed on in the entries preceeding this one, continue.
+                            continue
                         assert isinstance(module, str)
                         if module not in all_dependencies:
                             all_dependencies.append(module)
