@@ -199,7 +199,7 @@ __all__ = [
     # Randomness Prims
     #
     "normal",
-    "uniform",
+    "_uniform_helper",
     #
     # FFT prims
     #
@@ -1232,7 +1232,12 @@ def _broadcast_in_dim_meta(
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            new_strides.append(0)
+            if shape[idx] != 1:
+                new_strides.append(0)
+            elif original_idx == a.ndim:
+                new_strides.append(1)
+            else:
+                new_strides.append(a.stride()[original_idx] * a.size()[original_idx])
 
     return a.as_strided(shape, new_strides, a.storage_offset())
 
@@ -2707,7 +2712,7 @@ _uniform_doc = """
 """
 
 # TODO: we should more seriously review randomness modeling and prims
-uniform = _make_prim(
+_uniform_helper = _make_prim(
     schema=(
         "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),
