@@ -146,8 +146,10 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
 
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
-        query_size_last <= 128)) {
+        query_size_last <= 128 && key_size_last % 8 == 0 &&
+        key_size_last <= 128)) {
     TORCH_CHECK(
         !debug,
         "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
@@ -193,9 +195,11 @@ inline int64_t minimum_gemm_alignment(sdp_params params) {
 
 inline bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   const int64_t alignment = minimum_gemm_alignment(params);
   if (!(query_size_last == params.key.size(-1) &&
-        query_size_last % alignment == 0)) {
+        query_size_last % alignment == 0 && query_size_last >= 8 &&
+        key_size_last % alignment == 0 && key_size_last >= 8)) {
     TORCH_CHECK(
         !debug,
         "Mem efficient attention requires last dimension of inputs to be divisible by ",
