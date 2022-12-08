@@ -88,14 +88,18 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
-// This constructor allows child classes to have their own custom c10::TensorImpl.
-LTCTensorImpl::LTCTensorImpl(const LazyTensorPtr& tensor,
-  c10::DispatchKey dispatch_key, c10::DispatchKey autograd_dispatch_key,
-  caffe2::TypeMeta data_type, c10::Device device)
+// This constructor allows child classes to have their own custom
+// c10::TensorImpl.
+LTCTensorImpl::LTCTensorImpl(
+    const LazyTensorPtr& tensor,
+    c10::DispatchKey dispatch_key,
+    c10::DispatchKey autograd_dispatch_key,
+    caffe2::TypeMeta data_type,
+    c10::Device device)
     : c10::TensorImpl(
-          c10::DispatchKeySet{
-              dispatch_key, autograd_dispatch_key},
-          data_type, device),
+          c10::DispatchKeySet{dispatch_key, autograd_dispatch_key},
+          data_type,
+          device),
       tensor_(c10::make_intrusive<LazyTensor>(std::move(*tensor))) {
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }

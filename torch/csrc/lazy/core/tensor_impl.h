@@ -16,9 +16,12 @@ class TORCH_API LTCTensorImpl : public c10::TensorImpl {
   explicit LTCTensorImpl(const LazyTensorPtr& tensor);
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
-  explicit LTCTensorImpl(const LazyTensorPtr& tensor,
-    c10::DispatchKey dispatch_key, c10::DispatchKey autograd_dispatch_key,
-    caffe2::TypeMeta data_type, c10::Device device);
+  explicit LTCTensorImpl(
+      const LazyTensorPtr& tensor,
+      c10::DispatchKey dispatch_key,
+      c10::DispatchKey autograd_dispatch_key,
+      caffe2::TypeMeta data_type,
+      c10::Device device);
 
   LazyTensorPtr tensor() {
     return tensor_;
