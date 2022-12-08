@@ -309,16 +309,7 @@ inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
       t = *(uint8_t*)&src_min[j * ids_stride];
       output += t * wts;
     }
-    output = (uint8_t) (output >> weights_precision);
-
-    // std::cout << "AA " << weights_precision << std::endl;
-
-    *(uint8_t*)&dst[i * strides[0]] = output;
-    //     interpolate_aa_single_dim_zero_strides<scalar_t, int64_t>(
-    //         src + i * strides[1], &data[2], ids_stride);
-    // if (output == 108) {
-    //   std::cout << "108 " << n << " " << i << std::endl;
-    // }
+    *(uint8_t*)&dst[i * strides[0]] = (uint8_t)std::clamp(output >> weights_precision, 0, 255);
   }
 }
 
@@ -378,46 +369,15 @@ inline void basic_loop_aa_single_dim_nonzero_strides<uint8_t>(
     short* wts_ptr = (short*)&data[2 + 3][wts_idx];
     short wts = wts_ptr[0];
 
-#ifdef VERBOSE
-    if (i < 2) {
-      std::cout << "\n-- i=" << i << ", n=" << n << std::endl;
-      std::cout << "t, wts: " << (int) t << ", " << wts << std::endl;
-    }
-#endif
-
     // Intermediate computations are using integer type
     int output = 1 << (weights_precision - 1);
-#ifdef VERBOSE
-    if (i < 2) {
-      std::cout << "1 output= " << output << std::endl;
-    }
-#endif
     output += t * wts;
-#ifdef VERBOSE
-    if (i < 2) {
-      std::cout << "2 output= " << output << std::endl;
-    }
-#endif
     for (const auto j : c10::irange(1, ids_size)) {
       wts = wts_ptr[j];
       t = *(uint8_t*)&src_min[j * ids_stride];
       output += t * wts;
-#ifdef VERBOSE
-      if (i < 2) {
-        std::cout << j + 2 << " t, wts, output= " << (int) t << ", " << wts << ", " << output << std::endl;
-      }
-#endif
     }
-    output = (uint8_t) (output >> weights_precision);
-#ifdef VERBOSE
-    if (i < 2) {
-      std::cout << "final output= " << output << std::endl;
-    }
-#endif
-
-    *(uint8_t*)&dst[i * strides[0]] = output;
-        // interpolate_aa_single_dim<uint8_t,q int64_t>(
-        //     src + i * strides[1], &data[2], &strides[2], i, ids_stride);
+    *(uint8_t*)&dst[i * strides[0]] = (uint8_t)std::clamp(output >> weights_precision, 0, 255);
   }
 }
 
@@ -1157,20 +1117,14 @@ struct HelperInterpLinear : public HelperInterpBase {
     }
 
     // rescale float values to int16, we use the same buffer as PIL-SIMD
-    // w_f32 -> w_i16 = int(w_f32 * 2^N + 0.5)
-    // out_ui8 = int( (w_i16 * in_ui8) / 2^N + 0.5 )
-
     short * data_i16 = (short *) data_f32;
     for (const auto i : c10::irange(weights_f32_size)) {
-    //   float v = data_f32[i];
       double v = data_f32[i];
       if (v < 0) {
           data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
       } else {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
-    //   std::cout << "(" << v << ", " << data_i16[i] << ") ";
-    //   std::cout << std::endl;
     }
     return indices_weights;
   }
@@ -1388,9 +1342,6 @@ struct HelperInterpCubic : public HelperInterpBase {
       } else {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
-
-    //   std::cout << "(" << v << ", " << data_i16[i] << ") ";
-    //   std::cout << std::endl;
     }
     return indices_weights;
   }
@@ -1801,9 +1752,7 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
     input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
     beepidiboop(input, output, &F::aa_filter, F::interp_size);
-    // std::cout << "fast path" << std::endl;
   } else {
-    // std::cout << "slow path" << std::endl;
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
         output, input, align_corners, {scales_h, scales_w});
   }
@@ -1812,10 +1761,6 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
       output, input, align_corners, {scales_h, scales_w});
 #endif // CPU_CAPABILITY_AVX2
 
-//   std::cout << std::endl;
-//   std::cout << std::endl;
-//   std::cout << std::endl;
-//   std::cout << std::endl;
 }
 
 void upsample_bilinear2d_aa_kernel_impl(

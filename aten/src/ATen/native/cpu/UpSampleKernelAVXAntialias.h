@@ -121,7 +121,7 @@ int precompute_coeffs( // TODO: This is redundant with
     filterscale = 1.0;
   }
   /* determine support size (length of resampling filter) */
-  support = filterscale * interp_size / 2;
+  support = filterscale * interp_size / 2.;
 
   /* maximum number of coeffs */
   ksize = (int)ceil(support) * 2 + 1;
@@ -222,8 +222,6 @@ int normalize_coeffs_8bpc(int outSize, int ksize, double* prekk) {
     } else {
       kk[x] = (int)(0.5 + prekk[x] * (1 << coefs_precision));
     }
-    //   std::cout << "(" << prekk[x] << ", " << kk[x] << ") ";
-    // std::cout << std::endl;
   }
   return coefs_precision;
 }
@@ -324,7 +322,6 @@ void ImagingResampleVertical_8bpc(
   // use the same buffer for normalized coefficients
   kk = (INT16*)prekk;
   coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
-  // std::cout << "BB " << coefs_precision << std::endl;
 
   for (yy = 0; yy < yout; yy++) {
     k = &kk[yy * ksize];
@@ -1237,6 +1234,7 @@ void ImagingResampleVerticalConvolution8u(
       pix = _mm_unpacklo_epi8(source, _mm_setzero_si128());
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
+
     for (; x < xmax; x++) {
       // __m128i pix = mm_cvtepu8_epi32(&imIn->image32[x + xmin][xx]);
       __m128i pix = mm_cvtepu8_epi32(imIn + (x + xmin) * xin + xx);
