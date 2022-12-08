@@ -13,8 +13,8 @@ namespace {
 template <typename T> class TensorGPUTest : public ::testing::Test {};
 template <typename T> class TensorGPUDeathTest : public ::testing::Test {};
 typedef ::testing::Types<char, int, float> TensorTypes;
-TYPED_TEST_CASE(TensorGPUTest, TensorTypes);
-TYPED_TEST_CASE(TensorGPUDeathTest, TensorTypes);
+TYPED_TEST_SUITE(TensorGPUTest, TensorTypes);
+TYPED_TEST_SUITE(TensorGPUDeathTest, TensorTypes);
 
 TYPED_TEST(TensorGPUTest, TensorInitializedEmpty) {
   if (!caffe2::HasCudaGPU()) return;

@@ -252,8 +252,8 @@ class TensorCPUTest : public ::testing::Test {};
 template <typename T>
 class TensorCPUDeathTest : public ::testing::Test {};
 typedef ::testing::Types<char, int, float> TensorTypes;
-TYPED_TEST_CASE(TensorCPUTest, TensorTypes);
-TYPED_TEST_CASE(TensorCPUDeathTest, TensorTypes);
+TYPED_TEST_SUITE(TensorCPUTest, TensorTypes);
+TYPED_TEST_SUITE(TensorCPUDeathTest, TensorTypes);
 
 TYPED_TEST(TensorCPUTest, TensorInitializedEmpty) {
   Tensor tensor(CPU);
@@ -899,7 +899,7 @@ class TypedTensorTest : public ::testing::Test {};
 typedef ::testing::
     Types<float, bool, double, int, int8_t, int16_t, uint8_t, uint16_t, int64_t>
         TensorDataTypes;
-TYPED_TEST_CASE(TypedTensorTest, TensorDataTypes);
+TYPED_TEST_SUITE(TypedTensorTest, TensorDataTypes);
 
 TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
   int64_t d1 = 2;

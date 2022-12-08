@@ -955,8 +955,9 @@ TEST_F(LazyOpsTest, TestIntegerAdd) {
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
       torch::Tensor b =
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
-      torch::Scalar one =
-          isIntegralType(type) ? torch::Scalar(1) : torch::Scalar(1.0);
+      torch::Scalar one = isIntegralType(type, /*includeBool=*/false)
+          ? torch::Scalar(1)
+          : torch::Scalar(1.0);
       torch::Tensor c = torch::add(b, one);
 
       torch::Tensor lazy_a = CopyToDevice(a, device);

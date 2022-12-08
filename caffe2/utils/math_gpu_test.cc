@@ -346,7 +346,7 @@ TEST_P(GemmBatchedGPUTest, GemmStridedBatchedGPUFloatTest) {
   VerifyOutput(20.0f);
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     GemmBatchedGPUTrans,
     GemmBatchedGPUTest,
     testing::Combine(testing::Bool(), testing::Bool()));

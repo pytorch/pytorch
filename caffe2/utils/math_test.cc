@@ -281,7 +281,7 @@ TEST_P(GemmBatchedTest, GemmStridedBatchedFloatTest) {
   VerifyOutput(20.0f);
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     GemmBatchedTrans,
     GemmBatchedTest,
     testing::Combine(testing::Bool(), testing::Bool()));
