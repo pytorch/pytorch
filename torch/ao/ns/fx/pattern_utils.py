@@ -8,7 +8,7 @@ from torch.fx.graph import Node
 
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
-from torch.ao.quantization.utils import _getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
 from torch.ao.quantization import (
     ObserverBase,
@@ -159,7 +159,7 @@ def end_node_matches_reversed_fusion(
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
                 assert isinstance(cur_node.target, str)
-                target_mod = _getattr_from_fqn(gm, cur_node.target)
+                target_mod = getattr_from_fqn(gm, cur_node.target)
                 if not isinstance(cur_fusion_el, type):
                     return False
                 if not isinstance(target_mod, cur_fusion_el):
