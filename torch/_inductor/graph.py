@@ -97,6 +97,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
+        self.scheduler = None
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
