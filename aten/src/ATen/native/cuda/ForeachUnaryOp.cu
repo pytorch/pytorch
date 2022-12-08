@@ -317,7 +317,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_zero_cuda_", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_zero_cuda_", [&]() {
         multi_tensor_apply<1>(tensor_lists,
                               ZeroFunctor<scalar_t,
                                           /* depth */ 1,
