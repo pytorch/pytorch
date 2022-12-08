@@ -1,5 +1,5 @@
 import tensorboard
-from packaging import version  # type: ignore
+from packaging import version  # type: ignore[import]
 
 if not hasattr(tensorboard, "__version__") or version.parse(
     tensorboard.__version__
