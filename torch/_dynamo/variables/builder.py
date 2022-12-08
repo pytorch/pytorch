@@ -717,7 +717,6 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             # TODO(voz): Find all the callsites and burn this down.
             # Flipping it to an assert fails dozens of tests.
             if not isinstance(example_value, torch._subclasses.FakeTensor):
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
                 example_value = fake_wrapper(example_value)
 
