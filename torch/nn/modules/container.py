@@ -15,6 +15,19 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
+# Copied from torch.nn.modules.module, required for a cusom __repr__ for ModuleList
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # don't do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
+
+
 class Container(Module):
 
     def __init__(self, **kwargs: Any) -> None:
@@ -311,6 +324,29 @@ class ModuleList(Module):
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
         return combined
+
+    def __repr__(module):
+        """A custom repr for ModuleList that compresses repeated module representations"""
+        list_of_reprs = [repr(item) for item in module]
+        repeats = [1]
+        repeated_blocks = [list_of_reprs[0]]
+        for r in list_of_reprs[1:]:
+            if r == repeated_blocks[-1]:
+                repeats[-1] += 1
+            else:
+                repeats.append(1)
+                repeated_blocks.append(r)
+
+        lines = []
+        main_str = module._get_name() + '('
+        for r, b in zip(repeats, repeated_blocks):
+            local_repr = f"{r} x {b}"
+            local_repr = _addindent(local_repr, 2)
+            lines.append(local_repr)
+
+        main_str += '\n  ' + '\n  '.join(lines) + '\n'
+        main_str += ')'
+        return main_str
 
     @_copy_to_script_wrapper
     def __dir__(self):
