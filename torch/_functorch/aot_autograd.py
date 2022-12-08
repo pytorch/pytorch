@@ -480,9 +480,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         # The base that we want to replay our view off of might have a different shape than the view's original base.
         b = target_meta_tensor._base
         reshaped_base_tensor = aliased_base_tensor.as_strided(b.size(), b.stride(), b.storage_offset())
-        out = target_meta_tensor._view_func(reshaped_base_tensor)
-        out.requires_grad_(target_requires_grad)
-        return out
+        if torch.Tensor._has_same_metadata(target_meta_tensor._base, reshaped_base_tensor):
+            out = target_meta_tensor._view_func(reshaped_base_tensor)
+            out.requires_grad_(target_requires_grad)
+            return out
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()

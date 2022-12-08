@@ -714,6 +714,27 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_has_same_metadata(
+    PyObject* _self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(_self);
+  static PythonArgParser parser({
+      "_has_same_metadata(Tensor a, Tensor b)",
+  });
+  ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(_self, args, kwargs, parsed_args);
+  auto a = r.tensor(0);
+  auto b = r.tensor(1);
+  if (torch::autograd::utils::has_same_meta(a, b)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(
     PyObject* _self,
@@ -1676,6 +1697,10 @@ static PyMethodDef extra_methods[] = {
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
     {"_view_func", THPVariable_view_func, METH_O, nullptr},
+    {"_has_same_metadata",
+     castPyCFunctionWithKeywords(THPVariable_has_same_metadata),
+     METH_STATIC | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {nullptr}};
 
 /* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
