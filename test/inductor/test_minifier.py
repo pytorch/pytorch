@@ -204,7 +204,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     def test_after_aot_cuda_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 4, TRITON_ACCURACY_ERROR)
 
-    def _test_torch_compile(self, repro_after):
+    def _test_torch_compile(self, repro_after, repro_level, backend_code):
         run_code = textwrap.dedent(
             """\
             def inner(x):
@@ -221,26 +221,37 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         """
         )
 
-        patch_code = self._gen_codegen_fn_patch_code("relu", CPP_COMPILE_ERROR, "cpu")
+        patch_code = self._gen_codegen_fn_patch_code("relu", backend_code, "cpu")
         self.assertIsNotNone(patch_code)
 
         (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, repro_after, 2, patch_code
+            run_code, repro_after, repro_level, patch_code
         )
         return (
             (test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8")),
             (test_proc.returncode, repro_proc.returncode),
         )
 
-    def test_torch_compile_after_dynamo(self):
-        (tb1, tb2), _ = self._test_torch_compile("dynamo")
+    def test_torch_compile_after_dynamo_compile_error(self):
+        (tb1, tb2), _ = self._test_torch_compile("dynamo", 2, CPP_COMPILE_ERROR)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
 
-    def test_torch_compile_after_aot(self):
-        (tb1, tb2), _ = self._test_torch_compile("aot")
+    def test_torch_compile_after_dynamo_accuracy_error(self):
+        (tb1, tb2), _ = self._test_torch_compile("dynamo", 4, CPP_ACCURACY_ERROR)
+        self.assertIn("AccuracyError", tb1)
+        self.assertIn("AccuracyError", tb2)
+
+    def test_torch_compile_after_aot_compile_error(self):
+        (tb1, tb2), _ = self._test_torch_compile("aot", 2, CPP_COMPILE_ERROR)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
+
+    def test_torch_compile_after_aot_accuracy_error(self):
+        (tb1, tb2), _ = self._test_torch_compile("aot", 4, CPP_ACCURACY_ERROR)
+        self.assertIn("AccuracyError", tb1)
+        self.assertIn("AccuracyError", tb2)
+
 
 
 if __name__ == "__main__":
