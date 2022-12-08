@@ -156,18 +156,16 @@ class Collective:
                     self._start_cond.notify()
 
             if rank == 0:
-                while self._count < self._world_size and not self._pg._terminate:
-                    self._start_cond.wait(COLLECTIVE_TIMEOUT_DEFAULT)
-                if self._pg._terminate:
-                    raise RuntimeError("Test fails due to early termination of thread!")
+                self._start_cond.wait_for(lambda: self._count == self._world_size or self._pg._terminate.is_set())
+                if self._pg._terminate.is_set():
+                    sys.exit("Test termination event occurs.")
 
         with self._done_cond:
             # wait for rank 0 to finish
             if rank > 0:
-                while not self._done and not self._pg._terminate:
-                    self._done_cond.wait(COLLECTIVE_TIMEOUT_DEFAULT)
-                if self._pg._terminate:
-                    raise RuntimeError("Test fails due to early termination of thread!")
+                self._done_cond.wait_for(lambda: self._done or self._pg._terminate.is_set())
+                if self._pg._terminate.is_set():
+                    sys.exit("Test termination event occurs.")
             else:
                 # copy data around
                 self._collective.work(self._data)
@@ -184,8 +182,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     _coll_lock = threading.Lock()
     _cur_coll = None
-    
-    _terminate = False
+
+    _terminate = threading.Event()
 
     @classmethod
     def _register(cls, pg):
@@ -217,13 +215,16 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     @classmethod
     def exception_handle(cls, exc):
-        with cls._pg_lock:
-            cls._terminate = True
+        cls._terminate.set()
+        coll = cls._cur_coll
+        if coll:
+            coll._start_cond.notify()
+            coll._done_cond.notify_all()
 
     @classmethod
-    def reset_terminate(cls):
-        with cls._pg_lock:
-            cls._terminate = False
+    def reset(cls):
+        cls._cur_coll = None
+        cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
@@ -352,15 +353,17 @@ def run_with_threaded_pg(world_size, timeout, callback):
 
     def worker(rank):
         if not world_is_valid():
-            raise TimeoutError("Invalid world") # TODO: raise TimeoutError or RuntimeError?
+            raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
         dist.init_process_group(
             backend="threaded", rank=rank, world_size=world_size, store=global_store
         )
         try:
             callback()
-        except BaseException as ex:
+        # reason why we don't use BaseException is we want to
+        # ignore SystemExit excpetion caused by _terminate event
+        except Exception as ex:
             exception_queue.put((rank, sys.exc_info()))
-            # notify all threads to throw exception.
+            # thread cleanup
             world.default_pg.exception_handle(ex)
         finally:
             if world_is_valid():
@@ -373,7 +376,15 @@ def run_with_threaded_pg(world_size, timeout, callback):
         for thread in threads:
             thread.start()
 
+        # we want to have a as close to MultiProcessTestCase._join_processes()
+        # as possible logic
+
+        # all test threads must join within `deadline`
+        # otherwise it is a timeout error
+        start_time = time.time()
+        subthread_error = False
         deadline = time.time() + timeout
+
         for idx, thread in enumerate(threads):
             thread.join(max(0, deadline - time.time()))
             if thread.is_alive():
@@ -389,7 +400,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
                         ),
                     )
                 )
-        ProcessLocalGroup.reset_terminate()
+        ProcessLocalGroup.reset()
         failed_ranks = []
         while not exception_queue.empty():
             failure = exception_queue.get()

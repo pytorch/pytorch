@@ -27,6 +27,36 @@ class TestCollectivesWithWrapper(TestCase):
         dist.broadcast_object_list(object_list=object_list)
         self.assertEqual(99, object_list[0])
 
+    def test_collective_timeout_on_rank_zero(self):
+        @spawn_threads_and_init_comms(world_size=4)
+        def _test_method(self):
+            input_tensor = torch.ones(3, 3) * dist.get_rank()  # perform 1st all gather
+            output_tensors = [torch.empty_like(input_tensor) for _ in range(dist.get_world_size())]
+            dist.all_gather(output_tensors, input_tensor)  # TODO: investigate why error here on rank 0
+
+            if dist.get_rank() == 0:
+                raise AssertionError("Mimic real test failure.")  # fail on rank 0
+
+            dist.all_gather(output_tensors, input_tensor)  # perform 2nd all gather
+
+        with self.assertRaisesRegex(AssertionError, "Mimic real test failure."):
+            _test_method(self)
+
+    def test_collective_timeout_on_rank_non_zero(self):
+        @spawn_threads_and_init_comms(world_size=4)
+        def _test_method(self):
+            input_tensor = torch.ones(3, 3) * dist.get_rank()  # perform 1st all gather
+            output_tensors = [torch.empty_like(input_tensor) for _ in range(dist.get_world_size())]
+            dist.all_gather(output_tensors, input_tensor)
+
+            if dist.get_rank() == 1:
+                raise AssertionError("Mimic real test failure.")  # fail on rank 1
+
+            dist.all_gather(output_tensors, input_tensor)  # perform 2nd all gather
+
+        with self.assertRaisesRegex(AssertionError, "Mimic real test failure."):
+            _test_method(self)
+
 class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -82,45 +112,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
-
-class TestCollectiveTimeout(TestCase):
-    def test_collective_timeout_on_rank_zero(self):
-        @spawn_threads_and_init_comms(world_size=4)
-        def _test_method(self):
-            # perform 1st all gather
-            input_tensor = torch.ones(3, 3) * dist.get_rank()
-            output_tensors = [torch.empty_like(input_tensor) for _ in range(dist.get_world_size())]
-            dist.all_gather(output_tensors, input_tensor)  # TODO: investigate why error here on rank 0
-
-            # fail on rank 0
-            if dist.get_rank() == 0:
-                raise AssertionError("Mimic real test failure.")
-            
-            # perform 2nd all gather
-            dist.all_gather(output_tensors, input_tensor)
-
-        with self.assertRaises(RuntimeError):
-            _test_method(self)
-
-
-    def test_collective_timeout_on_rank_non_zero(self):
-        @spawn_threads_and_init_comms(world_size=4)
-        def _test_method(self):
-            # perform 1st all gather
-            input_tensor = torch.ones(3, 3) * dist.get_rank()
-            output_tensors = [torch.empty_like(input_tensor) for _ in range(dist.get_world_size())]
-            dist.all_gather(output_tensors, input_tensor)
-
-            # fail on rank 0
-            if dist.get_rank() == 1:
-                raise AssertionError("Mimic real test failure.")
-            
-            # perform 2nd all gather
-            dist.all_gather(output_tensors, input_tensor)
-
-        with self.assertRaises(RuntimeError):
-            _test_method(self)
-        
 
 if __name__ == "__main__":
     run_tests()
