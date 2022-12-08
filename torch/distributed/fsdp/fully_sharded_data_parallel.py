@@ -82,6 +82,7 @@ from ._optim_utils import (
 )
 from ._state_dict_utils import (
     _post_load_state_dict_hook,
+    _pre_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
@@ -392,6 +393,7 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
+        self.register_state_dict_pre_hook(_pre_state_dict_hook)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True

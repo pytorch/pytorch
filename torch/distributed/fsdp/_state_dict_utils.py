@@ -129,10 +129,10 @@ def _common_pre_state_dict_hook(
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
-    # if fsdp_state.is_root:
-    #    _clear_grads_if_needed(_all_handles(fsdp_state))
-    if _has_fsdp_params(fsdp_state, module):
-        _clear_grads_if_needed([_module_handles(fsdp_state, module)[0]])
+    if fsdp_state.is_root:
+       _clear_grads_if_needed(_all_handles(fsdp_state))
+    # if _has_fsdp_params(fsdp_state, module):
+    #     _clear_grads_if_needed([_module_handles(fsdp_state, module)[0]])
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -178,8 +178,8 @@ def _common_unshard_post_state_dict_hook(
     # TODO: Once pre_state_dict hook is supported, this pop should be removed.
     # For `use_orig_params=True`, the `FlatParameter` is not registered, so
     # there is no entry in the state dict for it to pop.
-    if not fsdp_state._use_orig_params:
-        state_dict.pop(f"{prefix}{FLAT_PARAM}")
+    # if not fsdp_state._use_orig_params:
+    #     state_dict.pop(f"{prefix}{FLAT_PARAM}")
 
     # If a rank does not have unsharded parameters(when `rank0_only=True`
     # and `rank != 0`), then the rank only needed to participate in the
@@ -294,8 +294,8 @@ def _full_post_state_dict_hook(
     back to sharded version after _unshard_params ends, and also remove
     the ``FSDP_WRAPPED_MODULE`` prefix.
     """
-    # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    _full_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
+    # # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
+    # _full_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     def param_hook(
         state_dict: Dict[str, Any],
@@ -383,7 +383,7 @@ def _local_post_state_dict_hook(
     will happen. The underlying storage is the same.
     """
     # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    _local_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
+    # _local_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     _replace_by_prefix(state_dict, f"{prefix}{FSDP_PREFIX}", prefix)
     if not _has_fsdp_params(fsdp_state, module):
@@ -504,7 +504,7 @@ def _sharded_post_state_dict_hook(
     """
 
     # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    _sharded_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
+    #_sharded_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
@@ -648,6 +648,25 @@ def _post_state_dict_hook(
     )
     return processed_state_dict
 
+@no_type_check
+@torch.no_grad()
+def _pre_state_dict_hook(
+    module: nn.Module,
+    prefix: str,
+    keep_vars: bool,
+) -> None:
+    """
+    TODO: doc
+    """
+    fsdp_state: _FSDPState = module
+    _pre_state_dict_hook_fn = {
+        StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
+        StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
+        StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
+    }
+    _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
+        module, prefix, keep_vars,
+    )
 
 @no_type_check
 @torch.no_grad()
