@@ -563,10 +563,15 @@ Tensor sparse_compressed_to_dense(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
 
-  auto batch_ndim = sparse_csr::numBatchDimensions(self);
-
   if (self.layout() == kSparseCsr || self.layout() == kSparseCsc
       || self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+    auto sizes = self.sizes();
+    if (std::find(sizes.cbegin(), sizes.cend(), 0) != sizes.cend()) {
+      return at::zeros(self.sizes(), self.options().layout(kStrided));
+    }
+
+    auto batch_ndim = sparse_csr::numBatchDimensions(self);
+
     auto compressed_rows = self.layout() == kSparseCsr || self.layout() == kSparseBsr;
     auto block_sparse = self.layout() == kSparseBsr || self.layout() == kSparseBsc;
 
@@ -597,28 +602,23 @@ Tensor sparse_compressed_to_dense(
     // At this point everything the batch dim was inserted, existed
     // already or was flattened from multiple batch dims
     auto n_batch = values.size(0);
-    // If we already had batch dim(s) and any of them were zero we can
-    // take the early exit
-    if (n_batch == 0) {
-      return dense.reshape(self.sizes());
-    }
 
     int64_t nrows, ncols;
-    auto dense_reshaped_size = dense.sizes().vec();
+    auto dense_reshaped_sizes = dense.sizes().vec();
     if (!block_sparse) {
       nrows = self.size(batch_ndim);
       ncols = self.size(batch_ndim + 1);
-      dense_reshaped_size.erase(dense_reshaped_size.begin());
-      dense_reshaped_size.erase(dense_reshaped_size.begin());
+      dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
+      dense_reshaped_sizes.erase(dense_reshaped_sizes.begin());
     } else {
       std::array<int64_t, 2> blocksize = {self.size(batch_ndim + 2), self.size(batch_ndim + 3)};
       nrows = self.size(batch_ndim) / blocksize[0];
       ncols = self.size(batch_ndim + 1) / blocksize[1];
-      dense_reshaped_size[1] = blocksize[0];
-      dense_reshaped_size[2] = blocksize[1];
+      dense_reshaped_sizes[1] = blocksize[0];
+      dense_reshaped_sizes[2] = blocksize[1];
     }
-    dense_reshaped_size[0] = n_batch * nrows * ncols;
-    dense = dense.reshape(dense_reshaped_size);
+    dense_reshaped_sizes[0] = n_batch * nrows * ncols;
+    dense = dense.reshape(dense_reshaped_sizes);
 
     int64_t nnz_per_batch = values.size(1);
     auto options = compressed_indices.options();
