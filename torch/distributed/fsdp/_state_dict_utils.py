@@ -171,9 +171,6 @@ def _common_unshard_post_state_dict_hook(
         _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
-    # TODO: Once pre_state_dict hook is supported, this pop should be removed.
-    # For `use_orig_params=True`, the `FlatParameter` is not registered, so
-    # there is no entry in the state dict for it to pop.
     # TODO: removing this pop causes some test failures, such as
     # python test/distributed/fsdp/test_fsdp_state_dict.py -v "TestFSDPStateDict.test_save_and_load_after_forward_state_dict_state_dict_type_state_dict_mixed_precision_False_state_dict_rank0_and_offload_True"
     # Recursively, we:
@@ -182,7 +179,6 @@ def _common_unshard_post_state_dict_hook(
     # but only the latter exists.
     if not fsdp_state._use_orig_params:
         try:
-            print(f"trying to pop: {prefix}{FLAT_PARAM}")
             state_dict.pop(f"{prefix}{FLAT_PARAM}")
         except:
             pass
@@ -211,13 +207,10 @@ def _common_unshard_post_state_dict_hook(
     # Loop only the parameters saved in this instance's wrapped module to
     # avoid processing buffers.
     for fqn, param_name, module_name in _param_fqns(module, fsdp_state):
-        # # TODO: remove the parameter retrieval. See ``_full_pre_state_dict_hook``.
-        # param = functools.reduce(getattr, fqn.split("."), module.module)
         fqn = f"{prefix}{fqn}"
         if no_fsdp_return:
             state_dict.pop(fqn)
             continue
-        # state_dict[fqn] = param
         assert fqn in state_dict, (
             f"FSDP assumes {fqn} is in the state_dict but the state_dict only "
             f"has {state_dict.keys()}. "
@@ -300,8 +293,6 @@ def _full_post_state_dict_hook(
     back to sharded version after _unshard_params ends, and also remove
     the ``FSDP_WRAPPED_MODULE`` prefix.
     """
-    # # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    # _full_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     def param_hook(
         state_dict: Dict[str, Any],
@@ -388,8 +379,6 @@ def _local_post_state_dict_hook(
     the state_dict[f"{prefix}{FLAT_PARAM}] with the ShardedTensor. No copy
     will happen. The underlying storage is the same.
     """
-    # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    # _local_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     _replace_by_prefix(state_dict, f"{prefix}{FSDP_PREFIX}", prefix)
     if not _has_fsdp_params(fsdp_state, module):
@@ -508,9 +497,6 @@ def _sharded_post_state_dict_hook(
     The hook replaces the unflattened, unsharded parameter in the state_dict
     with a unflattened, sharded parameter (a ShardedTensor).
     """
-
-    # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
-    #_sharded_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
