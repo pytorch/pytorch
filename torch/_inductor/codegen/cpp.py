@@ -756,6 +756,7 @@ class CppVecKernel(CppKernel):
         assert codecache.pick_vec_isa()
         self.simd_nelements = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
+        self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -790,7 +791,8 @@ class CppVecKernel(CppKernel):
             if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
                 nelements = codecache.pick_vec_isa().nelements()
-                if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
+                if var not in self.var_vec_buf_map:
+                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
                     self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
                 self.loads.writeline(
                     f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
