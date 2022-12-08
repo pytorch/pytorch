@@ -262,8 +262,8 @@ test_inductor_benchmark() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   PARTITION_FLAGS=""
-  if [[ ! -z "$NUM_TEST_SHARDS" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id \"$2\""
+  if [[ ! -z "$NUM_TEST_SHARDS" && ! -z "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
   fi
   mkdir -p "$TEST_REPORTS_DIR"
   # Check inference with --float32
