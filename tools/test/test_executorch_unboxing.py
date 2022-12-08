@@ -3,7 +3,7 @@ import unittest
 from torchgen import local
 
 from torchgen.api import cpp as aten_cpp, types as aten_types
-from torchgen.api.types_base import BaseCType, ConstRefCType, MutRefCType
+from torchgen.api.types import BaseCType, ConstRefCType, MutRefCType
 from torchgen.executorch.api import cpp as et_cpp, types as et_types
 
 from torchgen.executorch.api.unboxing import Unboxing

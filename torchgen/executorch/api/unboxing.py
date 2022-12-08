@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable, List, Sequence, Tuple
 
-from torchgen.api.types_base import Binding, CType, NamedCType
+from torchgen.api.types import Binding, CType, NamedCType
 
 from torchgen.model import (
     Argument,
