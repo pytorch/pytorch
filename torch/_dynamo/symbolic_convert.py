@@ -12,7 +12,8 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, Iterable, List
+from collections.abc import Sized
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import torch
@@ -282,7 +283,7 @@ def break_graph_if_unsupported(*, push):
                 if self.has_backedge():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
-                    raise exc.SkipFrame(msg)
+                    raise exc.SkipFrame(msg) from excp
 
                 if not self.should_compile_partial_graph():
                     raise
@@ -1429,7 +1430,7 @@ class InstructionTranslatorBase(object):
         graphstate = self.checkpoint[1][1:]
         state = (*output_graphstate, *graphstate)
         for obj in state:
-            if isinstance(obj, Iterable):
+            if isinstance(obj, Sized):
                 if len(obj) != 0:
                     return False
         return True
