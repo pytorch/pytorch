@@ -113,6 +113,7 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
+        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -742,33 +743,72 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
 
 
 def run_test_ops(test_module, test_directory, options):
+    if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
+        # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
+        # flakiness status. Default to 50 re-runs
+        rerun_options = ["--flake-finder", "--flake-runs=50"]
+    else:
+        # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
+        # failure
+        rerun_options = ["-x", "--reruns=2"]
+
+    default_unittest_args = [
+        "--use-pytest",
+        "-vv",
+        "-rfEX"
+    ]
+    default_unittest_args.extend(rerun_options)
+
     if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        extra_unittest_args = default_unittest_args.copy()
         # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
         # it's also on periodic so we don't care about TTS as much
-        return run_test(test_module, test_directory, copy.deepcopy(options),
-                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
-                        )
+        return run_test(
+            test_module,
+            test_directory,
+            copy.deepcopy(options),
+            extra_unittest_args=extra_unittest_args,
+        )
+
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)
     for i in range(NUM_PROCS):
-        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
-                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
-                                                                     "-k=not _linalg_cholesky_"],
-                                             })
+        extra_unittest_args = default_unittest_args.copy()
+        extra_unittest_args.extend([
+            f"--shard-id={i}",
+            f"--num-shards={NUM_PROCS}",
+            "-k=not _linalg_cholesky_",
+        ])
+
+        return_code = pool.apply_async(
+            run_test,
+            args=(test_module, test_directory, copy.deepcopy(options)),
+            kwds={
+                "extra_unittest_args": extra_unittest_args,
+            },
+        )
         return_codes.append(return_code)
+
     pool.close()
     pool.join()
-    del os.environ['NUM_PARALLEL_PROCS']
+    del os.environ["NUM_PARALLEL_PROCS"]
 
     for return_code in return_codes:
         if return_code.get() != 0:
             return return_code.get()
-    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
-                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                "-k=_linalg_cholesky_"],
-                           )
+
+    extra_unittest_args = default_unittest_args.copy()
+    extra_unittest_args.extend([
+        "-k=_linalg_cholesky_",
+    ])
+
+    return_code = run_test(
+        test_module,
+        test_directory,
+        copy.deepcopy(options),
+        extra_unittest_args=extra_unittest_args,
+    )
     return return_code
 
 

@@ -121,7 +121,9 @@ def contract(func):
                     f"New FQNs: {new_only}"
                 )
 
-        check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
+        check_fqn(
+            list(orig_named_params.keys()), list(new_named_params.keys())
+        )
         check_fqn(
             list(orig_named_buffers.keys()), list(new_named_buffers.keys())
         )
@@ -138,7 +140,12 @@ def contract(func):
         return updated
 
     def get_state(module: nn.Module) -> Optional[_State]:
-        return module.__dict__.get(STATE_KEY).get(func)  # type: ignore[call-overload]
+        return module.__dict__.setdefault(  # type: ignore[call-overload]
+            STATE_KEY,
+            {},  # TODO(@yhcharles): this is a temporary fix, need a better way
+        ).get(
+            func
+        )  # type: ignore[call-overload]
 
     wrapper.state = get_state  # type: ignore[attr-defined]
 

@@ -340,7 +340,7 @@ class Conv2d(_ConvNd):
       number or a tuple.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
-      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      can be either a string {{'valid', 'same'}} or an int / a tuple of ints giving the
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also

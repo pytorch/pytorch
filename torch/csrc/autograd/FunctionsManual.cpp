@@ -5,9 +5,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
@@ -571,7 +571,7 @@ Tensor permute_backwards(const Tensor& grad, IntArrayRef fwd_dims) {
 Tensor rad2deg_backward(const Tensor& grad) {
   constexpr double M_180_PI =
       57.295779513082320876798154814105170332405472466564;
-  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_180_PI)));
+  return at::mul(grad, Scalar(M_180_PI));
 }
 
 Tensor deg2rad_backward(const Tensor& grad) {
@@ -4891,10 +4891,10 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
-Tensor embedding_dense_double_backward(
+Tensor embedding_dense_double_backward_symint(
     const Tensor& grad,
     const Tensor& indices,
-    int64_t padding_idx) {
+    c10::SymInt padding_idx) {
   // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));

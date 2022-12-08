@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import inspect
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import torch.nn
 
@@ -59,17 +59,47 @@ class AttributeMutationNew(AttributeMutation):
         return self is other
 
 
-class SideEffects(object):
+class SideEffects:
     """
     Track side effects (list mutation, setattr, etc) that need to be
     applied after an FX graph is run.
     """
 
+    id_to_variable: Dict[int, VariableTracker]
+    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    keepalive: List[Any]
+
     def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
-        super(SideEffects, self).__init__()
+        super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
+
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, SideEffects)
+        # NB: do NOT test keepalive
+        return (
+            self.id_to_variable == other.id_to_variable
+            and self.store_attr_mutations == other.store_attr_mutations
+        )
+
+    def diff(self, other: "SideEffects") -> Optional[str]:
+        if self.id_to_variable != other.id_to_variable:
+            sk_itv = self.id_to_variable.keys()
+            ok_itv = other.id_to_variable.keys()
+            if sk_itv != ok_itv:
+                return f"id_to_variable keys: {sk_itv} != {ok_itv}"
+            # Feel free to augment this with more fancy diffing logic
+            # if needed for debugging
+            return "id_to_variable: unknown diff"
+        elif self.store_attr_mutations != other.store_attr_mutations:
+            sk_sam = self.store_attr_mutations.keys()
+            ok_sam = other.store_attr_mutations.keys()
+            if sk_sam != ok_sam:
+                return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
+            return "store_attr_mutations: unknown diff"
+        else:
+            return None
 
     def clone(self):
         """Create a shallow copy"""
@@ -82,16 +112,16 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
-    def apply(self, fn, cache=None):
+    def apply(self, fn, cache=None, skip_fn=lambda _: False):
         if cache is None:
             cache = dict()
 
         self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache))
+            (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.id_to_variable.items()
         )
         self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache))
+            (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.store_attr_mutations.items()
         )
 
