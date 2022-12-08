@@ -215,8 +215,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         cls._terminate.set()
         coll = cls._cur_coll
         if coll:
-            coll._start_cond.notify()
-            coll._done_cond.notify_all()
+            with coll._start_cond:
+                coll._start_cond.notify()
+            with coll._done_cond:
+                coll._done_cond.notify_all()
 
     @classmethod
     def reset(cls):
