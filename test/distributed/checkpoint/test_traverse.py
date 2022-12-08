@@ -3,7 +3,7 @@
 from collections import OrderedDict
 import torch
 
-import torch.distributed.checkpoint.traverse as traverse
+import torch.distributed.checkpoint._traverse as _traverse
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -24,7 +24,7 @@ class TestTraverse(TestCase):
             nonlocal data
             data[path] = value
 
-        traverse.traverse_state_dict(state_dict, collect_data)
+        _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertIn(("key0",), data)
         self.assertEqual(data[("key0",)], 1)
@@ -53,7 +53,7 @@ class TestTraverse(TestCase):
             nonlocal data
             data[path] = value
 
-        traverse.traverse_state_dict(state_dict, collect_data)
+        _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertNotIn(("key1"), data)
 
@@ -84,7 +84,7 @@ class TestTraverse(TestCase):
             nonlocal data
             data[path] = value
 
-        traverse.traverse_state_dict(state_dict, collect_data)
+        _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertNotIn(("key0",), data)
 
@@ -105,7 +105,7 @@ class TestTraverse(TestCase):
             nonlocal data
             data[path] = value
 
-        traverse.traverse_state_dict(state_dict, collect_data)
+        _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertIn(("key0", 0, "key1", "key2"), data)
         self.assertEqual(
@@ -129,7 +129,7 @@ class TestTraverse(TestCase):
             nonlocal data
             data[path] = value
 
-        traverse.traverse_state_dict(state_dict, collect_data)
+        _traverse.traverse_state_dict(state_dict, collect_data)
 
         self.assertIn(("key0", 0), data)
         self.assertEqual(data[("key0", 0)], 99)
@@ -140,36 +140,36 @@ class TestTraverse(TestCase):
     def test_set_element(self) -> None:
         state_dict: STATE_DICT_TYPE = {}
 
-        traverse.set_element(state_dict, ("k",), 10)
+        _traverse.set_element(state_dict, ("k",), 10)
         self.assertEqual(state_dict["k"], 10)
 
-        traverse.set_element(state_dict, ("k1", 2), 1)
+        _traverse.set_element(state_dict, ("k1", 2), 1)
         self.assertEqual(state_dict["k1"], [None, None, 1])
 
-        traverse.set_element(state_dict, ("k1", 1), 99)
+        _traverse.set_element(state_dict, ("k1", 1), 99)
         self.assertEqual(state_dict["k1"], [None, 99, 1])
 
-        traverse.set_element(state_dict, ("k1", 3), 88)
+        _traverse.set_element(state_dict, ("k1", 3), 88)
         self.assertEqual(state_dict["k1"], [None, 99, 1, 88])
 
-        traverse.set_element(state_dict, ("k2", "k3"), 3)
+        _traverse.set_element(state_dict, ("k2", "k3"), 3)
         self.assertEqual(state_dict["k2"], {"k3": 3})
 
-        traverse.set_element(state_dict, ("k2", "k4", 0, 0), 99)
+        _traverse.set_element(state_dict, ("k2", "k4", 0, 0), 99)
         self.assertEqual(state_dict["k2"]["k4"][0], [99])
 
     def test_get_element(self) -> None:
         state_dict = {"a": [0, 1], "b": [2, {"c": "d"}]}
-        self.assertEqual(traverse.get_element(state_dict, ("a",)), [0, 1])
-        self.assertEqual(traverse.get_element(state_dict, ("b", 0)), 2)
-        self.assertEqual(traverse.get_element(state_dict, ("b", 1, "c")), "d")
+        self.assertEqual(_traverse.get_element(state_dict, ("a",)), [0, 1])
+        self.assertEqual(_traverse.get_element(state_dict, ("b", 0)), 2)
+        self.assertEqual(_traverse.get_element(state_dict, ("b", 1, "c")), "d")
 
-        self.assertIsNone(traverse.get_element(state_dict, ("c",)))
-        self.assertIsNone(traverse.get_element(state_dict, ("a", 33)))
-        self.assertIsNone(traverse.get_element(state_dict, ("b", 88)))
-        self.assertIsNone(traverse.get_element(state_dict, ("b", 0, 2)))
-        self.assertIsNone(traverse.get_element(state_dict, ("b", 1, 2)))
-        self.assertIsNone(traverse.get_element(state_dict, ("b", 1, "d")))
+        self.assertIsNone(_traverse.get_element(state_dict, ("c",)))
+        self.assertIsNone(_traverse.get_element(state_dict, ("a", 33)))
+        self.assertIsNone(_traverse.get_element(state_dict, ("b", 88)))
+        self.assertIsNone(_traverse.get_element(state_dict, ("b", 0, 2)))
+        self.assertIsNone(_traverse.get_element(state_dict, ("b", 1, 2)))
+        self.assertIsNone(_traverse.get_element(state_dict, ("b", 1, "d")))
 
 
 if __name__ == "__main__":
