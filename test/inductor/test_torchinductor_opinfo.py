@@ -62,7 +62,6 @@ TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
-ALL_SAMPLES = True
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
@@ -146,6 +145,7 @@ inductor_expected_failures_all_samples["cpu"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "rsub": {f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "amax": {f16},
@@ -198,8 +198,12 @@ inductor_expected_failures_all_samples["cpu"] = {
     "linalg.pinv.singular": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
+    "norm": {f16},
+    "renorm": {f16, f32, f64},
+    "repeat": {b8, f16, f32, f64, i32, i64},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
+    "scatter": {b8, i64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_no_dim": {f16},
     "max.reduction_with_dim": {b8},
@@ -302,6 +306,7 @@ inductor_expected_failures_all_samples["cuda"] = {
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.singular": {f32, f64},
+    "linalg.householder_product": {f32},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -320,6 +325,9 @@ inductor_expected_failures_all_samples["cuda"] = {
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
+    "norm": {f16, f64},
+    "renorm": {f16, f32, f64},
+    "repeat": {b8, f16, f32, f64, i32, i64},
     "pca_lowrank": {f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
@@ -330,6 +338,7 @@ inductor_expected_failures_all_samples["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
+    "scatter": {b8, i64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
@@ -374,7 +383,7 @@ inductor_should_fail_with_exception["cpu"] = {
     "__rpow__": {
         i32: "Pow input must be floating point.",
         i64: "Pow input must be floating point.",
-    }
+    },
 }
 
 
@@ -382,7 +391,7 @@ inductor_should_fail_with_exception["cuda"] = {
     "__rpow__": {
         i32: "Pow input must be floating point.",
         i64: "Pow input must be floating point.",
-    }
+    },
 }
 
 
@@ -446,6 +455,7 @@ inductor_passes_for_single_sample["cpu"] = {
     "half": {b8, f16, f32, f64, i32, i64},
     "int": {b8, f16, f32, f64, i32, i64},
     "bfloat16": {b8, f16, f32, f64, i32, i64},
+    "short": {b8, f16, f32, f64, i32, i64},
     "long": {b8, f16, f32, f64, i32, i64},
     "gather": {b8, f16, f32, f64, i32, i64},
     "cat": {b8, f16, f32, f64, i32, i64},
@@ -471,6 +481,7 @@ inductor_passes_for_single_sample["cpu"] = {
     "narrow": {b8, f16, f32, f64, i32, i64},
     "native_layer_norm": {f32, f64},
     "new_zeros": {b8, f16, f32, f64, i32, i64},
+    "tile": {b8, f16, f32, f64, i32, i64},
     "nn.functional.avg_pool2d": {f32},
     "nn.functional.embedding_bag": {f16, f32, f64},
     "nn.functional.layer_norm": {f32, f64},
@@ -495,10 +506,22 @@ inductor_passes_for_single_sample["cpu"] = {
     "nn.functional.upsample_nearest": {f32, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
-    "linalg.norm_subgradients_at_zero": {f16}
+    "linalg.norm_subgradients_at_zero": {f16},
+    "signal.windows.bartlett": {f16, f32, f64},
+    "signal.windows.blackman": {f16, f32, f64},
+    "signal.windows.cosine": {f16, f32, f64},
+    "signal.windows.exponential": {f16, f32, f64},
+    "signal.windows.gaussian": {f16, f32, f64},
+    "signal.windows.general_cosine": {f16, f32, f64},
+    "signal.windows.general_hamming": {f16, f32, f64},
+    "signal.windows.hamming": {f16, f32, f64},
+    "signal.windows.hann": {f16, f32, f64},
+    "signal.windows.kaiser": {f16, f32, f64},
+    "unflatten": {b8, i32, i64},
 }
 inductor_passes_for_single_sample["cuda"] = {
-    "__rpow__": {f16, i32, i64},
+    "__rpow__": {f16},
+    "rsub": {f16, f32, f64, i32, i64},
     "__rmatmul__": {f16, f32, f64},
     "arange": {i64},
     "diff": {f16},
@@ -541,7 +564,6 @@ inductor_passes_for_single_sample["cuda"] = {
     "masked.mean": {b8},
     "gather": {b8, f16, f32, f64, i32, i64},
     "linalg.det": {f32},
-    "linalg.householder_product": {f32},
     "linspace": {f16, f32, f64, i32, i64},
     "masked.logsumexp": {f16, f32, f64, b8},
     "matmul": {f16, f32, f64},
@@ -565,7 +587,7 @@ inductor_passes_for_single_sample["cuda"] = {
     "nn.functional.max_pool2d": {f16, f32, f64},
     "nn.functional.max_pool3d": {f16},
     "nn.functional.group_norm": {f16},
-    "nn.functional.interpolate.area": {f16, f32},
+    "nn.functional.interpolate.area": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
     "nn.functional.interpolate.bicubic": {f64},
     "nn.functional.interpolate.bilinear": {f64},
@@ -588,12 +610,25 @@ inductor_passes_for_single_sample["cuda"] = {
     "int": {b8, f16, f32, f64, i32, i64},
     "bfloat16": {b8, f16, f32, f64, i32, i64},
     "long": {b8, f16, f32, f64, i32, i64},
+    "short": {b8, f16, f32, f64, i32, i64},
     "index_put": {f16, f32, f64},
     "cat": {b8, f16, f32, f64, i32, i64},
     "narrow": {b8, f16, f32, f64, i32, i64},
     "native_layer_norm": {f16, f32, f64},
     "new_zeros": {b8, f16, f32, f64, i32, i64},
     "max_pool2d_with_indices_backward": {f16, f32, f64},
+    "signal.windows.bartlett": {f16, f32, f64},
+    "signal.windows.blackman": {f16, f32, f64},
+    "signal.windows.cosine": {f16, f32, f64},
+    "signal.windows.exponential": {f16, f32, f64},
+    "signal.windows.gaussian": {f16, f32, f64},
+    "signal.windows.general_cosine": {f16, f32, f64},
+    "signal.windows.general_hamming": {f16, f32, f64},
+    "signal.windows.hamming": {f16, f32, f64},
+    "signal.windows.hann": {f16, f32, f64},
+    "signal.windows.kaiser": {f16, f32, f64},
+    "tile": {b8, f16, f32, f64, i32, i64},
+    "unflatten": {b8, i32, i64},
 }
 
 
@@ -635,14 +670,14 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
-        elif dtype in inductor_passes_for_single_sample[device_type].get(
-            op_name, set()
-        ) or dtype in inductor_expected_failures_all_samples[device_type].get(
-            op_name, set()
-        ) or dtype in inductor_gradient_expected_failures_single_sample[
-            device_type
-        ].get(
-            op_name, set()
+        elif (
+            dtype in inductor_passes_for_single_sample[device_type].get(op_name, set())
+            or dtype
+            in inductor_expected_failures_all_samples[device_type].get(op_name, set())
+            or dtype
+            in inductor_gradient_expected_failures_single_sample[device_type].get(
+                op_name, set()
+            )
         ):
             test_expect = TestExpect.XFAILURE
         else:
@@ -671,7 +706,6 @@ class TestInductorOpInfo(TestCase):
             and not dtype == torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
-        print(op_name)
         try:
             # keep a counter and assert in except that the counter is > 0 if the op, dtype, device is in the newly added list
             # else error out saying "move this op to the other list since it now fails on even the first input"
@@ -718,7 +752,13 @@ class TestInductorOpInfo(TestCase):
         except Exception as e:
 
             if test_expect is TestExpect.XFAILURE:
-                if dtype in inductor_passes_for_single_sample[device_type].get(op_name, set()) and count == 0:
+                if (
+                    dtype
+                    in inductor_passes_for_single_sample[device_type].get(
+                        op_name, set()
+                    )
+                    and count == 0
+                ):
                     raise RuntimeError(
                         f"expected to pass on at least one input {op_name}, {dtype}, {device_type}"
                     )
