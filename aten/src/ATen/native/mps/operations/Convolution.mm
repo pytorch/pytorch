@@ -336,14 +336,18 @@ Tensor mps_convolution_backward_input(
 }
 
 Tensor mps_convolution_backward_weights(
-    IntArrayRef weight_size, const Tensor& grad_output_t, const Tensor& input_t,
+    IntArrayRef weight_size, const Tensor& grad_output_, const Tensor& input_,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
   CheckedFrom c = "mps_convolution_backward_weights";
-  auto memory_format = input_t.suggest_memory_format();
-  MPSShape* inputShape = getMPSShape(input_t, memory_format);
-  MPSShape* gradOutputShape = getMPSShape(grad_output_t, memory_format);
+  auto memory_format = input_.suggest_memory_format();
+  bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
+
+  auto grad_output_t = grad_output_.to(memory_format);
+  auto input_t = input_.to(memory_format);
+
+  MPSShape* gradOutputShape = get_mps_conv_shape(grad_output_t, is_channels_last);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -353,7 +357,13 @@ Tensor mps_convolution_backward_weights(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = at::empty(weight_size, grad_output_t.options(), c10::nullopt);
+  auto grad_weight_t = at::empty(
+                          weight_size,
+                          grad_output_t.scalar_type(),
+                          c10::nullopt,
+                          kMPS,
+                          c10::nullopt,
+                          memory_format);
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -384,9 +394,8 @@ Tensor mps_convolution_backward_weights(
       default:
         assert(0 && "Check should have been done earlier\n");
     }
-
     MPSShape* mps_weight_shape = getMPSShape(weight_size);
-    NSString* ns_shape_key = [[mps_weight_shape valueForKey:@"description"] componentsJoinedByString:@","];
+    NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key = "mps_convolution_backward_weights:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":"
                                                      + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":"
                                                      + to_string(padding[0]) + ":" + to_string(padding[1]) + ":"
@@ -408,12 +417,20 @@ Tensor mps_convolution_backward_weights(
           fill_conv_desc(descriptor_, stride[1], stride[0],
                                       dilation[1], dilation[0],
                                       padding[1], padding[0],
-                                      memory_format, groups);
+                                      at::MemoryFormat::Contiguous, groups);
 
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(input_t.scalar_type()), inputShape);
+          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
-          MPSGraphTensor* gradWeightTensor = [mpsGraph convolution2DWeightsGradientWithIncomingGradientTensor:gradOutputTensor
+          MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
+          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+            // NHWC -> NCHW
+            gradOutputTensorTranspose = [mpsGraph transposeTensor: [mpsGraph transposeTensor:gradOutputTensor dimension:-1 withDimension:-2 name:nil]
+                                           dimension: -2
+                                       withDimension: -3
+                                                name: nil];
+          }
+          MPSGraphTensor* gradWeightTensor = [mpsGraph convolution2DWeightsGradientWithIncomingGradientTensor:gradOutputTensorTranspose
                                                                                                  sourceTensor:inputTensor
                                                                                                   outputShape:mps_weight_shape
                                                                                  forwardConvolutionDescriptor:descriptor_
@@ -429,7 +446,7 @@ Tensor mps_convolution_backward_weights(
     }
 
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t, gradOutputShape);
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, inputShape);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight_t);
 
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{

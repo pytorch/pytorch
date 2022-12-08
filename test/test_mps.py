@@ -7102,7 +7102,7 @@ class TestConvolutionMPS(TestCase):
             res_cpu = res_cpu.sum().backward()
             res_mps = res_mps.sum().backward()
 
-            # self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad)
+            self.assertEqual(conv_cpu.weight.grad, conv_mps.weight.grad, rtol=2.6e-05, atol=2e-04)
             self.assertEqual(x_cpu.grad, x_mps.grad)
 
         helper(shape=(1, 176, 1))
