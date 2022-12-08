@@ -5,9 +5,7 @@ import io
 import os
 import shutil
 import zipfile
-from typing import List, Mapping, Set, Tuple, Union
-
-import numpy as np
+from typing import Any, List, Mapping, Set, Tuple, Union
 
 import torch
 import torch.jit._trace
@@ -73,9 +71,7 @@ def export_as_test_case(
 
 
 @_beartype.beartype
-def load_test_case(
-    dir: str,
-) -> Tuple[bytes, Mapping[str, np.ndarray], Mapping[str, np.ndarray]]:
+def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     """Load a self contained ONNX test case from a directory.
 
     The test case must contain the model and the inputs/outputs data. The directory structure
