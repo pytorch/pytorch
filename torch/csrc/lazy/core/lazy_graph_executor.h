@@ -161,6 +161,65 @@ class TORCH_API LazyGraphExecutor {
     std::vector<size_t> parameter_sequence;
   };
 
+  // Locking:
+  // We perform two kinds of operations of tensors, synchronous and asynchronous.
+  // The ApplyPendingGraph() are synchronous, as we need the device data result
+  // immediately. Before the synchronous operations can start, they need to wait
+  // that the pending asynchronous operations have completed.
+  // Synchronous operations do not hold device locks, since they are strictly
+  // sequential, dictated by the PyTorch execution order.
+  // The SyncTensorsGraph() is asynchronous, and returns immediately after having
+  // scheduled the asynchronous operation. While executing, the asynchronous
+  // operations will hold locks on all the participating devices (in most common
+  // cases there will be only one device).
+  // Since asynchronous operations capture device locks, only one asynchronous
+  // operation can execute at the same time, on a given device. Tensor operations
+  // which send data to device do not need to hold any device locks while doing
+  // so. Only operations which _use_ device data (computations, and transfer from
+  // server) need to wait for asynchronous operations to complete (barrier).
+
+  class DeviceLocker {
+  public:
+    explicit DeviceLocker(BackendDevice device) : device_(std::move(device)) {}
+
+    const BackendDevice& device() const {
+      return device_;
+    }
+
+    void Lock();
+    void Unlock(std::exception_ptr exptr);
+    void Barrier();
+
+  private:
+    void CheckResetException();
+
+    BackendDevice device_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool locked_ = false;
+    std::exception_ptr exptr_;
+  };
+
+  class DeviceLockerArena {
+  public:
+    static DeviceLockerArena* Get();
+
+    std::shared_ptr<DeviceLocker> GetLocker(const BackendDevice& device);
+
+    void DeviceBarrier(const BackendDevice& device);
+
+    // Use a set to impose an order on the device locking sequence (ABBA
+    // prevention).
+    std::vector<ExceptionCleanup> LockDevices(
+        const std::set<BackendDevice>& devices);
+
+  private:
+    ExceptionCleanup LockDevice(const BackendDevice& device);
+
+    std::mutex mutex_;
+    std::map<BackendDevice, std::shared_ptr<DeviceLocker>> lockers_;
+  };
+
   void ResetTrimCounter() const;
 
  private:

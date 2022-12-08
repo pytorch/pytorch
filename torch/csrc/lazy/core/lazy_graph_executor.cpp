@@ -48,116 +48,6 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
              contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
 }
 
-// Locking:
-// We perform two kinds of operations of tensors, synchronous and asynchronous.
-// The ApplyPendingGraph() are synchronous, as we need the device data result
-// immediately. Before the synchronous operations can start, they need to wait
-// that the pending asynchronous operations have completed.
-// Synchronous operations do not hold device locks, since they are strictly
-// sequential, dictated by the PyTorch execution order.
-// The SyncTensorsGraph() is asynchronous, and returns immediately after having
-// scheduled the asynchronous operation. While executing, the asynchronous
-// operations will hold locks on all the participating devices (in most common
-// cases there will be only one device).
-// Since asynchronous operations capture device locks, only one asynchronous
-// operation can execute at the same time, on a given device. Tensor operations
-// which send data to device do not need to hold any device locks while doing
-// so. Only operations which _use_ device data (computations, and transfer from
-// server) need to wait for asynchronous operations to complete (barrier).
-
-class DeviceLocker {
- public:
-  explicit DeviceLocker(BackendDevice device) : device_(std::move(device)) {}
-
-  const BackendDevice& device() const {
-    return device_;
-  }
-
-  void Lock() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return !locked_; });
-    CheckResetException();
-    locked_ = true;
-  }
-
-  void Unlock(std::exception_ptr exptr) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    locked_ = false;
-    exptr_ = std::move(exptr);
-    cv_.notify_all();
-  }
-
-  void Barrier() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cv_.wait(lock, [this] { return !locked_; });
-    cv_.notify_all();
-    CheckResetException();
-  }
-
- private:
-  void CheckResetException() {
-    std::exception_ptr exptr = std::move(exptr_);
-    exptr_ = nullptr;
-    if (exptr != nullptr) {
-      std::rethrow_exception(exptr);
-    }
-  }
-
-  BackendDevice device_;
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  bool locked_ = false;
-  std::exception_ptr exptr_;
-};
-
-class DeviceLockerArena {
- public:
-  static DeviceLockerArena* Get() {
-    static DeviceLockerArena* arena = new DeviceLockerArena();
-    return arena;
-  }
-
-  std::shared_ptr<DeviceLocker> GetLocker(const BackendDevice& device) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = lockers_.find(device);
-    if (it == lockers_.end()) {
-      it = lockers_.emplace(device, std::make_shared<DeviceLocker>(device))
-               .first;
-    }
-    return it->second;
-  }
-
-  void DeviceBarrier(const BackendDevice& device) {
-    auto locker = DeviceLockerArena::Get()->GetLocker(device);
-    locker->Barrier();
-  }
-
-  // Use a set to impose an order on the device locking sequence (ABBA
-  // prevention).
-  std::vector<ExceptionCleanup> LockDevices(
-      const std::set<BackendDevice>& devices) {
-    std::vector<ExceptionCleanup> unlocker;
-    unlocker.reserve(devices.size());
-    for (auto& device : devices) {
-      unlocker.emplace_back(LockDevice(device));
-    }
-    return unlocker;
-  }
-
- private:
-  ExceptionCleanup LockDevice(const BackendDevice& device) {
-    auto locker = DeviceLockerArena::Get()->GetLocker(device);
-    locker->Lock();
-    return ExceptionCleanup(
-        [locker = std::move(locker)](ExceptionCleanup::StatusType status) {
-          locker->Unlock(std::move(status));
-        });
-  }
-
-  std::mutex mutex_;
-  std::map<BackendDevice, std::shared_ptr<DeviceLocker>> lockers_;
-};
-
 class DataCacheArena {
  public:
   static DataCacheArena* Get() {
@@ -392,6 +282,74 @@ bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
 
 std::atomic<LazyGraphExecutor*> lazy_graph_executor_registry;
 } // namespace
+
+void LazyGraphExecutor::DeviceLocker::Lock() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait(lock, [this] { return !locked_; });
+  CheckResetException();
+  locked_ = true;
+}
+
+void LazyGraphExecutor::DeviceLocker::Unlock(std::exception_ptr exptr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  locked_ = false;
+  exptr_ = std::move(exptr);
+  cv_.notify_all();
+}
+
+void LazyGraphExecutor::DeviceLocker::Barrier() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cv_.wait(lock, [this] { return !locked_; });
+  cv_.notify_all();
+  CheckResetException();
+}
+
+void LazyGraphExecutor::DeviceLocker::CheckResetException() {
+  std::exception_ptr exptr = std::move(exptr_);
+  exptr_ = nullptr;
+  if (exptr != nullptr) {
+    std::rethrow_exception(exptr);
+  }
+}
+
+auto LazyGraphExecutor::DeviceLockerArena::Get() -> DeviceLockerArena* {
+  static DeviceLockerArena* arena = new DeviceLockerArena();
+  return arena;
+}
+
+auto LazyGraphExecutor::DeviceLockerArena::GetLocker(const BackendDevice& device) -> std::shared_ptr<DeviceLocker> {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = lockers_.find(device);
+  if (it == lockers_.end()) {
+    it = lockers_.emplace(device, std::make_shared<DeviceLocker>(device))
+              .first;
+  }
+  return it->second;
+}
+
+void LazyGraphExecutor::DeviceLockerArena::DeviceBarrier(const BackendDevice& device) {
+  auto locker = DeviceLockerArena::Get()->GetLocker(device);
+  locker->Barrier();
+}
+
+std::vector<ExceptionCleanup> LazyGraphExecutor::DeviceLockerArena::LockDevices(
+    const std::set<BackendDevice>& devices) {
+  std::vector<ExceptionCleanup> unlocker;
+  unlocker.reserve(devices.size());
+  for (auto& device : devices) {
+    unlocker.emplace_back(LockDevice(device));
+  }
+  return unlocker;
+}
+
+ExceptionCleanup LazyGraphExecutor::DeviceLockerArena::LockDevice(const BackendDevice& device) {
+  auto locker = DeviceLockerArena::Get()->GetLocker(device);
+  locker->Lock();
+  return ExceptionCleanup(
+      [locker = std::move(locker)](ExceptionCleanup::StatusType status) {
+        locker->Unlock(std::move(status));
+      });
+}
 
 void LazyGraphExecutor::Register(LazyGraphExecutor* executor) {
   lazy_graph_executor_registry.store(executor);
