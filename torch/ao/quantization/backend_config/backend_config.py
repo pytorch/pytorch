@@ -474,7 +474,7 @@ class BackendPatternConfig:
             implementation for this pattern's root module.
             "fused_module": a :class:`torch.nn.Module` that represents the fused implementation for this pattern
             "fuser_method": a function that specifies how to fuse the pattern for this pattern
-            "use_complex_pattern_format": whether to use the legacy reversed nested tuple pattern format
+            "use_complex_pattern_format": whether to use the reversed nested tuple pattern format (deprecated)
 
         """
         def _get_dtype_config(obj: Any) -> DTypeConfig:
@@ -506,7 +506,7 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_use_complex_pattern_format(backend_pattern_config_dict.get(USE_COMPLEX_PATTERN_FORMAT_DICT_KEY, None))
+        conf._set_use_complex_pattern_format(backend_pattern_config_dict.get(USE_COMPLEX_PATTERN_FORMAT_DICT_KEY, False))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:

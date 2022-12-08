@@ -3057,6 +3057,19 @@ class CommonTemplate:
             ),
         )
 
+    def test_index3(self):
+        def fn(x, ia, ib):
+            return (x[:, ia, None, ib, 0],)
+
+        self.common(
+            fn,
+            (
+                torch.randn(3, 4, 4, 4, 3),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
+            ),
+        )
+
     def test_index_select(self):
         def fn(a, b):
             return (

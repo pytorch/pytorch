@@ -108,6 +108,7 @@ TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 TORCH_API c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
+TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);
 
 // Pretty printers
 TORCH_API std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
