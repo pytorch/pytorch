@@ -43,11 +43,20 @@ if RUN_NVFUSER and torch.version.cuda is not None:
 
 if 'PYTORCH_NVFUSER_ENABLE' not in os.environ:
     os.environ['PYTORCH_NVFUSER_ENABLE'] = ""
-os.environ['PYTORCH_NVFUSER_ENABLE'] = 'linear_decomposition,conv_decomposition,graph_op_fusion,' + \
-    os.environ['PYTORCH_NVFUSER_ENABLE']
+if 'linear_decomposition' not in os.environ['PYTORCH_NVFUSER_ENABLE']:
+    os.environ['PYTORCH_NVFUSER_ENABLE'] = 'linear_decomposition,' + os.environ['PYTORCH_NVFUSER_ENABLE']
+if 'conv_decomposition' not in os.environ['PYTORCH_NVFUSER_ENABLE']:
+    os.environ['PYTORCH_NVFUSER_ENABLE'] = 'conv_decomposition,' + os.environ['PYTORCH_NVFUSER_ENABLE']
+if 'graph_op_fusion' not in os.environ['PYTORCH_NVFUSER_ENABLE']:
+    os.environ['PYTORCH_NVFUSER_ENABLE'] = 'graph_op_fusion,' + os.environ['PYTORCH_NVFUSER_ENABLE']
+
 if 'PYTORCH_NVFUSER_DISABLE' not in os.environ:
     os.environ['PYTORCH_NVFUSER_DISABLE'] = ""
-os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,fma,' + os.environ['PYTORCH_NVFUSER_DISABLE']
+if 'fallback' not in os.environ['PYTORCH_NVFUSER_DISABLE']:
+    os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fallback,' + os.environ['PYTORCH_NVFUSER_DISABLE']
+if 'fma' not in os.environ['PYTORCH_NVFUSER_DISABLE']:
+    os.environ['PYTORCH_NVFUSER_DISABLE'] = 'fma,' + os.environ['PYTORCH_NVFUSER_DISABLE']
+
 os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
 # TODO: enable complex when we fixes the extremal cases in OpInfo
 # see issue https://github.com/csarofeen/pytorch/issues/1730"
