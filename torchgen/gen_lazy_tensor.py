@@ -137,10 +137,10 @@ def validate_shape_inference_header(
         with open(shape_inference_hdr, "r") as f:
             shape_infr_decls = f.read()
             shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
-    except IOError:
+    except IOError as e:
         raise AssertionError(
             f"Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}"
-        )
+        ) from e
 
     shape_infr_regex = r"compute_shape_(\w+)"
     actual_shape_infr_name_counts = Counter(
