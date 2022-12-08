@@ -23,11 +23,13 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_symint(const Tensor& output, SymIntArrayRef shape);
 
 // Utility for resize_output
 //  Returns a bool saying resize should happen or not and
 //  raises a warning if resizing for one or more elements
 TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
