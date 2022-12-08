@@ -55,6 +55,7 @@ def _lazy_init(
     # set `_is_root=False` for the non-root instances
     state._is_root = True
     _assert_in_training_states(state, [TrainingState.IDLE])
+    #_init_mixed_precision_hooks_for_ignored_modules(root_module)
     _init_streams(state)
     buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
