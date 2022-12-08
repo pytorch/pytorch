@@ -1,13 +1,12 @@
 import tensorboard
-from packaging.version import parse, Version
+from packaging import version  # type: ignore
 
-if not hasattr(tensorboard, "__version__") or parse(
+if not hasattr(tensorboard, "__version__") or version.parse(
     tensorboard.__version__
-) < Version("1.15"):
+) < version.Version("1.15"):
     raise ImportError("TensorBoard logging requires TensorBoard version 1.15 or above")
 
-del parse
-del Version
+del version
 del tensorboard
 
 from .writer import FileWriter, SummaryWriter  # noqa: F401
