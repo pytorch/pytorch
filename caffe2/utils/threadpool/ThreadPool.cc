@@ -103,12 +103,13 @@ size_t getDefaultNumThreads() {
 
   /*
    * For llvm-tsan, holding limit for the number of locks for a single thread
-   * is 64. pthreadpool's worst case is the number of threads in a pool. So we
-   * want to limit the threadpool size to 64 when running with tsan. However,
-   * sometimes it is tricky to detect if we are running under tsan, for now
-   * capping the default threadcount to the tsan limit unconditionally.
+   * is 63 (because of comparison < 64 instead of <=). pthreadpool's worst
+   * case is the number of threads in a pool. So we want to limit the threadpool
+   * size to 64 when running with tsan. However, sometimes it is tricky to
+   * detect if we are running under tsan, for now capping the default
+   * threadcount to the tsan limit unconditionally.
    */
-  int tsanThreadLimit = 64;
+  int tsanThreadLimit = 63;
   numThreads = std::min(numThreads, tsanThreadLimit);
 
   return numThreads;
