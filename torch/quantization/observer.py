@@ -21,7 +21,7 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
     RecordingObserver,
     NoopObserver,
-    _is_activation_post_process,
+    is_activation_post_process,
     _is_per_channel_script_obs_instance,
     get_observer_state_dict,
     load_observer_state_dict,
