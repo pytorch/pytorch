@@ -52,6 +52,8 @@ class TestMemoryTracker(TestCase):
 
         self.assertTrue(len(tracker._hooks) == 0)
 
+        tracker.save_stats("memory.trace")
+        tracker.load("memory.trace")
         tracker.summary()
 
         self.assertTrue(tracker._op_index > 0)
