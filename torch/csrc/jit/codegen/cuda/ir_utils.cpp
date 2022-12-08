@@ -266,8 +266,7 @@ std::vector<Val*> siblingValsOf(Val* val) {
 }
 
 // Return immediate producers of val
-std::vector<Val*> producerValsOf(
-    const std::vector<Val*>& vals) {
+std::vector<Val*> producerValsOf(const std::vector<Val*>& vals) {
   std::vector<Val*> all_producer_vals;
   for (auto val : vals) {
     auto producer_vals = producerValsOf(val);
@@ -279,8 +278,7 @@ std::vector<Val*> producerValsOf(
 }
 
 // Return immediate consumers of val
-std::vector<Val*> consumerValsOf(
-    const std::vector<Val*>& vals) {
+std::vector<Val*> consumerValsOf(const std::vector<Val*>& vals) {
   std::vector<Val*> all_consumer_vals;
   for (auto val : vals) {
     auto consumer_vals = consumerValsOf(val);

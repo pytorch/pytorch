@@ -1038,15 +1038,11 @@ std::ostream& operator<<(
   return out << load_store_type2string(load_store_type);
 }
 
-std::ostream& operator<<(
-    std::ostream& out,
-    const IterType bt) {
+std::ostream& operator<<(std::ostream& out, const IterType bt) {
   return out << iter_type2string(bt);
 }
 
-std::ostream& operator<<(
-    std::ostream& os,
-    const Swizzle2DType& swizzle) {
+std::ostream& operator<<(std::ostream& os, const Swizzle2DType& swizzle) {
   switch (swizzle) {
     case Swizzle2DType::NoSwizzle:
       os << "NoSwizzle";
@@ -1073,9 +1069,7 @@ std::ostream& operator<<(
   return os;
 }
 
-std::ostream& operator<<(
-    std::ostream& os,
-    const SwizzleMode& swizzle) {
+std::ostream& operator<<(std::ostream& os, const SwizzleMode& swizzle) {
   switch (swizzle) {
     case SwizzleMode::NoSwizzle:
       os << "NoSwizzle";
@@ -1093,8 +1087,7 @@ std::ostream& operator<<(
   return os;
 }
 
-c10::optional<std::string> inline_op_str(
-    const UnaryOpType uotype) {
+c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
