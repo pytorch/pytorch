@@ -262,17 +262,21 @@ test_inductor_benchmark() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   PARTITION_FLAGS=""
-  if [[ ! -z "$NUM_TEST_SHARDS" && ! -z "$2" ]]; then
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
     PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
   fi
   mkdir -p "$TEST_REPORTS_DIR"
   # Check inference with --float32
+  # shellcheck disable=SC2086
   python benchmarks/dynamo/$1.py --ci --accuracy \
     --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  # shellcheck disable=SC2086
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
   # Check training with --amp
+  # shellcheck disable=SC2086
   python benchmarks/dynamo/$1.py --ci --training --accuracy \
     --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # shellcheck disable=SC2086
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
 }
 
