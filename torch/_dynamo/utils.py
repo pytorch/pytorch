@@ -767,7 +767,6 @@ def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False, name=None):
     # TODO: Check if we should remove FakeTensor isinstance check when
     # ignore_subclass
     if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
-        assert name is not None
 
         static_shapes = config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
@@ -778,7 +777,10 @@ def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False, name=None):
                 e, tx.fake_mode, static_shapes, tx, ignore_subclass=ignore_subclass
             )
         )
-        torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.associate(fake_tensor, name)
+        if name is not None:
+            torch.fx.experimental.guard_env.CURRENT_GUARD_ENV.associate(
+                fake_tensor, name
+            )
         return fake_tensor
     else:
         return e

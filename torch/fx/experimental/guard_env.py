@@ -78,6 +78,9 @@ class GuardEnv:
     def get_guards(self) -> List[GuardEnvExpr]:
         return self._guards
 
+    def clear(self):
+        self._guards.clear()
+        self._tensor_to_names.clear()
 
 CURRENT_GUARD_ENV = None
 
@@ -89,4 +92,5 @@ def guarding(guard_env):
     try:
         yield CURRENT_GUARD_ENV
     finally:
+        CURRENT_GUARD_ENV.clear()
         CURRENT_GUARD_ENV = old_guard_env

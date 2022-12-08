@@ -295,6 +295,7 @@ class OutputGraph(fx.Tracer):
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
+                    name=module_key,
                     **options,
                 )
 

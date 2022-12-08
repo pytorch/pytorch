@@ -666,6 +666,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    name=self.name,
                     **options,
                 )
             else:
@@ -674,6 +675,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    name=self.name,
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
