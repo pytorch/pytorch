@@ -1245,11 +1245,12 @@ Tensor trace_cpu(const Tensor& self) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
-    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
+    if constexpr (std::is_integral_v<accscalar_t>) {
       // all integer types get promoted to kLong
-      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
-      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
-    );
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
   });
 
   return result;
