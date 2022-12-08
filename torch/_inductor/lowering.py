@@ -1548,9 +1548,9 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 def as_tensor(data, dtype=None, device=None):
     if isinstance(data, TensorBox):
         if dtype is not None:
-            data = to(data, dtype)
+            data = to_dtype(data, dtype)
         if device is not None:
-            data = to(data, device)
+            data = to_device(data, device)
         return data
     return tensor(data, dtype=dtype, device=device)
 
