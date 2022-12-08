@@ -653,6 +653,7 @@ def _pre_state_dict_hook(
     what postprocessing will be done.
     """
     fsdp_state: _FSDPState = module
+    # Use partial to carry over FSDP state information to the hooks.
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: functools.partial(
             _full_pre_state_dict_hook, fsdp_state
