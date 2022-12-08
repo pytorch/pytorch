@@ -280,7 +280,7 @@ test_inductor_benchmark() {
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   # Check training with symbolic shapes (not actually inductor)
   # shellcheck disable=SC2086
-  TORCHDYNAMO_DYNAMIC_SHAPES=1 AOT_DYNAMIC_SHAPES=1 python benchmarks/dynamo/$1.py --ci --training --accuracy \
+  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
     --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_huggingface.csv
   # shellcheck disable=SC2086
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_huggingface.csv
@@ -299,7 +299,7 @@ test_inductor_timm_shard() {
 }
 
 test_inductor_torchbench() {
-  test_inductor_benchmark torchbench
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
 }
 
 test_python_gloo_with_tls() {

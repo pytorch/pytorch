@@ -84,6 +84,22 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
+CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    "DebertaForMaskedLM",
+    "DebertaForQuestionAnswering",
+    "DebertaV2ForQuestionAnswering",
+    "beit_base_patch16_224",
+    "botnet26t_256",
+    "convnext_base",
+    "crossvit_9_240",
+    "dpn107",
+    "eca_botnext26ts_256",
+    "eca_halonext26ts",
+    "hrnet_w18",
+    "levit_128",
+]
+
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
@@ -1679,12 +1695,17 @@ def run(runner, args, original_dir=None):
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
+    if args.dynamic_shapes:
+        torch._dynamo.config.dynamic_shapes = True
+        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
         if args.backend == "aot_eager":
             args.exclude = (
+                CI_SKIP_AOT_EAGER_DYNAMIC_TRAINING
+                if args.training and args.dynamic_shapes else
                 CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
                 else CI_SKIP_AOT_EAGER_INFERENCE
