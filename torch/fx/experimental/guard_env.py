@@ -1,4 +1,4 @@
-from typing import List, Dict, NoneType
+from typing import List, Dict
 import torch
 import dataclasses
 from contextlib import contextmanager
@@ -49,7 +49,7 @@ To have it here, especially as aot_autograd knows about this and registers new g
 """
 class GuardEnv:
     _guards : List[GuardEnvExpr] = []
-    _tensor_to_names : Dict[torch.Tensor, Dict[str, NoneType]] = {}
+    _tensor_to_names : Dict[torch.Tensor, Dict[str, None]] = {}
 
     def register_duplicates(self, dupe_arg: torch.Tensor, kept_arg: torch.Tensor):
         # Note: This is a little onerous - one could imagine that registration implies assoication.
