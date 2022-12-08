@@ -1,7 +1,13 @@
-from typing import List, Dict, Set
+from typing import List, Dict, NoneType
 import torch
 import dataclasses
 from contextlib import contextmanager
+
+__all__ = [
+    "GuardEnvExpr", "DuplicateInputs", "GuardEnv",
+    "CURRENT_GUARD_ENV", "guarding",
+]
+
 
 """
 Parent structure for guard env expressions.
@@ -43,7 +49,7 @@ To have it here, especially as aot_autograd knows about this and registers new g
 """
 class GuardEnv:
     _guards : List[GuardEnvExpr] = []
-    _tensor_to_names : Dict[torch.Tensor, Set[str]] = {}
+    _tensor_to_names : Dict[torch.Tensor, Dict[str, NoneType]] = {}
 
     def register_duplicates(self, dupe_arg: torch.Tensor, kept_arg: torch.Tensor):
         # Note: This is a little onerous - one could imagine that registration implies assoication.
