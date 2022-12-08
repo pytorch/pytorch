@@ -118,12 +118,6 @@ class TORCH_API LazyGraphExecutor {
       const Shape& shape,
       const BackendDevice& device);
 
-  // Configure the executor treat compile/execute API calls as no-ops
-  // for use when profiling lazy trace overheads
-  void SetNoOpExecutionMode(bool enable_noop) {
-    noop_execution_mode_ = enable_noop;
-  }
-
   struct CachedComputation {
     explicit CachedComputation(ComputationPtr computation)
         : computation(std::move(computation)) {}
@@ -137,7 +131,10 @@ class TORCH_API LazyGraphExecutor {
 
   hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
 
- private:
+ protected:
+  // TODO(alanwaketan): Revisit if all of them need to be accessible to
+  // derived classes.
+
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
     // the IR graph above them).
@@ -164,6 +161,7 @@ class TORCH_API LazyGraphExecutor {
     std::vector<size_t> parameter_sequence;
   };
 
+ private:
   struct CompilationResult {
     BackendDevice device;
     size_t emitted_nodes = 0;
@@ -256,8 +254,6 @@ class TORCH_API LazyGraphExecutor {
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices,
       c10::ArrayRef<BackendDataPtr> tensors_data);
-
-  bool noop_execution_mode_ = false;
 };
 
 } // namespace lazy

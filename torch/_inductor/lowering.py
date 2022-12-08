@@ -403,33 +403,6 @@ def _to_copy(
     return x
 
 
-@register_lowering(aten.to)
-def to(
-    x,
-    device_or_dtype=None,
-    non_blocking=False,
-    copy=False,
-    memory_format=None,
-    device=None,
-    dtype=None,
-    layout=None,
-):
-    assert not memory_format, "TODO"
-    assert layout in (None, torch.strided)
-    if isinstance(device_or_dtype, torch.dtype):
-        return to_dtype(x, device_or_dtype)
-    elif isinstance(device_or_dtype, torch.device):
-        return to_device(x, device_or_dtype)
-    else:
-        assert device_or_dtype is None, device_or_dtype
-
-    if device is not None:
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    return x
-
-
 def ops_wrapper(name):
     assert isinstance(name, str)
 
@@ -2605,12 +2578,15 @@ def max_pool2d_with_indices(
             ih = bh * stride[0] + ih - padding[0]
             iw = bw * stride[1] + iw - padding[1]
             val = x_loader([*prefix, ih, iw])
-            index = ops.index_expr(ih * w + iw, torch.int64)
+            if return_index:
+                index = ops.index_expr(ih * w + iw, torch.int64)
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
             if maxval is None:
-                maxindex = index
                 maxval = val
             else:
-                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
                 maxval = ops.maximum(val, maxval)
         if return_index:
             return maxindex
@@ -3289,7 +3265,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
 
 
 @register_lowering([aten.var, prims.var])
-def var_(x, axis, correction=1, keepdim=False):
+def var_(x, axis=None, correction=1, keepdim=False):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     diffs = square(sub(x, mean(x, axis, keepdim=True)))
@@ -3304,7 +3280,7 @@ def var_(x, axis, correction=1, keepdim=False):
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
+def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     if correction is None:
         correction = int(unbiased)
     return [
@@ -3314,7 +3290,7 @@ def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
 
 
 @register_lowering(aten.std)
-def std(x, axis, correction=1, keepdim=False):
+def std(x, axis=None, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
 
 
@@ -3497,18 +3473,16 @@ def fmod(a, b):
     return make_pointwise(fn)(a, b)
 
 
-# TODO - enable builtin and disable decomp to lower to ptx instruction
-# Causes compilation to not complete on timm_vision_transformers inference
-# @register_lowering(aten.rsqrt)
-# def rsqrt(x):
-#     dtype = x.get_dtype()
-#     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
-#         x = to_dtype(x, torch.get_default_dtype())
-#
-#     def _rsqrt(x):
-#         return ops.rsqrt(x)
-#
-#     return make_pointwise(_rsqrt)(x)
+@register_lowering(aten.rsqrt)
+def rsqrt(x):
+    dtype = x.get_dtype()
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        x = to_dtype(x, torch.get_default_dtype())
+
+    def _rsqrt(x):
+        return ops.rsqrt(x)
+
+    return make_pointwise(_rsqrt)(x)
 
 
 @register_lowering([aten.sum, prims.sum])
@@ -3580,6 +3554,16 @@ erf = register_pointwise(
 register_lowering(
     aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )(erf)
+
+register_pointwise(
+    aten.log1p,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+
+register_pointwise(
+    aten.expm1,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
 
 register_pointwise(
     aten.log,
@@ -3668,3 +3652,9 @@ def op_floordiv(a, b):
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
+
+
+@register_lowering(aten._test_inductor_realize)
+def _realize(x):
+    x.realize()
+    return clone(x)

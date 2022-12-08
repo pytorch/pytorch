@@ -6375,12 +6375,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             outf = m(inputf)
             out = m(input)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0.0)
+            self.assertEqual(out, outf.to(dtype), atol=0.1, rtol=0.0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
         for device in ['cpu']:
@@ -6400,7 +6398,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
         # note we allocated grad_output to be larger so out of bound access
-        # woudl be visible in grad_input
+        # would be visible in grad_input
         grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
         grad = grad[:, :, :out_s]
 
@@ -6712,12 +6710,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.log_softmax(inputf, dim=dim)
             out = F.log_softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
             self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
 
     def test_softmax_cpu(self, dtype=torch.bfloat16):
@@ -6726,12 +6722,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input = inputf.to(dtype).detach().requires_grad_(True)
             outf = F.softmax(inputf, dim=dim)
             out = F.softmax(input, dim=dim)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqualIgnoreType(out, outf, atol=1e-3, rtol=0)
+            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
 
             out.sum().backward()
             outf.sum().backward()
-            self.assertEqual(input.grad.dtype, dtype)
             self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
     def test_adaptive_log_softmax(self):
@@ -6842,12 +6836,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         outf = loss_cpu(inputf, target)
         out = loss_cpu(input, target)
-        self.assertEqual(out.dtype, dtype)
         self.assertEqual(out, outf.to(dtype=dtype), atol=1e-1, rtol=0)
 
         outf.backward()
         out.backward()
-        self.assertEqual(input.grad.dtype, dtype)
         self.assertEqual(input.grad, inputf.grad.to(dtype=dtype), atol=1e-1, rtol=0)
 
     def test_cross_entropy_loss_precision(self):
@@ -7672,6 +7664,17 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
+    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+        for elementwise_affine in [True, False]:
+            # layer norm input shape is normalized to m x n, cpu vectorized on n,
+            # so make sure n exceeds vector length
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            m2 = deepcopy(m).to(device, torch.float)
+            out = m(input)
+            out2 = m2(input)
+            self.assertEqual(out, out2)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -8085,6 +8088,9 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
+
+        if self.device_type == 'cpu':
+            self._test_LayerNorm_cpu_mixed_dtype(device)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
