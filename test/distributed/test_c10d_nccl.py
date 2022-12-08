@@ -2700,10 +2700,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
-        # TODO: [dispatchable comms] should we retrieve the options from the nccl backend always?
-        backend_pg = pg._get_backend(torch.device("cuda"))
         # test if the process group constructed with high priority stream
-        self.assertTrue(backend_pg.options.is_high_priority_stream)
+        self.assertTrue(pg._get_default_backend().options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
         pg.allreduce(t).wait()

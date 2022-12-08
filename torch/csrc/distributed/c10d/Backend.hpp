@@ -21,37 +21,6 @@ constexpr auto kBackendDefaultTimeout =
 
 namespace c10d {
 
-// template<typename T> Backend * createT() { return c10::make_intrusive<Backend>T; }
-
-// struct BackendFactory {
-//     typedef std::map<std::string, Backend*(*)()> map_type;
-
-//     static Backend * createInstance(std::string const& s) {
-//         map_type::iterator it = getMap()->find(s);
-//         if(it == getMap()->end())
-//             return 0;
-//         return it->second();
-//     }
-
-// protected:
-//     static map_type * getMap() {
-//         // never delete'ed. (exist until program termination)
-//         // because we can't guarantee correct destruction order
-//         if(!map) { map = new map_type; }
-//         return map;
-//     }
-
-// private:
-//     static map_type * map;
-// };
-
-// template<typename T>
-// struct DerivedRegister : BackendFactory {
-//     DerivedRegister(std::string const& s) {
-//         getMap()->insert(std::make_pair(s, &createT<T>));
-//     }
-// };
-
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
 

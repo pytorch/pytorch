@@ -344,7 +344,7 @@ c10::intrusive_ptr<Work> allgather(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     at::TensorList input_tensors,
     const AllgatherOptions& opts) {
-  // TODO: handles the case of using a PythonProcessGroup
+  // TODO: this is needed to handle the case of using a PythonProcessGroup
   if (!process_group->hasBackends()) {
     auto input_tensors_vec = input_tensors.vec();
     return process_group->allgather(

@@ -1210,6 +1210,7 @@ class DistributedTest:
                     # No model averaging, so the parameters are not updated.
                     self.assertEqual(param.data, tensor)
 
+        # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
@@ -1287,11 +1288,9 @@ class DistributedTest:
                 send_op = dist.P2POp(dist.isend, send_tensor, 0)
                 p2p_op_list.append(send_op)
 
-                print(p2p_op_list)
                 reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
-
 
             self._barrier()
 
@@ -7743,7 +7742,6 @@ class DistributedTest:
 
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
-            print(f"Rank {self.rank} calling barrier for group_gloo {group_gloo}")
             dist.barrier(group_gloo)
 
         @require_backend(DistTestCases.backend_feature["gpu"])

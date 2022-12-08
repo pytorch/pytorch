@@ -237,7 +237,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
             if with_new_group:
                 pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
             else:
-                print("HELLOOOOO")
                 _pg = c10d.ProcessGroupNCCL(
                     store, self.rank, self.world_size, timeout=timedelta(seconds=timeout)
                 )
