@@ -11,6 +11,7 @@ from torch.nn.utils.parametrize import is_parametrized
 from collections import OrderedDict
 from inspect import signature
 from inspect import getfullargspec
+from torch.ao.quantization.quantize import _add_observer_
 
 NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 NodePattern.__module__ = "torch.ao.quantization.utils"
@@ -627,7 +628,7 @@ def _get_lstm_with_individually_observed_parts(
 
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    torch.ao.quantization._add_observer_(
+    _add_observer_(
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
     )
