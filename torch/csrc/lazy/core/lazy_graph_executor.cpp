@@ -931,10 +931,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       // even in case the caller does not wait, and that is accomplished by
       // setting the unlockers status. In that case the exception will be
       // surfaced when the user tries to acquire the device locks the next time.
-      // std::exception_ptr exptr = std::current_exception();
       for (auto& unlocker : async->unlocker) {
-        std::exception_ptr exptr = std::current_exception();
-        unlocker.SetStatus(std::move(exptr));
+        unlocker.SetStatus(std::current_exception());
       }
       throw;
     }
