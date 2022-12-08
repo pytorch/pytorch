@@ -5,9 +5,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>

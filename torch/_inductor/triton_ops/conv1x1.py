@@ -26,7 +26,7 @@ if has_triton():
             shape_w = w.shape
             shape_bias = bias.shape if bias is not None else None
 
-            # indicies for the layeout
+            # indicies for the layout
             xn, xc, xh, xw = 0, 1, 2, 3
             yn, yc, yh, yw = 0, 1, 2, 3
             wn, wc, wh, ww = 0, 1, 2, 3

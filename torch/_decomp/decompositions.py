@@ -1523,7 +1523,8 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
+    if device is None and dtype is None and memory_format is None:
+        return x.clone()
     dtype_converted = False
     if device is not None and device != x.get_device():
         # avoid conversions on cpu
@@ -1557,7 +1558,7 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
 @reduction_complex_to_real
 def std_decomposition(
     x: Tensor,
-    dim: Optional[List[int]],
+    dim: Optional[List[int]] = None,
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
