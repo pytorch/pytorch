@@ -614,19 +614,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_inp = e.pop("tags", [])
-        if isinstance(tags_inp, str):
-            tags_inp = [tags_inp]
-        assert isinstance(tags_inp, list)
-
+        tags_s = e.pop("tags", "")
+        assert isinstance(tags_s, str)
         tags: Set[str] = set()
-        for t in tags_inp:
+        if len(tags_s) > 0:
             assert len(valid_tags) > 0
-            # TODO: verify that the tag is valid and has an entry in tags.yaml
-            if t in valid_tags:
-                tags.add(t)
-            else:
-                raise AssertionError(f"illegal tag {t}")
+            for t in tags_s.split(", "):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f"illegal tag {t}")
+        assert isinstance(tags, set)
 
         from torchgen.api import cpp
 
