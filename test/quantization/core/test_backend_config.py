@@ -150,7 +150,7 @@ class TestBackendConfig(QuantizationTestCase):
             "reference_quantized_module_for_root": nnqr.Linear,
             "fused_module": nni.LinearReLU,
             "fuser_method": self._fuser_method,
-            "use_legacy_pattern_format": False,
+            "use_complex_pattern_format": False,
         }
 
     def _get_backend_pattern_config_dict2(self):
@@ -163,7 +163,7 @@ class TestBackendConfig(QuantizationTestCase):
             "num_tensor_args_to_observation_type": self._num_tensor_args_to_observation_type,
             "input_type_to_index": self._input_type_to_index,
             "input_output_observed": False,
-            "use_legacy_pattern_format": False,
+            "use_complex_pattern_format": False,
         }
 
     def test_backend_op_config_set_observation_type(self):

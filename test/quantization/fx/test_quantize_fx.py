@@ -548,10 +548,10 @@ class TestFuseFx(QuantizationTestCase):
 
             conv_bn_res_relu_config1 = BackendPatternConfig((nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
                 .set_fuser_method(fuse_conv_bn_relu) \
-                ._set_use_legacy_pattern_format(True)
+                ._set_use_complex_pattern_format(True)
             conv_bn_res_relu_config2 = BackendPatternConfig((nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
                 .set_fuser_method(fuse_conv_bn_relu) \
-                ._set_use_legacy_pattern_format(True)
+                ._set_use_complex_pattern_format(True)
             backend_config = BackendConfig() \
                 .set_backend_pattern_config(conv_bn_res_relu_config1) \
                 .set_backend_pattern_config(conv_bn_res_relu_config2)
@@ -612,7 +612,7 @@ class TestFuseFx(QuantizationTestCase):
             .set_fuser_method(fuse_conv_bn_relu) \
             ._set_root_node_getter(conv_bn_res_relu_root_node_getter) \
             ._set_extra_inputs_getter(conv_bn_res_relu_extra_inputs_getter) \
-            ._set_use_legacy_pattern_format(True)
+            ._set_use_complex_pattern_format(True)
         backend_config = BackendConfig().set_backend_pattern_config(conv_bn_res_relu_config)
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv), torch.nn.Conv2d)
@@ -678,7 +678,7 @@ class TestFuseFx(QuantizationTestCase):
             .set_fuser_method(fuse_conv_res_relu) \
             ._set_root_node_getter(conv_res_relu_root_node_getter) \
             ._set_extra_inputs_getter(conv_res_relu_extra_inputs_getter) \
-            ._set_use_legacy_pattern_format(True)
+            ._set_use_complex_pattern_format(True)
         backend_config = BackendConfig() \
             .set_backend_pattern_config(conv_relu_config) \
             .set_backend_pattern_config(conv_res_relu_config)
@@ -5553,7 +5553,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs)
                 ._set_root_node_getter(root_node_getter)
-                ._set_use_legacy_pattern_format(True)
+                ._set_use_complex_pattern_format(True)
             )
             return backend_pattern_configs
 

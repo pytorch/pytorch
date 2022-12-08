@@ -242,7 +242,7 @@ def _maybe_convert_pattern_to_reversed_nested_tuple_format(
     by the subgraph rewriter in torch.fx, so we don't have to maintain our own
     complex pattern matching code. Then we won't need this helper function anymore.
     """
-    if not isinstance(pattern, Tuple) or config._use_legacy_pattern_format:
+    if not isinstance(pattern, tuple) or config._use_complex_pattern_format:
         return pattern
     if len(pattern) == 2:
         (a, b) = pattern
@@ -271,9 +271,9 @@ def _maybe_convert_fuser_method_to_reversed_nested_tuple_format(
 
     This currently only supports fuser methods with 3 or 4 arguments.
     """
-    if config._use_legacy_pattern_format:
+    if config._use_complex_pattern_format:
         return fuser_method
-    if not isinstance(pattern, Tuple):
+    if not isinstance(pattern, tuple):
         raise ValueError("Expected pattern to be a tuple, got: ", pattern)
     if len(pattern) == 2:
         return _reverse2(fuser_method)
