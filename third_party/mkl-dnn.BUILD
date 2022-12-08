@@ -55,8 +55,8 @@ template_rule(
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
         "@DNNL_VERSION_MINOR@": "7",
-        "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "650085b2f3643aad05c629425983491d63b5c289",
+        "@DNNL_VERSION_PATCH@": "2",
+        "@DNNL_VERSION_HASH@": "fbec3e25a559ee252022ae066817b204e106a6ba",
     },
 )
 
