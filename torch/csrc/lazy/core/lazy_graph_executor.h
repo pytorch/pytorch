@@ -220,6 +220,40 @@ class TORCH_API LazyGraphExecutor {
     std::map<BackendDevice, std::shared_ptr<DeviceLocker>> lockers_;
   };
 
+  class DataCacheArena {
+  public:
+    static DataCacheArena* Get();
+
+    BackendDataPtr GetDeviceData(
+        const at::Tensor& tensor,
+        const BackendDevice& device);
+
+    BackendDataPtr GetDeviceData(
+        const at::Scalar& value,
+        at::ScalarType scalar_type,
+        const BackendDevice& device);
+
+  private:
+    struct TensorHasher {
+      size_t operator()(const at::Tensor& tensor) const;
+    };
+    struct TensorComparer {
+      bool operator()(const at::Tensor& tensor1, const at::Tensor& tensor2)
+          const;
+    };
+
+    explicit DataCacheArena(size_t max_cache_size);
+
+    using DataCache =
+        Cache<at::Tensor, BackendData, TensorHasher, TensorComparer>;
+
+    DataCache* GetDataCache(const BackendDevice& device);
+
+    size_t max_cache_size_ = 0;
+    std::mutex mutex_;
+    std::map<BackendDevice, std::unique_ptr<DataCache>> device_caches_;
+  };
+
   void ResetTrimCounter() const;
 
  private:
