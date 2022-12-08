@@ -16,8 +16,9 @@
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
+#include <torch/csrc/jit/serialization/import.h>
 
 namespace py = pybind11;
 
