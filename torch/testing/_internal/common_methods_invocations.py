@@ -278,6 +278,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
 
     # input shape, output shape, output stride, output storage offset
     test_cases = [
+        ((1,), (), (), 0),
         ((1,), (1,), (1,), 0),
         ((3, 3), (2, 2), (1, 2), 0),
         ((3, 3), (2, 2), (1, 2), 1),
@@ -292,6 +293,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         input_t = make_arg(input_shape)
         input_src = make_arg(output_shape)
         yield SampleInput(input_t, input_src, output_shape, stride, storage_offset=storage_offset)
+
 
 def error_inputs_as_strided_scatter(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -10821,8 +10823,6 @@ op_db: List[OpInfo] = [
                             'test_non_standard_bool_values'),
            )),
     OpInfo('as_strided_scatter',
-           op=lambda x, src, size, stride, storage_offset=0:
-               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
@@ -18423,6 +18423,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.as_strided_scatter",
+        torch_opinfo_name="as_strided_scatter",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",

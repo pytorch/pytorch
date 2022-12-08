@@ -747,7 +747,8 @@ def _catch_all_reshard(
                 continue
             free_unsharded_flat_params.append(_should_free_in_backward(state, handle))
             handles_to_reshard.append(handle)
-        _reshard(state, handles_to_reshard, free_unsharded_flat_params)
+        if handles_to_reshard:
+            _reshard(state, handles_to_reshard, free_unsharded_flat_params)
     except Exception as e:
         p_assert(
             False,
@@ -888,7 +889,9 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._root_module_to_handles[module]
+        if module not in state._comm_module_to_handles:
+            continue
+        module_param_handles = state._comm_module_to_handles[module]
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -918,7 +921,9 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._root_module_to_handles[module]
+        if module not in state._comm_module_to_handles:
+            continue
+        module_param_handles = state._comm_module_to_handles[module]
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,

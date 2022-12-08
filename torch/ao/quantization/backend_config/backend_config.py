@@ -41,7 +41,7 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
-USE_LEGACY_PATTERN_FORMAT_DICT_KEY = "use_complex_pattern_format"
+USE_COMPLEX_PATTERN_FORMAT_DICT_KEY = "use_complex_pattern_format"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -506,7 +506,7 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_use_complex_pattern_format(backend_pattern_config_dict.get(USE_LEGACY_PATTERN_FORMAT_DICT_KEY, None))
+        conf._set_use_complex_pattern_format(backend_pattern_config_dict.get(USE_COMPLEX_PATTERN_FORMAT_DICT_KEY, None))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -539,5 +539,5 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
-        backend_pattern_config_dict[USE_LEGACY_PATTERN_FORMAT_DICT_KEY] = self._use_complex_pattern_format
+        backend_pattern_config_dict[USE_COMPLEX_PATTERN_FORMAT_DICT_KEY] = self._use_complex_pattern_format
         return backend_pattern_config_dict
