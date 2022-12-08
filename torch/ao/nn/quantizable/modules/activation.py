@@ -8,10 +8,6 @@ from typing import Optional, Tuple
 
 import warnings
 
-__all__ = [
-    "MultiheadAttention"
-]
-
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
