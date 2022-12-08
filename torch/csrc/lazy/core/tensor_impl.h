@@ -11,11 +11,14 @@ namespace lazy {
 
 // Tensor implementation class used to be fed to the at::Tensor.
 // Its scope is just to handle an LazyTensor.
-class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
+class TORCH_API LTCTensorImpl : public c10::TensorImpl {
  public:
   explicit LTCTensorImpl(const LazyTensorPtr& tensor);
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
+  explicit LTCTensorImpl(const LazyTensorPtr& tensor,
+    c10::DispatchKey dispatch_key, c10::DispatchKey autograd_dispatch_key,
+    caffe2::TypeMeta data_type, c10::Device device);
 
   LazyTensorPtr tensor() {
     return tensor_;
