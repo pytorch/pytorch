@@ -1149,6 +1149,7 @@ Tensor zeros_symint(SymIntArrayRef size,
 }
 
 Tensor _efficientzerotensor(IntArrayRef size,
+    bool is_wrapped_number,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1158,10 +1159,12 @@ Tensor _efficientzerotensor(IntArrayRef size,
     auto dtype_ = dtype_or_default(dtype);
     auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CPU) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
     auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    out.unsafeGetTensorImpl()->set_wrapped_number(is_wrapped_number);
     return out;
 }
 
 Tensor _efficientzerotensor_meta(IntArrayRef size,
+                                 bool is_wrapped_number,
                                  c10::optional<ScalarType> dtype,
                                  c10::optional<Layout> layout,
                                  c10::optional<Device> device,
@@ -1171,6 +1174,7 @@ Tensor _efficientzerotensor_meta(IntArrayRef size,
   auto dtype_ = dtype_or_default(dtype);
   auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
   auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  out.unsafeGetTensorImpl()->set_wrapped_number(is_wrapped_number);
   return out;
 }
 

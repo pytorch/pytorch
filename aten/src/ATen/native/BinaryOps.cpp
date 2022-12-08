@@ -1016,7 +1016,8 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
   auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
-  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+  auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
+  return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
 }
 
 Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
@@ -1033,7 +1034,8 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
     }
     else {
       // 0/x, return zero tensor
-      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+      auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
+      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
     }
   }
   else {
@@ -1043,7 +1045,8 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
     }
     else {
       // x/y -- unreachable, see TORCH_INTERNAL_ASSERT above
-      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+      auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
+      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
     }
   }
 }
@@ -1064,7 +1067,8 @@ Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
-      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+      auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
+      return at::_efficientzerotensor(meta_out.sizes(), is_wrapped_number, meta_out.options().device(out_device));
     }
     auto res = get_out_like(other);
     return alpha.equal(1) ? res : res.mul(alpha);
@@ -1095,8 +1099,10 @@ Tensor linalg_cross_zerotensor(
     other.to(device),
     dim);
 
+  auto is_wrapped_number = meta_out.unsafeGetTensorImpl()->is_wrapped_number();
   return at::_efficientzerotensor(
     meta_out.sizes(),
+    is_wrapped_number,
     meta_out.options().device(out_device));
 }
 

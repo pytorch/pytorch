@@ -174,7 +174,8 @@ Tensor dot(const Tensor &self, const Tensor &other){
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return at::_efficientzerotensor({}, self.options());
+    auto is_wrapped_number = self.unsafeGetTensorImpl()->is_wrapped_number();
+    return at::_efficientzerotensor({}, is_wrapped_number, self.options());
   }
 
   if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
@@ -212,7 +213,8 @@ Tensor vdot(const Tensor &self, const Tensor &other){
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return at::_efficientzerotensor({}, self.options());
+    auto is_wrapped_number = self.unsafeGetTensorImpl()->is_wrapped_number();
+    return at::_efficientzerotensor({}, is_wrapped_number, self.options());
   }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {

@@ -5784,7 +5784,7 @@
     CompositeExplicitAutograd: zeros
   autogen: zeros.names_out
 
-- func: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _efficientzerotensor(int[] size, bool is_wrapped_number, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda

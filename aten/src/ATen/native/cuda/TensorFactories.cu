@@ -56,6 +56,7 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
 }
 
 Tensor _efficientzerotensor_cuda(IntArrayRef size,
+    bool is_wrapped_number,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -68,6 +69,7 @@ Tensor _efficientzerotensor_cuda(IntArrayRef size,
     auto dtype_ = dtype_or_default(dtype);
     auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CUDA) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
     auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    out.unsafeGetTensorImpl()->set_wrapped_number(is_wrapped_number);
     return out;
 }
 

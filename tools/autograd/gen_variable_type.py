@@ -670,12 +670,21 @@ isFwGradDefinedTensorList(${req_inp})\
 """
 )
 
+FW_DERIVATIVE_DEFINED_EFFICIENT_ZERO_GRAD_TEMPLATE = CodeTemplate(
+    """\
+auto ${inp}_t_raw = toNonOptFwGrad(${inp});
+auto ${inp}_tensor = toNonOptTensor(${inp});
+auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
+  ? ${inp}_t_raw : at::_efficientzerotensor(${inp}_tensor.sizes(), ${inp}_tensor.unsafeGetTensorImpl()->is_wrapped_number(), ${inp}_tensor.options());
+"""
+)
+
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate(
     """\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp}_tensor = toNonOptTensor(${inp});
 auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
-  ? ${inp}_t_raw : at::${zeros_fn}(${inp}_tensor.sizes(), ${inp}_tensor.options());
+  ? ${inp}_t_raw : at::zeros(${inp}_tensor.sizes(), ${inp}_tensor.options());
 """
 )
 
@@ -1526,15 +1535,15 @@ def emit_body(
 
             unpacked_arguments = ""
             for inp in differentiable_inputs:
-                zeros_fn = (
-                    "zeros"
-                    if inplace and inp.name == "self"
-                    else "_efficientzerotensor"
-                )
+                use_efficientzerotensor = not (inplace and inp.name == "self")
+                if use_efficientzerotensor:
+                    fw_derivative_defined_grad_template = FW_DERIVATIVE_DEFINED_EFFICIENT_ZERO_GRAD_TEMPLATE
+                else:
+                    fw_derivative_defined_grad_template = FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += (
-                        FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
-                            inp=inp.name, zeros_fn=zeros_fn
+                        fw_derivative_defined_grad_template.substitute(
+                            inp=inp.name
                         )
                     )
                 if inp.name in (derivative.required_inputs_primal or []):
@@ -1542,8 +1551,8 @@ def emit_body(
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
                     )
             if derivative.required_original_self_value:
-                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
-                    inp="original_self", zeros_fn=zeros_fn
+                unpacked_arguments += fw_derivative_defined_grad_template.substitute(
+                    inp="original_self"
                 )
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(
                     inp="original_self"
