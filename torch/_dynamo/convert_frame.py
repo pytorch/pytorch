@@ -366,33 +366,38 @@ def _compile(
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
 
-    guard_env = GuardEnv()
-    with guarding(guard_env):
-        # from .utils import print_once;  print_once(code.co_filename)
-        def transform(instructions, code_options):
-            nonlocal output
-            tracer = InstructionTranslator(
-                instructions,
-                code,
-                locals,
-                globals,
-                builtins,
-                code_options,
-                compiler_fn,
-                one_graph,
-                export,
-            )
-            tracer.run()
-            output = tracer.output
-            assert output is not None
-            assert output.output_instructions
-            instructions[:] = output.output_instructions
-            code_options.update(output.code_options)
+    # from .utils import print_once;  print_once(code.co_filename)
+    def transform(instructions, code_options):
+        nonlocal output
+        tracer = InstructionTranslator(
+            instructions,
+            code,
+            locals,
+            globals,
+            builtins,
+            code_options,
+            compiler_fn,
+            one_graph,
+            export,
+        )
+        tracer.run()
+        output = tracer.output
+        assert output is not None
+        assert output.output_instructions
+        instructions[:] = output.output_instructions
+        code_options.update(output.code_options)
 
-            if config.dead_code_elimination:
-                instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        if config.dead_code_elimination:
+            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-        try:
+    try:
+        guard_env = GuardEnv()
+
+        # The guard_env here is entered pretty high up, because we need it in 3 places:
+        # (1) transforms when we are making fake_tensors
+        # (2) call_user_compiler so backends can have access to it
+        # (3) Inside guards (CheckFunctionManager) when we compile the code for check_fn
+        with guarding(guard_env):
             for attempt in itertools.count():
                 try:
                     out_code = transform_code_object(code, transform)
@@ -456,17 +461,17 @@ def _compile(
                 hooks.guard_export_fn(output.guards)
 
             return guarded_code
-        except (
-            Unsupported,
-            TorchRuntimeError,
-            BackendCompilerFailed,
-            AssertionError,
-        ) as e:
-            exception_handler(e, code, frame)
-            raise
-        except Exception as e:
-            exception_handler(e, code, frame)
-            raise InternalTorchDynamoError() from e
+    except (
+        Unsupported,
+        TorchRuntimeError,
+        BackendCompilerFailed,
+        AssertionError,
+    ) as e:
+        exception_handler(e, code, frame)
+        raise
+    except Exception as e:
+        exception_handler(e, code, frame)
+        raise InternalTorchDynamoError() from e
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
