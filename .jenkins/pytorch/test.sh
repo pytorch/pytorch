@@ -293,7 +293,7 @@ test_inductor_timm_shard() {
 }
 
 test_inductor_torchbench() {
-  test_inductor_benchmark torchbench
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
 }
 
 test_python_gloo_with_tls() {
