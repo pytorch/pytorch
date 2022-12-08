@@ -646,9 +646,8 @@ class OutputGraph(fx.Tracer):
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
 
-        # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
-        nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
+        # Carry module_stack along with node.nn_module_stack for reusing stacktrace propagation infra
+        rv.node.nn_module_stack = nn_module_stack
 
         return rv
 
