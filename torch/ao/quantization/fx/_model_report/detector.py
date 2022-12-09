@@ -282,7 +282,7 @@ class PerChannelDetector(DetectorBase):
         Each entry maps the fully-qualified-name to information on whether per_channel quantization.
 
         Args:
-            module: The current module that is being checked to see if it is per_channel qunatizable
+            model: The current module that is being checked to see if it is per_channel quantizable
 
         Returns dictionary mapping fqns to if per_channel quantization is possible
         """
