@@ -56,6 +56,7 @@ try:
     )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch._inductor import test_operators
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -761,14 +762,14 @@ class CommonTemplate:
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
-            b = torch._test_inductor_realize(a * 2)
+            b = test_operators.realize(a * 2)
             return (b * 2,)
 
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
     def test_scheduler_vertical_fusion1(self):
-        realize = torch._test_inductor_realize
+        realize = test_operators.realize
 
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
