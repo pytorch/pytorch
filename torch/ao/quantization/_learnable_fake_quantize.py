@@ -1,8 +1,6 @@
 import torch
 from torch.nn.parameter import Parameter
-from typing import List
 
-__all__: List[str] = []
 
 class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
     r""" This is an extension of the FakeQuantize module in fake_quantize.py, which
