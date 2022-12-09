@@ -827,7 +827,7 @@ class TestAssertClose(TestCase):
         """
         pass
 
-    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
+    @unittest.mock.patch("torch.testing.comparison._TensorLikePair.__init__", side_effect=UnexpectedException)
     def test_unexpected_error_originate(self, _):
         actual = torch.tensor(1.0)
         expected = actual.clone()
@@ -835,7 +835,7 @@ class TestAssertClose(TestCase):
         with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
             torch.testing.assert_close(actual, expected)
 
-    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.compare", side_effect=UnexpectedException)
+    @unittest.mock.patch("torch.testing.comparison._TensorLikePair.compare", side_effect=UnexpectedException)
     def test_unexpected_error_compare(self, _):
         actual = torch.tensor(1.0)
         expected = actual.clone()
