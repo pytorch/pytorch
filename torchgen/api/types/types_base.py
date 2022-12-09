@@ -6,7 +6,7 @@ This file defines data model classes for torchgen typing system, as well as some
 `types.py` defines ATen Tensor type and some c10 types, along with signatures that use these types.
 
 The difference between these two files, is `types_base.py` should be implementation-agnostic, meaning it shouldn't
-contain any type definition that is tight to a specific C++ library (e.g., ATen), so that it cacn be easily reused
+contain any type definition that is tight to a specific C++ library (e.g., ATen), so that it can be easily reused
 if we want to generate code for another C++ library.
 
 Add new types to `types.py` if these types are ATen/c10 related.
