@@ -2,7 +2,6 @@ from . import dynamic  # noqa: F403
 from . import functional  # noqa: F403
 from . import modules  # noqa: F403
 from .modules import *  # noqa: F403
-from .modules import MaxPool2d
 
 __all__ = [
     'BatchNorm2d',
@@ -27,6 +26,7 @@ __all__ = [
     'LeakyReLU',
     'Linear',
     'LSTM',
+    'MaxPool2d',
     'MultiheadAttention',
     'PReLU',
     'Quantize',
