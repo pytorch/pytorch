@@ -789,7 +789,7 @@ class CppVecKernel(CppKernel):
         new_index = self.transform_index(index)
 
         def load_help(load_index, nelements):
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8, torch.float64]:
+            if V.graph.get_dtype(name) != torch.float:
                 g_tmp_buf = f"g_tmp_buffer_{var}"
                 if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
                     self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
