@@ -1622,6 +1622,23 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
 
+    def test_shape_prop_fake_tensors(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(5, 5, requires_grad=True)
+                return x + y
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        fake_mode = FakeTensorMode()
+
+        mod = Mod()
+        trace = symbolic_trace(mod)
+        inp = torch.randn(5, 5, requires_grad=True)
+        # Should run without error: ShapeProp runs with fake_mode enabled,
+        # so factory functions create FakeTensors.
+        shape_prop.ShapeProp(trace, fake_mode=fake_mode).propagate(fake_mode.from_tensor(inp))
+
+
     def test_shape_prop_aggregate(self):
         class ReturnTwo(torch.nn.Module):
             def forward(self, x):
