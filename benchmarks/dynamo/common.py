@@ -137,6 +137,7 @@ CI_SKIP_OPTIMIZER = {
     # TIMM
     "hrnet_w18",  # accuracy
     "gernet_l",  # accuracy
+    "nfnet_l0",  # eager variation
 }
 
 
