@@ -53,11 +53,11 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
             for i in indices:
                 batch.append(self.datapipe[i])
             return self.wrapper_class(batch)
-        except IndexError:
+        except IndexError as e:
             if not self.drop_last and len(batch) > 0:
                 return self.wrapper_class(batch)
             else:
-                raise IndexError(f"Index {index} is out of bound.")
+                raise IndexError(f"Index {index} is out of bound.") from e
 
     def __len__(self) -> int:
         if self.length is not None:
