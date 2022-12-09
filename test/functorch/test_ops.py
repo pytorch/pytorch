@@ -914,7 +914,6 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
         decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
-        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS)),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
@@ -956,7 +955,9 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
-    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
+    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
+        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS)),
+    }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core
