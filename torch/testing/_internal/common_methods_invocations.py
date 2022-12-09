@@ -7782,7 +7782,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'log1p',
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
     ),
 
     ForeachFuncInfo(
@@ -9893,7 +9893,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.log1p',),
                    domain=(-1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
