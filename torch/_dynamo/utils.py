@@ -348,13 +348,13 @@ def proxy_args_kwargs(args, kwargs):
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
-    except NotImplementedError:
+    except NotImplementedError as e:
         from .exc import unimplemented
         from .variables.base import typestr
 
         raise unimplemented(
             f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        )
+        ) from e
 
 
 @dataclasses.dataclass
@@ -745,7 +745,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg)
+        raise unimplemented(msg) from e
 
 
 def wrap_to_fake_tensor(e, fake_mode):
@@ -877,8 +877,11 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.

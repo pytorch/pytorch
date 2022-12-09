@@ -1036,7 +1036,7 @@ class Scheduler:
                         self, [reorder_loop_node(n, order) for n in node2.get_nodes()]
                     )
                 else:
-                    assert False, f"Unsupported node type {node2}"
+                    raise RuntimeError(f"Unexpected node type {node2}")
 
                 if self.can_fuse(node1, new_node):
                     possible_fusions.add((node1, new_node))

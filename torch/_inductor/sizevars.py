@@ -459,10 +459,15 @@ class SizeVarAllocator(object):
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.maybe_stride_vars(index, vars):
+        for i, s in enumerate(self.maybe_stride_vars(index, vars)):
             if s is None:
-                result.append(0)
-                continue
+                # If the dimension is not truly strided, we approximate a
+                # stride by taking the difference of the 1st and 0th element in
+                # that dimension.
+                zero_index = {v: sympy.Integer(0) for v in vars if v != 0}
+                first_index = dict(zero_index)
+                first_index[vars[i]] = sympy.Integer(1)
+                s = sympy_subs(index, dim_only) - sympy_subs(index, zero_index)
 
             try:
                 result.append(self.size_hint(s))
