@@ -136,28 +136,35 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         options = VariableTracker.propagate([self])
         tx = parent.output.root_tx
         wrap = functools.partial(wrap_bound_arg, options=options, tx=tx)
-        
+
         fn: types.FunctionType = self.fn
         # TODO comment
         defaults = fn.__defaults__ or []
         defaults_source = AttrSource(self.source, "__defaults__")
-        defaults_item_sources = [GetItemSource(defaults_source, i) for i, _ in enumerate(defaults)]
+        defaults_item_sources = [
+            GetItemSource(defaults_source, i) for i, _ in enumerate(defaults)
+        ]
         fake_func = types.FunctionType(
             fn.__code__,
             fn.__globals__,
             fn.__name__,
-            tuple([
-                wrap(arg, source=source)
-                for arg, source in zip(defaults, defaults_item_sources)
-            ]),
+            tuple(
+                [
+                    wrap(arg, source=source)
+                    for arg, source in zip(defaults, defaults_item_sources)
+                ]
+            ),
             fn.__closure__,
         )
         if fn.__kwdefaults__:
             kwdefaults_source = AttrSource(self.source, "__kwdefaults__")
-            kwdefaults_sources = [GetItemSource(kwdefaults_source, k) for k in fn.__kwdefaults__]
+            kwdefaults_sources = [
+                GetItemSource(kwdefaults_source, k) for k in fn.__kwdefaults__
+            ]
             fake_func.__kwdefaults__ = {
                 # TODO update this too
-                k: wrap(v) for k, v in fn.__kwdefaults__.items()
+                k: wrap(v)
+                for k, v in fn.__kwdefaults__.items()
             }
 
         bound = inspect.signature(fake_func).bind(*args, **kwargs)
