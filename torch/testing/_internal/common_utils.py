@@ -1720,8 +1720,8 @@ def check_if_enable(test: unittest.TestCase):
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
-# convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
-# `torch.testing._comparison.are_equal`, used for example by the public testing function
+# convenient when writing tests, but not so much while reviewing them. By default, the comparison `_Pair` framework of
+# `torch.testing.comparison._not_close_error_metas`, used for example by the public testing function
 # `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
 # between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
 # change the supported inputs, but the comparison logic is the same.
