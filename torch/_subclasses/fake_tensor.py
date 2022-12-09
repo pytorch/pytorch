@@ -342,6 +342,22 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
+@register_op_impl(lambda func: func is aten._to_copy.default)
+def to_copy(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
+    input_device = new_kwargs["device"]
+    out_device = input_device if input_device else new_kwargs["input"].device
+    new_kwargs["device"] = torch.device("meta")
+    inp = new_kwargs.pop("input")
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(inp, **new_kwargs)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, r, out_device
+    )
+
+
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
