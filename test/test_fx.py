@@ -140,12 +140,12 @@ wrap('wrapper_fn')
 def wrapper_fn(x):
     return torch.foo(x)
 
-class _Pair(NamedTuple):
+class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
 
     def _custom_fx_repr_fn(self) -> str:
-        return f"_Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
+        return f"Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
 
 # for testing pytrees
 class Foo(object):  # noqa: B209
@@ -2507,7 +2507,7 @@ class TestFX(JitTestCase):
         res = traced(input)
         self.assertEqual(ref, res)
 
-        # Check _Pair NamedTuple works when inlined into the function call.
+        # Check Pair NamedTuple works when inlined into the function call.
         ph = call_func = None
         for node in traced.graph.nodes:
             if node.op == "placeholder":
@@ -2520,8 +2520,8 @@ class TestFX(JitTestCase):
         self.assertTrue(call_func is not None)
         self.assertTrue(isinstance(call_func.args[0], Pair))
         self.assertTrue(isinstance(call_func.kwargs["p2"], Pair))
-        self.assertEqual(_format_arg(call_func.args[0]), "_Pair(x=%inp, y=1.2)")
-        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "_Pair(x=3.4, y=%inp)")
+        self.assertEqual(_format_arg(call_func.args[0]), "Pair(x=%inp, y=1.2)")
+        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "Pair(x=3.4, y=%inp)")
 
         traced.graph.eliminate_dead_code()
         traced.recompile()
