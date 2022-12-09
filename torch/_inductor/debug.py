@@ -280,6 +280,11 @@ class DebugContext:
             dynamo_utils.init_logging()
 
         if config.debug:
+
+            def reset_log_level(level):
+                dynamo_config.log_level = level
+
+            self._stack.callback(reset_log_level, dynamo_config.log_level)
             dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))
