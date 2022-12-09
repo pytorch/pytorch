@@ -1880,7 +1880,7 @@ class TestJvp(TestCase):
         tx = torch.randn(2, 3, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "strict"):
-            torch._functorch.eager_transforms.jvp(f, (x,), (tx,), strict=True)
+            jvp(f, (x,), (tx,), strict=True)
 
     def test_multiple_outputs(self, device):
         x = torch.randn(2, 3, device=device)
