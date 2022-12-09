@@ -278,6 +278,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
 
     # input shape, output shape, output stride, output storage offset
     test_cases = [
+        ((1,), (), (), 0),
         ((1,), (1,), (1,), 0),
         ((3, 3), (2, 2), (1, 2), 0),
         ((3, 3), (2, 2), (1, 2), 1),
@@ -292,6 +293,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         input_t = make_arg(input_shape)
         input_src = make_arg(output_shape)
         yield SampleInput(input_t, input_src, output_shape, stride, storage_offset=storage_offset)
+
 
 def error_inputs_as_strided_scatter(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -4966,10 +4968,16 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
+    yield SampleInput(tensor_nd(), correction=0, keepdim=True)
+
+
+def sample_inputs_std_var_unbiased(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad)
 
     # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-    yield SampleInput(tensor_nd(), True)
-    yield SampleInput(tensor_nd(), False)
+    yield SampleInput(make_arg((S, S)), True)
+    yield SampleInput(make_arg((S,)), False)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -10344,10 +10352,36 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
                             "TestDecomp", "test_comprehensive", device_type="cuda"),
            )),
+    OpInfo('var_mean',
+           variant_test_name='unbiased',
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var_unbiased,
+           # TODO: some signatures of var_mean do support out
+           supports_out=False,
+           supports_forward_ad=True,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: some signatures of std_mean do support out
+           supports_out=False,
+           supports_forward_ad=True,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
+    OpInfo('std_mean',
+           variant_test_name='unbiased',
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var_unbiased,
+           # TODO: some signatures of var_mean do support out
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
@@ -10789,8 +10823,6 @@ op_db: List[OpInfo] = [
                             'test_non_standard_bool_values'),
            )),
     OpInfo('as_strided_scatter',
-           op=lambda x, src, size, stride, storage_offset=0:
-               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
@@ -16508,7 +16540,7 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'std',
         nan_policy='propagate',
-        supports_out=False,
+        supports_out=True,
         complex_to_real=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -16527,16 +16559,41 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
-            # NumPy is giving NaN for this
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                         dtypes=(torch.float16,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
+                         dtypes=(torch.float16,)),
+            # TODO: Meta not implemented for out overloads
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
+        ),
+    ),
+    ReductionOpInfo(
+        'std',
+        variant_test_name='unbiased',
+        nan_policy='propagate',
+        supports_out=False,
+        complex_to_real=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        check_batched_forward_grad=False,
+        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_std_var_unbiased,
+        skips=(
+            # FIXME: dim=[] reduces all dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
         'var',
         nan_policy='propagate',
-        supports_out=False,
+        supports_out=True,
         assert_autodiffed=True,
         promotes_int_to_float=True,
         complex_to_real=True,
@@ -16559,6 +16616,26 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
+        ),
+    ),
+    ReductionOpInfo(
+        'var',
+        variant_test_name='unbiased',
+        nan_policy='propagate',
+        supports_out=False,
+        complex_to_real=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        assert_autodiffed=True,
+        promotes_int_to_float=True,
+        check_batched_forward_grad=False,
+        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_std_var_unbiased,
+        skips=(
+            # FIXME: dim=[] reduces all dimensions
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionOpInfo(
@@ -18346,6 +18423,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.as_strided_scatter",
+        torch_opinfo_name="as_strided_scatter",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
