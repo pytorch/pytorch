@@ -15,7 +15,7 @@ from ..utils import (
     MatchAllNode
 )
 from .graph_module import (
-    _is_observed_standalone_module,
+    is_observed_standalone_module,
 )
 from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set, Iterable
@@ -228,7 +228,7 @@ def _find_matches(
     for node in graph.nodes:
         if node.op == 'call_module' and \
            (is_standalone_module(node.target, modules) or
-                _is_observed_standalone_module(modules[node.target])):
+                is_observed_standalone_module(modules[node.target])):
             # add node to matched nodes
             match_map[node.name] = (
                 node, node, None,
