@@ -9,6 +9,7 @@ import contextlib
 import copy
 import dataclasses
 import difflib
+import enum
 import io
 import itertools
 import os
@@ -29,6 +30,17 @@ from torch.types import Number
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
+_ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
+_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_InputKwargsType = Mapping[str, Any]
+
+
+class OnnxBackend(enum.Enum):
+    """Enum class for ONNX backend used for export verification."""
+
+    REFERENCE = "ONNXReferenceEvaluator"
+    ONNX_RUNTIME_CPU = "CPUExecutionProvider"
+    ONNX_RUNTIME_CUDA = "CUDAExecutionProvider"
 
 
 @dataclasses.dataclass
@@ -47,7 +59,7 @@ class VerificationOptions:
             Default to True.
         check_dtype: Whether to check the dtypes between PyTorch and ONNX Runtime outputs
             are consistent. Default to True.
-        ort_providers: ONNX Runtime providers to use. Default to ("CPUExecutionProvider", ).
+        backend: ONNX backend for verification. Default to OnnxBackend.ONNX_RUNTIME_CPU.
         rtol: relative tolerance in comparison between ONNX and PyTorch outputs.
         atol: absolute tolerance in comparison between ONNX and PyTorch outputs.
         remained_onnx_input_idx: If provided, only the specified inputs will be passed
@@ -63,7 +75,7 @@ class VerificationOptions:
     ignore_none: bool = True
     check_shape: bool = True
     check_dtype: bool = True
-    ort_providers: Sequence[str] = _ORT_PROVIDERS
+    backend: OnnxBackend = OnnxBackend.ONNX_RUNTIME_CPU
     rtol: float = 1e-3
     atol: float = 1e-7
     remained_onnx_input_idx: Optional[Sequence[int]] = None
@@ -120,7 +132,7 @@ def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
 
 
 @_beartype.beartype
-def _run_ort(ort_session, inputs):
+def _run_onnx(onnx_session, inputs):
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
         kw_inputs = inputs[-1]
@@ -130,15 +142,24 @@ def _run_ort(ort_session, inputs):
     for input_name, input in kw_inputs.items():
         ort_inputs[input_name] = _to_numpy(input)
     inputs = _to_numpy(inputs)
-    ort_session_inputs = ort_session.get_inputs()
+    if hasattr(onnx_session, "get_inputs"):
+        # onnxruntime.InferenceSession
+        input_names = [i.name for i in onnx_session.get_inputs()]
+    elif hasattr(onnx_session, "input_names"):
+        # onnx.reference.ReferenceEvaluator
+        input_names = onnx_session.input_names
+    else:
+        raise ValueError(f"Unknown ONNX backend type: {type(onnx_session)}.")
+
     for i, input in enumerate(inputs):
-        if i == len(ort_session_inputs) or ort_session_inputs[i].name in ort_inputs:
+        if i == len(input_names) or input_names[i] in ort_inputs:
             raise ValueError(
-                f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}"
+                f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}. "
+                f"input names: {input_names}."
             )
-        ort_inputs[ort_session_inputs[i].name] = input
-    ort_outs = ort_session.run(None, ort_inputs)
-    return ort_outs
+        ort_inputs[input_names[i]] = input
+    onnx_outs = onnx_session.run(None, ort_inputs)
+    return onnx_outs
 
 
 @_beartype.beartype
@@ -166,16 +187,33 @@ def _ort_session(
 
 
 @_beartype.beartype
-def _compare_ort_pytorch_outputs(
-    ort_outs: Union[Sequence[_NumericType], Sequence],
+def _onnx_reference_evaluator_session(model: Union[str, io.BytesIO]):
+    try:
+        import onnx
+        from onnx import reference as onnx_reference
+    except ImportError:
+        raise ImportError("onnx >= 1.13 is required for reference evaluator.")
+
+    proto = (
+        onnx.load(model)
+        if isinstance(model, str)
+        else onnx.load_model_from_string(model.getvalue())
+    )
+    onnx_session = onnx_reference.ReferenceEvaluator(proto)
+    return onnx_session
+
+
+@_beartype.beartype
+def _compare_onnx_pytorch_outputs(
+    onnx_outs: Union[Sequence[_NumericType], Sequence],
     pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
     options: VerificationOptions,
 ):
     """
-    Compare ONNX Runtime and PyTorch outputs.
+    Compare ONNX and PyTorch outputs.
 
     Args:
-        ort_outs: outputs from ONNX Runtime.
+        onnx_outs: outputs from ONNX backend.
         pt_outs: outputs from PyTorch.
         options: options for verification.
 
@@ -190,10 +228,10 @@ def _compare_ort_pytorch_outputs(
     else:
         pt_outs = _inline_flatten_list([pt_outs], [])
     pt_outs_np = _unpack_to_numpy(pt_outs, cast_onnx_accepted=False)
-    ort_outs = _inline_flatten_list(ort_outs, [])
-    assert len(ort_outs) == len(
+    onnx_outs = _inline_flatten_list(onnx_outs, [])
+    assert len(onnx_outs) == len(
         pt_outs_np
-    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs_np)})"
+    ), f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs_np)})"
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
@@ -202,7 +240,7 @@ def _compare_ort_pytorch_outputs(
             "If set, acceptable_error_percentage should be between 0.0 and 1.0"
         )
 
-    for ort_out, pt_out in zip(ort_outs, pt_outs_np):
+    for ort_out, pt_out in zip(onnx_outs, pt_outs_np):
         try:
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not options.check_shape:
@@ -288,18 +326,22 @@ def _prepare_input_for_export(args, kwargs):
 
 
 @_beartype.beartype
-def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
-    """Prepare input for ONNX model execution in ONNX Runtime.
+def _prepare_input_for_onnx(
+    args, kwargs, remained_onnx_input_idx: Optional[Sequence[int]], flatten: bool
+):
+    """Prepare input for ONNX model execution in ONNX backend.
 
-    Any future changes/formatting to the input before dispatching to the ONNX Runtime
-    InferenceSession run should be made in this function.
+    Any future changes/formatting to the input before dispatching to the ONNX backend
+    run should be made in this function.
 
     Args:
         args: positional arguments for PyTorch model forward method.
         kwargs: keyword arguments for PyTorch model forward method.
+        remained_onnx_input_idx: indices of inputs to be used for ONNX model execution.
+        flatten: whether to flatten the input before dispatching to the ONNX model execution.
 
     Returns:
-        onnx_inputs: positional arguments for ONNX model execution in ONNX Runtime.
+        onnx_inputs: positional arguments for ONNX model execution in ONNX backend.
     """
     onnx_inputs = _prepare_input_for_export(args, kwargs)
     if flatten:
@@ -326,46 +368,64 @@ def _try_clone_model(model):
 
 
 @_beartype.beartype
-def _compare_ort_pytorch_model(
-    model,
-    ort_session,
-    input_args,
-    input_kwargs,
-    additional_test_inputs,
+def _compare_onnx_pytorch_model(
+    pt_model: _ModelType,
+    onnx_model_f: Union[str, io.BytesIO],
+    input_args: _InputArgsType,
+    input_kwargs: Optional[_InputKwargsType],
+    additional_test_inputs: Optional[Sequence[_InputArgsType]],
     options: VerificationOptions,
 ):
     """Compare outputs from ONNX model runs with outputs from PyTorch model runs.
 
-    ONNX Runtime is used for model execution backend for ONNX model.
+    Args:
+        pt_model: PyTorch model.
+        onnx_model_f: ONNX model file path or file-like object.
+        input_args: positional arguments for PyTorch model forward method.
+        input_kwargs: keyword arguments for PyTorch model forward method.
+        additional_test_inputs: additional positional arguments for PyTorch model
+            forward method.
+        options: options for verification.
 
     Raises:
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
     """
 
+    if options.backend == OnnxBackend.REFERENCE:
+        onnx_session = _onnx_reference_evaluator_session(onnx_model_f)
+    elif (
+        options.backend == OnnxBackend.ONNX_RUNTIME_CPU
+        or options.backend == OnnxBackend.ONNX_RUNTIME_CUDA
+    ):
+        onnx_session = _ort_session(onnx_model_f, (options.backend.value,))
+    else:
+        raise ValueError(f"Unsupported backend: {options.backend}")
+
     @_beartype.beartype
-    def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
+    def compare_onnx_pytorch_model_with_input(input_args, input_kwargs):
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
-        model_copy = _try_clone_model(model)
-        pt_outs = model_copy(*pt_args, **pt_kwargs)
+        pt_model_copy = _try_clone_model(pt_model)
+        pt_outs = pt_model_copy(*pt_args, **pt_kwargs)
 
-        ort_inputs = _prepare_input_for_ort(
+        onnx_inputs = _prepare_input_for_onnx(
             input_args, input_kwargs, options.remained_onnx_input_idx, options.flatten
         )
-        ort_outs = _run_ort(ort_session, ort_inputs)
 
-        _compare_ort_pytorch_outputs(
-            ort_outs=ort_outs,
+        onnx_outs = _run_onnx(onnx_session, onnx_inputs)
+
+        _compare_onnx_pytorch_outputs(
+            onnx_outs=onnx_outs,
             pt_outs=pt_outs,
             options=options,
         )
 
-    compare_ort_pytorch_model_with_input(input_args, input_kwargs)
+    compare_onnx_pytorch_model_with_input(input_args, input_kwargs)
 
     if additional_test_inputs:
         for test_input_args in additional_test_inputs:
-            compare_ort_pytorch_model_with_input(test_input_args, {})
+            compare_onnx_pytorch_model_with_input(test_input_args, {})
 
 
 class _GraphDiff:
@@ -625,9 +685,9 @@ def check_export_model_diff(
 
 @_beartype.beartype
 def verify(
-    model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args: Union[torch.Tensor, Tuple[Any, ...]],
-    input_kwargs: Optional[Mapping[str, Any]] = None,
+    model: _ModelType,
+    input_args: _InputArgsType,
+    input_kwargs: Optional[_InputKwargsType] = None,
     do_constant_folding: bool = True,
     dynamic_axes: Optional[
         Mapping[str, Union[Mapping[int, str], Mapping[str, Sequence[int]]]]
@@ -640,13 +700,11 @@ def verify(
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[
-        Sequence[Union[torch.Tensor, Tuple[Any, ...]]]
-    ] = None,
+    additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
     options: Optional[VerificationOptions] = None,
     **_,
 ):
-    """Verify model export to ONNX with ONNX Runtime.
+    """Verify model export to ONNX against original PyTorch model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -705,13 +763,9 @@ def verify(
             verbose=verbose,
         )
 
-        ort_providers = options.ort_providers
-
-        ort_session = _ort_session(model_f, ort_providers)
-
-        _compare_ort_pytorch_model(
-            model=model_copy,
-            ort_session=ort_session,
+        _compare_onnx_pytorch_model(
+            pt_model=model_copy,
+            onnx_model_f=model_f,
             input_args=input_args,
             input_kwargs=input_kwargs,
             additional_test_inputs=additional_test_inputs,

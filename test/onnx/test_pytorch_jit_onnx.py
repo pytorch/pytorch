@@ -62,7 +62,7 @@ class _TestJITIRToONNX:
         ort_sess = onnxruntime.InferenceSession(
             onnx_proto, providers=self.ort_providers
         )
-        ort_outs = verification._run_ort(ort_sess, example_inputs)
+        ort_outs = verification._run_onnx(ort_sess, example_inputs)
 
         options = verification.VerificationOptions(
             rtol=1e-3,
@@ -72,7 +72,7 @@ class _TestJITIRToONNX:
             ignore_none=self.ignore_none,
             acceptable_error_percentage=None,
         )
-        verification._compare_ort_pytorch_outputs(
+        verification._compare_onnx_pytorch_outputs(
             ort_outs,
             jit_outs,
             options,
