@@ -403,33 +403,6 @@ def _to_copy(
     return x
 
 
-@register_lowering(aten.to)
-def to(
-    x,
-    device_or_dtype=None,
-    non_blocking=False,
-    copy=False,
-    memory_format=None,
-    device=None,
-    dtype=None,
-    layout=None,
-):
-    assert not memory_format, "TODO"
-    assert layout in (None, torch.strided)
-    if isinstance(device_or_dtype, torch.dtype):
-        return to_dtype(x, device_or_dtype)
-    elif isinstance(device_or_dtype, torch.device):
-        return to_device(x, device_or_dtype)
-    else:
-        assert device_or_dtype is None, device_or_dtype
-
-    if device is not None:
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    return x
-
-
 def ops_wrapper(name):
     assert isinstance(name, str)
 
