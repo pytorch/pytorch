@@ -59,8 +59,6 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 }
 
 // This function is used to convert a value to float for vectorization.
-// Only support bool/uint8(unsigned char)/double to float conversion now,
-// So the caller needs to make sure the src meets the dtype requirement.
 template <typename T>
 void to_float(const T* src, float* dst, int64_t n) {
 #pragma unroll
