@@ -98,6 +98,7 @@ decompositions = get_decompositions(
         aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
+        aten._to_copy,
         aten.transpose.int,
         aten.tril.default,
         aten.unfold,
