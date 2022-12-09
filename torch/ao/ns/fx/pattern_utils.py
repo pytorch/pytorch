@@ -8,7 +8,7 @@ from torch.fx.graph import Node
 
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
-from torch.ao.quantization.utils import _getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
 from torch.ao.quantization import (
     ObserverBase,
@@ -72,7 +72,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
     default_base_op_idx = 0
     for quant_pattern, _quant_handler in all_quant_patterns.items():
         # TODO: this is a temporary hack to flatten the patterns from quantization so
-        # that it works with the ns matcher function, maybe we should use `_is_match`
+        # that it works with the ns matcher function, maybe we should use `is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns
         if isinstance(quant_pattern, tuple) and len(quant_pattern) == 2 and \
            isinstance(quant_pattern[1], tuple) and len(quant_pattern[1]) == 2:
@@ -159,7 +159,7 @@ def end_node_matches_reversed_fusion(
             fusion_el_is_mod = isinstance(cur_fusion_el, type)
             if fusion_el_is_mod:
                 assert isinstance(cur_node.target, str)
-                target_mod = _getattr_from_fqn(gm, cur_node.target)
+                target_mod = getattr_from_fqn(gm, cur_node.target)
                 if not isinstance(cur_fusion_el, type):
                     return False
                 if not isinstance(target_mod, cur_fusion_el):

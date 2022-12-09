@@ -3,10 +3,6 @@ from .graph_module import QuantizedGraphModule
 from ..qconfig import QConfigAny
 from typing import Dict, Tuple
 
-__all__ = [
-    "lower_to_qnnpack"
-]
-
 def lower_to_qnnpack(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
