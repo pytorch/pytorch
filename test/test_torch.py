@@ -2703,7 +2703,7 @@ else:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
-    def test_large_cumsum(self, device, dtype):
+    def test_large_cumsum2(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
         x[::3] = -3
@@ -2713,7 +2713,7 @@ else:
 
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
-    def test_large_cumprod(self, device, dtype):
+    def test_large_cumprod2(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
         x[::3] = 8
