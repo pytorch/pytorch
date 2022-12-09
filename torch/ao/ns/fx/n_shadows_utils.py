@@ -19,8 +19,8 @@ from torch.ao.ns.fx.graph_passes import _maybe_get_fqn
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.qconfig import QConfigAny
-from torch.ao.quantization.utils import _getattr_from_fqn
-from torch.ao.quantization.fx.match_utils import _MatchResult
+from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.fx.match_utils import MatchResult
 
 import collections
 import copy
@@ -100,7 +100,7 @@ class OutputProp:
         return None
 
 def _get_dedup_subgraphs(
-    matches: Dict[str, _MatchResult]
+    matches: Dict[str, MatchResult]
 ) -> Dict[str, List[Node]]:
     # the original matches variable is unique by node, make it unique by subgraph
     # instead
@@ -110,7 +110,7 @@ def _get_dedup_subgraphs(
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[Tuple[str, _MatchResult]] = []
+    matches_items_reversed: List[Tuple[str, MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 
@@ -162,7 +162,7 @@ def _get_dedup_subgraphs(
             assert len(cur_match[1]) == 2
             # either (a, b), or ((a, b), c) or (c, (a, b))
             # cannot make any assumptions on order, not clear what the
-            # _find_matches function is doing to populate this
+            # find_matches function is doing to populate this
             # TODO(future PR): make this code less confusing,  see discussion
             # in https://github.com/pytorch/pytorch/pull/80521/files#r975918836
 
@@ -453,7 +453,7 @@ def create_submodule_from_subgraph(
 
         # copy the node
         if cur_node_orig.op == 'call_module':
-            orig_mod = _getattr_from_fqn(model, cur_node_orig.target)  # type: ignore[arg-type]
+            orig_mod = getattr_from_fqn(model, cur_node_orig.target)  # type: ignore[arg-type]
             orig_mod_copy = copy.deepcopy(orig_mod)
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)

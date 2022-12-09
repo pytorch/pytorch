@@ -815,7 +815,7 @@ def prepare_n_shadows_model(
     standalone_module_names: List[str] = []
     standalone_module_classes: List[Type] = []
     custom_module_classes: List[Type] = []
-    matches = _find_matches(
+    matches = find_matches(
         mt.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
     subgraphs_dedup: Dict[str, List[Node]] = \

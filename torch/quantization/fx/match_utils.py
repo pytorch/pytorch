@@ -7,8 +7,8 @@ appropriate files under `torch/ao/quantization/fx/`, while adding an import stat
 here.
 """
 from torch.ao.quantization.fx.match_utils import (
-    _MatchResult,
+    MatchResult,
     MatchAllNode,
-    _is_match,
-    _find_matches
+    is_match,
+    find_matches
 )

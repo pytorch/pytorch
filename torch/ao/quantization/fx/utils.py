@@ -23,10 +23,8 @@ from torch.ao.quantization.qconfig import (
     qconfig_equals,
 )
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import (
-    _activation_is_statically_quantized,
-)
-from torch.ao.quantization.observer import is_activation_post_process
+from torch.ao.quantization.utils import activation_is_statically_quantized
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -228,6 +226,9 @@ def _get_new_attr_name_with_prefix(prefix: str) -> Callable:
             attr_name = get_attr_name(i)
         return attr_name
     return get_new_attr_name
+
+# TODO remove this once BC no longer needed
+get_new_attr_name_with_prefix = _get_new_attr_name_with_prefix
 
 def _collect_producer_nodes(node: Node) -> Optional[List[Node]]:
     r''' Starting from a target node, trace back until we hit inpu or
@@ -552,7 +553,7 @@ def _is_custom_module_lstm(
     if qconfig is not None and qhandler is not None:
         assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
         return isinstance(mod, torch.nn.LSTM) and \
-            _activation_is_statically_quantized(qconfig) and \
+            activation_is_statically_quantized(qconfig) and \
             qhandler.is_custom_module()
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)
