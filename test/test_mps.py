@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI,
      TEST_WITH_UBSAN, dtype_abbrs, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
 from torch.testing import make_tensor
-from torch.testing._comparison import TensorLikePair
+from torch.testing.comparison import _TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
@@ -7253,13 +7253,13 @@ class TestNoRegression(TestCase):
     def test_mps_compat(self):
         # If this test is successful, that means that all operations in the comparison logic are supported natively on
         # the MPS backend. Please remove this test as well as the compatibility logic in
-        # torch.testing._comparison.TensorLikePair._equalize_attributes
+        # torch.testing.comparison._TensorLikePair._equalize_attributes
         actual = torch.tensor(1.0, device="mps")
         expected = actual.clone()
 
-        # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
-        # in torch.testing._comparison.TensorLikePair._equalize_attributes that we want to circumvent here
-        pair = TensorLikePair(actual, expected)
+        # We can't use assert_close or _TensorLikePair.compare() directly, since that would hit the compatibility logic
+        # in torch.testing.comparison._TensorLikePair._equalize_attributes that we want to circumvent here
+        pair = _TensorLikePair(actual, expected)
         pair._compare_values(actual, expected)
 
     def test_double_error(self):
