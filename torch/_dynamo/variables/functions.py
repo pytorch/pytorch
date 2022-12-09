@@ -41,12 +41,20 @@ def wrap_bound_arg(val, options, tx, source=None):
         # since InstructionTranslator __init__ prepares VariableTrackers for args of top
         # level function including defaults.
         #
-        # should there be a "name" here?
-        assert source is not None, "source must be provided for tensor arg"
-        return tx.output.register_attr_or_module(
-            val,
-            source=source,
-        )
+        # TODO: wish i could assert this; but if the default tensor arg lives on
+        # a NNModuleVariable, currently the UserFunctionVariable itself has no source
+        # so we need to fix that first
+        # assert source is not None, "source must be provided for tensor arg"
+        if source:
+            return tx.output.register_attr_or_module(
+                val,
+                # should there be a "name" here?
+                source=source,
+            )
+        else:
+            return tx.output.register_attr_or_module(
+                val,
+            )
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
