@@ -37,6 +37,10 @@ from common_utils import (
     loop2,
     expectedFailureIf
 )
+from torch.testing._internal.autograd_function_db import (
+    autograd_function_db
+)
+from torch.autograd.function import _set_autograd_function_extension_enabled
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -292,6 +296,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
 }
 
 aliasing_ops = {
@@ -339,8 +344,9 @@ aliasing_ops_list_return = {
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
+    @_set_autograd_function_extension_enabled()
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
@@ -511,7 +517,8 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
 
@@ -586,7 +593,8 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             _test(f, inplace=True)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @_set_autograd_function_extension_enabled()
+    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
