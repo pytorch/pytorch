@@ -560,7 +560,7 @@ class OutputGraph(fx.Tracer):
                     else format_graph_tabular(gm.graph)
                 )
                 log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
+                    logging.INFO,  # type: ignore[attr-defined]
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:

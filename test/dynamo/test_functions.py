@@ -13,6 +13,7 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.utils import same
 from torch import sub
 from torch._dynamo.testing import requires_static_shapes
 from torch.nn import functional as F
@@ -712,6 +713,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+
+def global_func_with_default_tensor_args(x=torch.zeros((2,2))):
+    x.add_(1)
+    return x
+
+class DefaultsTests(torch._dynamo.test_case.TestCase):
+
+    def test_default_tensor_args(self):
+        """
+            Tests that we indeed reference (and mutate) "the one" default tensor arg
+            stored on the globally allocated function object, both from the orig and
+            compiled function
+        """
+        def func():
+            return global_func_with_default_tensor_args()
+
+        compiled_func= torch.compile(func)
+        for i in range(4):
+            if i % 2 == 0:
+                out = func()
+            else:
+                out = compiled_func()
+            print(out)
+            self.assertTrue(same(out, torch.ones_like(out) + i))
+        
+        #TODO also lets confirm the guard works
+            
 
 
 if __name__ == "__main__":
