@@ -1469,24 +1469,21 @@ Arguments:
                 return ::c10d::ops::alltoall(
                     self, output_tensors, input_tensors, opts);
               },
-              py::arg("output_tensors"),
-              py::arg("input_tensors"),
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "alltoall",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& output_tensors,
-                 const std::vector<at::Tensor>& input_tensors) {
+                 const std::vector<at::Tensor>& output,
+                 const std::vector<at::Tensor>& input) {
                 return ::c10d::ops::alltoall(
-                    self,
-                    output_tensors,
-                    input_tensors,
-                    ::c10d::AllToAllOptions());
+                    self, output, input, ::c10d::AllToAllOptions());
               },
-              py::arg("output_tensors"),
-              py::arg("input_tensors"),
+              py::arg("output"),
+              py::arg("input"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
