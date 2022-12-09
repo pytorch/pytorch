@@ -469,7 +469,6 @@ class CSE:
         iter_buffers=None,
         store_cache=None,
         reduction_cache=None,
-        varname_map=None,
     ):
         self.prefix = prefix
         self.suffix = suffix
@@ -478,8 +477,8 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.varname_map = varname_map or {}
         self.invalidated_stores = set()
+        self.varname_map = {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -490,12 +489,11 @@ class CSE:
 
     def clone(self):
         return CSE(
-            prefix=self.prefix,
-            suffix=self.suffix,
-            name_prefix=self.name_prefix,
-            iter_buffers=self.iter_buffer_ids,
-            store_cache=self.store_cache,
-            varname_map=self.varname_map,
+            self.prefix,
+            self.suffix,
+            self.name_prefix,
+            self.iter_buffer_ids,
+            self.store_cache,
         )
 
     def generate(
@@ -597,8 +595,6 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
-            self.name = "CSEProxy"
-
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):

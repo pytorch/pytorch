@@ -5,16 +5,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from .backend_config import (
-    BackendConfig,
-    BackendPatternConfig,
-    DTypeConfig,
-    ObservationType,
-)
-from .qnnpack import (
-    qnnpack_weighted_op_qint8_symmetric_dtype_config,
-    qnnpack_default_op_qint8_symmetric_dtype_config
-)
+from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
 from ._common_operator_config_utils import _Conv2dMetadata
 from ..fuser_method_mappings import _reverse_sequential_wrapper2
 
@@ -56,6 +47,7 @@ executorch_default_dynamic_float16_dtype_config = DTypeConfig(
     is_dynamic=True,
 )
 
+
 # =============================
 # |  BACKEND PATTERN CONFIGS  |
 # =============================
@@ -66,7 +58,6 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [
-        qnnpack_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
         executorch_default_dynamic_int8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
@@ -93,10 +84,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     Return all configs related to conv modules and ops.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [
-        qnnpack_weighted_op_qint8_symmetric_dtype_config,
-        executorch_weighted_op_int8_dtype_config
-    ]
+    dtype_configs = [executorch_weighted_op_int8_dtype_config]
     conv_configs = []
     for convs in [_Conv2dMetadata]:
         # conv module
@@ -149,10 +137,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     """
     Return all configs related to binary ops.
     """
-    dtype_configs = [
-        qnnpack_default_op_qint8_symmetric_dtype_config,
-        executorch_weighted_op_int8_dtype_config
-    ]
+    dtype_configs = [executorch_weighted_op_int8_dtype_config]
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
         # will need to change this to NO_OBSERVER later after we implemented
@@ -180,10 +165,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     observer_0 - avgpool2d - observer_0 (same observer instance as input)
     """
     observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
-    dtype_configs = [
-        qnnpack_default_op_qint8_symmetric_dtype_config,
-        executorch_default_op_quint8_dtype_config
-    ]
+    dtype_configs = [executorch_default_op_quint8_dtype_config]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
         F.relu,
@@ -210,10 +192,7 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     Return all configs related to batchnorm.
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-    dtype_configs = [
-        qnnpack_default_op_qint8_symmetric_dtype_config,
-        executorch_default_op_quint8_dtype_config
-    ]
+    dtype_configs = [executorch_default_op_quint8_dtype_config]
     bn_configs = []
     bn_configs.append(
         BackendPatternConfig(nn.BatchNorm2d)
@@ -222,10 +201,7 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
     return bn_configs
 
 def _get_cat_configs() -> List[BackendPatternConfig]:
-    dtype_configs = [
-        qnnpack_default_op_qint8_symmetric_dtype_config,
-        executorch_default_op_quint8_dtype_config
-    ]
+    dtype_configs = [executorch_default_op_quint8_dtype_config]
     cat_configs = []
     cat_configs.append(
         BackendPatternConfig(torch.cat)

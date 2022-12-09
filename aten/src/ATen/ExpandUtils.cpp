@@ -47,11 +47,7 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
 }
 
 DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
-  return infer_size_impl<DimVector, IntArrayRef>(a, b);
-}
-
-SymDimVector infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b) {
-  return infer_size_impl<SymDimVector, SymIntArrayRef>(a, b);
+  return infer_size_impl<DimVector>(a, b);
 }
 
 template<typename Container>

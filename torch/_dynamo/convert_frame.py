@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import cast, Dict, List, Optional, Set
+from typing import cast, Dict, List, Optional
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -364,8 +364,6 @@ def _compile(
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
-    # This is shared across restarts
-    mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -380,7 +378,6 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
-            mutated_closure_cell_contents,
         )
         tracer.run()
         output = tracer.output
@@ -509,10 +506,10 @@ def replay(filename):
             record.globals,
             record.locals,
             record.builtins,
-            compiler_fn=eager,
+            eager,
+            hooks,
             one_graph=False,
             export=False,
-            hooks=Hooks(),
             frame=None,
         )
     except Exception:

@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 import torch
@@ -39,7 +39,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
-from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
+from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
@@ -92,7 +92,7 @@ def _step_logger():
 @dataclasses.dataclass
 class BlockStackEntry:
     target: Instruction
-    stack_index: Optional[int] = None
+    stack_index: int = None
     with_context: ContextWrappingVariable = None
 
     def can_restore(self):
@@ -106,28 +106,7 @@ class BlockStackEntry:
         return self.with_context.exit(tx)
 
 
-class InstructionTranslatorGraphState(NamedTuple):
-    output: OutputGraphState
-    symbolic_locals: Dict[str, VariableTracker]
-    stack: List[VariableTracker]
-    block_stack: List[BlockStackEntry]
-    instruction_pointer: Optional[int]
-    current_instruction: Instruction
-    next_instruction: Optional[Instruction]
-    lineno: int
-
-    def diff(self, other: "InstructionTranslatorGraphState") -> Optional[str]:
-        for k in self._fields:
-            if k == "output":
-                return self.output.diff(other.output, prefix=f"{k}.")
-            sv = getattr(self, k)
-            ov = getattr(other, k)
-            if sv != ov:
-                return f"{k} mismatch: {sv} != {ov}"
-        return None
-
-
-def stack_op(fn: typing.Callable[..., object]):
+def stack_op(fn: typing.Callable):
     nargs = len(inspect.signature(fn).parameters)
     fn_var = BuiltinVariable(fn)
 
@@ -139,9 +118,7 @@ def stack_op(fn: typing.Callable[..., object]):
 
 
 def _detect_and_normalize_assert_statement(
-    self: "InstructionTranslatorBase",
-    truth_fn: typing.Callable[[object], bool],
-    push: bool,
+    self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool
 ):
     # Detect if this jump instruction is assert and normalize the assert
     # by pushing dummy error message when nothing is given.
@@ -163,7 +140,6 @@ def _detect_and_normalize_assert_statement(
     if (truth_fn is not operator.truth) or push:
         return False
 
-    assert isinstance(self.instruction_pointer, int)
     current_instruction_pointer = self.instruction_pointer
     inst = self.instructions[current_instruction_pointer]
     # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
@@ -212,7 +188,7 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
-def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
@@ -366,25 +342,8 @@ def break_graph_if_unsupported(*, push):
 
 
 class InstructionTranslatorBase(object):
-    output: OutputGraph
-    symbolic_locals: Dict[str, VariableTracker]
-    symbolic_globals: Dict[str, VariableTracker]
-    stack: List[VariableTracker]
-    instruction_pointer: Optional[int]
-    current_instruction: Instruction
-    next_instruction: Optional[Instruction]
-    block_stack: List[BlockStackEntry]
-    lineno: int
-    mutated_closure_cell_contents: Set[str]
-
-    checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
-
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
-        assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
             if inst.opname in (
                 "JUMP_ABSOLUTE",
@@ -438,7 +397,7 @@ class InstructionTranslatorBase(object):
         def skip(v: VariableTracker):
             return oldvar.mutable_local not in v.recursively_contains
 
-        cache: Dict[int, Tuple[object, object]] = dict()
+        cache = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
             VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
@@ -472,7 +431,6 @@ class InstructionTranslatorBase(object):
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        assert isinstance(self.instruction_pointer, int)
         inst = self.instructions[self.instruction_pointer]
         self.current_instruction = inst
         self.instruction_pointer += 1
@@ -505,12 +463,11 @@ class InstructionTranslatorBase(object):
         except Exception as exc:
             real_stack = getattr(exc, "real_stack", [])
             real_stack.append(self.frame_summary())
-            exc.real_stack = real_stack  # type: ignore[attr-defined]
+            exc.real_stack = real_stack
             raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
-        assert self.checkpoint is not None
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)
         self.output.compile_subgraph(self, partial_convert=True)
@@ -532,7 +489,7 @@ class InstructionTranslatorBase(object):
             raise
         except Exception as e:
             if config.replay_record_enabled:
-                e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                e.exec_record = self.exec_recorder.get_record()
             raise
         finally:
             self.output.pop_tx()
@@ -544,20 +501,20 @@ class InstructionTranslatorBase(object):
             if isinstance(self, InstructionTranslator):
                 self.output.cleanup()
 
-    def push(self, val: Optional[VariableTracker]):
+    def push(self, val):
         assert val is None or isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)
 
-    def push_many(self, vals: List[VariableTracker]):
+    def push_many(self, vals: List[TensorVariable]):
         for val in vals:
             self.push(val)
 
-    def pop(self) -> VariableTracker:
+    def pop(self) -> TensorVariable:
         return self.stack.pop()
 
-    def popn(self, n: int) -> List[VariableTracker]:
+    def popn(self, n: int) -> List[TensorVariable]:
         assert n >= 0
         return list(reversed([self.pop() for _ in range(n)]))
 
@@ -686,7 +643,7 @@ class InstructionTranslatorBase(object):
                     f"({package!r} != {spec.parent!r})",
                     ImportWarning,
                     stacklevel=3,
-                )  # type: ignore[call-arg]
+                )
             return package
         elif spec is not None:
             return spec.parent
@@ -696,7 +653,7 @@ class InstructionTranslatorBase(object):
                 "falling back on __name__ and __path__",
                 ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
@@ -999,8 +956,8 @@ class InstructionTranslatorBase(object):
         fn = self.pop()
         assert isinstance(argnames, ConstantVariable)
         argnames = argnames.value
-        args, kwargs_list = args[: -len(argnames)], args[-len(argnames) :]
-        kwargs = dict(zip(argnames, kwargs_list))
+        args, kwargs = args[: -len(argnames)], args[-len(argnames) :]
+        kwargs = dict(zip(argnames, kwargs))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
 
@@ -1056,16 +1013,6 @@ class InstructionTranslatorBase(object):
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(self.next_instruction)
-        )
-
-    def create_call_resume_at(self, offset):
-        raise AssertionError(
-            f"create_call_resume_at not overridden by subclass {type(self)}"
-        )
-
-    def should_compile_partial_graph(self) -> bool:
-        raise AssertionError(
-            f"should_compile_partial_graph not overridden by subclass {type(self)}"
         )
 
     @break_graph_if_unsupported(push=0)
@@ -1449,9 +1396,9 @@ class InstructionTranslatorBase(object):
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
 
-    def copy_graphstate(self) -> InstructionTranslatorGraphState:
+    def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
-        return InstructionTranslatorGraphState(
+        return (
             self.output.copy_graphstate(),
             collections.OrderedDict(self.symbolic_locals),
             list(self.stack),
@@ -1462,7 +1409,7 @@ class InstructionTranslatorBase(object):
             self.lineno,
         )
 
-    def restore_graphstate(self, state: InstructionTranslatorGraphState):
+    def restore_graphstate(self, state):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             output_state,
@@ -1535,18 +1482,18 @@ class InstructionTranslatorBase(object):
         f_code: types.CodeType,
         export: bool,
     ):
-        super().__init__()
+        super(InstructionTranslatorBase, self).__init__()
 
         # Mutable state checkpointed by copy_graphstate()
-        self.output = output
-        self.symbolic_locals = symbolic_locals
-        self.symbolic_globals = symbolic_globals
-        self.stack = []
-        self.instruction_pointer = 0
-        self.current_instruction = create_instruction("NOP")
-        self.next_instruction = None
-        self.block_stack = []
-        self.lineno = code_options["co_firstlineno"]
+        self.output: OutputGraph = output
+        self.symbolic_locals: Dict[str, VariableTracker] = symbolic_locals
+        self.symbolic_globals: Dict[str, VariableTracker] = symbolic_globals
+        self.stack: List[VariableTracker] = []
+        self.instruction_pointer: int = 0
+        self.current_instruction: Instruction = create_instruction("NOP")
+        self.next_instruction: typing.Optional[Instruction] = None
+        self.block_stack: List[BlockStackEntry] = []
+        self.lineno: int = code_options["co_firstlineno"]
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -1572,7 +1519,7 @@ class InstructionTranslatorBase(object):
         )
 
         self.checkpoint = None
-        self.random_calls = []
+        self.random_calls: List[tuple] = []
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -1600,7 +1547,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
-        mutated_closure_cell_contents: Set[str],
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1617,7 +1563,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.one_graph: bool = one_graph
         self.export = export
-        self.mutated_closure_cell_contents = mutated_closure_cell_contents
         if self.export:
             assert (
                 self.one_graph
@@ -1742,8 +1687,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
-    symbolic_result: Optional[TensorVariable]
-
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
@@ -1792,7 +1735,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
 
-        tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
@@ -1813,7 +1755,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug(f"DONE INLINING {code}")
 
         if is_generator(code):
-            assert isinstance(tracer, InliningGeneratorInstructionTranslator)
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,
@@ -1866,30 +1807,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            maybe_cell = self.symbolic_locals.get(inst.argval)
             if isinstance(
-                maybe_cell,
+                self.symbolic_locals.get(inst.argval),
                 variables.NewCellVariable,
             ):
                 self.output.side_effects.store_cell(
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
-                if (
-                    maybe_cell is not None
-                    and maybe_cell.source.name()
-                    not in self.parent.mutated_closure_cell_contents
-                ):
-                    # Why is the source name here unique?
-                    # mutated_closure_cell_contents is a per-frame
-                    # concept, and sources identify, e.g., particular
-                    # locals from the frame.  If you had two locals,
-                    # they'll get different source names, and therefore
-                    # differ here.
-                    self.parent.mutated_closure_cell_contents.add(
-                        maybe_cell.source.name()
-                    )
-                    raise exc.RestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
@@ -1913,9 +1838,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
-        translator: InstructionTranslatorBase = self
+        translator = self
         while hasattr(translator, "parent"):
-            translator = translator.parent  # type: ignore[attr-defined]
+            translator = translator.parent
             translator.update_locals_and_stack(oldvar, newvar)
         return newvar
 
@@ -1931,8 +1856,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
-    generated_items: List[VariableTracker]
-
     def __init__(self, *args, **kwargs):
         super(InliningGeneratorInstructionTranslator, self).__init__(*args, **kwargs)
         self.generated_items = []

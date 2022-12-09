@@ -155,11 +155,9 @@ code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
-    'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
-    'torch/_dynamo/side_effects.py',
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
@@ -171,7 +169,6 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-nofollow.ini',
-    '--code=MYPYNOFOLLOW',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -201,7 +198,6 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-strict.ini',
-    '--code=MYPYSTRICT',
     '--',
     '@{{PATHSFILE}}'
 ]
