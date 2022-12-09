@@ -3358,6 +3358,8 @@ def _prepare_convolution_fusion_create(
     stride_: List[int],
     dilation_: List[int],
     groups: int,
+    transposed: bool = False,
+    output_padding_: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3370,6 +3372,7 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
+    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     with torch._subclasses.FakeTensorMode():
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -3383,71 +3386,7 @@ def _prepare_convolution_fusion_create(
             stride,
             padding,
             dilation,
-            False,
-            [0, 0],
-            groups,
-        )
-        output_size = output.size()
-        req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
-        req_stride_order = [len(req_stride_order)] + req_stride_order
-        output_stride = make_channels_last_strides_for(output_size)
-
-    x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
-    inputs = [x, weight]
-
-    kernel_layout = FixedLayout(
-        x.get_device(),
-        x.get_dtype(),
-        output.size(),
-        output_stride,
-    )
-    constant_args = [padding, stride, dilation, groups]
-
-    if bias is not None:
-        inputs.append(bias)
-    else:
-        constant_args.insert(0, bias)
-    return inputs, constant_args, kernel_layout, req_stride_order
-
-
-def _prepare_convolution_transpose_fusion_create(
-    cls,
-    x: "TensorBox",
-    weight: "TensorBox",
-    bias: "TensorBox",
-    padding_: List[int],
-    stride_: List[int],
-    dilation_: List[int],
-    groups: int,
-    output_padding_: List[int],
-):
-    """
-    This function is a helper function to prepare inputs, layout and constant args
-    for convolution_transpose post-op fusion's create function, including deciding the output
-    layout (channels first or channels last), realizing inputs and make them etc. The
-    function only supports the CPU device since conv post-op fusion kernel is only
-    supported on CPU right now.
-    """
-    stride = tuple(stride_)
-    padding = tuple(padding_)
-    dilation = tuple(dilation_)
-    assert isinstance(groups, int)
-    output_padding = tuple(output_padding_)
-    with torch._subclasses.FakeTensorMode():
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
-        output = torch.ops.aten.convolution(
-            x_fake,
-            weight_fake,
-            bias_fake,
-            stride,
-            padding,
-            dilation,
-            True,
+            transposed,
             output_padding,
             groups,
         )
@@ -3466,7 +3405,9 @@ def _prepare_convolution_transpose_fusion_create(
         output.size(),
         output_stride,
     )
-    constant_args = [padding, stride, dilation, groups, output_padding]
+    constant_args = [padding, stride, dilation, groups]
+    if transposed:
+        constant_args.append(output_padding)
 
     if bias is not None:
         inputs.append(bias)
@@ -3835,13 +3776,18 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         algorithm,
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            _,
-        ) = _prepare_convolution_transpose_fusion_create(
-            cls, x, weight, bias, padding_, stride_, dilation_, groups_, output_padding_
+        transposed = True
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups_,
+            transposed,
+            output_padding_,
         )
         constant_args = constant_args + [attr, scalars, algorithm]
         return ConvolutionTransposeUnary(
