@@ -59,30 +59,20 @@ echo "Android NDK version: $ANDROID_NDK_VERSION"
 
 CMAKE_ARGS=()
 
-if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
-  # Build PyTorch mobile
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
-  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
-  # custom build with selected ops
-  if [ -n "${SELECTED_OP_LIST}" ]; then
-    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
-    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
-    if [ ! -r ${SELECTED_OP_LIST} ]; then
-      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
-      exit 1
-    fi
-    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+# Build PyTorch mobile
+CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
+CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+
+# custom build with selected ops
+if [ -n "${SELECTED_OP_LIST}" ]; then
+  SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+  echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+  if [ ! -r ${SELECTED_OP_LIST} ]; then
+    echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+    exit 1
   fi
-else
-  # Build Caffe2 mobile
-  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
-  # Build protobuf from third_party so we have a host protoc binary.
-  echo "Building protoc"
-  $CAFFE2_ROOT/scripts/build_host_protoc.sh
-  # Use locally built protoc because we'll build libprotobuf for the
-  # target architecture and need an exact version match.
-  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+  CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
 fi
 
 # If Ninja is installed, prefer it to Make

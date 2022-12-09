@@ -33,7 +33,7 @@ from .fusion_patterns import *  # noqa: F401,F403
 from typing import Any, Callable, Dict, List, Tuple, Union
 import warnings
 
-from torch.ao.quantization.quantization_types import Pattern, NodePattern
+from torch.ao.quantization.utils import Pattern, NodePattern
 
 
 __all__ = [

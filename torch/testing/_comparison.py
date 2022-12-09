@@ -927,9 +927,34 @@ def originate_pairs(
     Returns:
         (List[Pair]): Originated pairs.
     """
+    if (
+        isinstance(actual, torch.TypedStorage)
+        and isinstance(expected, torch.TypedStorage)
+    ):
+        actual_len = actual._size()
+        expected_len = expected._size()
+        if actual_len != expected_len:
+            raise ErrorMeta(
+                AssertionError, f"The length of the sequences mismatch: {actual_len} != {expected_len}", id=id
+            )
+
+        pairs = []
+        for idx in range(actual_len):
+            pairs.extend(
+                originate_pairs(
+                    actual._getitem(idx),
+                    expected._getitem(idx),
+                    pair_types=pair_types,
+                    sequence_types=sequence_types,
+                    mapping_types=mapping_types,
+                    id=(*id, idx),
+                    **options,
+                )
+            )
+        return pairs
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
-    if (
+    elif (
         isinstance(actual, sequence_types)
         and not isinstance(actual, str)
         and isinstance(expected, sequence_types)
@@ -1228,7 +1253,7 @@ def assert_close(
 
         :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
         to :func:`~functools.partial` it to fit their use case. For example, if an equality check is needed, one might
-        define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
+        define an ``assert_equal`` that uses zero tolerances for every ``dtype`` by default:
 
         >>> import functools
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)

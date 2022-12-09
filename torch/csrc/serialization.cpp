@@ -233,7 +233,18 @@ void THPStorage_writeFileRaw(
   int64_t numel = size_bytes / element_size;
   if (self->device_type() == at::kCPU) {
     data = self->data<uint8_t>();
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && defined(TORCH_HIP_VERSION) && \
+    (TORCH_HIP_VERSION >= 301)
+  } else if (self->device_type() == at::kCUDA) {
+    cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
+    data = (uint8_t*)cpu_data.get();
+    C10_CUDA_CHECK(hipMemcpyWithStream(
+        data,
+        self->data<uint8_t>(),
+        size_bytes,
+        cudaMemcpyDeviceToHost,
+        c10::hip::getCurrentHIPStreamMasqueradingAsCUDA()));
+#elif defined(USE_CUDA)
   } else if (self->device_type() == at::kCUDA) {
     cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
     data = (uint8_t*)cpu_data.get();
@@ -398,7 +409,17 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     }
   }
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && defined(TORCH_HIP_VERSION) && \
+    (TORCH_HIP_VERSION >= 301)
+  if (storage->device_type() == at::kCUDA) {
+    C10_CUDA_CHECK(hipMemcpyWithStream(
+        storage->data<uint8_t>(),
+        data,
+        nbytes,
+        cudaMemcpyHostToDevice,
+        c10::hip::getCurrentHIPStreamMasqueradingAsCUDA()));
+  }
+#elif defined(USE_CUDA)
   if (storage->device_type() == at::kCUDA) {
     C10_CUDA_CHECK(cudaMemcpy(
         storage->data<uint8_t>(), data, nbytes, cudaMemcpyHostToDevice));

@@ -823,7 +823,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
-  at::Tensor input_reshaped = input.view({1, M, -1});
+  at::Tensor input_reshaped = input.reshape({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for

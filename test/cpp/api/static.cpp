@@ -47,6 +47,8 @@ TEST(TestStatic, EnableIfModule) {
   ASSERT_FALSE(torch::detail::check_not_lvalue_references<std::string&>());
 }
 
+namespace {
+
 struct A : torch::nn::Module {
   int forward() {
     return 5;
@@ -72,6 +74,8 @@ struct D : torch::nn::Module {
 };
 
 struct E : torch::nn::Module {};
+
+} // anonymous namespace
 
 // Put in a function because macros don't handle the comma between arguments to
 // is_same well ...

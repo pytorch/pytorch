@@ -20,6 +20,7 @@ from ao.sparsity.test_pruner import TestBasePruner  # noqa: F401
 
 # Scheduler
 from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
+from ao.sparsity.test_scheduler import TestCubicScheduler  # noqa: F401
 
 # Composability
 if not IS_ARM64:

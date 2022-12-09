@@ -299,7 +299,7 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, dtype):
+    def _test_conv2d_nhwc_base(self, weight_memory_format, dtype):
         conv_module = torch.nn.Conv2d
         input_shapes = (224, 224)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
@@ -319,7 +319,7 @@ class TestMkldnn(TestCase):
                                 dilation=dilation,
                                 bias=bias,
                                 groups=groups).to(dtype=dtype)
-            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            conv2 = copy.deepcopy(conv1).to(memory_format=weight_memory_format)
             x1 = x.clone()
             x2 = x.clone().to(memory_format=torch.channels_last)
             if train:
@@ -341,13 +341,15 @@ class TestMkldnn(TestCase):
                 self.assertEqual(x1.grad, x2.grad)
 
     def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.bfloat16)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -1057,6 +1059,11 @@ class TestMkldnn(TestCase):
                     x.transpose(dim1, dim2),
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
+
+    def test_transpose_invalid_dime(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch._mkldnn_transpose(x, 0, 12)
 
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()

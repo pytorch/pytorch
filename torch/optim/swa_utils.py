@@ -5,7 +5,7 @@ import warnings
 
 import torch
 from torch.nn import Module
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
 
 __all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
@@ -132,6 +132,11 @@ class AveragedModel(Module):
             else:
                 p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
                                                  self.n_averaged.to(device)))
+        if not self.use_buffers:
+            # If not apply running averages to the buffers,
+            # keep the buffers in sync with the source model.
+            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
+                b_swa.detach().copy_(b_model.detach().to(device))
         self.n_averaged += 1
 
 
@@ -191,7 +196,7 @@ def update_bn(loader, model, device=None):
     model.train(was_training)
 
 
-class SWALR(_LRScheduler):
+class SWALR(LRScheduler):
     r"""Anneals the learning rate in each parameter group to a fixed value.
 
     This learning rate scheduler is meant to be used with Stochastic Weight

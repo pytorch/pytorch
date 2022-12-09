@@ -1,11 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_avg_pool2d_native.h>
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/avg_pool3d_backward_native.h>
+#include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/mkldnn_adaptive_avg_pool2d_backward_native.h>
+#include <ATen/ops/mkldnn_adaptive_avg_pool2d_native.h>
+#include <ATen/ops/mkldnn_max_pool2d_backward_native.h>
+#include <ATen/ops/mkldnn_max_pool2d_native.h>
+#include <ATen/ops/mkldnn_max_pool3d_backward_native.h>
+#include <ATen/ops/mkldnn_max_pool3d_native.h>
+#endif
 
 
 #if !AT_MKLDNN_ENABLED()
@@ -502,7 +518,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*padding*/ {0, 0},
       /*dilation*/ {1, 1},
       /*ceil_mode*/ false,
-      /*algo*/ ideep::algorithm::pooling_avg);
+      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,

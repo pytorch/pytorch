@@ -6,6 +6,8 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <ATen/native/vulkan/api/Utils.h>
+
+#include <mutex>
 #include <ostream>
 
 namespace at {

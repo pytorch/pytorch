@@ -143,19 +143,19 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
-    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
-    view_default = torch.ops.aten.view.default(clone_default, [-1])
-    view_default_1 = torch.ops.aten.view.default(clone_default, [-1])
-    select_int = torch.ops.aten.select.int(view_default_1, 0, 0);  view_default_1 = None
-    view_default_2 = torch.ops.aten.view.default(select_int, [-1]);  select_int = None
-    add_tensor = torch.ops.aten.add_.Tensor(view_default_2, 1)
-    view_default_3 = torch.ops.aten.view.default(clone_default, [-1]);  clone_default = None
-    select_int_1 = torch.ops.aten.select.int(view_default_3, 0, 0)
-    view_default_4 = torch.ops.aten.view.default(view_default_2, []);  view_default_2 = None
-    view_default_5 = torch.ops.aten.view.default(view_default_3, [4]);  view_default_3 = None
-    view_default_6 = torch.ops.aten.view.default(view_default_5, [-1])
-    add_tensor_1 = torch.ops.aten.add_.Tensor(view_default_5, view_default_6);  view_default_6 = None
-    return view_default_5
+    clone = torch.ops.aten.clone.default(a__1);  a__1 = None
+    view = torch.ops.aten.view.default(clone, [-1])
+    view_1 = torch.ops.aten.view.default(clone, [-1])
+    select = torch.ops.aten.select.int(view_1, 0, 0);  view_1 = None
+    view_2 = torch.ops.aten.view.default(select, [-1]);  select = None
+    add = torch.ops.aten.add_.Tensor(view_2, 1)
+    view_3 = torch.ops.aten.view.default(clone, [-1]);  clone = None
+    select_1 = torch.ops.aten.select.int(view_3, 0, 0)
+    view_4 = torch.ops.aten.view.default(view_2, []);  view_2 = None
+    view_5 = torch.ops.aten.view.default(view_3, [4]);  view_3 = None
+    view_6 = torch.ops.aten.view.default(view_5, [-1])
+    add_1 = torch.ops.aten.add_.Tensor(view_5, view_6);  view_6 = None
+    return view_5
     """)
 
     def test_reinplace_scatter_twice(self):
@@ -180,14 +180,14 @@ def forward(self, a__1):
 
 
 def forward(self, a__1):
-    clone_default = torch.ops.aten.clone.default(a__1);  a__1 = None
-    slice_tensor = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
-    select_int = torch.ops.aten.select.int(slice_tensor, 1, 1);  slice_tensor = None
-    select_int_1 = torch.ops.aten.select.int(select_int, 0, 1);  select_int = None
-    add_tensor = torch.ops.aten.add_.Tensor(select_int_1, 1);  select_int_1 = None
-    slice_tensor_1 = torch.ops.aten.slice.Tensor(clone_default, 0, 0, 9223372036854775807)
-    select_int_2 = torch.ops.aten.select.int(slice_tensor_1, 1, 1);  slice_tensor_1 = None
-    return clone_default
+    clone = torch.ops.aten.clone.default(a__1);  a__1 = None
+    slice_1 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
+    select = torch.ops.aten.select.int(slice_1, 1, 1);  slice_1 = None
+    select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
+    add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = None
+    slice_2 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
+    select_2 = torch.ops.aten.select.int(slice_2, 1, 1);  slice_2 = None
+    return clone
     """)
 
     def test_reinplace_scatter_twice_with_different_view_op_valid(self):
@@ -319,8 +319,8 @@ def forward(self, a__1):
 
 def forward(self):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal_default = torch.ops.aten.diagonal.default(zeros)
-    add_tensor = torch.ops.aten.add_.Tensor(diagonal_default, 1);  diagonal_default = None
+    diagonal = torch.ops.aten.diagonal.default(zeros)
+    add = torch.ops.aten.add_.Tensor(diagonal, 1);  diagonal = None
     return [zeros]
     """)
 
@@ -343,11 +343,10 @@ def forward(self):
 def forward(self):
     zeros = torch.ops.aten.zeros.default([4, 4, 4], device = device(type='cpu'), pin_memory = False)
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
-    slice_tensor = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_tensor_1 = torch.ops.aten.slice.Tensor(slice_tensor, 1, 2, 9223372036854775807);  slice_tensor = None
-    slice_tensor_2 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 1, 2, 9223372036854775807);  slice_tensor_2 = None
-    copy__default = torch.ops.aten.copy_.default(slice_tensor_3, ones);  slice_tensor_3 = ones = None
+    slice_1 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 2, 9223372036854775807);  slice_1 = None
+    copy = torch.ops.aten.copy_.default(slice_2, ones);  slice_2 = ones = None
+    slice_3 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
     return zeros
     """)
 

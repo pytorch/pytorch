@@ -94,13 +94,13 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     float width_scale,
     const size_t out_numel) {
 
-  const int index = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (index < out_numel) {
-    const int c = index % channels;
-    const int w2 = (index / channels) % width2;
-    const int h2 = (index / channels / width2) % height2;
-    const int n = index / channels / width2 / height2;
+    const auto c = index % channels;
+    const auto w2 = (index / channels) % width2;
+    const auto h2 = (index / channels / width2) % height2;
+    const auto n = index / channels / width2 / height2;
 
     const size_t h1 = height1 == height2 ? h2 : nn_compute_source_index_fn(height_scale, h2, height1);
     const size_t w1 = width1 == width2 ? w2 : nn_compute_source_index_fn(width_scale, w2, width1);
@@ -240,13 +240,13 @@ static void upsample_nearest2d_out_cuda_template(
         output.is_contiguous(memory_format)) {
     at::Tensor input = input_.contiguous(at::MemoryFormat::ChannelsLast);
 
-    TORCH_CHECK(input.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports input tensors with less than INT_MAX elements");
-    TORCH_CHECK(output.numel() < std::numeric_limits<int>::max(),
-      "upsample_nearest_nhwc only supports output tensors with less than INT_MAX elements");
+    TORCH_CHECK(input.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports input tensors with less than 2^63 - 1 elements");
+    TORCH_CHECK(output.numel() < std::numeric_limits<int64_t>::max(),
+      "upsample_nearest_nhwc only supports output tensors with less than 2^63 - 1 elements");
 
-    const int num_kernels = output.numel();
-    const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+    const int64_t num_kernels = output.numel();
+    const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
       const scalar_t* idata = input.data_ptr<scalar_t>();

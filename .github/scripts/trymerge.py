@@ -36,7 +36,6 @@ from gitutils import (
 )
 from trymerge_explainer import (
     TryMergeExplainer,
-    get_land_check_troubleshooting_message,
     get_revert_message,
 )
 
@@ -152,6 +151,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            status {
+              contexts {
+                context
+                state
+                targetUrl
+              }
+            }
             pushedDate
             oid
           }
@@ -173,6 +179,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       comments(last: 5) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -330,6 +337,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
       comments(last: 100, before: $cursor) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -399,6 +407,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
     re.MULTILINE
 )
+RE_PR_CC_LINE = re.compile(r'^cc:? @\w+.*\r?\n?$', re.MULTILINE)
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
@@ -577,6 +586,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
 @dataclass
 class GitHubComment:
     body_text: str
+    created_at: str
     author_login: str
     author_association: str
     editor_login: Optional[str]
@@ -752,6 +762,13 @@ class GitHubPR:
         checksuites = orig_last_commit["checkSuites"]
 
         self.conclusions = add_workflow_conclusions(checksuites, get_pr_next_check_runs, get_pr_next_checksuites)
+
+        # Append old style statuses(like ones populated by CircleCI or EasyCLA) to conclusions
+        if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
+            for status in orig_last_commit["status"]["contexts"]:
+                name = status["context"]
+                self.conclusions[name] = WorkflowCheckState(name=name, status=status["state"], url=status["targetUrl"])
+
         return self.conclusions
 
     def get_authors(self) -> Dict[str, str]:
@@ -794,6 +811,7 @@ class GitHubPR:
     def _comment_from_node(node: Any) -> GitHubComment:
         editor = node["editor"]
         return GitHubComment(body_text=node["bodyText"],
+                             created_at=node["createdAt"] if "createdAt" in node else "",
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
@@ -890,8 +908,12 @@ class GitHubPR:
             filters out ghstack info """
         # Adding the url here makes it clickable within the Github UI
         approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
+        # Remove "cc: " line from the message body
+        msg_body = re.sub(RE_PR_CC_LINE, "", self.get_body())
+        if filter_ghstack:
+            msg_body = re.sub(RE_GHSTACK_DESC, "", msg_body)
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
-        msg += self.get_body() if not filter_ghstack else re.sub(RE_GHSTACK_DESC, "", self.get_body())
+        msg += msg_body
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
@@ -912,6 +934,8 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
+            if land_check_commit:
+                self.delete_land_time_check_branch(repo)
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
     def merge_changes(self,
@@ -961,6 +985,11 @@ class GitHubPR:
         if repo.current_branch() != orig_branch:
             repo.checkout(orig_branch)
         return commit
+
+    def delete_land_time_check_branch(self,
+                                      repo: GitRepo) -> None:
+        land_check_branch = f'landchecks/{self.pr_num}'
+        repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
 class MandatoryChecksMissingError(Exception):
@@ -1031,7 +1060,14 @@ def find_matching_merge_rule(pr: GitHubPR,
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
 
-    #  Used to determine best rejection reason
+    # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
+    # If it fails all rules, we need to find the rule that it came closest to passing and report
+    # that to the dev.
+    #
+    # reject_reason_score ranks rules by relevancy. The higher the score, the more relevant the
+    # rule & rejection reason, and we only care about the most relevant rule/reason
+    #
+    # reject_reason_score intrepretation:
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
     # Score 20K - matched all files and approvers, but mandatory checks are pending
@@ -1041,6 +1077,8 @@ def find_matching_merge_rule(pr: GitHubPR,
         rule_name = rule.name
         patterns_re = patterns_to_regex(rule.patterns)
         non_matching_files = []
+
+        # Does this rule apply to all the files?
         for fname in changed_files:
             if not patterns_re.match(fname):
                 non_matching_files.append(fname)
@@ -1048,16 +1086,21 @@ def find_matching_merge_rule(pr: GitHubPR,
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
-                reject_reason = (f"{num_matching_files} files matched rule {rule_name}, but there are still non-matching files: " +
-                                 f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Not all files match rule `{rule_name}`."
+                    f"{num_matching_files} files matched, but there are still non-matching files:"
+                    f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                ))
             continue
+
         # If rule needs approvers but PR has not been reviewed, skip it
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"Matched rule {rule_name}, but PR #{pr.pr_num} has not been reviewed yet"
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
             continue
 
+        # Does the PR have the required approvals for this rule?
         rule_approvers_set = set()
         for approver in rule.approved_by:
             if "/" in approver:
@@ -1070,34 +1113,43 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
-                                 f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
+                ))
             continue
+
+        # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-        required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
+        required_checks = filter(lambda x: skip_mandatory_checks is False or "EasyCLA" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
+        hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = (
-                    f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
-                    + f"Refusing to merge as mandatory check(s) {checks_to_str(failed_checks)} failed for "
-                    + f"rule {rule_name}."
-                )
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) failed (Rule `{rule_name}`):",
+                    *checks_to_markdown_bullets(failed_checks),
+                    "",
+                    f"Dig deeper by [viewing the failures on hud]({hud_link})"
+                ))
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = (
-                    f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
-                    + f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)} are pending/not yet run for "
-                    + f"rule {rule_name}."
-                )
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
+                    *checks_to_markdown_bullets(pending_checks),
+                    "",
+                    f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
+                ))
             continue
+
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
+
         return rule
 
     if reject_reason_score == 20000:
@@ -1133,6 +1185,10 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
+
+def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
+    return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks]
 
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
@@ -1317,7 +1373,7 @@ def merge(pr_num: int, repo: GitRepo,
     # here to stop the merge process right away
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
 
-    if land_checks:
+    if land_checks and not dry_run:
         land_check_commit = pr.create_land_time_check_branch(
             repo,
             'viable/strict',
@@ -1327,7 +1383,11 @@ def merge(pr_num: int, repo: GitRepo,
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+        if land_checks and not dry_run:
+            pr.delete_land_time_check_branch(repo)
+        raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
+                           "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
+                           "`@pytorchbot rebase`")
 
     start_time = time.time()
     last_exception = ''
@@ -1339,6 +1399,8 @@ def merge(pr_num: int, repo: GitRepo,
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         if initial_commit_sha != pr.last_commit()['oid']:
+            if land_checks and not dry_run:
+                pr.delete_land_time_check_branch(repo)
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
@@ -1373,10 +1435,16 @@ def merge(pr_num: int, repo: GitRepo,
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
             time.sleep(5 * 60)
+        except RuntimeError:
+            if land_checks and not dry_run:
+                pr.delete_land_time_check_branch(repo)
+            raise
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
+        if land_checks:
+            pr.delete_land_time_check_branch(repo)
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
@@ -1388,10 +1456,6 @@ def main() -> None:
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
-
-        troubleshooting = ""
-        if args.land_checks:
-            troubleshooting += get_land_check_troubleshooting_message()
 
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
@@ -1406,8 +1470,6 @@ def main() -> None:
         msg = "\n".join((
             f"## {title}",
             f"{exception}",
-            "",
-            f"{troubleshooting}",
             "",
             f"{internal_debugging}"
         ))

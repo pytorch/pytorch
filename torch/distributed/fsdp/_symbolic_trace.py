@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import torch
 
-
 __all__ = ["TracingConfig"]
 
 
@@ -140,13 +139,18 @@ def _patched_create_proxy(
         if args is not None:
             named_params: List[Tuple[str, torch.nn.Parameter]] = []
             for arg in args:
-                if isinstance(arg, torch.fx.Proxy) and arg.node.target in prefixed_param_name_to_param:
+                if (
+                    isinstance(arg, torch.fx.Proxy)
+                    and arg.node.target in prefixed_param_name_to_param
+                ):
                     param = prefixed_param_name_to_param[arg.node.target]
                     named_params.append((arg.node.target, param))
                     if param not in set(execution_info.param_exec_order):
                         execution_info.param_exec_order.append(param)
             if named_params:
-                execution_info.module_to_execution_infos[module].append((module, named_params))
+                execution_info.module_to_execution_infos[module].append(
+                    (module, named_params)
+                )
     elif kind == "call_module":
         named_params = list(module.named_parameters())
         if named_params:
@@ -234,7 +238,10 @@ def _patch_tracer(
     )
     prefixed_param_name_to_param = dict(root_module.named_parameters())
     tracer.create_proxy = functools.partial(
-        _patched_create_proxy, original_create_proxy, execution_info, prefixed_param_name_to_param
+        _patched_create_proxy,
+        original_create_proxy,
+        execution_info,
+        prefixed_param_name_to_param,
     )
     try:
         yield

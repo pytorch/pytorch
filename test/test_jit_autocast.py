@@ -797,7 +797,7 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone())
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone())
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
@@ -812,12 +812,38 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone().to(memory_format=torch.channels_last))
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone().to(memory_format=torch.channels_last))
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             if self.inputs[i].size().__len__() == 5:
                 # NHWC 3D case not support yet
                 continue
             test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_cat_promote(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], 0)
+        with torch.jit.fuser("none"):
+            # In this testcase, we will check whether cat has done the promotion in AMP with mixed dtype inputs.
+            # To avoid the fusion group from TE, we will disable the fuser here.
+            for jit_freeze_or_not in [False, True]:
+                test_model = TestModel().eval()
+                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16), torch.no_grad():
+                    a = torch.rand(24, 128, 128)
+                    b = torch.rand(24, 128, 128, dtype=torch.bfloat16)
+                    c = test_model(a, b)
+                    traced = torch.jit.trace(test_model, (a, b))
+                if jit_freeze_or_not:
+                    traced = torch.jit.freeze(traced)
+                for _ in range(3):
+                    c2 = traced(a, b)
+                self.assertTrue(c.dtype, torch.float32)
+                self.assertTrue(c2.dtype, torch.float32)
+                traced_graph = traced.graph_for(a, b)
+                self.assertTrue(any(n.kind() == "aten::to" for n in traced_graph.nodes()))
 
     def test_script_autocast_cpu(self):
         def fn(x):

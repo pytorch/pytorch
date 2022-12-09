@@ -94,7 +94,10 @@ def _binary_helper(fn, args, kwargs, inplace):
     )
 
     args0_layout = data_args[0].layout
-    same_layout = args0_layout == data_args[1].layout
+    same_layout = (
+        (torch.is_tensor(data_args[1]) or is_masked_tensor(data_args[1])) and
+        (args0_layout == data_args[1].layout)
+    )
 
     if args0_layout == torch.sparse_coo:
         if same_layout:

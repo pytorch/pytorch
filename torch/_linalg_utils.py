@@ -76,12 +76,7 @@ def qform(A: Optional[Tensor], S: Tensor):
 
 def basis(A):
     """Return orthogonal basis of A columns."""
-    if A.is_cuda:
-        # torch.orgqr is not available in CUDA
-        Q = torch.linalg.qr(A).Q
-    else:
-        Q = torch.orgqr(*torch.geqrf(A))
-    return Q
+    return torch.linalg.qr(A).Q
 
 
 def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
@@ -96,9 +91,31 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
     return E, Z
 
 
-# This function was deprecated and removed
+# These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
+def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed.",
+        "Please use the `torch.linalg.matrix_rank` function instead.",
+    )
+
+
 def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.solve` function instead.",
+    )
+
+
+def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed.",
+        "Please use the `torch.linalg.lstsq` function instead.",
+    )
+
+
+def eig(
+    self: Tensor, eigenvectors: bool = False, *, e=None, v=None
+) -> Tuple[Tensor, Tensor]:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.eig` function instead.",
     )

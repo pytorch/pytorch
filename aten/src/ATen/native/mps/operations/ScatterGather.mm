@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 
 TORCH_IMPL_FUNC(gather_out_mps)
-(const Tensor & self,
+(const Tensor & self_arg,
  int64_t dim,
  const Tensor & index,
  bool sparse_grad,
@@ -23,6 +23,8 @@ TORCH_IMPL_FUNC(gather_out_mps)
 
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
+
+  auto self = self_arg.dim() == 0 ? self_arg.view({1}) : self_arg;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -150,7 +152,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
 }
 
 void scatter_mps_general
-(const Tensor& self,
+(const Tensor& self_arg,
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
@@ -160,6 +162,8 @@ void scatter_mps_general
 
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
+
+  auto self = self_arg.dim() == 0 ? self_arg.view({1}) : self_arg;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -358,13 +362,13 @@ void scatter_mps_general
             // 2. Flatten the values
             // 3. Scatter into input with add mode
 
-            int shape_data[num_input_dims];
+            std::vector<int> shape_data(num_input_dims);
 
             for(int i = 0; i < num_input_dims; i++) {
               shape_data[i] = {[scatterInputShape[i] intValue]};
             }
 
-            MPSGraphTensor* scatterInputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data length:num_input_dims * sizeof(int)]
+            MPSGraphTensor* scatterInputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data.data() length:num_input_dims * sizeof(int)]
                                                                            shape:@[[NSNumber numberWithInt:num_input_dims]]
                                                                         dataType:MPSDataTypeInt32];
 

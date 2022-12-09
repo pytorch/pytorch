@@ -30,14 +30,14 @@ from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -47,7 +47,7 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
-    expectedAlertNondeterministic, get_all_device_types, skipXLA)
+    get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -1158,11 +1158,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('avg_pool3d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'avg_pool3d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
@@ -1171,11 +1170,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'adaptive_avg_pool2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
@@ -1184,11 +1182,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_avg_pool3d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'adaptive_avg_pool3d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_MaxPool3d(self, device):
@@ -1197,11 +1194,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('max_pool3d_with_indices_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'max_pool3d_with_indices_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
@@ -1210,11 +1206,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('adaptive_max_pool2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'adaptive_max_pool2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
@@ -1223,11 +1218,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'fractional_max_pool2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
@@ -1236,11 +1230,52 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('fractional_max_pool3d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'fractional_max_pool3d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
-        backward_func(self, device)
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool1d(3, 1)
+        input = torch.randn(1, 1, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool2d(3, 1)
+        input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool3d(3, 1)
+        input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling3d_forward_out')
 
     @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
@@ -1252,11 +1287,10 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_linear1d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad),
+            'upsample_linear1d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -1267,11 +1301,10 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bilinear2d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad),
+            'upsample_bilinear2d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
@@ -1283,11 +1316,10 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_bicubic2d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad),
+            'upsample_bicubic2d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
@@ -1299,11 +1331,10 @@ else:
             align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('upsample_trilinear3d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad),
+            'upsample_trilinear3d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
@@ -1312,11 +1343,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad1d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'reflection_pad1d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_ReflectionPad2d(self, device):
         module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
@@ -1324,11 +1354,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'reflection_pad2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
@@ -1337,11 +1366,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('reflection_pad3d_backward_out_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'reflection_pad3d_backward_out_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
@@ -1350,11 +1378,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad1d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad1d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
@@ -1362,11 +1389,10 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
@@ -1375,22 +1401,21 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('replication_pad3d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad3d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
         target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
 
-        @expectedAlertNondeterministic('nll_loss2d_forward_out_cuda_template', ['cuda'])
-        def forward_func(slf, device):
-            module(input, target)
 
-        forward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: module(input, target),
+            'nll_loss2d_forward_out_cuda_template',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
@@ -1401,11 +1426,10 @@ else:
         res = module(input, target, input_lengths, target_lengths)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('ctc_loss_backward_gpu', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad, retain_graph=True)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'ctc_loss_backward_gpu',
+            torch.device(device).type == 'cuda')
 
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
@@ -1415,113 +1439,67 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('embedding_bag_backward_cuda_max', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'embedding_bag_backward_cuda_max',
+            torch.device(device).type == 'cuda')
 
     @dtypes(*all_types_and_complex_and(torch.bool))
     def test_nondeterministic_alert_cumsum(self, device, dtype):
+        input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
+        should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
 
-        def test_func(op_call):
-            input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
-
-            @expectedAlertNondeterministic('cumsum_cuda_kernel', ['cuda'])
-            def forward_func_alert(slf, device):
-                op_call(input, 0)
-
-            if dtype.is_floating_point or dtype.is_complex:
-                forward_func_alert(self, device)
-            else:
-                with DeterministicGuard(True):
-                    op_call(input, 0)
-
-        test_func(torch.Tensor.cumsum)
-        test_func(torch.cumsum)
-
-    def test_nondeterministic_alert_scatter_add(self, device):
-        def test_func(op_call):
-            input = torch.randn(5, 4, device=device)
-            dim = 0
-            index = torch.tensor([[3]], device=device)
-            src = torch.tensor([[1.0]], device=device)
-
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
-            def forward_func(slf, device):
-                op_call(input, dim, index, src)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.scatter_add_)
-        test_func(torch.Tensor.scatter_add)
-        test_func(torch.scatter_add)
+        for op_call in [torch.Tensor.cumsum, torch.cumsum]:
+            self.check_nondeterministic_alert(
+                lambda: op_call(input, 0),
+                'cumsum_cuda_kernel',
+                should_alert)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device)
-            indices = torch.tensor([0, 0], device=device)
-            values = torch.tensor([0., 1.], device=device)
+        a = torch.randn(10, device=device)
+        indices = torch.tensor([0, 0], device=device)
+        values = torch.tensor([0., 1.], device=device)
 
-            @expectedAlertNondeterministic('put_')
-            def forward_func(slf, device):
-                op_call(a, indices, values, accumulate=False)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.put)
-        test_func(torch.Tensor.put_)
+        for op_call in [torch.Tensor.put, torch.Tensor.put_]:
+            self.check_nondeterministic_alert(
+                lambda: op_call(a, indices, values, accumulate=False),
+                'put_')
 
     def test_nondeterministic_alert_put_accumulate(self, device):
-        def test_func(op_call):
-            a = torch.randn(10, device=device)
-            indices = torch.tensor([0, 0], device=device)
-            values = torch.tensor([0., 1.], device=device)
+        a = torch.randn(10, device=device)
+        indices = torch.tensor([0, 0], device=device)
+        values = torch.tensor([0., 1.], device=device)
 
-            @expectedAlertNondeterministic('put_', ['cuda'])
-            def forward_func(slf, device):
-                op_call(a, indices, values, accumulate=True)
-
-            forward_func(self, device)
-
-        test_func(torch.Tensor.put)
-        test_func(torch.Tensor.put_)
+        for op_call in [torch.Tensor.put, torch.Tensor.put_]:
+            self.check_nondeterministic_alert(
+                lambda: op_call(a, indices, values, accumulate=True),
+                'put_',
+                torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
-        def test_func(op_call):
-            a = torch.tensor([], device=device)
-
-            @expectedAlertNondeterministic('_histc_cuda', ['cuda'])
-            def forward_func(slf, device):
-                res = op_call(a, min=0, max=3)
-
-            forward_func(self, device)
-
-        test_func(torch.histc)
-        test_func(torch.Tensor.histc)
+        a = torch.tensor([], device=device)
+        for op_call in [torch.histc, torch.Tensor.histc]:
+            self.check_nondeterministic_alert(
+                lambda: op_call(a, min=0, max=3),
+                '_histc_cuda',
+                torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_bincount(self, device):
-        def test_func(op_call):
-            a = torch.tensor([], device=device, dtype=torch.long)
-
-            @expectedAlertNondeterministic('_bincount_cuda', ['cuda'])
-            def forward_func(slf, device):
-                res = op_call(a)
-
-            forward_func(self, device)
-
-        test_func(torch.bincount)
-        test_func(torch.Tensor.bincount)
+        a = torch.tensor([], device=device, dtype=torch.long)
+        for op_call in [torch.bincount, torch.Tensor.bincount]:
+            self.check_nondeterministic_alert(
+                lambda: op_call(a),
+                '_bincount_cuda',
+                torch.device(device).type == 'cuda')
 
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_nondeterministic_alert_kthvalue(self, device, dtype):
-        @expectedAlertNondeterministic('kthvalue CUDA', ['cuda'])
-        def test_func(slf, device, call_type):
+        def test_func(call_type):
             S = 10
             k = 5
             a = torch.randn(S, device=device)
@@ -1536,27 +1514,11 @@ else:
             else:
                 self.fail(f"'{call_type}' is not a valid call type")
 
-        test_func(self, device, 'function')
-        test_func(self, device, 'method')
-        test_func(self, device, 'out')
-
-    @onlyNativeDeviceTypes
-    def test_nondeterministic_alert_gather(self, device):
-        def test_func(op_call):
-            a = torch.randn(3, 3, device=device, requires_grad=True)
-            dim = 0
-            index = torch.tensor([[0]], device=device)
-            res = op_call(a, dim, index)
-            grad = torch.ones_like(res)
-
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
-            def backward_func(slf, device):
-                res.backward(grad)
-
-            backward_func(self, device)
-
-        test_func(torch.gather)
-        test_func(torch.Tensor.gather)
+        for call_type in ['function', 'method', 'out']:
+            self.check_nondeterministic_alert(
+                lambda: test_func('function'),
+                'kthvalue CUDA',
+                torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_grid_sample_2d(self, device):
@@ -1565,11 +1527,10 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'grid_sampler_2d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     @skipIfMps
     def test_nondeterministic_alert_grid_sample_3d(self, device):
@@ -1578,11 +1539,10 @@ else:
         res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
 
-        @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', ['cuda'])
-        def backward_func(slf, device):
-            res.backward(grad)
-
-        backward_func(self, device)
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'grid_sampler_3d_backward_cuda',
+            torch.device(device).type == 'cuda')
 
     def test_invalid_shapes_grid_sampler(self, device):
         make_arg = partial(
@@ -1651,7 +1611,7 @@ else:
     # Ensures that median throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_nondeterministic_alert_median(self, device, dtype):
-        def test_func(slf, device, call_type):
+        def test_func(call_type):
             S = 10
             a = torch.randn(S, device=device)
             if call_type == 'function':
@@ -1669,15 +1629,19 @@ else:
             else:
                 self.fail(f"'{call_type}' is not a valid call type")
 
-        @expectedAlertNondeterministic('median CUDA with indices output', ['cuda'])
-        def test_func_expect_error(slf, device, call_type):
-            test_func(slf, device, call_type)
+        def test_func_expect_error(call_type, should_error):
+            self.check_nondeterministic_alert(
+                lambda: test_func(call_type),
+                'median CUDA with indices output',
+                should_error)
 
-        test_func(self, device, 'function')
-        test_func_expect_error(self, device, 'function with indices')
-        test_func(self, device, 'method')
-        test_func_expect_error(self, device, 'method with indices')
-        test_func_expect_error(self, device, 'out with indices')
+        is_cuda = torch.device(device).type == 'cuda'
+
+        test_func_expect_error('function', False)
+        test_func_expect_error('function with indices', is_cuda)
+        test_func_expect_error('method', False)
+        test_func_expect_error('method with indices', is_cuda)
+        test_func_expect_error('out with indices', is_cuda)
 
     # FIXME: move to test_scatter_gather_ops
     def _test_gather_backward_one_dim(self, device, deterministic: bool = False) -> None:
@@ -1786,7 +1750,8 @@ else:
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
                           lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
-                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size))
+                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size),
+                          lambda: torch.any(y))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),
@@ -2347,8 +2312,9 @@ else:
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
         res2 = torch.tensor([]).to(device)
-        torch.cumprod(x, 1, out=res2)
-        self.assertEqual(res1, res2)
+        if not TEST_WITH_TORCHINDUCTOR:
+            torch.cumprod(x, 1, out=res2)
+            self.assertEqual(res1, res2)
         x.cumprod_(1)
         self.assertEqual(res1, x)
 
@@ -2995,10 +2961,9 @@ else:
                     dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
                     src_size = size[:dim] + (num_src,) + size[dim + 1:]
                     src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
-                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if index_noncontig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        idx = torch.testing.make_non_contiguous(idx)
+                    idx = torch.testing.make_tensor(
+                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
+                    )
                     expected = dest.clone()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
@@ -4065,6 +4030,7 @@ else:
             doubles, sz, lambda input, out: out.copy_(input))
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4081,6 +4047,7 @@ else:
             ind.index_add_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_index_copy_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4097,6 +4064,7 @@ else:
             ind.index_copy_(0, ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
@@ -4121,6 +4089,7 @@ else:
             x[:-1] >>= x[1:]
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):
@@ -4133,10 +4102,9 @@ else:
         p = torch.rand(6, device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.bernoulli_(p=p)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.bernoulli(torch.rand_like(x), out=x)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_put_mem_overlap(self, device):
@@ -4158,6 +4126,7 @@ else:
             ind.put_(ind.clone(), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_index_put_mem_overlap(self, device):
@@ -4179,6 +4148,7 @@ else:
             ind.index_put_((ind.clone(),), ind)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # UserWarning not triggered
     @onlyNativeDeviceTypes
     def test_masked_fill_mem_overlap(self, device):
@@ -4195,6 +4165,7 @@ else:
             mask[1:].masked_fill_(mask[:-1], False)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
@@ -4206,6 +4177,7 @@ else:
             x.masked_scatter_(mask, src)
 
     # FIXME: convert to ErrorInputs
+    # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4678,6 +4650,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -5065,47 +5038,6 @@ else:
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid(self, device):
-        def test(probs):
-            with self.assertRaisesRegex(RuntimeError,
-                                        'probability tensor contains either `inf`, `nan` or element < 0'):
-                out = torch.multinomial(probs.to(device), 2)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        test(torch.tensor([1., -1., 1.]))
-        test(torch.tensor([1., inf, 1.]))
-        test(torch.tensor([1., -inf, 1.]))
-        test(torch.tensor([1., 1., nan]))
-
-    # FIXME: convert to ErrorInputs
-    @skipIfMps
-    def test_multinomial_invalid_distribution(self, device):
-        def test(probs, replacement):
-            with self.assertRaisesRegex(RuntimeError,
-                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
-                out = torch.multinomial(probs, 2, replacement)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
-
-        x = torch.zeros(3, device=device)
-        y = torch.zeros(3, 3, device=device)
-        z = torch.zeros(3, 3, device=device)
-        z[1, :] = 1
-
-        test(x, False)
-        test(y, False)
-        test(z, False)
-
-        # Verify only for CPU as replacement=True
-        # throws device side assert triggered.
-        if self.device_type == 'cpu':
-            test(x, True)
-            test(y, True)
-            test(z, True)
-
     # FIXME: move to test distributions
     def _test_multinomial_empty(self, device, replacement, num_samples):
         probs = torch.ones(0, 3, device=device)
@@ -5188,6 +5120,14 @@ else:
 
                 check_equal(condition, x, y)
                 check_equal(condition, y, x)
+                if self.device_type == "cuda":
+                    check_equal(condition, torch.tensor(x), y)
+                    check_equal(condition, y, torch.tensor(x))
+                    if not isinstance(y, torch.Tensor):
+                        check_equal(condition, torch.tensor(y), torch.tensor(x))
+                    if isinstance(y, torch.Tensor) and y.ndim > 0:
+                        check_equal(torch.tensor(True), x, y)
+                        check_equal(torch.tensor(True), y, x)
 
 
     def test_hook_remove(self, device):
@@ -5650,10 +5590,10 @@ class TestTorch(TestCase):
                             dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
                         src = torch.randn(num_copy, *other_sizes, device=device)
                         if not src_contig:
-                            src = torch.testing.make_non_contiguous(src)
+                            src = noncontiguous_like(src)
                         idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                         if not index_contig:
-                            idx = torch.testing.make_non_contiguous(idx)
+                            idx = noncontiguous_like(idx)
                         # index_add_ without alpha argument
                         dest2 = dest.clone()
                         dest.index_add_(0, idx, src)
@@ -5762,10 +5702,10 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
-        nt1 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
-        nt2 = torch.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
-        nt3 = torch.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
-        nt4 = torch.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt1 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
+        nt2 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
+        nt3 = torch.nested.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
+        nt4 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
 
         self.assertFalse(nt1.is_same_size(nt2))
         self.assertFalse(nt1.is_same_size(nt3))
@@ -6491,6 +6431,127 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
+    # Test that internal versions of functions related to TypedStorage do not
+    # produce a deprecation warning
+    def test_typed_storage_internal_no_warning(self):
+        s0 = torch.FloatStorage(10)
+        s0_untyped = s0.untyped()
+        t0 = torch.randn(10)
+
+        funcs = [
+            lambda: torch.FloatStorage(_internal=True),
+            lambda: torch.TypedStorage(
+                dtype=torch.float,
+                device='cpu',
+                _internal=True),
+            lambda: torch.TypedStorage(
+                wrap_storage=s0_untyped,
+                dtype=s0.dtype,
+                _internal=True),
+            lambda: torch.FloatStorage._dtype,
+            lambda: s0._resize_(20),
+            lambda: s0._size(),
+            lambda: s0._untyped_storage,
+            lambda: s0._is_shared(),
+            lambda: s0._share_memory_(),
+            lambda: s0._pickle_storage_type(),
+            lambda: s0._setitem(slice(0, s0._size()), 1),
+            lambda: s0._element_size(),
+            lambda: s0._deepcopy({}),
+            lambda: s0._data_ptr(),
+            lambda: s0._nbytes(),
+            lambda: t0._typed_storage(),
+        ]
+
+        if torch.cuda.is_available():
+            s1 = torch.cuda.FloatStorage(10)
+            s1_untyped = s1.untyped()
+            t1 = torch.randn(10, device='cuda')
+
+            funcs += [
+                lambda: torch.cuda.FloatStorage(_internal=True),
+                lambda: torch.TypedStorage(
+                    dtype=torch.float,
+                    device='cuda',
+                    _internal=True),
+                lambda: torch.TypedStorage(
+                    wrap_storage=s1_untyped,
+                    dtype=s1.dtype,
+                    _internal=True),
+                lambda: torch.cuda.FloatStorage._dtype,
+                lambda: s1._resize_(20),
+                lambda: s1._size(),
+                lambda: s1._untyped_storage,
+                lambda: s1._is_shared(),
+                lambda: s1._share_memory_(),
+                lambda: s1._pickle_storage_type(),
+                lambda: s1._setitem(slice(0, s1._size()), 1),
+                lambda: s1._element_size(),
+                lambda: s1._deepcopy({}),
+                lambda: s1._data_ptr(),
+                lambda: s1._nbytes(),
+                lambda: t1._typed_storage(),
+            ]
+
+        # Check that each of the TypedStorage internal function calls do not
+        # produce a deprecation warning
+        for f in funcs:
+            with warnings.catch_warnings():
+                warnings.filterwarnings('error', "TypedStorage is deprecated")
+                f()
+
+    # Test that public functions related to TypedStorage produce a deprecation
+    # warning
+    def test_typed_storage_deprecation_warning(self):
+        s0 = torch.FloatStorage(10)
+        funcs = [
+            lambda: torch.FloatStorage(),
+            lambda: torch.FloatStorage.dtype,
+            lambda: s0.fill_(0),
+            lambda: s0.is_cuda,
+            lambda: s0.untyped(),
+            lambda: len(s0),
+            lambda: s0[0],
+        ]
+
+        if torch.cuda.is_available():
+            s1 = torch.cuda.FloatStorage(10)
+            funcs += [
+                lambda: torch.cuda.FloatStorage(),
+                lambda: torch.cuda.FloatStorage.dtype,
+                lambda: s1.fill_(0),
+                lambda: s1.is_cuda,
+                lambda: s1.untyped(),
+                lambda: len(s1),
+                lambda: s1[0],
+            ]
+
+        # Check that each of the TypedStorage function calls produce a warning
+        # if warnings are reset between each
+        for f in funcs:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                f()
+                self.assertEqual(len(w), 1)
+                warning = w[0].message
+                self.assertTrue(warning, DeprecationWarning)
+                self.assertTrue(re.search(
+                    '^TypedStorage is deprecated',
+                    str(warning)))
+
+        # Check that only one warning is raised from calling multiple
+        # TypedStorage functions if warnings are not reset between each
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            for f in funcs:
+                f()
+            self.assertEqual(len(w), 1)
+            warning = w[0].message
+            self.assertTrue(warning, DeprecationWarning)
+            self.assertTrue(re.search(
+                '^TypedStorage is deprecated',
+                str(warning)))
+
     def test_from_file(self):
         def assert_with_filename(filename):
             size = 10000
@@ -6856,6 +6917,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -7471,6 +7533,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint32.is_signed)
 
     # FIXME: Put the following random tests into their own test class or test suite
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -7482,6 +7545,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         after = torch.rand(1000)
         self.assertEqual(before, after, atol=0, rtol=0)
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNGStateAliasing(self):
         # Fork the random number stream at this point
         gen = torch.Generator()
@@ -7494,6 +7558,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, atol=0, rtol=0, msg="RNG has not forked correctly.")
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_RNG_after_pickle(self):
         torch.random.manual_seed(100)
         before = torch.rand(10)
@@ -7506,6 +7571,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertEqual(before, after, atol=0, rtol=0)
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_boxMullerState(self):
         torch.manual_seed(123)
         odd_number = 101
@@ -7521,6 +7587,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(seeded, reseeded, atol=0, rtol=0,
                          msg='repeated calls to manual_seed not generating same sequence of normally distributed numbers')
 
+    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_manual_seed(self):
         rng_state = torch.get_rng_state()
         torch.manual_seed(2)
@@ -7594,6 +7661,51 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
+
+    def test_copy_float16(self):
+        # Check that fbgemm code no longer reads memory out of bounds, see
+        # copy_impl and fbgemm::Float16ToFloat_ref.
+        # https://github.com/pytorch/pytorch/issues/88543
+
+        # Types to test different code paths in copy_impl.
+        dtypes = (
+            # out_dtype, src_dtype
+            (torch.float32, torch.float16),  # fbgemm
+            (torch.float16, torch.float32),  # fbgemm
+            (torch.float32, torch.float32),  # TensorIterator
+        )
+
+        cases = (
+            # out_shape, src_shape, is_ok
+            # These cases used to crash with fbgemm, make sure these also raise
+            # exceptions with TensorIterator.
+            ((1, 2, 3), (0, 2, 3), False),  # same strides, not allowed by TI
+            ((1, 5, 6), (4, 5, 6), False),  # same strides, not allowed by TI
+            (1, (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (1, 2, 3), False),  # different strides
+            ((4, 5, 6), (6, 5, 4), False),  # same numel
+
+            # These cases should pass with fbgemm and TensorIterator.
+            ((4, 5, 6), (1, 5, 6), True),  # same strides
+            ((4, 5, 6), (4, 5, 6), True),  # same strides
+            ((0, 2, 3), 1, True),  # different strides, allowed by TI
+            ((4, 5, 6), (4, 5, 1), True),  # different strides, allowed by TI
+        )
+
+        for (out_shape, src_shape, is_ok), (out_dtype, src_dtype) in itertools.product(cases, dtypes):
+            out = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cpu'))
+            src = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cpu'))
+            if is_ok:
+                if torch.cuda.is_available():
+                    out_cuda = out.cuda()
+                    src_cuda = src.cuda()
+                res = out.copy_(src)
+                if torch.cuda.is_available():
+                    res_cuda = out_cuda.copy_(src_cuda)
+                    self.assertEqual(res, res_cuda)
+            else:
+                self.assertRaises(RuntimeError, lambda: out.copy_(src))
 
     # FIXME: Port to a more appropriate test suite
     def _test_to_with_layout(self, layout):

@@ -1,14 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
 from typing import List, Optional, Tuple
+import unittest
 
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.optim import SGD, Adam, AdamW
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.distributed.optim.utils import functional_optim_map, register_functional_optim
 
 class MyModule(torch.nn.Module):
     def __init__(self):
@@ -64,6 +65,10 @@ class MyDummyFnOptimizer(object):
         with torch.no_grad():
             raise RuntimeError("MyDummyFnOptimizer does not support step() as of now")
 
+if torch.distributed.is_available():
+    from torch.distributed.optim.utils import functional_optim_map, register_functional_optim
+
+@unittest.skipIf(not torch.distributed.is_available(), "These are testing distributed functions")
 class TestFunctionalOptimParity(TestCase):
     def _validate_parameters(self, params_1, params_2):
         for p1, p2 in zip(params_1, params_2):

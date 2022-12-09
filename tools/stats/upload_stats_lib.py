@@ -136,6 +136,22 @@ def upload_to_s3(
     print("Done!")
 
 
+def upload_file_to_s3(
+    file_name: str,
+    bucket: str,
+    key: str,
+) -> None:
+    """
+    Upload a local file to S3
+    """
+    print(f"Upload {file_name} to s3://{bucket}/{key}")
+    boto3.client("s3").upload_file(
+        file_name,
+        bucket,
+        key,
+    )
+
+
 def unzip(p: Path) -> None:
     """Unzip the provided zipfile to a similarly-named directory.
 

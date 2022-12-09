@@ -732,7 +732,7 @@ AnalyzeViewResult analyzeView(
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
       original_sizes.size() > 0,
-      "Empty original size not supported for view operatioon.");
+      "Empty original size not supported for view operation.");
 
   TORCH_INTERNAL_ASSERT(
       TensorDomain::noReductions(original_view_tv->getMaybeRFactorDomain())

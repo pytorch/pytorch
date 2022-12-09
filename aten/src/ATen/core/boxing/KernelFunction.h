@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
@@ -13,6 +14,56 @@ using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
 class OperatorHandle;
 struct OperatorKernel;
 class KernelFunction;
+
+template <typename T>
+using has_symint =
+  guts::disjunction<
+    std::is_same<c10::SymInt, std::decay_t<T>>,
+    std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
+    std::is_same<at::OptionalSymIntArrayRef, std::decay_t<T>>,
+    std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
+  >;
+
+template <typename T>
+struct remove_symint {
+  using type = T;
+};
+
+template <>
+struct remove_symint<c10::SymInt> {
+  using type = int64_t;
+};
+
+template <>
+struct remove_symint<at::OptionalSymIntArrayRef> {
+  using type = OptionalIntArrayRef;
+};
+
+template <>
+struct remove_symint<c10::SymIntArrayRef> {
+  using type = c10::IntArrayRef;
+};
+
+template <>
+struct remove_symint<c10::optional<c10::SymInt>> {
+  using type = c10::optional<int64_t>;
+};
+
+
+template <bool symint, typename T>
+struct maybe_keep_symint final {};
+
+template <typename T>
+struct maybe_keep_symint<true, T> { using type = T; };
+
+template <typename T>
+struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+
+template <typename T>
+using fn_has_symint = typename guts::typelist::true_for_any_type<
+  has_symint,
+  typename guts::infer_function_traits<T>::type::parameter_types
+>;
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -31,6 +82,7 @@ public:
   // Fast path for dispatch to allow not touching the boxed kernel in
   // the common case where unboxed is available.
   bool isValidUnboxed() const;
+  bool isValidSymUnboxed() const;
   bool isValid() const;
   bool isFallthrough() const;
 
@@ -182,13 +234,16 @@ private:
   explicit KernelFunction(
       std::unique_ptr<OperatorKernel> functor,
       InternalBoxedKernelFunction* boxed_kernel_func,
-      void* unboxed_kernel_func);
+      void* unboxed_kernel_func,
+      void* sym_unboxed_kernel_func);
   explicit KernelFunction(
       BoxedKernel boxed_fn,
-      void* unboxed_kernel_func);
+      void* unboxed_kernel_func,
+      void* sym_unboxed_kernel_func);
 
   BoxedKernel boxed_kernel_func_;
   void* unboxed_kernel_func_;
+  void* sym_unboxed_kernel_func_;
 };
 
 }

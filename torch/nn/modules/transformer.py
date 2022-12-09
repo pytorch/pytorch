@@ -56,6 +56,7 @@ class Transformer(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Transformer, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
@@ -150,11 +151,11 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int) -> Tensor:
+    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -186,6 +187,7 @@ class TransformerEncoder(Module):
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
         super(TransformerEncoder, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -203,6 +205,11 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -238,6 +245,8 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
         elif first_layer.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -266,14 +275,7 @@ class TransformerEncoder(Module):
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
                 convert_to_nested = True
-                # simplify on or after on 8/16/2022 to unconditionally call with mask_check=False
-                # we have established that either (1) the mask is OK with the check above,
-                # or (2) that we don't need a mask check with mask_check=False in the init
-                if not torch.jit.is_scripting():
-                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
-                else:
-                    # When scripting, make a simpler call until the FC bar passes on 8/16/2022
-                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
@@ -307,6 +309,7 @@ class TransformerDecoder(Module):
 
     def __init__(self, decoder_layer, num_layers, norm=None):
         super(TransformerDecoder, self).__init__()
+        torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -447,6 +450,11 @@ class TransformerEncoderLayer(Module):
             see the docs in Transformer class.
         """
 
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not src.dim() == 3:
@@ -461,13 +469,12 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
         elif not (self.norm1.eps == self.norm2.eps):
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
-        elif src_mask is not None:
-            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
-        elif src.is_nested and src_key_padding_mask is not None:
-            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+        elif src.is_nested and (src_key_padding_mask is not None or src_mask is not None):
+            why_not_sparsity_fast_path = "neither src_key_padding_mask nor src_mask are not supported with NestedTensor input"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
-
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
         if not why_not_sparsity_fast_path:
             tensor_args = (
                 src,
@@ -496,55 +503,30 @@ class TransformerEncoderLayer(Module):
                                               "input/output projection weights or biases requires_grad")
 
             if not why_not_sparsity_fast_path:
-                if not torch.jit.is_scripting():
-                    return torch._transformer_encoder_layer_fwd(
-                        src,
-                        self.self_attn.embed_dim,
-                        self.self_attn.num_heads,
-                        self.self_attn.in_proj_weight,
-                        self.self_attn.in_proj_bias,
-                        self.self_attn.out_proj.weight,
-                        self.self_attn.out_proj.bias,
-                        self.activation_relu_or_gelu == 2,
-                        self.norm_first,
-                        self.norm1.eps,
-                        self.norm1.weight,
-                        self.norm1.bias,
-                        self.norm2.weight,
-                        self.norm2.bias,
-                        self.linear1.weight,
-                        self.linear1.bias,
-                        self.linear2.weight,
-                        self.linear2.bias,
-                        # TODO: if src_mask and src_key_padding_mask merge to single 4-dim mask
-                        src_mask if src_mask is not None else src_key_padding_mask,
-                        1 if src_key_padding_mask is not None else
-                        0 if src_mask is not None else
-                        None,
-                    )
-                elif src_mask is None:
-                    # hack until 9/26/2022 for TS jit compatibility window
-                    return torch._transformer_encoder_layer_fwd(
-                        src,
-                        self.self_attn.embed_dim,
-                        self.self_attn.num_heads,
-                        self.self_attn.in_proj_weight,
-                        self.self_attn.in_proj_bias,
-                        self.self_attn.out_proj.weight,
-                        self.self_attn.out_proj.bias,
-                        self.activation_relu_or_gelu == 2,
-                        self.norm_first,
-                        self.norm1.eps,
-                        self.norm1.weight,
-                        self.norm1.bias,
-                        self.norm2.weight,
-                        self.norm2.bias,
-                        self.linear1.weight,
-                        self.linear1.bias,
-                        self.linear2.weight,
-                        self.linear2.bias,
-                        src_mask if src_mask is not None else src_key_padding_mask,
-                    )
+                merged_mask, mask_type = self.self_attn.merge_masks(src_mask, src_key_padding_mask, src)
+                return torch._transformer_encoder_layer_fwd(
+                    src,
+                    self.self_attn.embed_dim,
+                    self.self_attn.num_heads,
+                    self.self_attn.in_proj_weight,
+                    self.self_attn.in_proj_bias,
+                    self.self_attn.out_proj.weight,
+                    self.self_attn.out_proj.bias,
+                    self.activation_relu_or_gelu == 2,
+                    self.norm_first,
+                    self.norm1.eps,
+                    self.norm1.weight,
+                    self.norm1.bias,
+                    self.norm2.weight,
+                    self.norm2.bias,
+                    self.linear1.weight,
+                    self.linear1.bias,
+                    self.linear2.weight,
+                    self.linear2.bias,
+                    merged_mask,
+                    mask_type,
+                )
+
 
         x = src
         if self.norm_first:

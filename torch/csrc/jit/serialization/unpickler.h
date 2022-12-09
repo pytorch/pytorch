@@ -23,7 +23,7 @@ class DeserializationStorageContext;
 // deleted at some point, the Pickler doesn't produce it and it's only around to
 // support models saved before 1.1
 class TORCH_API Unpickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
   using TypeParserT = c10::TypePtr (*)(const std::string&);
 
@@ -120,6 +120,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
@@ -176,6 +177,9 @@ class TORCH_API Unpickler {
 
   // See [type tag serialization]
   uint64_t version_;
+
+  // See [NOTE] skip_next_read_global
+  uint8_t skip_next_read_global = 0;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);

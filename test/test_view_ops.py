@@ -9,7 +9,7 @@ import random
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
+    IS_FBCODE, TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
@@ -102,7 +102,7 @@ class TestViewOps(TestCase):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base._storage().data_ptr() != other._storage().data_ptr():
                 return False
 
         return True
@@ -857,6 +857,7 @@ class TestViewOps(TestCase):
         nv[1, 1] = 0
         self.assertNotEqual(t[2, 2], nv[1, 1])
 
+    @unittest.skipIf(IS_FBCODE, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds")
     def test_advanced_indexing_assignment(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
@@ -925,6 +926,12 @@ class TestViewOps(TestCase):
         # forward and backward give the same shape + result
         self.assertEqual(a_view_copy, a_view)
         self.assertEqual(a.grad, a_ref.grad)
+
+    # Testing that the output of a view_copy kernel (by default) is contiguous.
+    def test_view_copy_output_contiguous(self, device):
+        a = torch.randn(4, 4, 4, 4, device=device).to(memory_format=torch.channels_last)
+        b = torch.ops.aten.slice_copy(a, 0, 0, 2)
+        self.assertTrue(b.is_contiguous())
 
     def test_view_copy_out(self, device):
         a = torch.randn(2, 2, device=device)

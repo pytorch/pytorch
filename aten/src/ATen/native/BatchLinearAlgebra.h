@@ -231,10 +231,6 @@ using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, b
 
 DECLARE_DISPATCH(cholesky_inverse_fn, cholesky_inverse_stub);
 
-using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
-
-DECLARE_DISPATCH(eig_fn, eig_stub);
-
 using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
@@ -284,7 +280,8 @@ DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using unpack_pivots_fn = void(*)(
   TensorIterator& iter,
-  const int64_t dim_size);
+  const int64_t dim_size,
+  const int64_t max_pivot);
 DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
 using lu_solve_fn = void (*)(

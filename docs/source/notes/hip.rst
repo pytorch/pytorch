@@ -144,3 +144,14 @@ Refer to CUDA Semantics doc
 ---------------------------
 
 For any sections not listed here, please refer to the CUDA semantics doc: :ref:`cuda-semantics`
+
+
+Enabling kernel asserts
+-----------------------
+
+Kernel asserts are supported on ROCm, but they are disabled due to performance overhead. It can be enabled
+by recompiling the PyTorch from source.
+
+Please add below line as an argument to cmake command parameters::
+
+    -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON

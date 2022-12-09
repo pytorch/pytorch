@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>
@@ -71,6 +70,14 @@ enum class ncclDataType {
   Double = 8,
   Bfloat16 = 9,
   NumTypes = 10
+};
+
+// RAII helper class to manage NCCL group API and CUDA free mutex.
+// The destructor is allowed to throw since this helper class only
+// manages group and lock lifetimes.
+struct AutoNcclGroup {
+  AutoNcclGroup();
+  ~AutoNcclGroup() noexcept(false);
 };
 
 // NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
