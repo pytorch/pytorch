@@ -689,8 +689,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
   // The second return SHOULD always be an empty Tensor, unless need_attn_weights
   // is true (in which case the fused kernels would not be called). This blows up
   // op_info tests.
-  int64_t choice_int = at::_fused_sdp_choice(
-      query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+  auto choice_int_a = at::_fused_sdp_choice(
+      query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal).accessor(int64_t, 1);
+  int64_t choice_int = choice_int_a[0]
+
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
@@ -724,9 +726,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
   }
 }
 
-int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+Tensor _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
-  return static_cast<int64_t>(sdp::SDPBackend::math);
+  Tensor result = static_cast<int64_t>(sdp::SDPBackend::math);
+  return result;
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(

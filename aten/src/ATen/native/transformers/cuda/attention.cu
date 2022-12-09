@@ -773,7 +773,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
   return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
-int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
+Tensor _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
   auto backend = select_sdp_backend(kernel_params);
@@ -783,7 +783,8 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
         "No viable backend for scaled_dot_product_attention was found. ",
         "This is likely due to turning off both the math kernel and the fused kernels.");
   }
-  return static_cast<int64_t>(backend);
+  Tensor result = static_cast<int64_t>(backend);
+  return result;
 }
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_forward(
