@@ -140,12 +140,12 @@ wrap('wrapper_fn')
 def wrapper_fn(x):
     return torch.foo(x)
 
-class Pair(NamedTuple):
+class _Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
 
     def _custom_fx_repr_fn(self) -> str:
-        return f"Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
+        return f"_Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
 
 # for testing pytrees
 class Foo(object):  # noqa: B209
@@ -1679,6 +1679,36 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
 
+    def test_nn_module_stack(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub_mod = SubModule()
+
+            def forward(self, x):
+                return self.sub_mod(x)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        mod_stack = {}
+        expected_stack = [('sub_mod', str(type(m.sub_mod))),
+                          ('sub_mod.conv_mod', str(type(m.sub_mod.conv_mod)))]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get('nn_module_stack', {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
+
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2477,7 +2507,7 @@ class TestFX(JitTestCase):
         res = traced(input)
         self.assertEqual(ref, res)
 
-        # Check Pair NamedTuple works when inlined into the function call.
+        # Check _Pair NamedTuple works when inlined into the function call.
         ph = call_func = None
         for node in traced.graph.nodes:
             if node.op == "placeholder":
@@ -2490,8 +2520,8 @@ class TestFX(JitTestCase):
         self.assertTrue(call_func is not None)
         self.assertTrue(isinstance(call_func.args[0], Pair))
         self.assertTrue(isinstance(call_func.kwargs["p2"], Pair))
-        self.assertEqual(_format_arg(call_func.args[0]), "Pair(x=%inp, y=1.2)")
-        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "Pair(x=3.4, y=%inp)")
+        self.assertEqual(_format_arg(call_func.args[0]), "_Pair(x=%inp, y=1.2)")
+        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "_Pair(x=3.4, y=%inp)")
 
         traced.graph.eliminate_dead_code()
         traced.recompile()
@@ -3805,7 +3835,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)
+            raise AssertionError(msg) from e
 
     def test_public_api_surface(self):
         non_back_compat_objects = {}
