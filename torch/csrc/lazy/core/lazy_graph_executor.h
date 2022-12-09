@@ -29,15 +29,15 @@ class TORCH_API LazyGraphExecutor {
 
   // Override these methods to perform custom tensor registration and
   // unregistration Note: It is vital that the parent implementations are also
-  // called
-  //       in order for the tensors to show up in the live tensor list
+  // called in order for the tensors to show up in the live tensor list
   virtual void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
   virtual void UnregisterTensor(LazyTensor::Data* data);
 
-  // Seed for random generator
-  Value GetRngSeed(const BackendDevice& device);
-  uint64_t GetRunningSeed(const BackendDevice& device);
-  void SetRngSeed(const BackendDevice& device, uint64_t seed);
+  // Seed for random generator.
+  // Override to supply your own DeviceContextArena.
+  virtual Value GetRngSeed(const BackendDevice& device);
+  virtual uint64_t GetRunningSeed(const BackendDevice& device);
+  virtual void SetRngSeed(const BackendDevice& device, uint64_t seed);
 
   void DeviceBarrier(const BackendDevice& device);
 
@@ -77,7 +77,8 @@ class TORCH_API LazyGraphExecutor {
 
   // Marks an execution step, which allows the tensor framework to understand
   // the computation boundaries.
-  void MarkStep(const BackendDevice& device);
+  // Override to supply your own DeviceContextArena.
+  virtual void MarkStep(const BackendDevice& device);
 
   // Waits for all the outstanding operations on all the supplied devices.
   // If devices is empty, the wait will happen for all local devices.
