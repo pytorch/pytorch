@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 
 # add some debug printouts
 debug = False
@@ -64,13 +63,10 @@ unroll_reductions_threshold = 8
 comment_origin = False
 
 
-@lru_cache(1)
 def is_fbcode():
-    try:
-        import torch.fb  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    import torch
+
+    return not hasattr(torch.version, "git_version")
 
 
 compile_threads = (
@@ -169,7 +165,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
