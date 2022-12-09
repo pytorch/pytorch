@@ -1,6 +1,7 @@
 import torch
 import torch.fx
 import traceback
+import contextlib
 
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
@@ -115,6 +116,7 @@ class ShapeProp(torch.fx.Interpreter):
     def __init__(self, gm, fake_mode=None):
         super().__init__(gm)
         if fake_mode:
+            self.fake_mode = fake_mode
             from torch._dynamo.utils import deepcopy_to_fake_tensor
             # Note:
             # We need fake execution cause the inputs are fake, however, we cannot fakify the module
@@ -127,6 +129,7 @@ class ShapeProp(torch.fx.Interpreter):
             # See torch/_inductor/overrides.py for where this is called upstream of fusion.
             self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
         else:
+            self.fake_mode = None
             self.fake_module = None
 
         self.real_module = self.module
@@ -176,4 +179,6 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        return super().run(*args)
+        ctx = self.fake_mode if self.fake_mode is not None else contextlib.nullcontext()
+        with ctx:
+            return super().run(*args)

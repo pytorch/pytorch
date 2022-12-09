@@ -1622,6 +1622,23 @@ class TestFX(JitTestCase):
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last)
 
+    def test_shape_prop_fake_tensors(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(5, 5, requires_grad=True)
+                return x + y
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        fake_mode = FakeTensorMode()
+
+        mod = Mod()
+        trace = symbolic_trace(mod)
+        inp = torch.randn(5, 5, requires_grad=True)
+        # Should run without error: ShapeProp runs with fake_mode enabled,
+        # so factory functions create FakeTensors.
+        shape_prop.ShapeProp(trace, fake_mode=fake_mode).propagate(fake_mode.from_tensor(inp))
+
+
     def test_shape_prop_aggregate(self):
         class ReturnTwo(torch.nn.Module):
             def forward(self, x):
@@ -1678,6 +1695,36 @@ class TestFX(JitTestCase):
             # node is channels-last
             if node.op in {'placeholder'}:
                 self.assertEqual(node.meta['tensor_meta'].memory_format, torch.channels_last_3d)
+
+    def test_nn_module_stack(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
+
+            def forward(self, x):
+                return self.conv_mod(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub_mod = SubModule()
+
+            def forward(self, x):
+                return self.sub_mod(x)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        mod_stack = {}
+        expected_stack = [('sub_mod', str(type(m.sub_mod))),
+                          ('sub_mod.conv_mod', str(type(m.sub_mod.conv_mod)))]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get('nn_module_stack', {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -3805,7 +3852,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)
+            raise AssertionError(msg) from e
 
     def test_public_api_surface(self):
         non_back_compat_objects = {}
