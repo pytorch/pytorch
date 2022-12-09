@@ -60,43 +60,46 @@ static __m256i inline mm256_cvtepu8_epi32(void* ptr) {
 
 namespace {
 
-
-typedef double (*aa_filter_fn_t )(double x); // TODO: use aa_filter_fn_t from UpSampleKernel.cpp file instead?
+typedef double (*aa_filter_fn_t)(
+    double x); // TODO: use aa_filter_fn_t from UpSampleKernel.cpp file instead?
 
 void unpack_rgb(
-    uint8_t* unpacked,
-    const uint8_t* packed,
-    int num_pixels,
-    int num_channels)
-// TODO: maybe use faster version from
-// https://github.com/python-pillow/Pillow/pull/2693/files
-{
+    uint8_t* unpacked, // OUT
+    const at::Tensor& packed_tensor, // IN
+    bool is_channels_last) {
+  const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
+  auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
+  auto num_channels = packed_tensor.size(0);
+  auto packed_stride = is_channels_last ? 1 : num_pixels;
+  auto packed_increment = is_channels_last ? num_channels : 1;
+
   for (const auto i : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
-      unpacked[j] = packed[j];
+      unpacked[j] = packed[j * packed_stride];
     }
     for (const auto j : c10::irange(num_channels, 4)) {
       unpacked[j] = 255;
     }
     unpacked += 4;
-    packed += num_channels;
+    packed += packed_increment;
   }
 }
 
 void pack_rgb(
-    uint8_t* packed,
-    const uint8_t* unpacked,
-    int num_pixels,
-    int num_channels)
-// TODO: maybe use faster version from
-// https://github.com/python-pillow/Pillow/pull/2693/files
-{
+    const uint8_t* unpacked, // IN
+    const at::Tensor& packed_tensor, // OUT
+    bool is_channels_last) {
+  uint8_t* packed = (uint8_t*)packed_tensor.data_ptr<uint8_t>();
+  auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
+  auto num_channels = packed_tensor.size(0);
+  auto packed_stride = is_channels_last ? 1 : num_pixels;
+  auto packed_increment = is_channels_last ? num_channels : 1;
   for (const auto i : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
-      packed[j] = unpacked[j];
+      packed[j * packed_stride] = unpacked[j];
     }
     unpacked += 4;
-    packed += num_channels;
+    packed += packed_increment;
   }
 }
 
@@ -107,8 +110,7 @@ int precompute_coeffs( // TODO: This is redundant with
     int** boundsp,
     double** kkp,
     aa_filter_fn_t filter,
-    int interp_size
-    ) {
+    int interp_size) {
   double support, scale, filterscale;
   double center, ww, ss;
   int xx, x, ksize, xmin, xmax;
@@ -357,12 +359,14 @@ UINT32* ImagingResampleInner(
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
 
-  ksize_horiz = precompute_coeffs(xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
+  ksize_horiz = precompute_coeffs(
+      xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
   // if (!ksize_horiz) {
   //     return NULL;
   // }
 
-  ksize_vert = precompute_coeffs(yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
+  ksize_vert =
+      precompute_coeffs(yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
   // if (!ksize_vert) {
   //     free(bounds_horiz);
   //     free(kk_horiz);
@@ -450,7 +454,11 @@ UINT32* ImagingResampleInner(
   return unpacked_output_p;
 }
 
-void beepidiboop(const at::Tensor& input, const at::Tensor& output, aa_filter_fn_t filter, int interp_size) {
+void beepidiboop(
+    const at::Tensor& input,
+    const at::Tensor& output,
+    aa_filter_fn_t filter,
+    int interp_size) {
   // Assume shape is 1, 3, H, W  and layout is channels_last
 
   auto batch_size = input.size(0);
@@ -465,25 +473,20 @@ void beepidiboop(const at::Tensor& input, const at::Tensor& output, aa_filter_fn
   UINT32* unpacked_input_p = (UINT32*)malloc(sizeof(UINT32) * num_pixels_input);
 
   for (const auto i : c10::irange(batch_size)) {
-    const uint8_t* packed_input_p =
-        (const uint8_t*)input[i].data_ptr<uint8_t>();
     unpack_rgb(
         (uint8_t*)unpacked_input_p,
-        packed_input_p,
-        num_pixels_input,
-        num_channels);
+        input[i],
+        input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-    UINT32* unpacked_output_p =
-        ImagingResampleInner(unpacked_input_p, xin, yin, xout, yout, filter, interp_size);
+    UINT32* unpacked_output_p = ImagingResampleInner(
+        unpacked_input_p, xin, yin, xout, yout, filter, interp_size);
 
     uint8_t* packed_output_p = (uint8_t*)output[i].data_ptr<uint8_t>();
     pack_rgb(
-        packed_output_p,
         (const uint8_t*)unpacked_output_p,
-        num_pixels_output,
-        num_channels);
+        output[i],
+        output.is_contiguous(at::MemoryFormat::ChannelsLast));
   }
-
   free(unpacked_input_p);
 }
 
