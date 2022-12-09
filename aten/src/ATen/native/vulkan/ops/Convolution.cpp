@@ -992,7 +992,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       dilation,
       /* transposed = */ false,
       /* quantized = */ true,
-      /* output_padding_arg = */ {},
+      /* output_padding_arg = */ {0},
       groups,
       output_min,
       output_max));

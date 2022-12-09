@@ -65,7 +65,7 @@ except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("requires sympy/functorch/filelock") from e
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
@@ -3054,6 +3054,19 @@ class CommonTemplate:
             (
                 torch.randn(8, 8, 8),
                 torch.tensor([[0, 0, 2, 2]], dtype=torch.int64),
+            ),
+        )
+
+    def test_index3(self):
+        def fn(x, ia, ib):
+            return (x[:, ia, None, ib, 0],)
+
+        self.common(
+            fn,
+            (
+                torch.randn(3, 4, 4, 4, 3),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
+                torch.tensor([0, 2, 1], dtype=torch.int64),
             ),
         )
 
