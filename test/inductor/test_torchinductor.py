@@ -41,7 +41,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import codecache, config, metrics
+    from torch._inductor import codecache, config, metrics, test_operators
     from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
     from torch._inductor.codegen.triton import texpr
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
@@ -56,7 +56,6 @@ try:
     )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, timed
-    from torch._inductor import test_operators
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])

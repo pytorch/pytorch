@@ -18,7 +18,7 @@ from torch._prims_common import (
     Number,
 )
 
-from . import config, ir, overrides, test_operators
+from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
