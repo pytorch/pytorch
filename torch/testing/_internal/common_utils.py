@@ -1880,11 +1880,7 @@ class TensorOrArrayPair(TensorLikePair):
 
 
 class TypedStoragePair(TensorLikePair):
-    """Pair for :class:`torch.storage.TypedStorage` inputs.
-
-    After their deprecation, they no longer act as a regular sequence, since :meth:`torch.storage.TypedStorage.__len__`
-    and :meth:`torch.storage.TypedStorage.__getitem__` are disabled. Thus, we need to convert them to tensors manually.
-    """
+    """Pair for :class:`torch.storage.TypedStorage` inputs."""
     def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
         self._check_inputs_isinstance(actual, expected, cls=torch.storage.TypedStorage)
         super().__init__(actual, expected, **other_parameters)
