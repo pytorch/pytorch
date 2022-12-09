@@ -10,18 +10,21 @@ from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, GetItemSource
-from ..utils import make_cell
+from ..utils import istensor, make_cell
 from .base import typestr, VariableTracker
 
+# todo annotate types
+default_tensor_values = {}
 
-def wrap_bound_arg(val, options):
+
+def wrap_bound_arg(val, options, tx, source=None):
     if isinstance(val, dict):
         return variables.ConstDictVariable(
-            {k: wrap_bound_arg(v, options) for k, v in val.items()}, dict, **options
+            {k: wrap_bound_arg(v, options, tx) for k, v in val.items()}, dict, **options
         )
     elif isinstance(val, (tuple, list)):
         cls = variables.BaseListVariable.cls_for(type(val))
-        return cls([wrap_bound_arg(x, options) for x in val], **options)
+        return cls([wrap_bound_arg(x, options, tx) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
@@ -30,16 +33,30 @@ def wrap_bound_arg(val, options):
         return variables.EnumVariable(val, **options)
     elif isinstance(val, (type, abc.ABCMeta)):
         return variables.UserDefinedClassVariable(val, **options)
+    elif istensor(val):
+        # Assumption: this is only called from InliningInstructionTranslator, in which case
+        # it is assured we will not 'reconstruct' this value in codegen, since the usage is
+        # entirely inlined.
+        # TODO - can we assert this? we expect to not reach this case for non-inline,
+        # since InstructionTranslator __init__ prepares VariableTrackers for args of top
+        # level function including defaults.
+        #
+        # should there be a "name" here?
+        assert source is not None, "source must be provided for tensor arg"
+        return tx.output.register_attr_or_module(
+            val,
+            source=source,
+        )
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
 
 
-def wrap_args_kwargs(result, options):
+def wrap_args_kwargs(result, options, tx):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
-            result[k] = wrap_bound_arg(v, options)
+            result[k] = wrap_bound_arg(v, options, tx)
 
 
 def init_cellvars(parent, result, code):
@@ -117,20 +134,29 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def bind_args(self, parent, args, kwargs):
         assert not self.is_constant
         options = VariableTracker.propagate([self])
-        wrap = functools.partial(wrap_bound_arg, options=options)
-
         tx = parent.output.root_tx
-
+        wrap = functools.partial(wrap_bound_arg, options=options, tx=tx)
+        
         fn: types.FunctionType = self.fn
+        # TODO comment
+        defaults = fn.__defaults__ or []
+        defaults_source = AttrSource(self.source, "__defaults__")
+        defaults_item_sources = [GetItemSource(defaults_source, i) for i, _ in enumerate(defaults)]
         fake_func = types.FunctionType(
             fn.__code__,
             fn.__globals__,
             fn.__name__,
-            tuple(map(wrap, fn.__defaults__ or [])),
+            tuple([
+                wrap(arg, source=source)
+                for arg, source in zip(defaults, defaults_item_sources)
+            ]),
             fn.__closure__,
         )
         if fn.__kwdefaults__:
+            kwdefaults_source = AttrSource(self.source, "__kwdefaults__")
+            kwdefaults_sources = [GetItemSource(kwdefaults_source, k) for k in fn.__kwdefaults__]
             fake_func.__kwdefaults__ = {
+                # TODO update this too
                 k: wrap(v) for k, v in fn.__kwdefaults__.items()
             }
 
@@ -138,7 +164,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(result, options)
+        wrap_args_kwargs(result, options, tx)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -368,6 +394,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def bind_args(self, parent, args, kwargs):
         code = self.get_code()
+        tx = parent.output.root_tx
         func = types.FunctionType(
             code,
             self.f_globals,
@@ -381,8 +408,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-
-        wrap_args_kwargs(result, VariableTracker.propagate(self))
+        wrap_args_kwargs(result, VariableTracker.propagate(self), tx)
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
