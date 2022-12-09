@@ -923,7 +923,6 @@ class FakeTensorMode(TorchDispatchMode):
         """
 
         def validate(x):
-            print("X", x)
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
