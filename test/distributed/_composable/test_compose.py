@@ -7,14 +7,20 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_dist_composable import (
+    CompositeModel,
+    CompositeParamModel,
+    UnitModule,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 
@@ -31,39 +37,12 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class UnitModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.l1 = nn.Linear(100, 100)
-        self.seq = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.ReLU(),
-        )
-        self.l2 = nn.Linear(100, 100)
-
-    def forward(self, x):
-        return self.l2(self.seq(self.l1(x)))
-
-
-class CompositeModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.l1 = nn.Linear(100, 100)
-        self.u1 = UnitModule()
-        self.u2 = UnitModule()
-        self.l2 = nn.Linear(100, 100)
-
-    def forward(self, x):
-        return self.l2(self.u2(self.u1(self.l1(x))))
-
-
 class TestFSDPCheckpoint(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
 
-    def _test_wrap_same_submodule(
+    def _test_parity(
         self,
         base_model: nn.Module,
         test_model: nn.Module,
@@ -91,7 +70,7 @@ class TestFSDPCheckpoint(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [True, False])
     def test_wrap_same_submodule(self, use_reentrant: bool):
-        model = UnitModule().to("cuda")
+        model = UnitModule(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
@@ -110,30 +89,20 @@ class TestFSDPCheckpoint(FSDPTest):
                 "x": [torch.randn(2, 100, device="cuda")],
                 "grad_to_none": [True, False],
             },
-            self._test_wrap_same_submodule,
+            self._test_parity,
         )
 
     def _test_checkpoint_fsdp_submodules(self, use_reentrant):
-        model = CompositeModel().to(torch.device("cuda"))
+        model = CompositeModel(device=torch.device("cuda"))
 
         base_model = copy.deepcopy(model)
 
         test_model = copy.deepcopy(model)
-        test_model.u1 = fully_shard(
-            test_model.u1,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
-        test_model.u2 = fully_shard(
-            test_model.u2,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
+        test_model.u1 = fully_shard(test_model.u1, policy=None)
+        test_model.u2 = fully_shard(test_model.u2)
 
-        test_model.u1.seq = checkpoint(
-            test_model.u1.seq, use_reentrant=use_reentrant
-        )
-        test_model.u2.seq = checkpoint(
-            test_model.u2.seq, use_reentrant=use_reentrant
-        )
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=use_reentrant)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=use_reentrant)
 
         self.run_subtests(
             {
@@ -142,20 +111,65 @@ class TestFSDPCheckpoint(FSDPTest):
                 "x": [torch.randn(2, 100, device="cuda")],
                 "grad_to_none": [True, False],
             },
-            self._test_wrap_same_submodule,
+            self._test_parity,
         )
 
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_use_reentrant(self):
+        # Escape the brackets like `\[` since `[` has special meaning in regex
         with self.assertRaisesRegex(
-            AssertionError,
-            "Expects `Tensor` to have been saved in forward",
+            RuntimeError,
+            r"setStorage: sizes \[100, 100\], strides \[100, 1\], storage "
+            "offset 0, and itemsize 4 requiring a storage size of 40000 are "
+            "out of bounds for storage of size 0",
         ):
             self._test_checkpoint_fsdp_submodules(True)
 
     @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_non_reentrant(self):
         self._test_checkpoint_fsdp_submodules(False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_with_param(self):
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        base_model = copy.deepcopy(model)
+
+        test_model = copy.deepcopy(model)
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
+        test_model = fully_shard(test_model)
+
+        self.run_subtests(
+            {
+                "base_model": [base_model],
+                "test_model": [test_model],
+                "x": [torch.randn(2, 100, device="cuda")],
+                "grad_to_none": [True, False],
+            },
+            self._test_parity,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_checkpoint_fsdp_submodules_with_param_no_shard(self):
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        base_model = copy.deepcopy(model)
+
+        test_model = copy.deepcopy(model)
+        test_model.u1.seq = checkpoint(test_model.u1.seq, use_reentrant=False)
+        test_model.u2.seq = checkpoint(test_model.u2.seq, use_reentrant=False)
+        test_model = fully_shard(test_model, strategy=ShardingStrategy.NO_SHARD)
+
+        self.run_subtests(
+            {
+                "base_model": [base_model],
+                "test_model": [test_model],
+                "x": [torch.randn(2, 100, device="cuda")],
+                "grad_to_none": [True, False],
+            },
+            self._test_parity,
+        )
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)

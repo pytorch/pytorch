@@ -3258,7 +3258,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
                 if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error
                     time.sleep(random.random())
                     continue
                 raise
@@ -3999,8 +3999,8 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     """
     try:
         return next(iter(samples))
-    except StopIteration:
-        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
+    except StopIteration as e:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input') from e
 
 # this helper method is to recursively
 # clone the tensor-type input of operators tested by OpInfo
