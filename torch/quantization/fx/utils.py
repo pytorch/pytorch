@@ -8,7 +8,6 @@ here.
 """
 from torch.ao.quantization.fx.utils import (
     _get_per_tensor_qparams,
-    quantize_node,
     _get_custom_module_class_keys,
     _get_linear_prepack_op_for_dtype,
     _get_qconv_prepack_op,
