@@ -150,7 +150,6 @@ class TestBackendConfig(QuantizationTestCase):
             "reference_quantized_module_for_root": nnqr.Linear,
             "fused_module": nni.LinearReLU,
             "fuser_method": self._fuser_method,
-            "use_complex_pattern_format": False,
         }
 
     def _get_backend_pattern_config_dict2(self):
@@ -163,7 +162,6 @@ class TestBackendConfig(QuantizationTestCase):
             "num_tensor_args_to_observation_type": self._num_tensor_args_to_observation_type,
             "input_type_to_index": self._input_type_to_index,
             "input_output_observed": False,
-            "use_complex_pattern_format": False,
         }
 
     def test_backend_op_config_set_observation_type(self):
@@ -296,11 +294,11 @@ class TestBackendConfig(QuantizationTestCase):
         backend_op_config1 = self._get_backend_op_config1()
         backend_op_config2 = self._get_backend_op_config2()
         conf.set_backend_pattern_config(backend_op_config1)
-        self.assertEqual(conf.configs, {
+        self.assertEqual(conf._config_dict, {
             (torch.nn.Linear, torch.nn.ReLU): backend_op_config1,
         })
         conf.set_backend_pattern_config(backend_op_config2)
-        self.assertEqual(conf.configs, {
+        self.assertEqual(conf._config_dict, {
             (torch.nn.Linear, torch.nn.ReLU): backend_op_config1,
             torch.add: backend_op_config2
         })
@@ -319,10 +317,10 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(len(conf.configs), 2)
         key1 = (torch.nn.Linear, torch.nn.ReLU)
         key2 = torch.add
-        self.assertTrue(key1 in conf.configs)
-        self.assertTrue(key2 in conf.configs)
-        self.assertEqual(conf.configs[key1].to_dict(), op_dict1)
-        self.assertEqual(conf.configs[key2].to_dict(), op_dict2)
+        self.assertTrue(key1 in conf._config_dict)
+        self.assertTrue(key2 in conf._config_dict)
+        self.assertEqual(conf._config_dict[key1].to_dict(), op_dict1)
+        self.assertEqual(conf._config_dict[key2].to_dict(), op_dict2)
 
     def test_backend_config_to_dict(self):
         op1 = self._get_backend_op_config1()

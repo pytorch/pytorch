@@ -31,58 +31,57 @@ __all__ = [
 
 def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
     pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}
-    for pattern, config in backend_config.configs.items():
-        pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+    for config in backend_config.configs:
+        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
 
 def get_qat_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
     qat_module_classes = []
-    for config in backend_config.configs.values():
+    for config in backend_config.configs:
         if config.qat_module is not None:
             qat_module_classes.append(config.qat_module)
     return tuple(set(qat_module_classes))
 
 def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
     fused_module_classes = []
-    for config in backend_config.configs.values():
+    for config in backend_config.configs:
         if config.fused_module is not None:
             fused_module_classes.append(config.fused_module)
     return tuple(set(fused_module_classes))
 
 def get_pattern_to_input_type_to_index(backend_config: BackendConfig) -> Dict[Pattern, Dict[str, int]]:
     pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = {}
-    for pattern, config in backend_config.configs.items():
-        pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+    for config in backend_config.configs:
+        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
 
 def get_root_module_to_quantized_reference_module(
         backend_config: BackendConfig) -> Dict[Type[torch.nn.Module], Type[torch.nn.Module]]:
     mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = {}
-    for config in backend_config.configs.values():
+    for config in backend_config.configs:
         if config.root_module is not None and config.reference_quantized_module is not None:
             mapping[config.root_module] = config.reference_quantized_module
     return mapping
 
 def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
     fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = {}
-    for pattern, config in backend_config.configs.items():
+    for config in backend_config.configs:
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
             # BackendConfig, but the internal pattern matching code uses the reversed nested tuple
             # format, so here we convert both to the internal format
-            fuser_method = _maybe_convert_fuser_method_to_reversed_nested_tuple_format(
-                pattern, config.fuser_method, config)
-            pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
+            fuser_method = _get_fuser_method_in_reversed_nested_tuple_format(config)
             fuser_method_mapping[pattern] = fuser_method
     return fuser_method_mapping
 
 def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Pattern, Type[torch.nn.Module]]:
     module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = {}
-    for pattern, config in backend_config.configs.items():
+    for config in backend_config.configs:
         if config.qat_module is not None:
-            pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             module_to_qat_module[pattern] = config.qat_module
     return module_to_qat_module
 
@@ -97,9 +96,9 @@ def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dic
     e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
     """
     root_node_getter_mapping: Dict[Pattern, Callable] = {}
-    for pattern, config in backend_config.configs.items():
+    for config in backend_config.configs:
         if config._root_node_getter is not None:
-            pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             root_node_getter_mapping[pattern] = config._root_node_getter
     return root_node_getter_mapping
 
@@ -118,9 +117,9 @@ def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> 
         return [extra_input]
     """
     extra_inputs_getter_mapping: Dict[Pattern, Callable] = {}
-    for pattern, config in backend_config.configs.items():
+    for config in backend_config.configs:
         if config._extra_inputs_getter is not None:
-            pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             extra_inputs_getter_mapping[pattern] = config._extra_inputs_getter
     return extra_inputs_getter_mapping
 
@@ -208,17 +207,13 @@ def entry_to_pretty_str(entry) -> str:
     s += "}"
     return s
 
-def _maybe_convert_pattern_to_reversed_nested_tuple_format(
-    pattern: Pattern,
-    config: BackendPatternConfig,
-) -> Pattern:
+def _get_pattern_in_reversed_nested_tuple_format(config: BackendPatternConfig) -> Pattern:
     """
-    Given a pattern, if it is a flat 2-tuple or a 3-tuple, transform it to the
-    reversed nested tuple format used internally in the pattern matching code
-    for quantization.
+    Return the pattern specified in the given config in the reversed nested tuple format
+    used internally in the quantization pattern matching code.
 
-    If the pattern is not a tuple, or the BackendPatternConfig explicitly
-    specified to use the reversed nested tuple format, return the pattern as is.
+    If the pattern is not a tuple, or the pattern is already specified in the reversed
+    nested tuple format, return the pattern as is. Otherwise:
 
     For 2-tuples (a, b), return (b, a).
     For 3-tuples (a, b, c), return (c, (b, a)).
@@ -242,42 +237,49 @@ def _maybe_convert_pattern_to_reversed_nested_tuple_format(
     by the subgraph rewriter in torch.fx, so we don't have to maintain our own
     complex pattern matching code. Then we won't need this helper function anymore.
     """
-    if not isinstance(pattern, tuple) or config._use_complex_pattern_format:
-        return pattern
-    if len(pattern) == 2:
-        (a, b) = pattern
+    if config._pattern_complex_format is not None:
+        return config._pattern_complex_format
+    if config.pattern is None:
+        raise ValueError("Either 'pattern' or 'pattern_complex_format' must be specified")
+    if not isinstance(config.pattern, tuple):
+        return config.pattern
+
+    # Pattern is specified in the simple tuple format, need to convert
+    if len(config.pattern) == 2:
+        (a, b) = config.pattern
         return (b, a)
-    elif len(pattern) == 3:
-        (a, b, c) = pattern
+    elif len(config.pattern) == 3:
+        (a, b, c) = config.pattern
         return (c, (b, a))
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", pattern)
+        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
 
-def _maybe_convert_fuser_method_to_reversed_nested_tuple_format(
-    pattern: Pattern,
-    fuser_method: Callable,
-    config: BackendPatternConfig,
-) -> Callable:
+def _get_fuser_method_in_reversed_nested_tuple_format(config: BackendPatternConfig) -> Callable:
     """
-    Convert the given fuser method so that it satisfies the reversed nested tuple
-    format used internally in the pattern matching code for quantization. This is
-    analogous to `_maybe_convert_pattern_to_reversed_nested_tuple_format`.
+    Return the fuser method specified in the given config in the reversed nested
+    tuple format used internally in the quantization pattern matching code.
 
-    The first argument of a fuser method is always is_qat, and this argument is
-    not affected in this conversion. For example:
+    If pattern is specified in the reversed nested tuple format, we assume the
+    fuser method is also specified in this format and simply return it as is.
+    Otherwise, we convert the fuser method as follows:
+
         * Given f(is_qat, conv, relu), return f'(is_qat, relu, conv)
         * Given f(is_qat, conv, bn, relu), return f'(is_qat, relu, bn_conv),
           where bn_conv is a 2-tuple (bn, conv)
 
-    This currently only supports fuser methods with 3 or 4 arguments.
+    The first argument of a fuser method is always `is_qat` and is not affected
+    in the conversion. We currently only support functions with 3 or 4 arguments.
     """
-    if config._use_complex_pattern_format:
-        return fuser_method
-    if not isinstance(pattern, tuple):
-        raise ValueError("Expected pattern to be a tuple, got: ", pattern)
-    if len(pattern) == 2:
-        return _reverse2(fuser_method)
-    elif len(pattern) == 3:
-        return _reverse3(fuser_method)
+    assert config.fuser_method is not None
+    if config._pattern_complex_format is not None:
+        return config.fuser_method
+
+    # Pattern is specified in the simple tuple format, need to convert
+    if not isinstance(config.pattern, tuple):
+        raise ValueError("Expected pattern to be a tuple, got: ", config.pattern)
+    if len(config.pattern) == 2:
+        return _reverse2(config.fuser_method)
+    elif len(config.pattern) == 3:
+        return _reverse3(config.fuser_method)
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", pattern)
+        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)

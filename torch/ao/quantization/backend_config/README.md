@@ -30,11 +30,11 @@ The operator patterns used in BackendConfig are float modules, functional operat
 * (torch.nn.functional.linear, torch.nn.functional.relu)
 * (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU)
 
-Currently, only tuples of 2 or 3 elements are supported.
+Tuple patterns are treated as sequential patterns, and currently only tuples of 2 or 3 elements are supported.
 
 ### Advanced Pattern Specification
 
-The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative"reverse nested tuple" pattern format, enabled through `backend_pattern_config._set_use_complex_pattern_format(True)`. Note that this format is deprecated and will be replaced in a future version of PyTorch.
+The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative "reverse nested tuple" pattern format, enabled through `BackendPatternConfig()._set_pattern_complex_format(...)`. Note that this format is deprecated and will be replaced in a future version of PyTorch.
 ```
 operator = module_type | functional | torch op | native op | MatchAllNode
 Pattern = (operator, Pattern, Pattern, ...) | operator

@@ -29,6 +29,7 @@ CONFIGS_DICT_KEY = "configs"
 
 # BackendPatternConfig dict keys
 PATTERN_DICT_KEY = "pattern"
+PATTERN_COMPLEX_FORMAT_DICT_KEY = "pattern_complex_format"
 OBSERVATION_TYPE_DICT_KEY = "observation_type"
 DTYPE_CONFIGS_DICT_KEY = "dtype_configs"
 ROOT_MODULE_DICT_KEY = "root_module"
@@ -41,7 +42,6 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
-USE_COMPLEX_PATTERN_FORMAT_DICT_KEY = "use_complex_pattern_format"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -276,7 +276,7 @@ class BackendConfig:
     """
     def __init__(self, name: str = ""):
         self.name = name
-        self.configs: Dict[Pattern, BackendPatternConfig] = {}
+        self._config_dict: Dict[Pattern, BackendPatternConfig] = {}
 
     def set_name(self, name: str) -> BackendConfig:
         """
@@ -290,7 +290,13 @@ class BackendConfig:
         Set the config for an pattern that can be run on the target backend.
         This overrides any existing config for the given pattern.
         """
-        self.configs[config.pattern] = config
+        if config.pattern is not None:
+            pattern = config.pattern
+        elif config._pattern_complex_format is not None:
+            pattern = config._pattern_complex_format
+        else:
+            raise ValueError("Expected either 'pattern' or 'pattern_complex_format' to be set")
+        self._config_dict[pattern] = config
         return self
 
     def set_backend_pattern_configs(self, configs: List[BackendPatternConfig]) -> BackendConfig:
@@ -301,6 +307,13 @@ class BackendConfig:
         for conf in configs:
             self.set_backend_pattern_config(conf)
         return self
+
+    @property
+    def configs(self) -> List[BackendPatternConfig]:
+        """
+        Return a copy of the list of configs set in this `BackendConfig`.
+        """
+        return list(self._config_dict.values())
 
     @classmethod
     def from_dict(cls, backend_config_dict: Dict[str, Any]) -> BackendConfig:
@@ -329,7 +342,7 @@ class BackendConfig:
         """
         return {
             NAME_DICT_KEY: self.name,
-            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs.values()],
+            CONFIGS_DICT_KEY: [c.to_dict() for c in self.configs],
         }
 
 
@@ -339,8 +352,8 @@ class BackendPatternConfig:
     For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
 
     """
-    def __init__(self, pattern: Pattern):
-        self.pattern = pattern
+    def __init__(self, pattern: Optional[Pattern] = None):
+        self.pattern: Optional[Pattern] = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         self.dtype_configs: List[DTypeConfig] = []
         self.root_module: Optional[Type[torch.nn.Module]] = None
@@ -355,7 +368,20 @@ class BackendPatternConfig:
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
-        self._use_complex_pattern_format = False
+        self._pattern_complex_format: Optional[Pattern] = None
+
+    def set_pattern(self, pattern: Pattern) -> BackendPatternConfig:
+        """
+        Set the pattern to configure.
+
+        The pattern can be a float module, functional operator, pytorch operator, or a tuple
+        combination of the above. Tuple patterns are treated as sequential patterns, and
+        currently only tuples of 2 or 3 elements are supported.
+        """
+        if self._pattern_complex_format is not None:
+            raise ValueError("Only one of 'pattern' or 'pattern_complex_format' can be set")
+        self.pattern = pattern
+        return self
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
@@ -455,8 +481,16 @@ class BackendPatternConfig:
         self._input_output_observed = input_output_observed
         return self
 
-    def _set_use_complex_pattern_format(self, use_complex_pattern_format: bool) -> BackendPatternConfig:
-        self._use_complex_pattern_format = use_complex_pattern_format
+    def _set_pattern_complex_format(self, pattern: Pattern) -> BackendPatternConfig:
+        """
+        Set the pattern to configure, using the reversed nested tuple format.
+
+        See the BackendConfig README for more detail:
+        https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/backend_config/README.md#advanced-pattern-specification
+        """
+        if self.pattern is not None:
+            raise ValueError("Only one of 'pattern' or 'pattern_complex_format' can be set")
+        self._pattern_complex_format = pattern
         return self
 
     @classmethod
@@ -474,7 +508,7 @@ class BackendPatternConfig:
             implementation for this pattern's root module.
             "fused_module": a :class:`torch.nn.Module` that represents the fused implementation for this pattern
             "fuser_method": a function that specifies how to fuse the pattern for this pattern
-            "use_complex_pattern_format": whether to use the reversed nested tuple pattern format (deprecated)
+            "pattern_complex_format": the pattern specified in the reversed nested tuple format (deprecated)
 
         """
         def _get_dtype_config(obj: Any) -> DTypeConfig:
@@ -488,9 +522,9 @@ class BackendPatternConfig:
             raise ValueError("Expected a list of DTypeConfigs in backend_pattern_config_dict[\"%s\"], got '%s'" %
                              (DTYPE_CONFIGS_DICT_KEY, type(obj)))
 
-        if PATTERN_DICT_KEY not in backend_pattern_config_dict:
-            raise ValueError("backend_pattern_config_dict must contain '%s'" % PATTERN_DICT_KEY)
-        conf = cls(backend_pattern_config_dict[PATTERN_DICT_KEY])
+        conf = cls()
+        if PATTERN_DICT_KEY in backend_pattern_config_dict:
+            conf.set_pattern(backend_pattern_config_dict[PATTERN_DICT_KEY])
         if OBSERVATION_TYPE_DICT_KEY in backend_pattern_config_dict:
             conf.set_observation_type(backend_pattern_config_dict[OBSERVATION_TYPE_DICT_KEY])
         for d in backend_pattern_config_dict.get(DTYPE_CONFIGS_DICT_KEY, []):
@@ -506,7 +540,8 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_use_complex_pattern_format(backend_pattern_config_dict.get(USE_COMPLEX_PATTERN_FORMAT_DICT_KEY, False))
+        if PATTERN_COMPLEX_FORMAT_DICT_KEY in backend_pattern_config_dict:
+            conf._set_pattern_complex_format(backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY])
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -515,10 +550,11 @@ class BackendPatternConfig:
         :func:`~torch.ao.quantization.backend_config.BackendPatternConfig.from_dict`.
         """
         backend_pattern_config_dict: Dict[str, Any] = {
-            PATTERN_DICT_KEY: self.pattern,
             OBSERVATION_TYPE_DICT_KEY: self.observation_type,
             DTYPE_CONFIGS_DICT_KEY: [c.to_dict() for c in self.dtype_configs],
         }
+        if self.pattern is not None:
+            backend_pattern_config_dict[PATTERN_DICT_KEY] = self.pattern
         if self.root_module is not None:
             backend_pattern_config_dict[ROOT_MODULE_DICT_KEY] = self.root_module
         if self.qat_module is not None:
@@ -539,5 +575,6 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
-        backend_pattern_config_dict[USE_COMPLEX_PATTERN_FORMAT_DICT_KEY] = self._use_complex_pattern_format
+        if self._pattern_complex_format is not None:
+            backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY] = self._pattern_complex_format
         return backend_pattern_config_dict

@@ -12,7 +12,7 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.backend_config.utils import (
-    _maybe_convert_pattern_to_reversed_nested_tuple_format,
+    _get_pattern_in_reversed_nested_tuple_format,
 )
 from torch.ao.quantization.utils import (
     NodePattern,
@@ -155,8 +155,8 @@ def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pat
     new path, this is not exposed to backend developers
     """
     pattern_to_quantize_handlers = {}
-    for pattern, config in backend_config.configs.items():
-        pattern = _maybe_convert_pattern_to_reversed_nested_tuple_format(pattern, config)
+    for config in backend_config.configs:
+        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
         observation_type = config.observation_type
         dtype_configs = config.dtype_configs
         num_tensor_args_to_observation_type = config._num_tensor_args_to_observation_type
