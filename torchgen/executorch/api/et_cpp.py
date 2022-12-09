@@ -8,7 +8,6 @@ from torchgen.api.types import (
     Binding,
     ConstRefCType,
     CType,
-    longT,
     MutRefCType,
     NamedCType,
     SpecialArgName,
@@ -21,7 +20,6 @@ from torchgen.model import (
     Arguments,
     BaseTy,
     BaseType,
-    FunctionSchema,
     ListType,
     NativeFunction,
     OptionalType,
@@ -31,53 +29,29 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
-
 from .types import (
     ArrayRefCType,
     BaseTypeToCppMapping,
-    intArrayRefT,
     OptionalCType,
     scalarT,
     tensorListT,
     tensorT,
 )
 
+"""
+This file describes the translation of JIT schema to the public C++ API, which is what people use when they call
+functions like at::add. It also serves as a native function API, which is the signature of kernels,
+since in Executorch CppSignature is the same as NativeSignature.
 
-# This file describes the translation of JIT schema to the public C++
-# API, which is what people use when they call functions like at::add,
-# as well as native function API, which is the signature of kernels.
-# Notice that in Executorch CppSignature is the same as NativeSignature.
-#
-# Prominent characteristics of the C++ API:
-#
-#   - dtype, layout, device and pin_memory are collected into
-#     a single C++ type TensorOptions  (the native functions API
-#     also has this, but tensor options is really most relevant
-#     for the C++ API; it makes calling kwarg factory functions
-#     pleasant). Executorch doesn't have TensorOptions support,
-#     we keep the logic here to be compatible with torchgen.api.
-#     types.CppSignature, so that we can do stuff like ATen mode.
-#
-#   - defaulting lives here (in fact, the dispatcher is completely
-#     oblivious of defaults!)
-#
-# BTW: policy on name collisions: we try not to have types with
-# collisions, but functions are fair game to collide
+Difference between this file and torchgen.api.cpp.py:
 
+  - Executorch doesn't support TensorOptions, however in this file we still keep the logic here to be compatible with
+    torchgen.api.cpp, so that we can do stuff like ATen mode (running ATen kernels in Executorch).
 
-def name(
-    func: FunctionSchema,
-    *,
-    faithful_name_for_out_overloads: bool = False,
-) -> str:
-    name = str(func.name.name)
-    if func.is_out_fn():
-        if faithful_name_for_out_overloads:
-            name += "_outf"
-        else:
-            name += "_out"
-
-    return name
+  - Executorch doesn't support Dimname.
+  
+  - Executorch runtime doesn't support SymInt, will treat it as int.
+"""
 
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
@@ -92,6 +66,7 @@ def valuetype_type(
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
             return None
+        # For SymInt we simply treat it as int.
         elif str(t) == "SymInt":
             return NamedCType(binds, BaseCType(BaseTypeToCppMapping[BaseTy.int]))
         if remove_non_owning_ref_types:
@@ -159,30 +134,14 @@ def argumenttype_type(
                 )
         elif str(t.elem) == "Scalar":
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
-        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
-            raise NotImplementedError("Need to implement type resolution for int[]?")
-        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "SymInt":
-            raise NotImplementedError("Need to implement type resolution for SymInt[]?")
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
-        # TODO: remove these special cases, ArrayRef fallthrough works fine
-        if str(t.elem) == "int":
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, VectorCType(BaseCType(longT)))
-            else:
-                return NamedCType(binds, BaseCType(intArrayRefT))
-        if str(t.elem) == "SymInt":
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, VectorCType(BaseCType(longT)))
-            else:
-                return NamedCType(binds, BaseCType(intArrayRefT))
+        # TODO: keeping these special cases for Tensor[] and Tensor?[] so that we can hookup with ATen kernels.
         if str(t.elem) == "Tensor":
             return NamedCType(binds, BaseCType(tensorListT))
-        elif str(t.elem) == "Scalar":
-            return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
         elif str(t.elem) == "Dimname":
-            raise NotImplementedError("Need to implement type resolution for Dimname")
+            raise NotImplementedError("Executorch doesn't support Dimname")
         elif str(t.elem) == "Tensor?":
             return NamedCType(binds, ArrayRefCType(OptionalCType(BaseCType(tensorT))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
