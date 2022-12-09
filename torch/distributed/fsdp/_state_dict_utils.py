@@ -171,18 +171,6 @@ def _common_unshard_post_state_dict_hook(
         _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
-    # TODO: removing this pop causes some test failures, such as
-    # python test/distributed/fsdp/test_fsdp_state_dict.py -v "TestFSDPStateDict.test_save_and_load_after_forward_state_dict_state_dict_type_state_dict_mixed_precision_False_state_dict_rank0_and_offload_True"
-    # Recursively, we:
-    # try to pop: _fsdp_wrapped_module.0._flat_param
-    # try to pop: _flat_param
-    # but only the latter exists.
-    if not fsdp_state._use_orig_params:
-        try:
-            state_dict.pop(f"{prefix}{FLAT_PARAM}")
-        except:
-            pass
-
     # If a rank does not have unsharded parameters(when `rank0_only=True`
     # and `rank != 0`), then the rank only needed to participate in the
     # all-gather and does not need to save the # state dict. We simply check
@@ -201,6 +189,10 @@ def _common_unshard_post_state_dict_hook(
                 f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
             )
             state_dict.pop(f"{prefix}{clean_key}", None)
+        # Non-zero ranks have flat_param key when rank0_only=True, because rank0_only=True is
+        # passed in to unshard context, but nonzero ranks reshard early, causing this flat_param
+        # to appear in state_dict.
+        state_dict.pop(f"{prefix}{FLAT_PARAM}")
         _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
