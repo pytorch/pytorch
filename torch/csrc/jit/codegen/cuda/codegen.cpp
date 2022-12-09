@@ -1281,7 +1281,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const LoadStoreOp* ldst) {
+  void handle(const LoadStoreOp* ldst) final {
     // TODO:
     //  Need to gradually merge the code path of this
     //   with UnaryOp::Set for vectorization.
@@ -2629,7 +2629,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
   }
 
-  void handle(const kir::Swizzle2DInt* swizzle_2d) {
+  void handle(const kir::Swizzle2DInt* swizzle_2d) final {
     TORCH_INTERNAL_ASSERT(print_inline_);
     TORCH_INTERNAL_ASSERT(
         swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle,
@@ -2642,14 +2642,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::IntPair* int_pair) {
+  void handle(const kir::IntPair* int_pair) final {
     const auto def = int_pair->definition();
     TORCH_INTERNAL_ASSERT(
         def != nullptr, "no support for un-inlined int pair yet.");
     code_ << gen(def);
   }
 
-  void handle(const kir::PairSelect* pair_select) {
+  void handle(const kir::PairSelect* pair_select) final {
     if (print_inline_) {
       code_ << gen(pair_select->in());
     } else {

@@ -1,6 +1,11 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
+C10_DIAGNOSTIC_POP()
+
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <mutex>
