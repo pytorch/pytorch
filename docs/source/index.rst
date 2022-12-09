@@ -55,7 +55,8 @@ Features described in this documentation are classified by release status:
    dynamo/custom-backends
    dynamo/deep-dive
    dynamo/troubleshooting
-   dynamo/faq
+   dynamo/
+   ir
 
 .. toctree::
    :maxdepth: 1
