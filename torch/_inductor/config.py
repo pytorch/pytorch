@@ -4,12 +4,6 @@ import sys
 # add some debug printouts
 debug = False
 
-# Whether to disable a progress bar for autotuning
-disable_progress = True
-
-# Whether to enable printing the source code for each future
-verbose_progress = False
-
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -171,7 +165,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
