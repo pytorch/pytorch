@@ -956,7 +956,7 @@ class MultiThreadedTestCase(TestCase):
         raise RuntimeError("world size not implemented")
 
 
-class CheckPrecisionModule(nn.Module):
+class SaveForwardInputsModule(nn.Module):
     def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
@@ -967,11 +967,11 @@ class CheckPrecisionModule(nn.Module):
         return self.l(x)
 
 
-class ModelWithCheckPrecisionModule(nn.Module):
+class SaveForwardInputsModel(nn.Module):
     def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
         super().__init__()
-        self.c1 = CheckPrecisionModule(forward_inputs)
-        self.c2 = CheckPrecisionModule(forward_inputs)
+        self.c1 = SaveForwardInputsModule(forward_inputs)
+        self.c2 = SaveForwardInputsModule(forward_inputs)
         self.forward_inputs = forward_inputs
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

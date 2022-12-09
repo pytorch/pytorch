@@ -266,7 +266,7 @@ def _pre_forward(
     handles: List[FlatParamHandle],
     unshard_fn: Callable,
     module: nn.Module,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> Tuple[Tuple[Any], Dict[str, Any]]:
     """
@@ -282,7 +282,7 @@ def _pre_forward(
             sharded parameters or ``None`` to not do any unsharding.
         module (nn.Module): Module whose forward this method runs right before;
             expected by the hook signature.
-        args (Tuple[Any]): Module forward ``args``.
+        args (Tuple[Any, ...]): Module forward ``args``.
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     state.training_state = TrainingState.FORWARD_BACKWARD
@@ -451,7 +451,7 @@ def _cast_fp_inputs_to_dtype(
     """
 
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x):
+        if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
         y = x.to(dtype)
         # Explicitly copy over `requires_grad` since this runs inside

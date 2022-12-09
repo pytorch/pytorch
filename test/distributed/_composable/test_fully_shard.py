@@ -24,7 +24,7 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import (
-    ModelWithCheckPrecisionModule,
+    SaveForwardInputsModel,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -414,12 +414,6 @@ class TestFSDPRuntime(FSDPTest):
 class TestMixedPrecision(FSDPTest):
 
     @property
-    def world_size(self) -> int:
-        return 2
-
-
-class TestFSDPDifferentSubmodulePrecision(FSDPTest):
-    @property
     def world_size(self):
         return 2
 
@@ -428,7 +422,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         forward_inputs: Dict[str, nn.Module] = {}
         float16 = MixedPrecision(param_dtype=torch.float16)
 
-        model = ModelWithCheckPrecisionModule(forward_inputs).cuda()
+        model = SaveForwardInputsModel(forward_inputs).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
