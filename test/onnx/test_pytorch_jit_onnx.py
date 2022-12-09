@@ -64,15 +64,18 @@ class _TestJITIRToONNX:
         )
         ort_outs = verification._run_ort(ort_sess, example_inputs)
 
-        verification._compare_ort_pytorch_outputs(
-            ort_outs,
-            jit_outs,
+        options = verification.VerificationOptions(
             rtol=1e-3,
             atol=1e-7,
             check_shape=self.check_shape,
             check_dtype=self.check_dtype,
             ignore_none=self.ignore_none,
             acceptable_error_percentage=None,
+        )
+        verification._compare_ort_pytorch_outputs(
+            ort_outs,
+            jit_outs,
+            options,
         )
 
     def test_example_ir(self):
