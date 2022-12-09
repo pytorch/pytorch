@@ -8,6 +8,8 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 
+__all__ = ["make_tensor"]
+
 # Used by make_tensor for generating complex tensor.
 complex_to_corresponding_float_type_map = {
     torch.complex32: torch.float16,

@@ -24,7 +24,7 @@ from torch._jit_internal import _qualified_name, is_scripting, get_callable_argu
 from torch.autograd import function
 from torch.nn import Module
 
-from torch.testing._comparison import default_tolerances
+from torch.testing.comparison import _default_tolerances
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -511,7 +511,7 @@ def _check_trace(
                             orig.to(torch.cdouble),
                             ref.to(torch.cdouble),
                             rtol=check_tolerance,
-                            atol=default_tolerances(orig, ref)[1],
+                            atol=_default_tolerances(orig, ref)[1],
                             equal_nan=True,
                         )
                     else:
@@ -520,7 +520,7 @@ def _check_trace(
                                 orig.float(),
                                 ref.float(),
                                 rtol=check_tolerance,
-                                atol=default_tolerances(orig, ref)[1],
+                                atol=_default_tolerances(orig, ref)[1],
                                 equal_nan=True,
                             )
                         else:
@@ -528,7 +528,7 @@ def _check_trace(
                                 orig.double(),
                                 ref.double(),
                                 rtol=check_tolerance,
-                                atol=default_tolerances(orig, ref)[1],
+                                atol=_default_tolerances(orig, ref)[1],
                                 equal_nan=True,
                             )
                 except AssertionError as e:
