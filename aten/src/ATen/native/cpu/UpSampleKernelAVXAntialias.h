@@ -216,7 +216,6 @@ void ImagingResampleVerticalConvolution8u(
 void ImagingResampleHorizontal_8bpc(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
-    int offset,
     int ksize,
     int* bounds,
     double* prekk,
@@ -224,7 +223,7 @@ void ImagingResampleHorizontal_8bpc(
     int yout,
     int xin) {
   int yy;
-  int16_t *kk;
+  int16_t* kk;
   int coefs_precision;
 
   // use the same buffer for normalized coefficients
@@ -238,10 +237,10 @@ void ImagingResampleHorizontal_8bpc(
         unpacked_output_p + (yy + 1) * xout,
         unpacked_output_p + (yy + 2) * xout,
         unpacked_output_p + (yy + 3) * xout,
-        unpacked_input_p + (yy + offset) * xin,
-        unpacked_input_p + (yy + offset + 1) * xin,
-        unpacked_input_p + (yy + offset + 2) * xin,
-        unpacked_input_p + (yy + offset + 3) * xin,
+        unpacked_input_p + yy * xin,
+        unpacked_input_p + (yy + 1) * xin,
+        unpacked_input_p + (yy + 2) * xin,
+        unpacked_input_p + (yy + 3) * xin,
         xout,
         bounds,
         kk,
@@ -251,7 +250,7 @@ void ImagingResampleHorizontal_8bpc(
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
         unpacked_output_p + yy * xout,
-        unpacked_input_p + (yy + offset) * xin,
+        unpacked_input_p + yy * xin,
         xout,
         bounds,
         kk,
@@ -263,13 +262,12 @@ void ImagingResampleHorizontal_8bpc(
 void ImagingResampleVertical_8bpc(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
-    int offset,
     int ksize,
     int* bounds,
     double* prekk,
     int xout,
     int yout) {
-  int yy, ymin, ymax;
+  int ymin, ymax;
   int16_t *k, *kk;
   int coefs_precision;
 
@@ -277,7 +275,7 @@ void ImagingResampleVertical_8bpc(
   kk = (int16_t*)prekk;
   coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
 
-  for (yy = 0; yy < yout; yy++) {
+  for (const auto yy : c10::irange(yout)) {
     k = &kk[yy * ksize];
     ymin = bounds[yy * 2 + 0];
     ymax = bounds[yy * 2 + 1];
@@ -292,6 +290,8 @@ void ImagingResampleVertical_8bpc(
   }
 }
 
+// TODO: Cleanup error checks (as in comments)
+// TODO: probably use pytorch's allocator instead of malloc
 uint32_t* ImagingResampleInner(
     uint32_t* unpacked_input_p,
     int xin,
@@ -300,8 +300,7 @@ uint32_t* ImagingResampleInner(
     int yout,
     aa_filter_fn_t filter,
     int interp_size) {
-  int i, need_horizontal, need_vertical;
-  int ybox_first, ybox_last;
+  int need_horizontal, need_vertical;
   int ksize_horiz, ksize_vert;
   int *bounds_horiz, *bounds_vert;
   double *kk_horiz, *kk_vert;
@@ -311,31 +310,13 @@ uint32_t* ImagingResampleInner(
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
 
-  ksize_horiz = precompute_coeffs(
-      xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
-  // if (!ksize_horiz) {
-  //     return NULL;
-  // }
-
-  ksize_vert =
-      precompute_coeffs(yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
-  // if (!ksize_vert) {
-  //     free(bounds_horiz);
-  //     free(kk_horiz);
-  //     return NULL;
-  // }
-
-  // First used row in the source image
-  ybox_first = bounds_vert[0];
-  // Last used row in the source image
-  ybox_last = bounds_vert[yout * 2 - 2] + bounds_vert[yout * 2 - 1];
-
   /* two-pass resize, horizontal pass */
   if (need_horizontal) {
-    // Shift bounds for vertical pass
-    for (i = 0; i < yout; i++) {
-      bounds_vert[i * 2] -= ybox_first;
-    }
+    ksize_horiz = precompute_coeffs(
+        xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
+    // if (!ksize_horiz) {
+    //     return NULL;
+    // }
 
     // imTemp = ImagingNewDirty(imIn->mode, xout, ybox_last - ybox_first);
     // if (imTemp) {
@@ -346,7 +327,6 @@ uint32_t* ImagingResampleInner(
     ImagingResampleHorizontal_8bpc(
         unpacked_output_temp_p,
         unpacked_input_p,
-        ybox_first,
         ksize_horiz,
         bounds_horiz,
         kk_horiz,
@@ -362,21 +342,24 @@ uint32_t* ImagingResampleInner(
     // }
     // imOut = imIn = imTemp;
     unpacked_output_p = unpacked_input_p = unpacked_output_temp_p;
-  } else {
-    // Free in any case
-    free(bounds_horiz);
-    free(kk_horiz);
   }
 
   /* vertical pass */
   if (need_vertical) {
+    ksize_vert = precompute_coeffs(
+        yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
+    // if (!ksize_vert) {
+    //     free(bounds_horiz);
+    //     free(kk_horiz);
+    //     return NULL;
+    // }
+
     // imOut = ImagingNewDirty(imIn->mode, imIn->xsize, ysize);
     unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
     // if (imOut) {
     ImagingResampleVertical_8bpc(
         unpacked_output_p,
         unpacked_input_p,
-        0,
         ksize_vert,
         bounds_vert,
         kk_vert,
@@ -392,10 +375,6 @@ uint32_t* ImagingResampleInner(
     // if (!imOut) {
     //     return NULL;
     // }
-  } else {
-    // Free in any case
-    free(bounds_vert);
-    free(kk_vert);
   }
 
   // /* none of the previous steps are performed, copying */
@@ -411,7 +390,6 @@ void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& output,
     aa_filter_fn_t filter,
     int interp_size) {
-
   auto batch_size = input.size(0);
   auto xin = input.size(3);
   auto yin = input.size(2);
@@ -453,10 +431,10 @@ void ImagingResampleHorizontalConvolution8u4x(
     int16_t* kk,
     int kmax,
     int coefs_precision) {
-  int xmin, xmax, xx, x;
+  int xmin, xmax, x;
   int16_t* k;
 
-  for (xx = 0; xx < xsize; xx++) {
+  for (const auto xx : c10::irange(xsize)) {
     xmin = xbounds[xx * 2 + 0];
     xmax = xbounds[xx * 2 + 1];
     k = &kk[xx * kmax];
@@ -568,10 +546,10 @@ void ImagingResampleHorizontalConvolution8u(
     int16_t* kk,
     int kmax,
     int coefs_precision) {
-  int xmin, xmax, xx, x;
+  int xmin, xmax, x;
   int16_t* k;
 
-  for (xx = 0; xx < xsize; xx++) {
+  for (const auto xx : c10::irange(xsize)) {
     __m128i sss;
     xmin = xbounds[xx * 2 + 0];
     xmax = xbounds[xx * 2 + 1];
