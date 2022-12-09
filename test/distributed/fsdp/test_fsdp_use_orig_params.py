@@ -1054,6 +1054,7 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
     def world_size(self) -> int:
         return 2
 
+    @skip_if_lt_x_gpu(2)
     def test_no_sync(self):
         """
         Tests a basic ``no_sync()`` setup by comparing ``use_orig_params=True``
