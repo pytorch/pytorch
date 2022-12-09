@@ -4,10 +4,6 @@ import itertools
 import collections
 from torch.nn.modules.module import _addindent
 
-__all__ = [
-    "WeightedQuantizedModule",
-]
-
 class WeightedQuantizedModule(torch.nn.Module, metaclass=abc.ABCMeta):
     """Wrapper for quantized modules than can be lowered from reference modules."""
     @classmethod
@@ -85,7 +81,7 @@ def _ntuple_from_first(n):
         return tuple(itertools.repeat(x, n))
     return parse
 
-def _hide_packed_params_repr(self, params):
+def hide_packed_params_repr(self, params):
     # We don't want to show `PackedParams` children, hence custom
     # `__repr__`. This is the same as nn.Module.__repr__, except the check
     # for the `params module`.
