@@ -1,5 +1,3 @@
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-
 #ifdef FLATBUFFERS_VERSION_MAJOR
 #error "flatbuffer_loader.h must not include any flatbuffers headers"
 #endif // FLATBUFFERS_VERSION_MAJOR
@@ -24,8 +22,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -882,7 +880,6 @@ mobile::Module load_mobile_module_from_stream_with_copy(
       std::move(data), size, device, extra_files);
 }
 
-namespace {
 mobile::Module parse_flatbuffer_no_object(
     std::shared_ptr<char> data,
     size_t size,
@@ -912,16 +909,10 @@ mobile::Module parse_flatbuffer_no_object(
   m.set_delete_memory(std::move(data));
   return m;
 }
-} // namespace
 
 bool register_flatbuffer_loader() {
-  load_flatbuffer_bytes = parse_and_initialize_mobile_module;
-  load_flatbuffer_bytes_no_object = parse_flatbuffer_no_object;
-  get_flatbuffer_bytecode_version = get_bytecode_version_from_bytes;
   return true;
 }
-
-const bool kRegisteredFlatbufferLoader = register_flatbuffer_loader();
 
 } // namespace jit
 } // namespace torch
