@@ -7,7 +7,18 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from typing_extensions import Protocol
@@ -54,6 +65,29 @@ class CompiledFn(Protocol):
 
 
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+
+
+class OutputGraphState(NamedTuple):
+    graphargs: List[GraphArg]
+    guards: Set[Guard]
+    nn_modules: Optional[Dict[str, torch.nn.Module]]
+    side_effects: SideEffects
+    timestamp: int
+    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
+
+    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
+        for k in self._fields:
+            if k == "side_effects":
+                r = self.side_effects.diff(other.side_effects)
+                if r is not None:
+                    return r
+                continue
+
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{prefix}{k} mismatch: {sv} != {ov}"
+        return None
 
 
 @functools.lru_cache(None)
@@ -161,6 +195,9 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
@@ -186,20 +223,31 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
-    def copy_graphstate(self):
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
+
+    def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        state = (
+        state = OutputGraphState(
             list(self.graphargs),
             set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
+            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
 
-    def restore_graphstate(self, state):
+    def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
@@ -207,6 +255,7 @@ class OutputGraph(fx.Tracer):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
+            self.name_to_input,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         for node in reversed(list(self.graph.nodes)):
@@ -504,10 +553,15 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= logging.INFO and config.output_code:
+                graph_str = (
+                    gm.print_readable()
+                    if config.output_graph_code
+                    else format_graph_tabular(gm.graph)
+                )
                 log.log(
                     logging.CODE,  # type: ignore[attr-defined]
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(
@@ -563,6 +617,8 @@ class OutputGraph(fx.Tracer):
                 config.repro_after is not None and config.repro_level == 4
             )
             if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
                 compiled_fn = compiler_fn(gm, self.example_inputs())
             else:
                 compiled_fn = compiler_fn(gm, self.fake_example_inputs())
@@ -659,14 +715,13 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
-        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
