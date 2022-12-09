@@ -669,13 +669,13 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     """
     try:
         import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
     from pynvml import NVMLError_DriverNotLoaded
     try:
         pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
     device = _get_device_index(device, optional=True)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
@@ -695,13 +695,13 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     """
     try:
         import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
     from pynvml import NVMLError_DriverNotLoaded
     try:
         pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    except NVMLError_DriverNotLoaded as e:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
     device = _get_device_index(device, optional=True)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
@@ -737,11 +737,12 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import _LegacyStorage
+from torch.storage import _LegacyStorage, _warn_typed_storage_removal
 
 class _CudaLegacyStorage(_LegacyStorage):
     @classmethod
     def from_buffer(cls, *args, **kwargs):
+        _warn_typed_storage_removal()
         raise RuntimeError('from_buffer: Not available for CUDA storage')
 
     @classmethod
@@ -755,61 +756,121 @@ class _CudaLegacyStorage(_LegacyStorage):
 class ByteStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.uint8
 
 class DoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.double
 
 class FloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.float
 
 class HalfStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.half
 
 class LongStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.long
 
 class IntStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int
 
 class ShortStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.short
 
 class CharStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int8
 
 class BoolStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bool
 
 class BFloat16Storage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bfloat16
 
 class ComplexDoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cdouble
 
 class ComplexFloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cfloat
 
 del _LegacyStorage
@@ -850,13 +911,14 @@ __all__ = [
     'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
     'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
-    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend', 'get_arch_list',
-    'get_device_capability', 'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state', 'get_rng_state_all',
-    'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect',
-    'is_available', 'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes',
-    'make_graphed_callables', 'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
-    'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats',
-    'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx', 'profiler', 'random',
-    'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached', 'reset_peak_memory_stats',
-    'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state', 'set_rng_state_all', 'set_stream',
-    'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
+    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend', 'CUDAPluggableAllocator',
+    'change_current_allocator', 'get_arch_list', 'get_device_capability', 'get_device_name', 'get_device_properties',
+    'get_gencode_flags', 'get_rng_state', 'get_rng_state_all', 'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs',
+    'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect', 'is_available', 'is_bf16_supported',
+    'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
+    'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
+    'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot',
+    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx', 'profiler',
+    'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
+    'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
+    'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']

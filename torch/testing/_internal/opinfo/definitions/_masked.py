@@ -26,8 +26,7 @@ from torch.testing._internal.opinfo.core import (
     sample_inputs_reduction,
     SampleInput,
 )
-from torch.testing._internal.opinfo.utils import reference_reduction_numpy
-
+from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction_numpy
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
@@ -400,6 +399,17 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
         ),
         decorators=[
             DecorateInfo(
@@ -434,7 +444,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.prod",
-        ref=reference_reduction_numpy(np.prod),
+        ref=prod_numpy,
         method_variant=None,
         identity=1,
         nan_policy="propagate",
@@ -446,8 +456,8 @@ op_db: List[OpInfo] = [
         supports_sparse=True,
         supports_sparse_csr=True,
         promotes_int_to_int64=True,
-        # FIXME: "prod_cpu" not implemented for 'Half' or 'BFloat16'
-        dtypes=all_types_and_complex_and(torch.bool),
+        # FIXME: "prod_cpu" not implemented for 'Half'
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.float16, torch.bfloat16
         ),
@@ -466,9 +476,7 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
-            # integer overflow
             DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestReductions",
                 "test_ref_small_input",
                 dtypes=(torch.int8, torch.int16, torch.int32),
@@ -549,14 +557,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.bfloat16,),
-                device_type="cpu",
-            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCompositeCompliance",
@@ -607,6 +607,17 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -645,6 +656,17 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
+            ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -1109,7 +1131,10 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,

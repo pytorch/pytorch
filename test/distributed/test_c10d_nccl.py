@@ -290,8 +290,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # Run with 1 input tensor
             x = torch.tensor([self.rank]).cuda(self.rank_to_GPU[self.rank][0])
             output = broadcast([x], i, 0)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
+            self.assertEqual(torch.tensor([i]), output[0])
 
             expected_tensor = torch.empty([i + 1, i + 1]).fill_(i + 1)
             xs = [torch.empty([i + 1, i + 1]).fill_(-1).cuda(device=device_idx) for device_idx in self.rank_to_GPU[self.rank]]
@@ -326,10 +325,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         allreduce(tensors, c10d.ReduceOp.SUM)
 
-        ndev = float(self.world_size)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
-            torch.tensor([ndev * (ndev + 1) / 2]),
+        ndev = self.world_size
+        self.assertEqual(
+            torch.tensor([ndev * (ndev + 1) // 2]),
             tensors[0],
         )
 
@@ -338,9 +336,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             tensors = [torch.tensor([self.rank + 1.]).cuda(local_device_id)]
 
             allreduce(tensors, c10d.ReduceOp.AVG)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            ndev = float(self.world_size)
-            self.assertEqualIgnoreType(
+            ndev = self.world_size
+            self.assertEqual(
                 torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
                 tensors[0],
             )
@@ -348,16 +345,14 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Premul Sum
         if torch.cuda.nccl.version() >= (2, 11, 1):
             for dtype in torch.half, torch.float, torch.double:
-                for factor in (3.0,
-                               (torch.tensor([5.0], device=local_device_id, dtype=dtype),)):
+                for factor in (3.0, torch.tensor([5.0], device=local_device_id, dtype=dtype)):
                     tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)]
 
                     allreduce(tensors, c10d._make_nccl_premul_sum(factor))
 
-                    f = factor if isinstance(factor, float) else factor[0]
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(
-                        f * torch.tensor([float(self.world_size * (self.world_size + 1) / 2)], device=local_device_id),
+                    self.assertEqual(
+                        factor * torch.tensor([self.world_size * (self.world_size + 1) / 2],
+                                              dtype=dtype, device=local_device_id),
                         tensors[0],
                     )
 
@@ -365,17 +360,15 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
 
         allreduce(tensors, c10d.ReduceOp.PRODUCT)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
-            torch.tensor([float(math.factorial(self.world_size))]), tensors[0]
+        self.assertEqual(
+            torch.tensor([math.factorial(self.world_size)]), tensors[0]
         )
 
         # Min
         tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
 
         allreduce(tensors, c10d.ReduceOp.MIN)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(torch.tensor([1.0]), tensors[0])
+        self.assertEqual(torch.tensor([1]), tensors[0])
 
         # Max
         tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
@@ -412,14 +405,13 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
             reduce(tensors, rt, 0)
 
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             if self.rank == rt:
-                self.assertEqualIgnoreType(
-                    torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
+                self.assertEqual(
+                    torch.tensor([self.world_size * (self.world_size + 1) // 2]),
                     tensors[0],
                 )
             else:
-                self.assertEqualIgnoreType(
+                self.assertEqual(
                     torch.tensor([self.rank + 1]),
                     tensors[0],
                 )
@@ -435,9 +427,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
             # Premul sum
             if torch.cuda.nccl.version() >= (2, 11, 1):
-                for factor in (3.0, (torch.tensor([5.0], device=local_device_id),)):
-                    if isinstance(factor, tuple):
-                        factor_ref = factor[0].cpu().item()
+                for factor in (3.0, torch.tensor([5.0], device=local_device_id)):
+                    if isinstance(factor, torch.Tensor):
+                        factor_ref = factor.cpu().item()
                     else:
                         factor_ref = factor
                     float_tensors = [
@@ -513,7 +505,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work = pg._allgather_base(output_t, input_t)
             work.wait()
 
-        # anticpate an error
+        # anticipate an error
         with self.assertRaisesRegex(
             RuntimeError,
             "output tensor size must be equal to world_size times input tensor size",
@@ -525,7 +517,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # fails the check because output_t is not correctly sized
             allgather_base(output_t, tensor)
 
-        # anticpate an error
+        # anticipate an error
         with self.assertRaisesRegex(
             RuntimeError, "output tensor must have the same type as input tensor"
         ):
@@ -801,7 +793,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work = pg._reduce_scatter_base(output_t, input_t)
             work.wait()
 
-        # anticpate an error
+        # anticipate an error
         with self.assertRaisesRegex(
             RuntimeError,
             "input tensor must be the same size as output size times world size",
@@ -813,7 +805,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # fails the check because output_t is not correctly sized
             reduce_scatter_base(output_t, input_t)
 
-        # anticpate an error
+        # anticipate an error
         with self.assertRaisesRegex(
             RuntimeError, "input tensor must be the same type as the output tensor."
         ):
@@ -861,13 +853,12 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for i in range(num_gpus):
             expected = torch.tensor(
                 [
-                    float((1 + self.world_size) * self.world_size / 2)
+                    (1 + self.world_size) * self.world_size // 2
                     + self.world_size * self.rank
                 ])
 
 
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, output[i])
+            self.assertEqual(expected, output[i])
 
         # Min
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
@@ -888,7 +879,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Product
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
 
-        # math pakcage don't have math.perm until python 3.8, so
+        # math package don't have math.perm until python 3.8, so
         # we implement a naive version here.
         def perm(n, k):
             prod_val = n
@@ -900,8 +891,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             prod_val = perm(self.rank + self.world_size, self.world_size)
 
             expected = torch.tensor([prod_val])
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(expected, output[i])
+            self.assertEqual(expected, output[i])
 
         # Test the input params overridden scenarios, aka, when the input is
         # a list and output is just one tensor.
@@ -910,19 +900,19 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         input_list = [tensor[0].cuda(self.rank) for tensor in input_per_gpu]
         pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.SUM).wait()
         expected = torch.tensor(
-            float((1 + self.world_size) * self.world_size / 2) + self.world_size * self.rank
+            (1 + self.world_size) * self.world_size // 2 + self.world_size * self.rank
         )
-        self.assertEqualIgnoreType(expected, output_tensor)
+        self.assertEqual(expected, output_tensor)
 
         # Min
         pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MIN).wait()
         expected = torch.tensor(self.rank + 1)
-        self.assertEqualIgnoreType(expected, output_tensor)
+        self.assertEqual(expected, output_tensor)
 
         # Max
         pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MAX).wait()
         expected = torch.tensor(self.rank + self.world_size)
-        self.assertEqualIgnoreType(expected, output_tensor)
+        self.assertEqual(expected, output_tensor)
 
         # Product
         pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.PRODUCT).wait()
@@ -930,12 +920,12 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for k in range(1, self.world_size):
             prod_val = prod_val * (self.rank + 1 + k)
         expected = torch.tensor(prod_val)
-        self.assertEqualIgnoreType(expected, output_tensor)
+        self.assertEqual(expected, output_tensor)
 
         if torch.cuda.nccl.version() >= (2, 11, 1):
-            for factor in (3.0, (torch.tensor([5.0], device=self.rank),),):
-                if isinstance(factor, tuple):
-                    factor_ref = factor[0].cpu().item()
+            for factor in (3.0, torch.tensor([5.0], device=self.rank)):
+                if isinstance(factor, torch.Tensor):
+                    factor_ref = factor.cpu().item()
                 else:
                     factor_ref = factor
                 output = [t.float() for t in output]
@@ -997,8 +987,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         for i in range(1, len(local_device_ids) + 1):
             for j in range(i):
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
+                self.assertEqual(
                     torch.tensor([(j + 1) * self.world_size]), tensors_list[i - 1][j]
                 )
 
@@ -1025,6 +1014,18 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
                 dist.send(send_tensor_view, 1)
 
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, "NCCL test requires 1 GPU")
+    @skip_if_lt_x_gpu(1)
+    def test_nccl_dist_backend_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+
+        # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
+        with self.assertRaises(dist.DistBackendError) as cm:
+            dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+
+        self.assertIsInstance(cm.exception, RuntimeError)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -1652,8 +1653,7 @@ class DistributedDataParallelTest(
                     target[self.rank : (self.rank + 1)],
                 )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
+                    self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
@@ -2598,7 +2598,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             try:
                 pg_gloo.barrier().wait()
             except Exception as e:
-                raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}")
+                raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
             # Now verify communicators on this rank have
             # been aborted by watchdog.
             self._wait_for_comm_abort(process_group, failed_collective_timeout)
@@ -2942,6 +2942,43 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
         self._test_collectives(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_allgather_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.all_gather_into_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.reduce_scatter_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
 
 if __name__ == "__main__":
     assert (

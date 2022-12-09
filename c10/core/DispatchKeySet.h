@@ -757,6 +757,9 @@ constexpr auto functorch_transforms_ks = DispatchKeySet(
      DispatchKey::VmapMode,
      DispatchKey::FuncTorchGradWrapper});
 
+constexpr auto functorch_batched_ks =
+    DispatchKeySet({DispatchKey::FuncTorchBatched});
+
 // This keyset has:
 // (1) the functionality bits corresponding to backends (dense, sparse,
 // quantized) (2) all of the backend bits set
@@ -876,7 +879,10 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
           autocast_dispatch_keyset -
-          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
+          DispatchKeySet(
+              {DispatchKey::Functionalize,
+               DispatchKey::PythonTLSSnapshot,
+               DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 

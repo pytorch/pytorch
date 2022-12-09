@@ -721,7 +721,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     const std::vector<LazyTensorPtr>& tensors,
     SyncTensorCollection* coll) {
-  std::vector<Node*> roots;
+  std::vector<const Node*> roots;
   roots.reserve(coll->indices.size());
   for (auto index : coll->indices) {
     Value ir_value = tensors.at(index)->CurrentIrValue();
@@ -896,12 +896,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       std::move(tensors_data),
       std::move(cached_computation));
 
-  auto syncfn = [this, async, hash = coll->hash]() {
-    // For profiling lazy trace overhead
-    if (noop_execution_mode_) {
-      return;
-    }
-
+  auto syncfn = [async, hash = coll->hash]() {
     try {
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " ...";

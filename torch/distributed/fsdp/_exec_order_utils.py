@@ -6,7 +6,11 @@ from typing import cast, Dict, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _get_param_to_unflat_param_names
+from torch.distributed.fsdp._common_utils import (
+    _all_handles,
+    _FSDPState,
+    _get_param_to_fqns,
+)
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
 _HandlesKey = Tuple[FlatParamHandle, ...]
@@ -44,7 +48,7 @@ class _ExecOrderData:
         self.handles_post_forward_order: List[_HandlesKey] = []
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
-        self.is_first_iter = True
+        self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
         # single module
@@ -70,7 +74,8 @@ class _ExecOrderData:
 
     def init(
         self,
-        fsdp_root: nn.Module,  # `FullyShardedDataParallel`
+        state: _FSDPState,
+        root_module: nn.Module,
         process_group: dist.ProcessGroup,
     ) -> None:
         """
@@ -82,18 +87,21 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        for fsdp_module in fsdp_root.fsdp_modules(fsdp_root):  # type: ignore[operator]
-            for handle in fsdp_module._handles:
-                index = len(self.all_handles)
-                self.all_handles.append(handle)
-                self.handle_to_handle_index[handle] = index
+        for handle in _all_handles(state):
+            index = len(self.all_handles)
+            self.all_handles.append(handle)
+            self.handle_to_handle_index[handle] = index
         self.flat_param_to_prefixed_param_names = cast(
             Dict[FlatParameter, List[str]],
-            _get_param_to_unflat_param_names(fsdp_root),
+            _get_param_to_fqns(root_module),
         )
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
+
+    @property
+    def is_first_iter(self) -> bool:
+        return self._iter == 0
 
     def get_handles_to_backward_prefetch(
         self,
@@ -371,7 +379,7 @@ class _ExecOrderData:
         called in the post-backward callback since that marks the true end of
         an iteration.
         """
-        self.is_first_iter = False
+        self._iter += 1
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         if self._checking_order:

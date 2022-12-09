@@ -79,10 +79,10 @@ Tensor new_with_sizes(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
     const optional<Device>& device,
-    IntArrayRef sizes) {
+    c10::SymIntArrayRef sizes) {
   maybe_initialize_cuda(options.device());
   pybind11::gil_scoped_release no_gil;
-  return torch::empty(sizes, build_options(options, scalar_type, device));
+  return at::empty_symint(sizes, build_options(options, scalar_type, device));
 }
 
 Tensor new_with_storage(
@@ -124,6 +124,12 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
 }
 
 ScalarType infer_scalar_type(PyObject* obj) {
+  if (torch::is_symint(obj)) {
+    return ScalarType::Long;
+  }
+  if (torch::is_symfloat(obj)) {
+    return ScalarType::Double;
+  }
 #ifdef USE_NUMPY
   if (is_numpy_available()) {
     if (PyArray_Check(obj)) {
@@ -204,7 +210,21 @@ void recursive_store(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
   int64_t ndim = sizes.size();
+  bool is_symfloat = torch::is_symfloat(obj);
+  bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
+    if (is_symfloat) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
+      auto val = new_obj.cast<c10::SymFloat>();
+      *(double*)data = val.guard_float(__FILE__, __LINE__);
+      return;
+    }
+    if (is_symint) {
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
+      auto val = new_obj.cast<c10::SymInt>();
+      *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+      return;
+    }
     torch::utils::store_scalar(data, scalarType, obj);
     return;
   }
@@ -531,7 +551,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       "new(*, int64_t cdata)|hidden",
       "new(Tensor indices, Tensor values, *, Device? device=None)",
       "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
-      "new(IntArrayRef size, *, Device? device=None)",
+      "new(SymIntArrayRef size, *, Device? device=None)",
   });
   if (ctor_or_new == CtorOrNew::NEW)
     check_base_legacy_new(dispatch_key, c10::kSparse);
@@ -577,7 +597,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       }
     }
     return new_with_sizes(
-        options, scalar_type, r.deviceOptional(1), r.intlist(0));
+        options, scalar_type, r.deviceOptional(1), r.symintlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -615,7 +635,7 @@ Tensor legacy_tensor_generic_ctor_new(
                                                           // matching with
                                                           // IntArrayRef,
                                                           // PyObject*
-      "new(IntArrayRef size, *, Device? device=None)",
+      "new(SymIntArrayRef size, *, Device? device=None)",
       "new(PyObject* data, *, Device? device=None)",
   });
 
@@ -690,7 +710,7 @@ Tensor legacy_tensor_generic_ctor_new(
           options, scalar_type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(
-        options, scalar_type, r.deviceOptional(1), r.intlist(0));
+        options, scalar_type, r.deviceOptional(1), r.symintlist(0));
   } else if (r.idx == 6) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(dispatch_key, deviceOptional);

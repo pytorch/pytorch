@@ -8,6 +8,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -15,13 +16,13 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
@@ -160,8 +161,12 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+        (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
+        (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -199,10 +204,20 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
         (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 5e-4),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.default) : (1e-5, 5e-4),
+        # The decomposition is TOO correct. It computes everything in int64, so sometimes
+        # there's an off-by-one error. See
+        # https://github.com/pytorch/pytorch/issues/81996
+        # https://github.com/pytorch/pytorch/issues/82230
+        (torch.int8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
     }
-    if (test_dtype, op) in tol_table:
+    if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
@@ -294,12 +309,15 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
+    # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
+    ("cpu", torch.bfloat16, "_softmax_backward_data"),
+    (None, None, "norm"),
+    # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
+    (None, None, "native_batch_norm"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
-    ("cuda", torch.float16, "nn.functional.embedding"),
-    ("cuda", torch.bfloat16, "nn.functional.embedding"),
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
@@ -353,7 +371,6 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
-@skipIfSlowGradcheckEnv
 class TestDecomp(TestCase):
     longMessage = True
 
@@ -375,6 +392,19 @@ class TestDecomp(TestCase):
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
+
+    def test_uniform(self, device):
+        size = (2, 3, 4, 5)
+        dtype = torch.float32
+        x = make_tensor(size, dtype=dtype, device=device)
+        low = 0.3
+        high = 0.9
+
+        torch.manual_seed(123)
+        ref = torch.ops.aten.uniform(x, low, high)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.uniform(x, low=low, high=high)
+        self.assertEqual(ref, res)
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
@@ -562,6 +592,47 @@ class DecompContiguousTests(TestCase):
 
 instantiate_device_type_tests(DecompContiguousTests, globals())
 
+class DecompAmpTests(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @onlyCUDA
+    def test_amp_batch_norm_backward(self):
+        device = "cuda"
+        grad_out = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
+        x = torch.randn((1, 2, 16, 16), dtype=torch.float16, device=device)
+        weight = torch.randn((2,), dtype=torch.float32, device=device)
+        rmean = torch.randn((2,), dtype=torch.float32, device=device)
+        rvar = torch.randn((2,), dtype=torch.float32, device=device)
+        mean = torch.randn((0,), dtype=torch.float32, device=device)
+
+        ref = torch.ops.aten.native_batch_norm_backward(
+            grad_out,
+            x,
+            weight,
+            rmean,
+            rvar,
+            mean,
+            mean,
+            False,
+            1e-05,
+            [True, True, True])
+        res = torch._decomp.decompositions.native_batch_norm_backward(
+            grad_out,
+            x,
+            weight,
+            rmean,
+            rvar,
+            mean,
+            mean,
+            False,
+            1e-05,
+            [True, True, True])
+        for (a, b) in zip(ref, res):
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.dtype, b.dtype)
+
+
+instantiate_device_type_tests(DecompAmpTests, globals())
 
 if __name__ == "__main__":
     run_tests()

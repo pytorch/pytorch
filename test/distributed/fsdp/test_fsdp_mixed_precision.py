@@ -154,10 +154,13 @@ class LinearMixedPrecision(nn.Module):
     A linear module with extra checks for mixed precision training.
     """
 
-    def __init__(self, param_dtype):
+    def __init__(self, param_dtype, buffer_name="buffer"):
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False).to(param_dtype)
-        self.register_buffer("buffer", torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
+        # Use a configurable buffer name to avoid all submodules sharing the
+        # same buffer name, which may hide prefixed vs. unprefixed name bugs
+        self.buffer_name = buffer_name
+        self.register_buffer(buffer_name, torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
         self._orig_param_type = param_dtype
         self._orig_buffer_dtype = _BUFFER_ORIG_DTYPE
 
@@ -176,7 +179,7 @@ class LinearMixedPrecision(nn.Module):
         )
         cls.assertEqual(inp.dtype, expected_param_type)
         # Buffer should be in specified precision as well.
-        cls.assertEqual(self.buffer.dtype, expected_buffer_type)
+        cls.assertEqual(getattr(self, self.buffer_name).dtype, expected_buffer_type)
 
         # In FSDP, self.params should point to the right type.
         num_active_fsdp = 0
@@ -234,9 +237,11 @@ class TestFSDPMixedPrecision(FSDPTest):
         model = FSDP(
             nn.Sequential(
                 FSDP(
-                    LinearMixedPrecision(param_dtype).cuda(), *fsdp_args, **fsdp_kwargs
+                    LinearMixedPrecision(param_dtype, buffer_name="buffer0").cuda(),
+                    *fsdp_args,
+                    **fsdp_kwargs,
                 ),
-                LinearMixedPrecision(param_dtype).cuda(),
+                LinearMixedPrecision(param_dtype, buffer_name="buffer1").cuda(),
             ),
             *fsdp_args,
             **fsdp_kwargs,
@@ -306,7 +311,9 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
-    def _test_grads_reduced_precision(self, offload_params: bool):
+    def _test_grads_reduced_precision(
+        self, offload_params: bool, use_orig_params: bool
+    ):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -326,6 +333,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         fsdp_kwargs = {
             "mixed_precision": mp,
             "cpu_offload": CPUOffload(offload_params=offload_params),
+            "use_orig_params": use_orig_params,
         }
         m.lin1 = FSDP(m.lin1, **fsdp_kwargs)
         m = FSDP(m, **fsdp_kwargs)
@@ -333,7 +341,8 @@ class TestFSDPMixedPrecision(FSDPTest):
             inp = torch.ones(1, 10)
             m(inp).sum().backward()
             for param in m.parameters():
-                self.assertEqual(torch.float16, param.grad.dtype)
+                if param.grad is not None:
+                    self.assertEqual(torch.float16, param.grad.dtype)
 
         dist.barrier()
 
@@ -643,7 +652,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(2)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {
+                "offload_params": [False, True],
+                "use_orig_params": [False, True],
+            },
             self._test_grads_reduced_precision,
         )
 
@@ -716,7 +728,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(1)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {"offload_params": [False, True], "use_orig_params": [False, True]},
             self._test_grads_reduced_precision,
         )
 
@@ -750,6 +762,48 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
+
+
+class IgnoredModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l(x)
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.Linear(100, 100)
+        self.ignored = IgnoredModule()
+        self.l2 = nn.Linear(100, 100)
+
+    def forward(self, x):
+        return self.l2(self.ignored(self.l1(x)))
+
+
+class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+    @property
+    def world_size(self):
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_mixed_precision_with_ignored_module(self):
+        model = Model().cuda()
+        float16 = MixedPrecision(param_dtype=torch.float16)
+        model = FSDP(
+            model,
+            ignored_modules=[model.ignored],
+            mixed_precision=float16,
+        )
+
+        x = torch.ones(2, 100, device=torch.cuda.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+            model(x).sum().backward()
+
 
 if __name__ == "__main__":
     run_tests()

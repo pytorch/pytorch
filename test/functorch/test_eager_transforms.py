@@ -32,11 +32,13 @@ from functorch import (
     jvp, make_functional, make_functional_with_buffers,
     combine_state_for_ensemble, make_fx
 )
-from functorch._src.make_functional import (
+from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
+from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
+from torch._ops import PyOperator
+from torch._functorch.utils import enable_autograd_function
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -2388,6 +2390,35 @@ class TestComposability(TestCase):
         with self.assertRaises(RuntimeError):
             grad(f)(x)
 
+    def test_autograd_function_debug_switch(self, device):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, gy):
+                x, = ctx.saved_tensors
+                return gy * x.cos()
+
+        x = torch.randn([])
+
+        # by default, autograd.Function is disabled in a functorch transform
+        with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
+            grad(MySin.apply)(x)
+
+        # we have a debug switch to allow it
+        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+        try:
+            torch._C._functorch.set_autograd_function_allowed(True)
+            self.assertTrue(torch._C._functorch.get_autograd_function_allowed())
+            y = grad(MySin.apply)(x)
+        finally:
+            torch._C._functorch.set_autograd_function_allowed(False)
+        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+        self.assertEqual(y, x.cos())
+
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -2669,6 +2700,37 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_state_correctly_returned_after_forward(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        mod = Net()
+        func, params = make_functional(mod)
+
+        # state in func.names_map
+        old_state_linear_weight = func.stateless_model.linear.weight
+        old_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(old_state_linear_weight)
+        self.assertIsNotNone(old_state_linear_bias)
+
+        x = torch.randn(4, 3)
+        func(params, x)
+
+        new_state_linear_weight = func.stateless_model.linear.weight
+        new_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(new_state_linear_weight)
+        self.assertIsNotNone(new_state_linear_bias)
+
+        self.assertEqual(old_state_linear_weight, new_state_linear_weight)
+        self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
 class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device):
@@ -3483,6 +3545,123 @@ def forward(self, x_1):
     """)
 
 
+def construct_sum_pyop():
+    mysum = PyOperator("mysum")
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
+    def mysum_batch_rule(interpreter, x, dim):
+        if not torch._C._functorch.is_batchedtensor(x):
+            with interpreter.lower():
+                x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                return mysum(x, dim)
+
+        bdim = torch._C._functorch.maybe_get_bdim(x)
+        value = torch._C._functorch.get_unwrapped(x)
+
+        with interpreter.lower():
+            value = value.movedim(bdim, 0)
+            result = mysum(value, dim + 1)
+
+        return torch._C._functorch._add_batch_dim(result, 0, interpreter.level())
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Grad)
+    def mysum_grad_rule(interpreter, x, dim):
+        level = interpreter.level()
+
+        class MySum(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, dim):
+                ctx.x_shape = x.shape
+                ctx.dim = dim
+                x = torch._C._functorch._unwrap_for_grad(x, level)
+                with torch.enable_grad(), interpreter.lower():
+                    x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                    y = mysum(x, dim)
+
+                y = torch._C._functorch._wrap_for_grad(y, level)
+                return y
+
+            @staticmethod
+            def backward(ctx, gy):
+                return gy.unsqueeze(ctx.dim).expand(ctx.x_shape), None
+
+        with enable_autograd_function():
+            return MySum.apply(x, dim)
+
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCPU)
+    def mysum_autograd_cpu(x, dim):
+        return torch.sum(x, dim)
+
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCUDA)
+    def mysum_autograd_cuda(x, dim):
+        return torch.sum(x, dim)
+
+    return mysum
+
+sum_pyop = construct_sum_pyop()
+
+class TestPyOperatorInteraction(TestCase):
+
+    def test_basic_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = sum_pyop(x, 1)
+        self.assertEqual(result, torch.sum(x, 1))
+
+    def test_vmap_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = vmap(sum_pyop, (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 1))
+
+        result = vmap(vmap(sum_pyop, (0, None)), (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 2))
+
+    def test_grad_sum(self, device):
+        x = torch.randn(3, device=device)
+        gx = grad(sum_pyop)(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_grad_grad_sum(self, device):
+        x = torch.randn(3, requires_grad=True, device=device)
+
+        def f(x):
+            # higher order grad. Requires a non-linearity
+            return sum_pyop(x.sin(), 0)
+
+        def grad_f_sum(x):
+            return grad(f)(x).sum()
+
+        ggx = grad(grad_f_sum)(x)
+        self.assertEqual(ggx, -x.sin())
+
+    def test_vmap_grad_sum(self, device):
+        x = torch.randn(2, 3, device=device)
+        gx = vmap(grad(sum_pyop), (0, None))(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_no_grad_outside_grad(self, device):
+        x = torch.randn(3, device=device, requires_grad=True)
+        with torch.no_grad():
+            y = grad(sum_pyop)(x, 0)
+        self.assertEqual(y, torch.ones_like(x))
+        self.assertFalse(y.requires_grad)
+
+    def test_no_grad_inside_grad(self, device):
+        def f(x):
+            with torch.no_grad():
+                shift = sum_pyop(x ** 2, 0)
+            return sum_pyop(x ** 2, 0) - shift
+
+        x = torch.randn(3, device=device)
+        y = grad(f)(x)
+        self.assertEqual(y, 2 * x)
+        y = grad(lambda x: grad(f)(x).sum())(x)
+        self.assertEqual(y, torch.full_like(x, 2))
+
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = grad(f)(x)
+        z, = torch.autograd.grad(y.sum(), x)
+        self.assertEqual(z, torch.full_like(x, 2))
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
@@ -3522,6 +3701,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestPyOperatorInteraction,
     globals(),
     only_for=only_for,
 )

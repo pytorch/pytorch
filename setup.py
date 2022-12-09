@@ -446,8 +446,8 @@ Please install it via `conda install {module}` or `pip install {module}`
 def check_pydep(importname, module):
     try:
         importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+    except ImportError as e:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module)) from e
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -852,7 +852,7 @@ def configure_extension_build():
     pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
     if pytorch_extra_install_requirements:
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
-        extra_install_requires += pytorch_extra_install_requirements.split(";")
+        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
 
     # Cross-compile for M1
@@ -1036,9 +1036,11 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',
+        'include/ATen/cpu/vec/vec256/vsx/*.h',
         'include/ATen/cpu/vec/vec512/*.h',
         'include/ATen/cpu/vec/*.h',
         'include/ATen/core/*.h',
@@ -1147,6 +1149,7 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        'include/sleef.h',
         "_inductor/codegen/*.h",
         "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
