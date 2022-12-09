@@ -26,7 +26,7 @@ fi
 ./Dict_test
 ./NamedTensor_test
 ./cpu_generator_test
-./vmap_test
+./legacy_vmap_test
 ./operators_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
