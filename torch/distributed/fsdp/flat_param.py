@@ -1255,6 +1255,7 @@ class FlatParamHandle:
                 # gradient to be computed directly with padding.
                 accumulated_grad_in_no_sync = (
                     flat_param.grad is not None
+                    and self.uses_sharded_strategy
                     and flat_param.grad.shape == flat_param._unpadded_unsharded_size
                 )
                 if accumulated_grad_in_no_sync:
