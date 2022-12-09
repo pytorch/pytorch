@@ -1,4 +1,4 @@
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>

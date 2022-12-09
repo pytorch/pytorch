@@ -21,7 +21,7 @@ from torch.nn.intrinsic import _FusedModule
 
 from ..utils import (
     _parent_name,
-    _get_qconfig_dtypes,
+    get_qconfig_dtypes,
     get_combined_dict
 )
 from ..qconfig_mapping import (
@@ -236,7 +236,7 @@ def _is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List
         bias_dtype = dtype_config.bias_dtype or torch.float
         output_dtype = dtype_config.output_dtype or torch.float
         qconfig_activation_dtype, qconfig_weight_dtype, qconfig_input_act_is_dynamic = \
-            _get_qconfig_dtypes(qconfig)
+            get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
             if (
                 qconfig_activation_dtype == torch.float16
