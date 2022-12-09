@@ -191,7 +191,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
             This is the process group used for collective communications and
             the one over which the model is sharded. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD`` or ``ShardingStrategy._HYBRID_SHARD_ZERO2``, users can
+            ``ShardingStrategy.HYBRID_SHARD`` users can
             pass in a tuple of process groups representing the groups to shard and replicate across,
             respectively.
         sharding_strategy (Optional[ShardingStrategy]):
