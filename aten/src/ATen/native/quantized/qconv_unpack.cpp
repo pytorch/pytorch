@@ -28,6 +28,12 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <ATen/ops/from_blob.h>
 #endif
 
+template <int kSpatialDim = 2>
+int register_conv_params();
+
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
+
 
 namespace at {
 namespace native {
@@ -192,6 +198,8 @@ unpack_quantized_prepacked_sizes_conv2d(const IValue& ivalue) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
+  register_conv_params<2>();
+  register_conv_params<3>();
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
   // We use  conv2d_unpack to be consistent with conv3d_unpack
