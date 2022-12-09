@@ -5,6 +5,7 @@ import io
 import subprocess
 import json
 from functools import lru_cache
+from typing import List, Tuple
 
 cache = lru_cache(None)
 
@@ -311,13 +312,13 @@ def trace(data):
 
 class PlotWriter:
     def __init__(self):
-        string_table = []
-        suffix_table = []
+        string_table: List[str] = []
+        suffix_table: List[Tuple[int, int]] = []
 
         elements = []
-        actions = []
+        actions: List[int] = []
 
-        initially_allocated = []
+        initially_allocated: List[int] = []
 
         @cache
         def intern_str(s):
@@ -449,11 +450,16 @@ def profile_plot(memory_profile, device=None):
             kv_to_elem[(tensor_key, version + 1)] = elemid = add_element(size, tensor_key, version + 1)
             w.allocate(elemid)
         elif action == Action.PREEXISTING:
-            kv_to_elem[(tensor_key, version)] = elemid = add_element(size,  tensor_key, version)
+            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
             w.initially_allocated(elemid)
     return w.to_html()
 
-
+# note: this template should eventually move to its own file,
+# however, we first need to package _memory_viz.py so that it can be
+# pip-installed separately from pytorch so it is easy to run e.g.
+# on a laptop with downloaded snapshots. Currently this is
+# accomplished by downloading _memory_viz.py so the template
+# needs to be included
 _memory_over_time_template = r"""
 <!DOCTYPE html>
 <html>
