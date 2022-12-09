@@ -117,6 +117,29 @@ class TestContract(TestCase):
         model(torch.zeros(10, 10), torch.zeros(10, 10))
         self.assertEqual(api.state(model.seq1).dummy_state, 8)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    def test_registry(self):
+        @contract
+        def api1(module: nn.Module) -> nn.Module:
+            return module
+
+        @contract
+        def api2(module: nn.Module) -> nn.Module:
+            return module
+
+        model = ToyModel()
+        model = api1(model)
+        self.assertEqual(1, len(api2.registry(model)))
+        self.assertTrue("api1" in api2.registry(model))
+        model = api2(model)
+        self.assertEqual(2, len(api2.registry(model)))
+        self.assertTrue([api2.registry(model).keys()], ["api1", "api2"])
+
+        with self.assertRaisesRegex(
+            AssertionError, "api1 has already been applied"
+        ):
+            model = api1(model)
+
 
 if __name__ == "__main__":
     run_tests()
