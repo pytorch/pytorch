@@ -2153,7 +2153,8 @@ class ReducerTest(TestCase):
         c10d.destroy_process_group()
         try:
             os.remove(self.file.name)
-        except OSError:
+        except OSError as e:
+            print(str(e))
             pass
 
     @requires_gloo()

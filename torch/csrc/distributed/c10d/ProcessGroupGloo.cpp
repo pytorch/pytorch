@@ -727,36 +727,6 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 }
 #endif
 
-c10::intrusive_ptr<ProcessGroupGloo> ProcessGroupGloo::createProcessGroupGloo(
-    const c10::intrusive_ptr<Store>& store,
-    int rank,
-    int size,
-    std::chrono::milliseconds timeout) {
-  auto glooOptions = ::c10d::ProcessGroupGloo::Options::create();
-
-  // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-  std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-  char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-  if (ifnameEnv && strlen(ifnameEnv) > 1) {
-    for (const auto& iface : split(',', ifnameEnv)) {
-      glooOptions->devices.push_back(
-          ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
-    }
-  } else {
-    // If no hostname is specified, this function looks up
-    // the machine's hostname and returns a device instance
-    // associated with the address that the hostname resolves to.
-    glooOptions->devices.push_back(
-        ::c10d::ProcessGroupGloo::createDefaultDevice());
-  }
-
-  glooOptions->timeout = timeout;
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  glooOptions->threads = glooOptions->devices.size() * 2;
-
-  return c10::make_intrusive<ProcessGroupGloo>(store, rank, size, glooOptions);
-}
-
 ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,

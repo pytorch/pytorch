@@ -173,8 +173,8 @@ c10::intrusive_ptr<Work> send(
     int64_t dstRank,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(process_group->getBackendType())
-      ->send(tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+  return process_group->getDefaultBackend()->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
 c10::intrusive_ptr<Work> recv_(
@@ -183,8 +183,8 @@ c10::intrusive_ptr<Work> recv_(
     int64_t srcRank,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(process_group->getBackendType())
-      ->recv(tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+  return process_group->getDefaultBackend()->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
 c10::intrusive_ptr<Work> recv_any_source_(
@@ -192,8 +192,8 @@ c10::intrusive_ptr<Work> recv_any_source_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(process_group->getBackendType())
-      ->recvAnysource(tensor_vec, static_cast<int>(tag));
+  return process_group->getDefaultBackend()->recvAnysource(
+      tensor_vec, static_cast<int>(tag));
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -571,6 +571,19 @@ void monitored_barrier(
 c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts) {
+  at::Tensor tensor;
+  // TODO: if nccl was specified then use it
+  if (process_group->getBackendType() ==
+      c10d::ProcessGroup::BackendType::NCCL) {
+    // set cuda tensor
+    tensor = at::empty(
+        {1}, at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte));
+  } else {
+    // Default to using cpu implementation
+    tensor = at::empty(
+        {1}, at::TensorOptions().device(at::DeviceType::CPU).dtype(at::kByte));
+  }
+
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::barrier", "")
                        .typed<c10::intrusive_ptr<::c10d::Work>(
@@ -578,15 +591,6 @@ c10::intrusive_ptr<Work> barrier(
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<int64_t>&,
                            int64_t)>();
-
-  // Default to using cpu implementation
-  at::Tensor tensor = at::empty({0}, at::TensorOptions().device(at::kCPU));
-  // TODO: if nccl was specified then use it
-  if (process_group->getBackendType() ==
-      c10d::ProcessGroup::BackendType::NCCL) {
-    // set cuda tensor
-    tensor = at::empty({0}, at::TensorOptions().device(at::kCUDA));
-  }
 
   return op.call(tensor, process_group, opts.device_ids, opts.timeout.count());
 }

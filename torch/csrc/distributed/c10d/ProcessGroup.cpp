@@ -124,61 +124,6 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
     auto backend = backendTypeToBackend_.at(backendType);
     deviceTypeToBackend_[deviceType] = backend;
     return backend;
-  } else {
-    // TODO: finish implementing this for lazy initialization
-#ifdef USE_C10D_GLOO
-    std::cout << "C++ initializing the backend for "
-              << backendTypeToStr(backendType) << std::endl;
-    // initialize the backend
-
-    // create a separate prefix store for the newly created backend
-    auto prefixStore = c10::make_intrusive<PrefixStore>(
-        backendTypeToStr(backendType) + "/", store_);
-    c10::intrusive_ptr<Backend> backend;
-
-    // TODO: we should move this into its own function for each respective
-    // backend if backend is gloo then initialize a gloo backend
-    if (backendType == ProcessGroup::BackendType::GLOO) {
-      // create ProcessGroupGloo options
-      backend = ProcessGroupGloo::createProcessGroupGloo(
-          prefixStore, rank_, size_, options_->timeout);
-    }
-
-    // if backend is nccl or gloo then set sequence number
-    if (backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::GLOO) {
-      backend->setSequenceNumberForGroup();
-    }
-
-    // if using torch_distributed_debug, then wrap backend with
-    // ProcessGroupWrapper
-    if (dist_debug_level_ >= DebugLevel::Detail) {
-      // create new prefix store for the wrapper
-      auto wrapperPrefixStore = c10::make_intrusive<PrefixStore>(
-          backendTypeToStr(backendType) + "/wrapper", store_);
-      auto wrapperBackend = ProcessGroupGloo::createProcessGroupGloo(
-          wrapperPrefixStore, rank_, size_, options_->timeout);
-      backend =
-          c10::make_intrusive<ProcessGroupWrapper>(backend, wrapperBackend);
-    }
-
-    // set internal state and return
-    deviceTypeToBackend_[deviceType] = backend;
-    backendTypeToBackend_[backendType] = backend;
-    return backend;
-
-    // if (backendType == ProcessGroup::BackendType::MPI) {
-    //   auto backend = c10::make_intrusive<ProcessGroupMPI>();
-    // } else if (backendType == ProcessGroup::BackendType::GLOO) {
-    //   return c10::make_intrusive<ProcessGroupGloo>();
-    // } else if (backendType == ProcessGroup::BackendType::NCCL) {
-    //   return c10::make_intrusive<ProcessGroupNCCL>();
-    // } else if (backendType == ProcessGroup::BackendType::UCC) {
-    //   return c10::make_intrusive<ProcessGroupUCC>();
-    // } else {
-    //   TORCH_CHECK(false, "Unknown backend type: ", backendType);
-    // }
-#endif // USE_C10D_GLOO
   }
 
   TORCH_CHECK(
@@ -201,10 +146,6 @@ ProcessGroup::ProcessGroup(
       backendType_(strToBackendType(options->backend)),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
-
-  std::cout << "creating process group" << std::endl;
-  // parseBackendStr(options_->backend);
-  std::cout << "finished parsing backend str" << std::endl;
 }
 
 ProcessGroup::ProcessGroup(int rank, int size)

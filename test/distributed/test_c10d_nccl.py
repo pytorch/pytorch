@@ -1037,9 +1037,8 @@ class DistributedDataParallelTest(
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
-    def _get_process_group(self, store=None):
-        if store is None:
-            store = self._get_store()
+    def _get_process_group(self):
+        store = self._get_store()
         c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
         return c10d.distributed_c10d._get_default_group()
 
@@ -1714,7 +1713,8 @@ class DistributedDataParallelTest(
         c10d.destroy_process_group(process_group)
 
         store = c10d.FileStore(recovery_filename, self.world_size)
-        process_group = self._get_process_group(store=store)
+        c10d.init_process_group("nccl", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
         ddp = DistributedDataParallel(
             model,
             device_ids=[device_id],

@@ -237,14 +237,14 @@ class BackendConfig(object):
         # error check to make sure the config string is valid
 
         # Cases for when backend is a single string (without device types)
-        if backend == Backend.UNDEFINED or backend == Backend.NCCL:
+        if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             self.device_backend_map = {
                 "cpu": Backend.GLOO,
                 "cuda": Backend.NCCL,
             }
         elif backend.lower() in Backend.backend_list:
-            # backend applies to all devices (e.g. "GLOO", "UCC", "MPI", "custom_backend")
+            # backend applies to all devices (e.g. "NCCL", "GLOO", "UCC", "MPI", "custom_backend")
             backend_val = Backend(backend)
             self.device_backend_map = {
                 "cpu": backend_val,
@@ -742,12 +742,6 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
         The backend of the given process group as a lower case string.
 
     """
-    warnings.warn(
-        "torch.distributed.get_backend() will be deprecated. Process groups now support multiple backends "
-        "and will use a backend based on the device of the tensors arguments in the collective, "
-        "use torch.distributed.get_backend_config() to get the backend specification for all devices. "
-        "For more information on this feature, see https://github.com/pytorch/pytorch/issues/86225"
-    )
     if group is None:
         pg = _get_default_group()
     else:
@@ -1040,12 +1034,9 @@ def _new_process_group_helper(
 
                 backend_pg = creator_fn(dist_backend_opts, pg_options)
 
-        # TODO: remove _set_sequence_number_for_group() after lazy initialization is supported
-        if backend_pg is not None:
-            # Set sequence numbers for gloo and nccl backends.
-            if backend_str in [Backend.GLOO, Backend.NCCL]:
-                backend_pg._set_sequence_number_for_group()
-
+        # Set sequence numbers for gloo and nccl backends.
+        if backend_str in [Backend.GLOO, Backend.NCCL]:
+            backend_pg._set_sequence_number_for_group()
         # If the type is a sublcass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
@@ -1053,33 +1044,37 @@ def _new_process_group_helper(
             pg = backend_pg
             break
 
-        # TODO: remove process group wrapper code after lazy initialization is supported
-        if backend_pg is not None:
-            # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-            if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
-                # In debug mode and if GLOO is available, wrap in a wrapper PG that
-                # enables enhanced collective checking for debuggability.
-                if get_debug_level() == DebugLevel.DETAIL:
-                    if not _GLOO_AVAILABLE:
-                        logger.info(
-                            """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
-                                    GLOO is not available. Build with Gloo to
-                                    create a wrapper process group in debug mode
-                                    to aid collective desynchronization debugging."""
-                        )
-                    else:
-                        backend_pg = _create_process_group_wrapper(
-                            wrapped_pg=backend_pg,
-                            store_prefix=group_name,
-                            store=prefix_store,
-                            rank=group_rank,
-                            world_size=group_size,
-                            timeout=timeout,
-                        )
+        # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
+        if backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debuggability.
+            if get_debug_level() == DebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    backend_pg = _create_process_group_wrapper(
+                        wrapped_pg=backend_pg,
+                        store_prefix=group_name,
+                        store=prefix_store,
+                        rank=group_rank,
+                        world_size=group_size,
+                        timeout=timeout,
+                    )
 
-        print("set backend")
-        pg._set_backend(torch.device(device), backend_pg_type, backend_pg)
-        print(f"finished creating {backend_pg} for device {device}")
+        # only create single backend pg when backend is set to gloo, nccl, mpi, etc.
+        if backend.lower() in Backend.backend_list:
+            for device in backend_config.get_device_backend_map().keys():
+                print("set backend")
+                pg._set_backend(torch.device(device), backend_pg_type, backend_pg)
+                print(f"finished creating {backend_pg} for device {device}")
+
+            # break out of outer loop to not create any more backends
+            break
 
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
@@ -1966,7 +1961,7 @@ def _check_for_nccl_backend(group):
 
     return (
         is_nccl_available() and
-        isinstance(pg, ProcessGroupNCCL)
+        pg.name() == Backend.NCCL
     )
 
 @exception_handler
