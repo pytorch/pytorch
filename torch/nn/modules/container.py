@@ -325,7 +325,7 @@ class ModuleList(Module):
             combined.add_module(str(i), module)
         return combined
 
-    def __repr__(module):
+    def __repr__(self):
         """A custom repr for ModuleList that compresses repeated module representations"""
         list_of_reprs = [repr(item) for item in module]
         repeats = [1]
