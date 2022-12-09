@@ -689,10 +689,6 @@ class FullyShardedDataParallel(nn.Module):
                     module, prev_state_dict_type, prev_state_dict_config
                 )
 
-    def state_dict(self, *args, **kwargs):
-        _lazy_init(self, self)
-        return super().state_dict(*args, **kwargs)
-
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Runs the forward pass for the wrapped module, inserting FSDP-specific
