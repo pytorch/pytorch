@@ -1257,7 +1257,6 @@ def forward(self, primals_1, primals_2):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
 
     def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
-        from functorch.experimental import functionalize
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -1265,13 +1264,15 @@ def forward(self, primals_1, primals_2):
                 self.register_buffer("buffer", torch.ones(4, 5))
 
             def forward(self, x):
-                self.buffer.resize_([6, 5])
+                y = self.buffer.add_(3)
+                y.resize_([20])
+                assert(y.shape == self.buffer.shape)
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
         inp = torch.randn(2, 5)
         # inplace mutation on attr is not allowed
-        with self.assertRaisesRegex(Exception, "Invoking operators with non-Fake Tensor"):
+        with self.assertRaisesRegex(Exception, "Can't call inplace view ops on global variables"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
 
