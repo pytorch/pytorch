@@ -699,12 +699,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
+            _root_pre_forward(self, self, unused)
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
-            _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, unused
+            args, kwargs = _pre_forward(
+                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
                 p_assert(
