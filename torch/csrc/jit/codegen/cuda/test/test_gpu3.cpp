@@ -7176,6 +7176,47 @@ TEST_F(NVFuserTest, FusionVectorizeWelford2_CUDA) {
       __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionRepro2241_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  {
+    TensorView* t6 = makeContigConcreteTensor({1}, DataType::Int);
+    TensorView* t15 = makeContigConcreteTensor({3, 2, 1, 2}, DataType::Double);
+    TensorView* t20 = makeContigConcreteTensor({1, 1, 1, 1}, DataType::Int);
+    fusion->addInput(t6);
+    fusion->addInput(t15);
+    fusion->addInput(t20);
+    auto sample_total = sum(t15, {0, 1, 2, 3}, true);
+    auto sample_mean = div(sample_total, t20);
+    auto x = sub(t15, sample_mean);
+    auto input = mul(x, x);
+    auto total = sum(input, {0, 1, 2, 3});
+    auto t7 = div(total, t6);
+    fusion->addOutput(t7);
+  }
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
+  auto options = at::TensorOptions().device(at::kCUDA, 0);
+  at::Tensor t6 = at::tensor({15}, options.dtype(kLong));
+  at::Tensor t15 = at::randn({3, 2, 1, 2}, options.dtype(kDouble));
+  at::Tensor t20 = at::tensor({12}, options.dtype(kLong)).expand({1, 1, 1, 1});
+
+  auto cg_outputs = fec.runFusionWithInputs({t6, t15, t20});
+
+  auto sample_total = at::sum(t15, {0, 1, 2, 3}, true);
+  auto sample_mean = at::div(sample_total, t20);
+  auto x = at::sub(t15, sample_mean);
+  auto input = at::mul(x, x);
+  auto total = at::sum(input, {0, 1, 2, 3}, false);
+  auto t7 = at::div(total, t6);
+
+  testValidate(
+      fec.fusion(), cg_outputs, {t6, t15, t20}, {t7}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

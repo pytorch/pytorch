@@ -214,6 +214,33 @@ TensorView* scheduleReductionTV(
   return sortAndRFactor(reduction_tv);
 }
 
+namespace {
+
+// Input: a vector of axes in the given tensor ignoring broadcasts. For example,
+//        if you have a tensor T1[b, rS1, rS2, rS3], and you want to specify
+//        axis rS2 and rS3, then your `non_broadcast_axes` should be {1, 2}.
+// Output: the raw positions (counting broadcasts). In the above example, the
+//         output should be {2, 3}.
+std::vector<int> addBackBroadcasts(
+    TensorView* tv,
+    const std::unordered_set<int>& non_broadcast_axes) {
+  // convert non-broadcast positions to raw positions
+  std::vector<int> axes;
+  int non_broadcast_pos = 0;
+  for (const auto i : c10::irange(tv->nDims())) {
+    if (tv->axis((int)i)->isBroadcast()) {
+      continue;
+    }
+    if (non_broadcast_axes.count(non_broadcast_pos)) {
+      axes.emplace_back(i);
+    }
+    non_broadcast_pos++;
+  }
+  return axes;
+}
+
+} // namespace
+
 void multiReductionInliner(
     Fusion* fusion,
     const ReductionParams& rparams,
@@ -230,12 +257,22 @@ void multiReductionInliner(
   // If reduction_tv is rfactored, rfactor all reductions.
   if (reference_tv != reduction_tv) {
     // Apply rfactor to all reductions if applicable
-    std::vector<int> rfactor_axes;
+    // We use axes ignoring broadcasts because in checkPatternEquivalence,
+    // broadcast is ignored, we might end up having multiple reductions with
+    // pattern equivalence but have different number of broadcasts, so the
+    // position in the reference tensor is not necessary the same as the
+    // position in other reduction TVs.
+    std::unordered_set<int> non_broadcast_rfactor_axes;
+    int non_broadcast_pos = 0;
     for (const auto i : c10::irange(reference_tv->nDims())) {
+      if (reference_tv->axis((int)i)->isBroadcast()) {
+        continue;
+      }
       if (reference_tv->axis((int)i)->isReduction() &&
           reference_tv->axis((int)i)->isRFactorProduct()) {
-        rfactor_axes.push_back((int)i);
+        non_broadcast_rfactor_axes.insert(non_broadcast_pos);
       }
+      non_broadcast_pos++;
     }
 
     for (auto reduction_tv_ : reduction_tvs) {
@@ -243,7 +280,9 @@ void multiReductionInliner(
         // This should come in already rfactored
         continue;
       } else {
-        ir_utils::rfactorHelper(reduction_tv_, rfactor_axes);
+        ir_utils::rfactorHelper(
+            reduction_tv_,
+            addBackBroadcasts(reduction_tv_, non_broadcast_rfactor_axes));
       }
     }
   }
