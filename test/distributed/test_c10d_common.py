@@ -1522,6 +1522,20 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         for tensor in tensors:
             self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
 
+    def _test_all_to_all_single(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        input_tensor = torch.ones(2, 2, device=torch.device(device))
+        output_tensor = torch.zeros(2, 2, device=torch.device(device))
+        dist.all_to_all_single(output_tensor, input_tensor)
+
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
         super(CompilerTest, self).setUp()
@@ -1550,7 +1564,6 @@ class CompilerTest(MultiProcessTestCase):
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            # return z * 2
             if isinstance(z, list):
                 return [zz * 2 for zz in z]
             elif isinstance(z, torch.Tensor):

@@ -281,6 +281,7 @@ ALLOW_LIST = [
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
+    ("c10d::alltoall_", datetime.date(2022, 12, 30)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
     ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
