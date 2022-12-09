@@ -38,6 +38,8 @@ class MapperIterDataPipe(IterDataPipe):
 
 ### Length
 In the most common cases, as the example of `MapperIterDataPipe` above, the `__len__` method of DataPipe should return the length of source DataPipe.
+Take care that `__len__` must be computed dynamically, because the length of source data-pipes might change after initialization (for example if sharding is applied).
+
 ```py
 class MapperIterDataPipe(IterDataPipe):
     ...
