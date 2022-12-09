@@ -192,8 +192,6 @@ if(BUILD_PYTHON)
   endif()
   target_include_directories(${NVFUSER_PYTHON}
                          PRIVATE ${TORCH_ROOT})
-                 #PRIVATE ${pybind11_INCLUDE_DIRS}
-                           #PRIVATE ${PYTHON_INCLUDE_DIRS})
   target_compile_options(${NVFUSER_PYTHON} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
   if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     message(STATUS "somehow this is happening")

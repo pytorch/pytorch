@@ -160,7 +160,7 @@ function checkout_install_torchdeploy() {
   local commit
   setup_torchdeploy_deps
   pushd ..
-  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  git clone --recurse-submodules https://github.com/jjsjann123/multipy.git
   pushd multipy
   python multipy/runtime/example/generate_examples.py
   pip install -e . --install-option="--cudatests"
