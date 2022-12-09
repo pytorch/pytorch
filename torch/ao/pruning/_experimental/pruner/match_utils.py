@@ -3,7 +3,7 @@ Contains utility functions to check if a pattern is in the graph and return the 
 """
 import torch
 from torch import nn
-from torch.ao.quantization.fx.match_utils import (
+from torch.ao.quantization.utils import (
     MatchAllNode,
 )
 from torch.fx import Node
