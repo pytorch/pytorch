@@ -8,6 +8,7 @@ from typing import Callable
 
 import onnx
 import parameterized
+import pytorch_test_common
 
 import torch
 import torch.onnx
@@ -27,13 +28,7 @@ from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
-class _BaseTestCase(common_utils.TestCase):
-    def setUp(self):
-        super().setUp()
-        torch.manual_seed(0)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(0)
-
+class _BaseTestCase(pytorch_test_common.ExportTestCase):
     def _model_to_graph(
         self,
         model,
@@ -64,7 +59,7 @@ class _BaseTestCase(common_utils.TestCase):
 
 
 @common_utils.instantiate_parametrized_tests
-class TestUnconvertibleOps(common_utils.TestCase):
+class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
     """Unit tests for the `unconvertible_ops` function."""
 
     def setUp(self):
@@ -127,6 +122,18 @@ class TestUnconvertibleOps(common_utils.TestCase):
 
         # Einsum is supported since opset 12
         _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=12)
+        self.assertEqual(unconvertible_ops, [])
+
+    def test_it_returns_empty_list_when_model_contains_supported_inplace_ops(self):
+        class SkipConnectionModule(torch.nn.Module):
+            def forward(self, x):
+                out = x
+                out += x
+                out = torch.nn.functional.relu(out, inplace=True)
+
+        module = SkipConnectionModule()
+        x = torch.randn(4, 4)
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=13)
         self.assertEqual(unconvertible_ops, [])
 
 
@@ -233,7 +240,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -251,7 +257,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -598,8 +603,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
+        self.assertEqual(weight, torch.tensor([2.0, 3.0, 4.0, 5.0, 6.0]))
 
     def test_constant_fold_sub(self):
         class Module(torch.nn.Module):
@@ -630,8 +634,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
+        self.assertEqual(weight, torch.tensor([0.0, -1.0, -2.0, -3.0, -4.0]))
 
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):

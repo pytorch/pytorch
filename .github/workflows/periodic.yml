@@ -3,20 +3,18 @@ name: periodic
 on:
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
       - ciflow/periodic/*
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
 jobs:
   linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build:
-    # Disable because slow-gradcheck tests take > 4 hrs and time out.
-    # TODO(sdym@meta.com): investigate re-enabling slow-gradcheck tests.
-    if: false
     name: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -29,9 +27,6 @@ jobs:
         ]}
 
   linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-test:
-    # Disable because slow-gradcheck tests take > 4 hrs and time out.
-    # TODO(sdym@meta.com): investigate re-enabling slow-gradcheck tests.
-    if: false
     name: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build
@@ -39,6 +34,7 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
+      timeout-minutes: 300
 
   linux-focal-rocm5_2-py3_8-slow-build:
     name: linux-focal-rocm5.2-py3.8-slow
@@ -46,6 +42,10 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_8-slow-test:
     name: linux-focal-rocm5.2-py3.8-slow
@@ -54,10 +54,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -68,6 +65,11 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_8-distributed-test:
     name: linux-focal-rocm5.2-py3.8-distributed
@@ -76,11 +78,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -170,8 +168,9 @@ jobs:
       cuda-version: "11.7"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.8xlarge.nvidia.gpu" },
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 

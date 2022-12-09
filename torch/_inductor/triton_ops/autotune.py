@@ -11,7 +11,7 @@ from typing import List
 import torch
 
 from .. import config
-from ..ir import ReductionHint
+from ..ir import ReductionHint, TileHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product, dynamo_utils, has_triton
 from .conv_perf_model import (
@@ -42,11 +42,12 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook):
+    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
+        self.mutated_arg_names = mutated_arg_names
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
@@ -134,19 +135,24 @@ class CachingAutotuner(KernelInterface):
 
         from triton.testing import do_bench
 
-        return do_bench(kernel_call)
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_utils.dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
 
-        # clone the input args to avoid autotune contaminating them if
-        # the kernel does in-place stores
-        cloned_args = [
-            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        ]
+        # clone inplace buffers to avoid autotune contaminating them if
+        # the kernel does in-place stores. avoid cloning other buffers because
+        # it leads to increase memory use
+        cloned_args = []
+        for i, arg in enumerate(args):
+            if self.fn.arg_names[i] in self.mutated_arg_names:
+                assert isinstance(arg, torch.Tensor)
+                cloned_args.append(clone_preserve_strides(arg))
+            else:
+                cloned_args.append(arg)
+
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
@@ -178,7 +184,7 @@ class CachingAutotuner(KernelInterface):
                 raise RuntimeError(
                     """Consider updating Triton with
 `pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                )
+                ) from e
             else:
                 raise e
 
@@ -208,7 +214,8 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    best_config = json.loads(open(cache_filename).read())
+    with open(cache_filename, "r") as fd:
+        best_config = json.loads(fd.read())
     if best_config.get("configs_hash") != configs_hash:
         return None
 
@@ -250,9 +257,15 @@ def cached_autotune(
     else:
         save_cache_hook = None
 
+    mutated_arg_names = meta.pop("mutated_arg_names", ())
+
     def decorator(fn):
         return CachingAutotuner(
-            fn, meta=meta, configs=configs, save_cache_hook=save_cache_hook
+            fn,
+            meta=meta,
+            configs=configs,
+            save_cache_hook=save_cache_hook,
+            mutated_arg_names=mutated_arg_names,
         )
 
     return decorator
@@ -377,15 +390,15 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(size_hints, meta, filename=None):
+def pointwise(size_hints, meta, tile_hint=None, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
     if len(size_hints) == 1:
         return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune:
-            return cached_autotune([triton_config(size_hints, 64, 64)], meta=meta)
+        if not config.triton.autotune or tile_hint == TileHint.SQUARE:
+            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),

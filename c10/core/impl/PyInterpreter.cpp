@@ -27,6 +27,13 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
+  void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_op_registration_trampoline);
+  }
+
   void python_dispatcher(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,

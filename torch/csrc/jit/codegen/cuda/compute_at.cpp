@@ -213,20 +213,21 @@ void ComputeAt::runAt(
   auto selected = getPropagationSubgraph(producer, consumer);
   ComputeAtSelector selector(selected);
 
-  InlinePropagator inline_propagator(
-      consumer, consumer_position, mode, selector.selected());
-
   MaxRootDomainInfoSpanningTree path(consumer, consumer_position, &selector);
 
   if (mode == ComputeAtMode::MostInlined) {
     MostInlinedTransformPropagator propagator;
     path.traverse(&propagator);
+    inlineMost(selected);
   } else {
     TransformPropagator propagator(consumer, consumer_position);
     path.traverse(&propagator);
+    inlineSelectedAt(
+        selected,
+        consumer,
+        consumer_position,
+        mode == ComputeAtMode::BestEffort);
   }
-
-  path.traverse(&inline_propagator);
 }
 
 void ComputeAt::runWith(
@@ -253,19 +254,21 @@ void ComputeAt::runWith(
   auto selected = getPropagationSubgraph(producer, consumer);
   ComputeAtSelector selector(selected);
 
-  InlinePropagator inline_propagator(
-      producer, producer_position, mode, selector.selected());
-
   MaxRootDomainInfoSpanningTree path(producer, producer_position, &selector);
 
   if (mode == ComputeAtMode::MostInlined) {
     MostInlinedTransformPropagator propagator;
     path.traverse(&propagator);
+    inlineMost(selected);
   } else {
     TransformPropagator propagator(producer, producer_position);
     path.traverse(&propagator);
+    inlineSelectedAt(
+        selected,
+        producer,
+        producer_position,
+        mode == ComputeAtMode::BestEffort);
   }
-  path.traverse(&inline_propagator);
 }
 
 } // namespace cuda
