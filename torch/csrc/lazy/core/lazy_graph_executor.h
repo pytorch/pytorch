@@ -255,6 +255,61 @@ class TORCH_API LazyGraphExecutor {
     std::map<BackendDevice, std::unique_ptr<DataCache>> device_caches_;
   };
 
+  // The DeviceContextArena holds per device live information and statistics,
+  // among which the lazy tensors which are currently alive in the system. This
+  // is used to create computation "barriers" in order to flush pending
+  // operations and ensure the same computations are created during the training
+  // loops.
+  // TODO(alanwaketan): Add a registry such that we don't need to make all related
+  // methods virtual.
+  class DeviceContextArena {
+   protected:
+    struct DeviceContext {
+      std::mutex lock;
+      std::map<int64_t, std::weak_ptr<LazyTensor::Data>> tensors_data;
+      uint64_t seed = 101;
+      uint64_t running_seed = 101;
+      Value seed_ir_value;
+    };
+
+   public:
+    static DeviceContextArena* Get();
+    virtual ~DeviceContextArena() = default;
+
+    void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
+    void UnregisterTensor(LazyTensor::Data* data);
+
+    std::vector<LazyTensorPtr> GetLiveTensors(const BackendDevice* device);
+
+    // Overriding it allow derived class to use their own IRs for Value.
+    virtual Value GetRngSeed(const BackendDevice& device);
+    uint64_t GetRunningSeed(const BackendDevice& device);
+    void SetRngSeed(const BackendDevice& device, uint64_t seed);
+
+    void MarkStep(const BackendDevice& device);
+
+    std::vector<BackendDevice> GetActiveDevices();
+
+   protected:
+    DeviceContext* GetDeviceContext(const BackendDevice& device);
+
+    void ForAllDeviceContexts(
+        const std::function<void(DeviceContext*)>& fn,
+        const BackendDevice* device);
+
+    // Overriding it allow derived class to use their own conversions.
+    virtual Value IrValueFromScalar(
+        const at::Scalar& value,
+        at::ScalarType scalar_type,
+        const BackendDevice& device);
+
+   private:
+    std::vector<DeviceContext*> GetAllDeviceContexts();
+
+    std::mutex lock_;
+    std::map<BackendDevice, DeviceContext*> device_contexts_;
+  };
+
   void ResetTrimCounter() const;
 
  private:
