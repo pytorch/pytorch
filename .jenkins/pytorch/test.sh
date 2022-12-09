@@ -284,6 +284,18 @@ test_inductor_huggingface() {
   test_inductor_benchmark huggingface
 }
 
+test_inductor_huggingface_perf() {
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check training with --amp
+  # Not checking accuracy for perf test for now
+  python benchmarks/dynamo/huggingface.py --training --performance --disable-cudagraphs \
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
+}
+
 test_inductor_timm_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -292,8 +304,34 @@ test_inductor_timm_shard() {
   test_inductor_benchmark timm_models "$1"
 }
 
+test_inductor_timm_perf_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check training with --amp
+  # Not checking accuracy for perf test for now
+  python benchmarks/dynamo/timm_models.py --performance --disable-cudagraphs \
+    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+}
+
 test_inductor_torchbench() {
   PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+}
+
+test_inductor_torchbench_perf() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check training with --amp
+  # Not checking accuracy for perf test for now
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --training --performance --disable-cudagraphs \
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
 }
 
 test_python_gloo_with_tls() {
@@ -750,12 +788,25 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_perf
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_huggingface
   test_inductor_huggingface
+elif [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  test_inductor_timm_perf_shard $id
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
@@ -763,6 +814,13 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench_perf
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
