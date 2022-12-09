@@ -398,13 +398,6 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            # A "tiny" graph can actually decompose into multiple
-            # operators (if it's a decomposition) and inductor can
-            # do a better job on it in this case
-            #
-            # Also, for some reason, test_comprehensive___rmatmul___cpu
-            # fails without forcing a compile lol.
-            force_compile_tiny_graphs=True,
         )(model_, example_inputs_)
 
 
