@@ -227,18 +227,22 @@ allgather_cuda_(
           output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> _allgather_base_cpu_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  auto work = process_group->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
-c10::intrusive_ptr<Work> _allgather_base_cuda_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cuda_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  auto work = process_group->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
 c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
