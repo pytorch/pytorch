@@ -455,7 +455,7 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif (
-            isinstance(value, types.BuiltinFunctionType)
+            isinstance(value, types.MethodType)
             and type(getattr(value, "__self__", None))
             is torch.autograd.function.FunctionMeta
             and getattr(value, "__name__", "") == "apply"
