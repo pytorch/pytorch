@@ -6,6 +6,8 @@ from types import ModuleType
 
 import torch
 
+from . import external_utils
+
 try:
     import torch._prims
     import torch._refs
@@ -57,6 +59,7 @@ constant_functions = {
     torch._C._get_tracing_state: None,
     torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
+    external_utils.is_compiling: True,
 }
 
 
