@@ -9739,10 +9739,10 @@ class TestNNDeviceType(NNTestCase):
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            rtol, atol = torch.testing.comparison._get_tolerances(dtype, rtol=None, atol=None)
             self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
-            rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
+            rtol, _ = torch.testing.comparison._get_tolerances(torch.half, rtol=None, atol=None)
             self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
@@ -10895,7 +10895,7 @@ class TestNNDeviceType(NNTestCase):
             labels_cpu = labels.cpu()
         out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
-        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        rtol, atol = torch.testing.comparison._get_tolerances(torch.float32, rtol=None, atol=None)
         if reduction == "sum":
             orig_rtol, orig_atol = rtol, atol
             rtol, atol = 7 * rtol, 3 * atol
@@ -11236,7 +11236,7 @@ class TestNNDeviceType(NNTestCase):
             loss_cpu.backward()
 
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
-        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        rtol, atol = torch.testing.comparison._get_tolerances(torch.float32, rtol=None, atol=None)
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
         if reduction != "none":
             self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
