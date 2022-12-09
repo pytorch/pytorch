@@ -85,7 +85,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
     # These optimizers are disabled until we remove item() calls
     test_adam = make_test(torch.optim.Adam, exp_graph_count=0)
-    test_adamax = make_test(torch.optim.Adamax, exp_graph_count=0)
     test_adamw = make_test(torch.optim.AdamW, exp_graph_count=0)
 
     # RAdam and Adagrad have data-dependent control which breaks the graph;
@@ -93,7 +92,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
     test_radam = make_test(torch.optim.RAdam, exp_graph_count=0)
-    test_adagrad = make_test(torch.optim.Adagrad, exp_graph_count=0)
 
     test_nadam = make_test(torch.optim.NAdam)
     # ASGD has a small optimization that avoids averaging
@@ -111,11 +109,8 @@ exclude = set(
         "SparseAdam",  # Unsupported
         "LBFGS",  # Unsupported
         "Adam",  # Disabled pending item call removal
-        "Adamax",  # Disabled pending item call removal
         "AdamW",  # Disabled pending item call removal
         "RAdam",  # Disabled pending item call removal
-        "NAdam",  # Disabled pending item call removal
-        "Adagrad",  # Disabled pending item call removal
         "ASGD",
     ]
 )

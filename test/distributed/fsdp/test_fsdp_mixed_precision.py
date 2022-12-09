@@ -22,7 +22,10 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_cuda import CUDA11OrLater
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    SaveForwardInputsModel,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
@@ -311,7 +314,9 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
-    def _test_grads_reduced_precision(self, offload_params: bool):
+    def _test_grads_reduced_precision(
+        self, offload_params: bool, use_orig_params: bool
+    ):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -331,6 +336,7 @@ class TestFSDPMixedPrecision(FSDPTest):
         fsdp_kwargs = {
             "mixed_precision": mp,
             "cpu_offload": CPUOffload(offload_params=offload_params),
+            "use_orig_params": use_orig_params,
         }
         m.lin1 = FSDP(m.lin1, **fsdp_kwargs)
         m = FSDP(m, **fsdp_kwargs)
@@ -338,7 +344,8 @@ class TestFSDPMixedPrecision(FSDPTest):
             inp = torch.ones(1, 10)
             m(inp).sum().backward()
             for param in m.parameters():
-                self.assertEqual(torch.float16, param.grad.dtype)
+                if param.grad is not None:
+                    self.assertEqual(torch.float16, param.grad.dtype)
 
         dist.barrier()
 
@@ -648,7 +655,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(2)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {
+                "offload_params": [False, True],
+                "use_orig_params": [False, True],
+            },
             self._test_grads_reduced_precision,
         )
 
@@ -721,7 +731,7 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(1)
     def test_grads_reduced_precision(self):
         self.run_subtests(
-            {"offload_params": [False, True]},
+            {"offload_params": [False, True], "use_orig_params": [False, True]},
             self._test_grads_reduced_precision,
         )
 
@@ -766,7 +776,7 @@ class IgnoredModule(nn.Module):
         return self.l(x)
 
 
-class Model(nn.Module):
+class ModelWithIgnoredModule(nn.Module):
     def __init__(self):
         super().__init__()
         self.l1 = nn.Linear(100, 100)
@@ -784,7 +794,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_with_ignored_module(self):
-        model = Model().cuda()
+        model = ModelWithIgnoredModule().cuda()
         float16 = MixedPrecision(param_dtype=torch.float16)
         model = FSDP(
             model,
@@ -796,6 +806,31 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
 
         with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
             model(x).sum().backward()
+
+
+class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+    @property
+    def world_size(self):
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_float16_on_one_submodule(self):
+        forward_inputs: Dict[str, nn.Module] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16)
+
+        model = SaveForwardInputsModel(forward_inputs).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on one submodule and float32 on everything else
+        model.c2 = FSDP(model.c2, mixed_precision=float16)
+        fsdp = FSDP(model)
+
+        fsdp(x).sum().backward()
+
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c2].dtype, torch.float16)
 
 
 if __name__ == "__main__":

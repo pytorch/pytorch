@@ -1319,6 +1319,31 @@ class TestMPS(TestCase):
 
         self.assertEqual(x_cpu, x.cpu())
 
+    def test_view_slice(self):
+        # https://github.com/pytorch/pytorch/issues/83995
+        NUM_SAMPLES = 60
+        s = (0, 1)
+
+        X = torch.rand(8000, 3, dtype=torch.float32, device='cpu')
+        X_mps = X.detach().clone().to("cpu")
+
+        idx = torch.randint(0, X.shape[0], (1,)).repeat(len(s))
+        pts = torch.randint(0, X.shape[0], (NUM_SAMPLES, X.shape[1]))
+        idx_mps = idx.to("mps")
+        pts_mps = pts.to("mps")
+        pts[:, s] = idx
+        pts_mps[:, s] = idx_mps
+
+        actual_pts = torch.zeros(NUM_SAMPLES, X.shape[1], dtype=torch.float)
+        actual_pts_mps = torch.zeros(NUM_SAMPLES, X.shape[1], dtype=torch.float, device="mps")
+
+        for i in range(NUM_SAMPLES):
+            for j in range(X.shape[1]):
+                actual_pts_mps[i, j] = X_mps[pts_mps[i, j], j]
+                actual_pts[i, j] = X[pts[i, j], j]
+                self.assertEqual(actual_pts[i, j], actual_pts_mps[i, j])
+
+
     def test_slice(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         cpu_x = torch.tensor(values, device='cpu')
@@ -1650,7 +1675,7 @@ class TestMPS(TestCase):
     def test_bool_expand(self):
         x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
         y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
-        self.assertNotEqual(x.expand(2, 2), y.expand(2, 2), rtol=0, atol=0, exact_device=True)
+        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
 
     # Empty unary op should return tensor of the same size
     def test_empty_neg(self):
@@ -5043,7 +5068,7 @@ class TestNLLLoss(TestCase):
         # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
         x = torch.ones(4, dtype=torch.int32, device='mps')
         self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
-        self.assertEqual(x + 1.5, torch.full((4,), 2.5, device='mps'), rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(x + 1.5, torch.full((4,), 2.5, device='mps')))
 
     def test_types_binary_op(self):
         # Float * Bool
