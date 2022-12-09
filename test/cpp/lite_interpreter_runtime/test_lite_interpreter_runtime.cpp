@@ -43,7 +43,6 @@ TEST(RunTimeTest, LoadAndForward) {
   //      return self.A0.forward(self.B0.forward(x))
 
   Module bc = _load_for_mobile(testModelFile);
-  auto forward_method = bc.find_method("forward");
   std::vector<c10::IValue> input{c10::IValue(at::tensor(1))};
   const auto result = bc.forward(input);
   const auto expected_result = c10::IValue(at::tensor(4));

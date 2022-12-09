@@ -572,7 +572,7 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   gather_with_cpp() {
     auto r = _gather();
     r->cpp_frames = c10::get_backtrace();
-    return std::move(r);
+    return r;
   }
 };
 
