@@ -136,5 +136,5 @@ class CrossRefFakeMode(TorchDispatchMode):
                             r_out, fake_out, check_strides=self.check_strides
                         )
                     except Exception as e:
-                        raise RuntimeError(f"Mismatch on {func}: {e}")
+                        raise RuntimeError(f"Mismatch on {func}: {e}") from e
         return r
