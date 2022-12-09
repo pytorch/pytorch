@@ -11,9 +11,12 @@ import subprocess
 from typing import Any, List
 from unittest.mock import patch
 
-import functorch
-
-from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
+from functorch.compile import (
+    config,
+    draw_graph,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+)
 
 import torch
 from torch import fx as fx
@@ -21,7 +24,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
-from . import config, ir
+from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
@@ -179,12 +182,15 @@ def enable_aot_logging():
     # and the log level of the file logger to DEBUG
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch._src.config.debug_fake_cross_ref", True))
-    stack.enter_context(patch("functorch._src.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch._src.config.debug_graphs", True))
-    stack.enter_context(patch("functorch._src.config.debug_joint", True))
+    stack.enter_context(patch("functorch.compile.config.debug_fake_cross_ref", True))
+    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
+    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
+    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
+    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
 
-    log = logging.getLogger(functorch._src.aot_autograd.__name__)
+    import torch._functorch.aot_autograd
+
+    log = logging.getLogger(torch._functorch.aot_autograd.__name__)
     path = os.path.join(dynamo_utils.get_debug_dir(), "aot_torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
