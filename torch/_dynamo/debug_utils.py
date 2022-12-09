@@ -871,7 +871,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -888,7 +888,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
