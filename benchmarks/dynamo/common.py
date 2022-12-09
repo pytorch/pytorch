@@ -138,6 +138,7 @@ CI_SKIP_OPTIMIZER = {
     "hrnet_w18",  # accuracy
     "gernet_l",  # accuracy
     "nfnet_l0",  # eager variation
+    "sebotnet33ts_256",  # accuracy
 }
 
 
