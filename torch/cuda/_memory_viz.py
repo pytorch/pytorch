@@ -385,7 +385,12 @@ def trace_plot(data, device=None, plot_segments=False):
     plot_data = json.dumps(r)
     return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
 
-
+# note: this template should eventually move to its own file,
+# however, we first need to package _memory_viz.py so that it can be
+# pip-installed separately from pytorch so it is easy to run e.g.
+# on a laptop with downloaded snapshots. Currently this is
+# accomplished by downloading _memory_viz.py so the template
+# needs to be included
 _memory_over_time_template = r"""
 <!DOCTYPE html>
 <html>
