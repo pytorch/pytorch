@@ -13,7 +13,7 @@ from typing import Any, List, Tuple, Optional, Dict
 import torch
 import torch.nn as nn
 from torch.ao.quantization.utils import (
-    _check_min_max_valid, _calculate_qmin_qmax, _is_per_tensor, _is_per_channel)
+    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel)
 
 __all__ = [
     "default_affine_fixed_qparams_observer",
@@ -238,7 +238,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         if self.has_customized_qrange:
             self._validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = \
-            _calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
+            calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
     def _load_from_state_dict(
         self,
@@ -307,7 +307,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             scales: Scales tensor of shape (#channels,)
             zero_points: Zero points tensor of shape (#channels,)
         """
-        if not _check_min_max_valid(min_val, max_val):
+        if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
         quant_min, quant_max = self.quant_min, self.quant_max
@@ -451,7 +451,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not _is_per_tensor(qscheme):
+        if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
@@ -569,7 +569,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if not _is_per_tensor(qscheme):
+        if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MovingAverageMinMaxObserver's qscheme only support \
                     torch.per_tensor_symmetric and torch.per_tensor_affine."
@@ -644,7 +644,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not _is_per_channel(qscheme):
+        if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
@@ -836,7 +836,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if not _is_per_channel(qscheme):
+        if not is_per_channel(qscheme):
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
@@ -922,7 +922,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not _is_per_tensor(qscheme):
+        if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
@@ -1446,7 +1446,7 @@ def _is_observer_script_module(mod, obs_type_name):
     return False
 
 
-def is_activation_post_process(module):
+def _is_activation_post_process(module):
     return (
         isinstance(module, torch.ao.quantization.ObserverBase)
         or isinstance(module, torch.ao.quantization.FakeQuantize)
@@ -1493,7 +1493,7 @@ def load_observer_state_dict(mod, obs_dict):
     unexpected_keys: List[str] = []
     for name, module in mod.named_modules():
         prefix = name + "."
-        if is_activation_post_process(module):
+        if _is_activation_post_process(module):
             if _is_per_channel_script_obs_instance(module):
                 # For per-channel observers we need to call a custom load_from_state_dict to resize the tensor.
                 # However this is not called when the module is scripted and we end up calling the default one in module.py
