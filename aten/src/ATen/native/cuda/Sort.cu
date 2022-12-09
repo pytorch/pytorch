@@ -17,8 +17,8 @@ namespace at { namespace native {
 
 template <typename T>
 static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
-  int minGridSize;
-  int blockSize;
+  int minGridSize{};
+  int blockSize{};
   C10_CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
       &minGridSize,
       &blockSize,
