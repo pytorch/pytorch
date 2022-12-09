@@ -233,6 +233,7 @@ class DebugContext:
             dynamo_utils.init_logging()
 
         if config.debug:
+
             def reset_log_level(level):
                 dynamo_config.log_level = level
 
