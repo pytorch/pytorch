@@ -243,7 +243,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     return _impl.jacrev(func, argnums, has_aux=has_aux)
 
 
-def jvp(func: Callable, primals: Any, tangents: Any, *, has_aux: bool = False):
+def jvp(func: Callable, primals: Any, tangents: Any, *, strict=False, has_aux: bool = False):
     """
     Standing for the Jacobian-vector product, returns a tuple containing
     the output of `func(*primals)` and the "Jacobian of ``func`` evaluated at
@@ -293,7 +293,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, has_aux: bool = False):
          >>> assert torch.allclose(output, x + y)
 
     """
-    return _impl.jvp(func, primals, tangents, has_aux=has_aux)
+    return _impl.jvp(func, primals, tangents, strict=strict, has_aux=has_aux)
 
 
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):

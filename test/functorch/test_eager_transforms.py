@@ -27,12 +27,10 @@ from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
 import functorch
-from torch.func import (
-    grad, vjp, jacrev, jacfwd, grad_and_value, hessian, jvp,
-)
 from functorch import (
-    make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx, vmap,
+    grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
+    jvp, make_functional, make_functional_with_buffers,
+    combine_state_for_ensemble, make_fx
 )
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
