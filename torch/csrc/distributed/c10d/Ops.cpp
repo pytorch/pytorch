@@ -170,7 +170,7 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_(
       const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllToAllOptions{std::chrono::milliseconds(timeout)});
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-        output_tensors, work);
+      output_tensors, work);
 }
 
 c10::intrusive_ptr<Work> barrier(
@@ -501,14 +501,14 @@ c10::intrusive_ptr<Work> alltoall(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const AllToAllOptions& opts) {
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("c10d::alltoall_", "")
-                       .typed<
-                           std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-                           const std::vector<at::Tensor>&,
-                           const std::vector<at::Tensor>&,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           int64_t)>();
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("c10d::alltoall_", "")
+          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+              const std::vector<at::Tensor>&,
+              const std::vector<at::Tensor>&,
+              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+              int64_t)>();
   return std::get<1>(op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count()));
 }
