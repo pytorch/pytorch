@@ -60,12 +60,13 @@ xfail_functorch_batched = {
 }
 
 xfail_functorch_batched_decomposition = {
-    'aten::diagonal_copy',
-    'aten::is_same_size',
-    'aten::t',
-    'aten::t_',
-    'aten::unfold_copy',
+    "aten::diagonal_copy",
+    "aten::is_same_size",
+    "aten::t",
+    "aten::t_",
+    "aten::unfold_copy",
 }
+
 
 class dispatch_registrations(_TestParametrizer):
     def __init__(self, dispatch_key: str, xfails: set):
@@ -98,15 +99,21 @@ class TestFunctorchDispatcher(TestCase):
     def test_register_a_batching_rule_for_composite_implicit_autograd(
         self, registration
     ):
-        assert (
-            registration not in FuncTorchBatchedRegistrations
-        ), f"{registration} is also registered in FuncTorchBatched"
+        assert registration not in FuncTorchBatchedRegistrations, (
+            f"You've added a batching rule for a CompositeImplicitAutograd operator {registration}. "
+            "The correct way to add vmap support for it is to put it into BatchRulesDecomposition to "
+            "reuse the CompositeImplicitAutograd decomposition"
+        )
 
-    @dispatch_registrations("FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition)
+    @dispatch_registrations(
+        "FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition
+    )
     def test_register_functorch_batched_decomposition(self, registration):
-        assert (
-            registration in CompositeImplicitAutogradRegistrations
-        ), f"{registration} should also be CompositeImplicitAutograd"
+        assert registration in CompositeImplicitAutogradRegistrations, (
+            f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
+            f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
+            "then please register it to the FuncTorchBatched key in another file."
+        )
 
 
 instantiate_parametrized_tests(TestFunctorchDispatcher)
