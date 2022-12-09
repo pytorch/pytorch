@@ -1853,9 +1853,15 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
-# @register_meta([aten._scaled_dot_product_flash_attention, aten, aten._scaled_dot_product_efficient_attention])
-# def meta__scaled_dot_product(self, k, v, attn_mask, dropout_p, training, out=None):
-#     return self.new_empty(self.shape)
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention,
+        aten._scaled_dot_product_efficient_attention,
+    ]
+)
+def meta__scaled_dot_product(self, k, v, attn_mask, dropout_p, training, out=None):
+    return self.new_empty(self.shape)
+
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
