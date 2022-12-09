@@ -663,7 +663,7 @@ Tensor linalg_matrix_power_impl(
         // Last multiplication can use the out version
         return result.defined() ? at::matmul_out(out, result, z) : out.copy_(z);
       }
-      result = result.defined() ? at::matmul(result, z) : std::move(z);
+      result = result.defined() ? at::matmul(result, z) : z;
     }
   }
 
