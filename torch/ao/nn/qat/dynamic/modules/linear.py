@@ -1,6 +1,5 @@
 import torch
 
-__all__ = ["Linear"]
 
 class Linear(torch.ao.nn.qat.Linear):
     r"""

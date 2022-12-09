@@ -6534,25 +6534,12 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 warnings.resetwarnings()
                 f()
-                self.assertEqual(len(w), 1)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
                 warning = w[0].message
                 self.assertTrue(warning, DeprecationWarning)
                 self.assertTrue(re.search(
                     '^TypedStorage is deprecated',
                     str(warning)))
-
-        # Check that only one warning is raised from calling multiple
-        # TypedStorage functions if warnings are not reset between each
-        with warnings.catch_warnings(record=True) as w:
-            warnings.resetwarnings()
-            for f in funcs:
-                f()
-            self.assertEqual(len(w), 1)
-            warning = w[0].message
-            self.assertTrue(warning, DeprecationWarning)
-            self.assertTrue(re.search(
-                '^TypedStorage is deprecated',
-                str(warning)))
 
     def test_from_file(self):
         def assert_with_filename(filename):
