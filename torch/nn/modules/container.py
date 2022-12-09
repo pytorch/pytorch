@@ -327,7 +327,7 @@ class ModuleList(Module):
 
     def __repr__(self):
         """A custom repr for ModuleList that compresses repeated module representations"""
-        list_of_reprs = [repr(item) for item in module]
+        list_of_reprs = [repr(item) for item in self]
         repeats = [1]
         repeated_blocks = [list_of_reprs[0]]
         for r in list_of_reprs[1:]:
@@ -338,7 +338,7 @@ class ModuleList(Module):
                 repeated_blocks.append(r)
 
         lines = []
-        main_str = module._get_name() + '('
+        main_str = self._get_name() + '('
         for r, b in zip(repeats, repeated_blocks):
             local_repr = f"{r} x {b}"
             local_repr = _addindent(local_repr, 2)
