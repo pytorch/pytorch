@@ -198,9 +198,10 @@ def replace_pattern_with_filters(
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
 
     Args:
-        ``match_filter``: A function that takes in (match: InternalMatch, original_graph: Graph, pattern_graph: Graph)
-            and returns a boolean indicating whether the match satisfies the condition. See matcher_utils.py for
-            definition of InternalMatch.
+        ``match_filters``: A list of functions that take in
+            (match: InternalMatch, original_graph: Graph, pattern_graph: Graph) and return a boolean indicating
+            whether the match satisfies the condition.
+            See matcher_utils.py for definition of InternalMatch.
     """
 
     return _replace_pattern(gm, pattern, replacement, match_filters)
