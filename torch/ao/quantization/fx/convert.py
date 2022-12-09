@@ -51,7 +51,6 @@ from .utils import (
     _get_module,
     _is_custom_module_lstm,
     _get_custom_module_class_keys,
-    _get_quantize_node_info,
     _create_getattr_from_value,
     _collect_producer_nodes,
     _graph_module_from_producer_nodes,
@@ -187,7 +186,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 if key in ['_scale_', '_zero_point_']:
                     # For scale and zero_point values we register them as buffers in the root module.
                     # TODO: maybe need more complex attr name here
-                    qparam_node = create_getattr_from_value(
+                    qparam_node = _create_getattr_from_value(
                         model, graph, module_path + prefix + key, value_or_node)
                     quantize_op_inputs.append(qparam_node)
                 else:
@@ -376,7 +375,7 @@ def _replace_observer_with_quantize_dequantize_node(
                 if key in ['_scale_', '_zero_point_']:
                     # For scale and zero_point values we register them as buffers in the root module.
                     # TODO: maybe need more complex attr name here
-                    qparam_node = create_getattr_from_value(
+                    qparam_node = _create_getattr_from_value(
                         model, graph, module_path + prefix + key, value_or_node)
                     quantize_op_inputs.append(qparam_node)
                 else:
