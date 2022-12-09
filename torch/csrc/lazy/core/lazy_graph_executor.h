@@ -261,8 +261,8 @@ class TORCH_API LazyGraphExecutor {
   // is used to create computation "barriers" in order to flush pending
   // operations and ensure the same computations are created during the training
   // loops.
-  // TODO(alanwaketan): Add a registry such that we don't need to make all related
-  // methods virtual.
+  // TODO(alanwaketan): Add a registry such that we don't need to make all
+  // related methods virtual.
   class DeviceContextArena {
    protected:
     struct DeviceContext {
