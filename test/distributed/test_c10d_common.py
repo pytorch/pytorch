@@ -1639,6 +1639,15 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_alltoall_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) + i for i in range(group.size())]
+            in_tensors = [tensor + i for i in range(group.size())]
+            work = dist.all_to_all(out_tensors, in_tensors, src=0, group=group, async_op=True)
+            return work, out_tensors
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_nested_comm_tensor_wrapping(self, tensor):
         def comm_fn(tensor, group=None):
             work = dist.all_reduce(CommTensor(tensor), group=group, async_op=True)
