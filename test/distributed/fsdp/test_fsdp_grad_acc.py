@@ -220,7 +220,11 @@ class TestGradAcc(FSDPTest):
                 None,
                 BackwardPrefetch.BACKWARD_PRE,
                 BackwardPrefetch.BACKWARD_POST,
-            ]
+            ],
+            "cpu_offload": [
+                CPUOffload(offload_params=False),
+                CPUOffload(offload_params=True),
+            ],
         }
 
     @skip_if_lt_x_gpu(2)
@@ -244,10 +248,6 @@ class TestGradAcc(FSDPTest):
         ],
     )
     @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
-    )
-    @parametrize(
         "sharding_strategy",
         [
             ShardingStrategy.FULL_SHARD,
@@ -258,7 +258,6 @@ class TestGradAcc(FSDPTest):
     def test_grad_acc(
         self,
         configs: _GradAccConfigs,
-        cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
     ):
         """
@@ -281,7 +280,6 @@ class TestGradAcc(FSDPTest):
             self._test_grad_acc,
             batch_dim=1,
             configs=configs.configs,
-            cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
         )
 
