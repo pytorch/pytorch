@@ -250,7 +250,16 @@ jobs:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
-
+  
+  win-vs2019-cuda11_6-py3-test:
+    name: win-vs2019-cuda11.6-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_6-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
+      test-matrix: ${{ needs.win-vs2019-cuda11_6-py3-build.outputs.test-matrix }}
+  
   win-vs2019-cuda11_6-py3-build:
     if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.6-py3
