@@ -5,6 +5,7 @@ import io
 import subprocess
 import json
 from functools import lru_cache
+from typing import List, Tuple
 
 cache = lru_cache(None)
 
@@ -309,35 +310,58 @@ def trace(data):
             format(d)
     return out.getvalue()
 
+class PlotWriter:
+    def __init__(self):
+        string_table: List[str] = []
+        suffix_table: List[Tuple[int, int]] = []
+
+        elements = []
+        actions: List[int] = []
+
+        initially_allocated: List[int] = []
+
+        @cache
+        def intern_str(s):
+            string_table.append(s)
+            return len(string_table) - 1
+
+        @cache
+        def intern_suffix(sid, restid):
+            suffix_table.append((sid, restid))
+            return len(suffix_table) - 1
+
+
+        def intern_stack(frames):
+            sids = [intern_str(f) for f in frames]
+            next_id = None
+            for sid in reversed(sids):
+                next_id = intern_suffix(sid, next_id)
+            return next_id
+
+        def add_element(size, lines):
+            elements.append({'size': size, 'info': intern_stack(lines)})
+            return len(elements) - 1
+
+        def to_html():
+            r = {
+                'actions': actions,
+                'elements': elements,
+                'suffix_table': suffix_table,
+                'string_table': string_table,
+                'initially_allocated': list(reversed(initially_allocated)),
+            }
+            plot_data = json.dumps(r)
+            return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
+
+        self.add_element = add_element
+        self.allocate = actions.append
+        self.free = actions.append
+        self.initially_allocated = initially_allocated.append
+        self.to_html = to_html
+
 def trace_plot(data, device=None, plot_segments=False):
-
-    string_table = []
-    suffix_table = []
-
-    elements = []
-    actions = []
-
+    w = PlotWriter()
     addr_to_alloc = {}
-
-    initially_allocated = []
-
-    @cache
-    def intern_str(s):
-        string_table.append(s)
-        return len(string_table) - 1
-
-    @cache
-    def intern_suffix(sid, restid):
-        suffix_table.append((sid, restid))
-        return len(suffix_table) - 1
-
-
-    def intern_stack(frames):
-        sids = [intern_str(f) for f in frames]
-        next_id = None
-        for sid in reversed(sids):
-            next_id = intern_suffix(sid, next_id)
-        return next_id
 
     if device is None:
         for i, t in enumerate(data['device_traces']):
@@ -350,12 +374,6 @@ def trace_plot(data, device=None, plot_segments=False):
 
     trace = data['device_traces'][device]
 
-    def add_element(size, frames, extra=()):
-        frames = [f"{_format_size(size)} allocation", *extra, *(_frame_fmt(f, full_filename=True) for f in frames)]
-        frame_id = intern_stack(frames)
-        elements.append({'size': size, 'info': frame_id})
-        return len(elements) - 1
-
     if plot_segments:
         alloc = 'segment_alloc'
         free = 'segment_free'
@@ -363,27 +381,78 @@ def trace_plot(data, device=None, plot_segments=False):
         alloc = 'alloc'
         free = 'free_completed'
 
+    def add_element(size, frames, extra=()):
+        frames = [f"{_format_size(size)} allocation", *extra, *(_frame_fmt(f, full_filename=True) for f in frames)]
+        return w.add_element(size, frames)
+
     for i, e in enumerate(trace):
         if e['action'] == alloc:
             elemid = add_element(e['size'], e['frames'])
             addr_to_alloc[e['addr']] = elemid
-            actions.append(elemid)
+            w.allocate(elemid)
         elif e['action'] == free:
             idx = addr_to_alloc.pop(e['addr'], None)
             if idx is None:
                 idx = add_element(e['size'], e['frames'], extra=('alloc not recorded, stack trace for free:',))
-                initially_allocated.append(idx)
-            actions.append(idx)
+                w.initially_allocated(idx)
+            w.free(idx)
+    return w.to_html()
 
-    r = {
-        'actions': actions,
-        'elements': elements,
-        'suffix_table': suffix_table,
-        'string_table': string_table,
-        'initially_allocated': list(reversed(initially_allocated)),
-    }
-    plot_data = json.dumps(r)
-    return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
+def profile_plot(memory_profile, device=None):
+    import torch
+    from torch.profiler._memory_profiler import Action, TensorKey
+    from torch._C._profiler import _EventType
+
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device('cuda', torch.cuda.current_device())
+        else:
+            device = torch.device('cpu')
+    w = PlotWriter()
+
+
+    allocation_stacks = {}
+    for event in memory_profile._op_tree.sorted_nodes:
+        if event.tag == _EventType.Allocation:
+            parent = event.parent
+            python_parents = []
+            while parent:
+                if parent.tag in (_EventType.PyCall, _EventType.PyCCall):
+                    python_parents.append(parent)
+                parent = parent.parent
+            key = TensorKey.from_allocation(event.extra_fields)
+
+            # Corner case: If allocation doesn't have an ID (can't prove it was used as a Tensor)
+            #              key will be None. I should add some way to identify these, I just haven't yet.
+            if key and event.extra_fields.alloc_size > 0:
+                allocation_stacks[key] = python_parents
+
+    def add_element(size, tensor_key, version):
+        category = memory_profile._categories.get(tensor_key, version)
+        if category is None:
+            category = 'unknown'
+        else:
+            category = category.name.lower()
+        stack = allocation_stacks.get(tensor_key, ())
+        return w.add_element(size, [f"{_format_size(size)} allocation ({category})", *(p.name for p in stack)])
+
+    kv_to_elem = {}
+    for time, action, (tensor_key, version), size in memory_profile.timeline:
+        if tensor_key.device != device:
+            continue
+        if action == Action.CREATE:
+            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
+            w.allocate(elemid)
+        elif action == Action.DESTROY:
+            w.free(kv_to_elem.pop((tensor_key, version)))
+        elif action == Action.INCREMENT_VERSION:
+            w.free(kv_to_elem.pop((tensor_key, version)))
+            kv_to_elem[(tensor_key, version + 1)] = elemid = add_element(size, tensor_key, version + 1)
+            w.allocate(elemid)
+        elif action == Action.PREEXISTING:
+            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
+            w.initially_allocated(elemid)
+    return w.to_html()
 
 # note: this template should eventually move to its own file,
 # however, we first need to package _memory_viz.py so that it can be
@@ -626,6 +695,8 @@ function MiniMap(mini_svg, plot, data, left_pad, height=70) {
         let [lastx, lasty] = mini_points[mini_points.length - 1]
         if (m !== lasty) {
             mini_points.push([i, lasty])
+            mini_points.push([i, m])
+        } else if (i === max_at_time.length - 1) {
             mini_points.push([i, m])
         }
     }
