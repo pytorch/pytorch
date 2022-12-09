@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -20,6 +21,14 @@
 namespace at {
 
 namespace native {
+
+DEFINE_DISPATCH(_fused_sdp_choice_stub);
+
+int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+REGISTER_ALL_CPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
 
 namespace {
 
@@ -690,7 +699,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
   // The second return SHOULD always be an empty Tensor, unless need_attn_weights
   // is true (in which case the fused kernels would not be called). This blows up
   // op_info tests.
-  int64_t choice_int = at::_fused_sdp_choice(
+  int64_t choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   switch (backend) {
@@ -723,11 +732,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
           "No viable backend for scaled_dot_product_attention was found.");
       return std::make_tuple(Tensor(), Tensor());
   }
-}
-
-int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
-  return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
