@@ -59,9 +59,9 @@ from .utils import (
 from torch.ao.quantization.utils import (
     is_per_channel,
     to_underlying_dtype,
+    _remove_qconfig,
 )
 from torch.ao.quantization.quantize import (
-    _remove_qconfig,
     is_activation_post_process,
 )
 from torch.ao.quantization.stubs import DeQuantStub

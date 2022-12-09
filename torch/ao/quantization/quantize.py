@@ -4,29 +4,34 @@ import warnings
 
 import torch
 import torch.nn as nn
-import torch.ao.nn.quantized as nnq
-from torch.nn.intrinsic import _FusedModule
-
-from torch.ao.quantization.quantization_mappings import (
-    get_default_dynamic_quant_module_mappings,
-    get_default_static_quant_module_mappings,
-    get_default_static_quant_reference_module_mappings,
-    get_default_qat_module_mappings,
-    get_default_qconfig_propagation_list,
-    no_observer_set,
-    _has_special_act_post_process,
-    _get_special_act_post_process,
-)
-from .utils import _get_qparam_dict, _has_no_children_ignoring_parametrizations
-from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     _add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
-    _activation_is_memoryless)
+)
+
+from torch.ao.quantization.quantization_mappings import (
+    get_default_dynamic_quant_module_mappings,
+    get_default_qat_module_mappings,
+    get_default_qconfig_propagation_list,
+    get_default_static_quant_module_mappings,
+    get_default_static_quant_reference_module_mappings,
+)
+from torch.ao.quantization.stubs import QuantWrapper
+from torch.nn.intrinsic import _FusedModule
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+from .utils import (
+    _add_observer_,
+    _DEFAULT_CUSTOM_CONFIG_DICT,
+    _get_qparam_dict,
+    _get_unique_devices_,
+    _has_no_children_ignoring_parametrizations,
+    _observer_forward_hook,
+    _remove_qconfig,
+)
 
 __all__ = [
     "get_default_custom_config_dict",
@@ -42,17 +47,6 @@ __all__ = [
     "swap_module",
 ]
 
-_DEFAULT_CUSTOM_CONFIG_DICT = {
-    'float_to_observed_custom_module_class': {
-        nn.LSTM: nn.quantizable.LSTM,
-        nn.MultiheadAttention: nn.quantizable.MultiheadAttention,
-    },
-    'observed_to_quantized_custom_module_class': {
-        nn.quantizable.LSTM: nn.quantized.LSTM,
-        nn.quantizable.MultiheadAttention: nn.quantized.MultiheadAttention,
-    }
-}
-
 def get_default_custom_config_dict():
     r"""Defines the default custom config dict.
     """
@@ -62,6 +56,27 @@ def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
             isinstance(module, torch.ao.quantization.FakeQuantizeBase))
 
+def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=None):
+    r"""Propagate qconfig through the module hierarchy and assign `qconfig`
+    attribute on each leaf module
+
+    Args:
+        module: input module
+        qconfig_dict: dictionary that maps from name or type of submodule to
+            quantization configuration, qconfig applies to all submodules of a
+            given module unless qconfig for the submodules are specified (when
+            the submodule already has qconfig attribute)
+        prepare_custom_config_dict: dictionary for custom handling of modules
+            see docs for :func:`~torch.ao.quantization.prepare_fx`
+
+    Return:
+        None, module is modified inplace with qconfig attached
+    """
+    if qconfig_dict is None:
+        qconfig_dict = {}
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+    _propagate_qconfig_helper(module, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
 
 def _propagate_qconfig_helper(module, qconfig_dict,
                               qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
@@ -102,141 +117,6 @@ def _propagate_qconfig_helper(module, qconfig_dict,
             _propagate_qconfig_helper(
                 child, qconfig_dict, qconfig_with_device_check, module_prefix
             )
-
-def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=None):
-    r"""Propagate qconfig through the module hierarchy and assign `qconfig`
-    attribute on each leaf module
-
-    Args:
-        module: input module
-        qconfig_dict: dictionary that maps from name or type of submodule to
-            quantization configuration, qconfig applies to all submodules of a
-            given module unless qconfig for the submodules are specified (when
-            the submodule already has qconfig attribute)
-        prepare_custom_config_dict: dictionary for custom handling of modules
-            see docs for :func:`~torch.ao.quantization.prepare_fx`
-
-    Return:
-        None, module is modified inplace with qconfig attached
-    """
-    if qconfig_dict is None:
-        qconfig_dict = {}
-    if prepare_custom_config_dict is None:
-        prepare_custom_config_dict = {}
-    _propagate_qconfig_helper(module, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
-
-def _observer_forward_hook(self, input, output):
-    r"""Forward hook that calls observer on the output
-    """
-    return self.activation_post_process(output)
-
-def _observer_forward_pre_hook(self, input):
-    r"""Forward pre hook that calls observer on the output
-    """
-    return self.activation_post_process(input[0])
-
-def _register_activation_post_process_hook(module, pre_hook=False):
-    assert hasattr(module, 'activation_post_process'), \
-        'Expect activation_post_process attribute already attached to the module'
-    if pre_hook:
-        handle = module.register_forward_pre_hook(
-            _observer_forward_pre_hook, prepend=True
-        )
-    else:
-        handle = module.register_forward_hook(
-            _observer_forward_hook, prepend=True
-        )
-
-
-def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
-    r"""Add observer for the leaf child of the module.
-
-    This function insert observer module to all leaf child module that
-    has a valid qconfig attribute.
-
-    Args:
-        module: input module with qconfig attributes for all the leaf modules that we want to quantize
-        qconfig_propagation_list: a list of quantizable modules that will have observers added to them
-            if they are leaf nodes
-        device: parent device, if any
-        non_leaf_module_list: list of non-leaf modules we want to add observer
-
-    Return:
-        None, module is modified inplace with added observer modules and forward_hooks
-    """
-    if qconfig_propagation_list is None:
-        qconfig_propagation_list = get_default_qconfig_propagation_list()
-
-    if custom_module_class_mapping is None:
-        custom_module_class_mapping = {}
-
-    # respect device affinity when adding observers
-    if device is None:
-        devices = _get_unique_devices_(module)
-        assert len(devices) <= 1, (
-            "_add_observer_ only works with cpu or single-device CUDA modules, "
-            "but got devices {}".format(devices)
-        )
-        device = next(iter(devices)) if len(devices) > 0 else None
-
-    def get_activation_post_process(qconfig, device, special_act_post_process=None):
-        activation = qconfig.activation() if special_act_post_process is None else special_act_post_process()
-        if device is not None:
-            activation.to(device)
-        return activation
-
-    def needs_observation(m):
-        return hasattr(m, 'qconfig') and m.qconfig is not None
-
-    def insert_activation_post_process(m, special_act_post_process=None):
-        """ Adds an activation post process module and register
-        a pre or post hook that calls the module
-        """
-        # We don't insert observer/fake_quantize for DeQuantStub
-        if needs_observation(m) and not isinstance(m, DeQuantStub):
-            # observer and hook will be gone after we swap the module
-            m.add_module('activation_post_process', get_activation_post_process(
-                m.qconfig, device, special_act_post_process))
-            # Register observer as the first entry in the hook list
-            # All post forward hooks are preserved and will be executed after the observer before convert
-            _register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
-
-    for name, child in module.named_children():
-        # TODO remove Dropout special after codebase stable
-        if type_before_parametrizations(child) in [nn.Dropout]:
-            continue
-        elif type_before_parametrizations(child) in [nnq.FloatFunctional, nnq.QFunctional]:
-            if needs_observation(child):
-                child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif isinstance(child, _FusedModule):
-            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
-            if needs_observation(child):
-                insert_activation_post_process(child)
-        elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
-            if needs_observation(child):
-                insert_activation_post_process(child)
-        elif _has_special_act_post_process(child):
-            special_act_post_process = _get_special_act_post_process(child)
-            insert_activation_post_process(child, special_act_post_process)
-        elif needs_observation(child) and type_before_parametrizations(child) in custom_module_class_mapping:
-            observed_child = custom_module_class_mapping[type_before_parametrizations(child)].from_float(child)
-            setattr(module, name, observed_child)
-            # TODO: These are the modules that cannot be observed
-            #       Once there are more, we should move them to a separate list
-            if custom_module_class_mapping[type_before_parametrizations(child)] not in no_observer_set():
-                insert_activation_post_process(observed_child)
-        else:
-            _add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
-
-    # Insert observers only for leaf nodes, note that this observer is for
-    # the output of the module, for input QuantStub will observe them
-    if _has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
-       and type_before_parametrizations(module) in qconfig_propagation_list:
-        insert_activation_post_process(module)
-
-def _get_unique_devices_(module):
-    return {p.device for p in module.parameters()} | \
-        {p.device for p in module.buffers()}
 
 def add_quant_dequant(module):
     r"""Wrap the leaf child module in QuantWrapper if it has a valid qconfig
@@ -315,43 +195,6 @@ def prepare(model, inplace=False, allow_list=None,
         model, qconfig_propagation_list, observer_non_leaf_module_list,
         custom_module_class_mapping=custom_module_class_mapping)
     return model
-
-def _remove_activation_post_process(module):
-    # TODO: maybe we should change activation_post_process to _activation_post_process
-    # to prevent it from being used by user
-    if hasattr(module, 'activation_post_process') and \
-       is_activation_post_process(module.activation_post_process):
-        delattr(module, 'activation_post_process')
-
-    # remove activation_post_proceess pre and post hooks
-    def remove_hooks(pre_hook=False):
-        hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
-        observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
-        handle_ids_to_remove = set()
-        for handle_id, hook_fn in hook_map.items():
-            if hook_fn is observer_hook:
-                handle_ids_to_remove.add(handle_id)
-        for handle_id in handle_ids_to_remove:
-            hook_map.pop(handle_id)
-
-    remove_hooks(pre_hook=True)
-    remove_hooks(pre_hook=False)
-
-# TODO: rename to something more general
-def _remove_qconfig(module):
-    r"""Clean up the qconfig left in the module so that new qconfig can be
-    propagated.
-
-    Args:
-        module: module to be cleaned up
-    """
-    for child in module.children():
-        _remove_qconfig(child)
-
-    if hasattr(module, "qconfig"):
-        del module.qconfig
-
-    _remove_activation_post_process(module)
 
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     r"""Quantize the input float model with post training static quantization.
@@ -644,20 +487,3 @@ def swap_module(mod, mapping, custom_module_class_mapping):
             if device:
                 new_mod.to(device)
     return new_mod
-
-def _get_observer_dict(mod, target_dict, prefix=""):
-    r"""Traverse the modules and save all observers into dict.
-    This is mainly used for quantization accuracy debug
-    Args:
-        mod: the top module we want to save all observers
-        prefix: the prefix for the current module
-        target_dict: the dictionary used to save all the observers
-    """
-    def get_prefix(prefix):
-        return prefix if prefix == "" else prefix + '.'
-
-    if hasattr(mod, 'activation_post_process'):
-        target_dict[get_prefix(prefix) + 'activation_post_process'] = mod.activation_post_process
-    for name, child in mod.named_children():
-        module_prefix = get_prefix(prefix) + name if prefix else name
-        _get_observer_dict(child, target_dict, module_prefix)
