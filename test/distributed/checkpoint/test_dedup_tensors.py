@@ -2,7 +2,7 @@
 
 import dataclasses
 import torch
-from torch.distributed.checkpoint.dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.planner import SavePlan, WriteItemType
 from torch.distributed.checkpoint.planner_helpers import (
     _create_write_item_for_tensor,

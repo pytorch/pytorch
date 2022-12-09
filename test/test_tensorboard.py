@@ -7,6 +7,7 @@ import shutil
 import sys
 import unittest
 import uuid
+import expecttest
 
 TEST_TENSORBOARD = True
 try:
@@ -520,6 +521,11 @@ def read_expected_content(function_ptr):
         return f.read()
 
 def compare_image_proto(actual_proto, function_ptr):
+    if expecttest.ACCEPT:
+        expected_file = get_expected_file(function_ptr)
+        with open(expected_file, 'w') as f:
+            f.write(text_format.MessageToString(actual_proto))
+        return True
     expected_str = read_expected_content(function_ptr)
     expected_proto = Summary()
     text_format.Parse(expected_str, expected_proto)
@@ -537,6 +543,9 @@ def compare_image_proto(actual_proto, function_ptr):
     )
 
 def compare_proto(str_to_compare, function_ptr):
+    if expecttest.ACCEPT:
+        write_proto(str_to_compare, function_ptr)
+        return True
     expected = read_expected_content(function_ptr)
     str_to_compare = str(str_to_compare)
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)
