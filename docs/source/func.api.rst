@@ -2,7 +2,6 @@ torch.func API Reference
 ========================
 
 .. currentmodule:: torch.func
-
 .. automodule:: torch.func
 
 Function Transforms
@@ -10,6 +9,7 @@ Function Transforms
 .. autosummary::
     :toctree: generated
 
+    vmap
     grad
     grad_and_value
     vjp
