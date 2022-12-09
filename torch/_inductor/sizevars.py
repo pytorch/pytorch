@@ -148,6 +148,11 @@ class SizeVarAllocator(object):
                 base_s = base.args[2] - 1
             elif not base.has(ModularIndexing):
                 # actual iteration range is to size-1
+                iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
+                base_lowest = sympy_subs(base, iter_ranges_zero)
+                if self.maybe_guard_lt(base_lowest, 0):
+                    # can't replace with indexing div if base can be negative
+                    return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
@@ -404,7 +409,9 @@ class SizeVarAllocator(object):
         assert all(isinstance(v, sympy.Symbol) or v == 0 for v in vars)
         var_symbols = [v for v in vars if isinstance(v, sympy.Symbol)]
 
-        stride_symbols = [sympy.Wild(f"stride{i}") for i in range(len(var_symbols))]
+        stride_symbols = [
+            sympy.Wild(f"stride{i}", exclude=vars) for i in range(len(var_symbols))
+        ]
         var_to_stride = {v: s for v, s in zip(var_symbols, stride_symbols)}
         offset_symbol = sympy.Wild("offset")
         index_pattern = offset_symbol + sympy_dot(var_symbols, stride_symbols)
@@ -452,10 +459,15 @@ class SizeVarAllocator(object):
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.maybe_stride_vars(index, vars):
+        for i, s in enumerate(self.maybe_stride_vars(index, vars)):
             if s is None:
-                result.append(0)
-                continue
+                # If the dimension is not truly strided, we approximate a
+                # stride by taking the difference of the 1st and 0th element in
+                # that dimension.
+                zero_index = {v: sympy.Integer(0) for v in vars if v != 0}
+                first_index = dict(zero_index)
+                first_index[vars[i]] = sympy.Integer(1)
+                s = sympy_subs(index, dim_only) - sympy_subs(index, zero_index)
 
             try:
                 result.append(self.size_hint(s))
