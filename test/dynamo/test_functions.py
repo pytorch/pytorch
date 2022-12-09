@@ -69,10 +69,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b
 
     @make_test
+    def test_add_(a, b):
+        a_copy = torch.tensor(a)
+        return a_copy.add_(b, alpha=5.0)
+
+    @make_test
     def test_addcdiv(a, b, c):
         # dynamo decomposes this to avoid a graph break when
         # the value kwarg is populated
         return torch.addcdiv(a, b, c, value=5.0)
+
+    @make_test
+    def test_addcdiv_(a, b, c):
+        a_copy = torch.tensor(a)
+        return a_copy.addcdiv_(b, c, value=5.0)
 
     @make_test
     def test_is_not_null(a, b):
