@@ -16,7 +16,7 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
 
-class Faketqdm(object):  # type: ignore[no-redef]
+class _Faketqdm(object):  # type: ignore[no-redef]
 
     def __init__(self, total=None, disable=False,
                  unit=None, *args, **kwargs):
@@ -51,7 +51,7 @@ class Faketqdm(object):  # type: ignore[no-redef]
 try:
     from tqdm import tqdm  # If tqdm is installed use it, otherwise use the fake wrapper
 except ImportError:
-    tqdm = Faketqdm
+    tqdm = _Faketqdm
 
 __all__ = [
     'download_url_to_file',
