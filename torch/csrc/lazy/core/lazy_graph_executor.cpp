@@ -73,7 +73,6 @@ void LazyGraphExecutor::DeviceContextArena::RegisterTensor(
   DeviceContext* devctx = GetDeviceContext(data->device);
   std::lock_guard<std::mutex> lock(devctx->lock);
   devctx->tensors_data.emplace(data->unique_id, data);
-  TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
 }
 
 void LazyGraphExecutor::DeviceContextArena::UnregisterTensor(
@@ -81,7 +80,6 @@ void LazyGraphExecutor::DeviceContextArena::UnregisterTensor(
   DeviceContext* devctx = GetDeviceContext(data->device);
   std::lock_guard<std::mutex> lock(devctx->lock);
   devctx->tensors_data.erase(data->unique_id);
-  TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
 }
 
 std::vector<LazyTensorPtr> LazyGraphExecutor::DeviceContextArena::
@@ -352,10 +350,12 @@ LazyGraphExecutor* LazyGraphExecutor::Get() {
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
   DeviceContextArena::Get()->RegisterTensor(data);
+  TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
 }
 
 void LazyGraphExecutor::UnregisterTensor(LazyTensor::Data* data) {
   DeviceContextArena::Get()->UnregisterTensor(data);
+  TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
 }
 
 Value LazyGraphExecutor::GetRngSeed(const BackendDevice& device) {
