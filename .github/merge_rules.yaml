@@ -20,6 +20,11 @@
   approved_by:
   - BowenBao
   - abock
+  - justinchuby
+  - shubhambhokare1
+  - thiagocrepaldi
+  - titaiwangms
+  - wschin
   mandatory_checks_name:
   - EasyCLA
   - Lint

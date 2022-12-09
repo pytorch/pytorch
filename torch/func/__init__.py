@@ -11,6 +11,17 @@ import torch._functorch.eager_transforms as _impl
 # or rely on helper functions, please put the implementation in one of the
 # imported files and call it from here.
 
+__all__ = [
+    'jvp',
+    'grad',
+    'grad_and_value',
+    'vjp',
+    'jacrev',
+    'jvp',
+    'jacfwd',
+    'hessian',
+    'functionalize',
+]
 
 argnums_t = Union[int, Tuple[int, ...]]
 
