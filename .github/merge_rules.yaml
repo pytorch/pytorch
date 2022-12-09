@@ -20,6 +20,11 @@
   approved_by:
   - BowenBao
   - abock
+  - justinchuby
+  - shubhambhokare1
+  - thiagocrepaldi
+  - titaiwangms
+  - wschin
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -228,9 +233,14 @@
   - wanchaol
   - fduwjj
   - H-Huang
-  - d4l3k
   - aazzolini
   - kwen2501
+  - XilunWu
+  - wz337
+  - awgu
+  - fegin
+  - kumpera
+  - yhcharles
   mandatory_checks_name:
   - EasyCLA
   - Lint
