@@ -335,17 +335,17 @@ like any other TorchScript type:
 
     # Declare a TorchScript class
     @torch.jit.script
-    class Pair:
+    class _Pair:
       def __init__(self, first, second):
         self.first = first
         self.second = second
 
     @torch.jit.script
     def sum_pair(p):
-      # type: (Pair) -> Tensor
+      # type: (_Pair) -> Tensor
       return p.first + p.second
 
-    p = Pair(torch.rand(2, 3), torch.rand(2, 3))
+    p = _Pair(torch.rand(2, 3), torch.rand(2, 3))
     print(sum_pair(p))
 
 
