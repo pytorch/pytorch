@@ -401,7 +401,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
-    return _impl.jacfwd(func, argnums, has_aux=has_aux, randomness="error")
+    return _impl.jacfwd(func, argnums, has_aux=has_aux, randomness=randomness)
 
 
 def hessian(func, argnums=0):

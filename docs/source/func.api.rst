@@ -3,6 +3,8 @@ torch.func API Reference
 
 .. currentmodule:: torch.func
 
+.. automodule:: torch.func
+
 Function Transforms
 -------------------
 .. autosummary::
