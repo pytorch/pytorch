@@ -86,9 +86,7 @@ class TestVerification(common_utils.TestCase):
     ):
         ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
         pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
-        verification._compare_ort_pytorch_outputs(
-            ort_outs,
-            pytorch_outs,
+        options = verification.VerificationOptions(
             rtol=1e-5,
             atol=1e-6,
             check_shape=True,
@@ -96,20 +94,28 @@ class TestVerification(common_utils.TestCase):
             ignore_none=True,
             acceptable_error_percentage=0.3,
         )
+        verification._compare_ort_pytorch_outputs(
+            ort_outs,
+            pytorch_outs,
+            options,
+        )
 
     def test_compare_ort_pytorch_outputs_raise_without_acceptable_error_percentage(
         self,
     ):
         ort_outs = [np.array([[1.0, 2.0], [3.0, 4.0]])]
         pytorch_outs = [torch.tensor([[1.0, 2.0], [3.0, 1.0]])]
+        options = verification.VerificationOptions(
+            rtol=1e-5,
+            atol=1e-6,
+            check_shape=True,
+            check_dtype=False,
+            ignore_none=True,
+            acceptable_error_percentage=None,
+        )
         with self.assertRaises(AssertionError):
             verification._compare_ort_pytorch_outputs(
                 ort_outs,
                 pytorch_outs,
-                rtol=1e-5,
-                atol=1e-6,
-                check_shape=True,
-                check_dtype=False,
-                ignore_none=True,
-                acceptable_error_percentage=None,
+                options,
             )
