@@ -21,7 +21,6 @@ from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
-
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -268,7 +267,7 @@ class TensorVariable(VariableTracker):
                 )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
-            constant_result = "ConstantVariable"(index, **options)
+            constant_result = ConstantVariable(index, **options)
         else:
             constant_result = None
 
