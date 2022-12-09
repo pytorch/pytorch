@@ -343,7 +343,9 @@ class FullyShardedDataParallel(nn.Module):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        _init_process_group_state(self, process_group, sharding_strategy, auto_wrap_policy)
+        _init_process_group_state(
+            self, process_group, sharding_strategy, auto_wrap_policy
+        )
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
