@@ -26,8 +26,10 @@ try:
 except ModuleNotFoundError:
     NUMPY_AVAILABLE = False
 
+__all__ = ["assert_close", "assert_allclose"]
 
-class ErrorMeta(Exception):
+
+class _ErrorMeta(Exception):
     """Internal testing exception that makes that carries error metadata."""
 
     def __init__(
@@ -84,7 +86,7 @@ _DTYPE_PRECISIONS.update(
 )
 
 
-def default_tolerances(
+def _default_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
     dtype_precisions: Optional[Dict[torch.dtype, Tuple[float, float]]] = None,
 ) -> Tuple[float, float]:
@@ -110,7 +112,7 @@ def default_tolerances(
     return max(rtols), max(atols)
 
 
-def get_tolerances(
+def _get_tolerances(
     *inputs: Union[torch.Tensor, torch.dtype],
     rtol: Optional[float],
     atol: Optional[float],
@@ -130,7 +132,7 @@ def get_tolerances(
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
         # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
-        raise ErrorMeta(
+        raise _ErrorMeta(
             ValueError,
             f"Both 'rtol' and 'atol' must be either specified or omitted, "
             f"but got no {'rtol' if rtol is None else 'atol'}.",
@@ -139,7 +141,7 @@ def get_tolerances(
     elif rtol is not None and atol is not None:
         return rtol, atol
     else:
-        return default_tolerances(*inputs)
+        return _default_tolerances(*inputs)
 
 
 def _make_mismatch_msg(
@@ -204,7 +206,7 @@ def _make_mismatch_msg(
     return msg.strip()
 
 
-def make_scalar_mismatch_msg(
+def _make_scalar_mismatch_msg(
     actual: Union[int, float, complex],
     expected: Union[int, float, complex],
     *,
@@ -235,7 +237,7 @@ def make_scalar_mismatch_msg(
     )
 
 
-def make_tensor_mismatch_msg(
+def _make_tensor_mismatch_msg(
     actual: torch.Tensor,
     expected: torch.Tensor,
     mismatches: torch.Tensor,
@@ -303,11 +305,11 @@ def make_tensor_mismatch_msg(
     )
 
 
-class UnsupportedInputs(Exception):  # noqa: B903
+class _UnsupportedInputs(Exception):  # noqa: B903
     """Exception to be raised during the construction of a :class:`Pair` in case it doesn't support the inputs."""
 
 
-class Pair(abc.ABC):
+class _Pair(abc.ABC):
     """ABC for all comparison pairs to be used in conjunction with :func:`assert_equal`.
 
     Each subclass needs to overwrite :meth:`Pair.compare` that performs the actual comparison.
@@ -335,13 +337,13 @@ class Pair(abc.ABC):
 
     @staticmethod
     def _inputs_not_supported() -> NoReturn:
-        raise UnsupportedInputs()
+        raise _UnsupportedInputs()
 
     @staticmethod
     def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):
         """Checks if all inputs are instances of a given class and raise :class:`UnsupportedInputs` otherwise."""
         if not all(isinstance(input, cls) for input in inputs):
-            Pair._inputs_not_supported()
+            _Pair._inputs_not_supported()
 
     def _fail(
         self, type: Type[Exception], msg: str, *, id: Tuple[Any, ...] = ()
@@ -353,7 +355,9 @@ class Pair(abc.ABC):
             If you use this before the ``super().__init__(...)`` call in the constructor, you have to pass the ``id``
             explicitly.
         """
-        raise ErrorMeta(type, msg, id=self.id if not id and hasattr(self, "id") else id)
+        raise _ErrorMeta(
+            type, msg, id=self.id if not id and hasattr(self, "id") else id
+        )
 
     @abc.abstractmethod
     def compare(self) -> None:
@@ -386,7 +390,7 @@ class Pair(abc.ABC):
         return "\n".join((head, *body, *tail))
 
 
-class ObjectPair(Pair):
+class _ObjectPair(_Pair):
     """Pair for any type of inputs that will be compared with the `==` operator.
 
     .. note::
@@ -401,7 +405,7 @@ class ObjectPair(Pair):
             equal = self.actual == self.expected
         except Exception as error:
             # We are not using `self._raise_error_meta` here since we need the exception chaining
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 ValueError,
                 f"{self.actual} == {self.expected} failed with:\n{error}.",
                 id=self.id,
@@ -411,7 +415,7 @@ class ObjectPair(Pair):
             self._fail(AssertionError, f"{self.actual} != {self.expected}")
 
 
-class NonePair(Pair):
+class _NonePair(_Pair):
     """Pair for ``None`` inputs."""
 
     def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
@@ -427,7 +431,7 @@ class NonePair(Pair):
             )
 
 
-class BooleanPair(Pair):
+class _BooleanPair(_Pair):
     """Pair for :class:`bool` inputs.
 
     .. note::
@@ -469,7 +473,7 @@ class BooleanPair(Pair):
         elif isinstance(bool_like, np.bool_):
             return bool_like.item()
         else:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 TypeError, f"Unknown boolean type {type(bool_like)}.", id=id
             )
 
@@ -481,7 +485,7 @@ class BooleanPair(Pair):
             )
 
 
-class NumberPair(Pair):
+class _NumberPair(_Pair):
     """Pair for Python number (:class:`int`, :class:`float`, and :class:`complex`) inputs.
 
     .. note::
@@ -532,7 +536,7 @@ class NumberPair(Pair):
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, id=id, **other_parameters)
 
-        self.rtol, self.atol = get_tolerances(
+        self.rtol, self.atol = _get_tolerances(
             *[self._TYPE_TO_DTYPE[type(input)] for input in (actual, expected)],
             rtol=rtol,
             atol=atol,
@@ -565,7 +569,7 @@ class NumberPair(Pair):
         elif isinstance(number_like, self._NUMBER_TYPES):
             return number_like
         else:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 TypeError, f"Unknown number type {type(number_like)}.", id=id
             )
 
@@ -590,7 +594,7 @@ class NumberPair(Pair):
 
         self._fail(
             AssertionError,
-            make_scalar_mismatch_msg(
+            _make_scalar_mismatch_msg(
                 self.actual, self.expected, rtol=self.rtol, atol=self.atol
             ),
         )
@@ -604,7 +608,7 @@ class NumberPair(Pair):
         )
 
 
-class TensorLikePair(Pair):
+class _TensorLikePair(_Pair):
     """Pair for :class:`torch.Tensor`-like inputs.
 
     Kwargs:
@@ -647,7 +651,7 @@ class TensorLikePair(Pair):
         )
         super().__init__(actual, expected, id=id, **other_parameters)
 
-        self.rtol, self.atol = get_tolerances(
+        self.rtol, self.atol = _get_tolerances(
             actual, expected, rtol=rtol, atol=atol, id=self.id
         )
         self.equal_nan = equal_nan
@@ -691,7 +695,7 @@ class TensorLikePair(Pair):
             torch.sparse_bsr,
             torch.sparse_bsc,
         }:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 ValueError, f"Unsupported tensor layout {tensor.layout}", id=id
             )
 
@@ -998,7 +1002,7 @@ class TensorLikePair(Pair):
             return
 
         if actual.shape == torch.Size([]):
-            msg = make_scalar_mismatch_msg(
+            msg = _make_scalar_mismatch_msg(
                 actual.item(),
                 expected.item(),
                 rtol=rtol,
@@ -1006,7 +1010,7 @@ class TensorLikePair(Pair):
                 identifier=identifier,
             )
         else:
-            msg = make_tensor_mismatch_msg(
+            msg = _make_tensor_mismatch_msg(
                 actual, expected, ~matches, rtol=rtol, atol=atol, identifier=identifier
             )
         self._fail(AssertionError, msg)
@@ -1041,16 +1045,16 @@ class TensorLikePair(Pair):
         )
 
 
-def originate_pairs(
+def _originate_pairs(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]],
+    pair_types: Sequence[Type[_Pair]],
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     id: Tuple[Any, ...] = (),
     **options: Any,
-) -> List[Pair]:
+) -> List[_Pair]:
     """Originates pairs from the individual inputs.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1059,7 +1063,7 @@ def originate_pairs(
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        pair_types (Sequence[Type[Pair]]): Sequence of pair types that will be tried to construct with the inputs.
+        pair_types (Sequence[Type[_Pair]]): Sequence of pair types that will be tried to construct with the inputs.
             First successful pair will be used.
         sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
         mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
@@ -1075,7 +1079,7 @@ def originate_pairs(
         ErrorMeta: With any expected exception that happens during the construction of a pair.
 
     Returns:
-        (List[Pair]): Originated pairs.
+        (List[_Pair]): Originated pairs.
     """
     if isinstance(actual, torch.TypedStorage) and isinstance(
         expected, torch.TypedStorage
@@ -1083,7 +1087,7 @@ def originate_pairs(
         actual_len = actual._size()
         expected_len = expected._size()
         if actual_len != expected_len:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 AssertionError,
                 f"The length of the sequences mismatch: {actual_len} != {expected_len}",
                 id=id,
@@ -1092,7 +1096,7 @@ def originate_pairs(
         pairs = []
         for idx in range(actual_len):
             pairs.extend(
-                originate_pairs(
+                _originate_pairs(
                     actual._getitem(idx),
                     expected._getitem(idx),
                     pair_types=pair_types,
@@ -1114,7 +1118,7 @@ def originate_pairs(
         actual_len = len(actual)
         expected_len = len(expected)
         if actual_len != expected_len:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 AssertionError,
                 f"The length of the sequences mismatch: {actual_len} != {expected_len}",
                 id=id,
@@ -1123,7 +1127,7 @@ def originate_pairs(
         pairs = []
         for idx in range(actual_len):
             pairs.extend(
-                originate_pairs(
+                _originate_pairs(
                     actual[idx],
                     expected[idx],
                     pair_types=pair_types,
@@ -1141,7 +1145,7 @@ def originate_pairs(
         if actual_keys != expected_keys:
             missing_keys = expected_keys - actual_keys
             additional_keys = actual_keys - expected_keys
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 AssertionError,
                 (
                     f"The keys of the mappings do not match:\n"
@@ -1159,7 +1163,7 @@ def originate_pairs(
         pairs = []
         for key in keys:
             pairs.extend(
-                originate_pairs(
+                _originate_pairs(
                     actual[key],
                     expected[key],
                     pair_types=pair_types,
@@ -1177,11 +1181,11 @@ def originate_pairs(
                 return [pair_type(actual, expected, id=id, **options)]
             # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
             # inputs. Thus, we try the next pair type.
-            except UnsupportedInputs:
+            except _UnsupportedInputs:
                 continue
             # Raising an `ErrorMeta` during origination is the orderly way to abort and so we simply re-raise it. This
             # is only in a separate branch, because the one below would also except it.
-            except ErrorMeta:
+            except _ErrorMeta:
                 raise
             # Raising any other exception during origination is unexpected and will give some extra information about
             # what happened. If applicable, the exception should be expected in the future.
@@ -1198,22 +1202,22 @@ def originate_pairs(
                     "please except the previous error and raise an expressive `ErrorMeta` instead."
                 ) from error
         else:
-            raise ErrorMeta(
+            raise _ErrorMeta(
                 TypeError,
                 f"No comparison pair was able to handle inputs of type {type(actual)} and {type(expected)}.",
                 id=id,
             )
 
 
-def not_close_error_metas(
+def _not_close_error_metas(
     actual: Any,
     expected: Any,
     *,
-    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
+    pair_types: Sequence[Type[_Pair]] = (_ObjectPair,),
     sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
     mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     **options: Any,
-) -> List[ErrorMeta]:
+) -> List[_ErrorMeta]:
     """Asserts that inputs are equal.
 
     ``actual`` and ``expected`` can be possibly nested :class:`~collections.abc.Sequence`'s or
@@ -1222,7 +1226,7 @@ def not_close_error_metas(
     Args:
         actual (Any): Actual input.
         expected (Any): Expected input.
-        pair_types (Sequence[Type[Pair]]): Sequence of :class:`Pair` types that will be tried to construct with the
+        pair_types (Sequence[Type[_Pair]]): Sequence of :class:`Pair` types that will be tried to construct with the
             inputs. First successful pair will be used. Defaults to only using :class:`ObjectPair`.
         sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
         mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
@@ -1232,7 +1236,7 @@ def not_close_error_metas(
     __tracebackhide__ = True
 
     try:
-        pairs = originate_pairs(
+        pairs = _originate_pairs(
             actual,
             expected,
             pair_types=pair_types,
@@ -1240,15 +1244,15 @@ def not_close_error_metas(
             mapping_types=mapping_types,
             **options,
         )
-    except ErrorMeta as error_meta:
+    except _ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None
 
-    error_metas: List[ErrorMeta] = []
+    error_metas: List[_ErrorMeta] = []
     for pair in pairs:
         try:
             pair.compare()
-        except ErrorMeta as error_meta:
+        except _ErrorMeta as error_meta:
             error_metas.append(error_meta)
         # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
         # about what happened. If applicable, the exception should be expected in the future.
@@ -1512,14 +1516,14 @@ def assert_close(
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
-    error_metas = not_close_error_metas(
+    error_metas = _not_close_error_metas(
         actual,
         expected,
         pair_types=(
-            NonePair,
-            BooleanPair,
-            NumberPair,
-            TensorLikePair,
+            _NonePair,
+            _BooleanPair,
+            _NumberPair,
+            _TensorLikePair,
         ),
         allow_subclasses=allow_subclasses,
         rtol=rtol,
@@ -1566,7 +1570,7 @@ def assert_allclose(
         expected = torch.tensor(expected, dtype=actual.dtype)
 
     if rtol is None and atol is None:
-        rtol, atol = default_tolerances(
+        rtol, atol = _default_tolerances(
             actual,
             expected,
             dtype_precisions={
