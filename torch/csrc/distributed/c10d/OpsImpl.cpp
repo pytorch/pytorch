@@ -293,30 +293,32 @@ reduce_scatter_cuda_(
       output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> _reduce_scatter_base_cpu_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
-  return process_group->_reduce_scatter_base(
+  auto work = process_group->_reduce_scatter_base(
       output_tensor,
       input_tensor,
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
-c10::intrusive_ptr<Work> _reduce_scatter_base_cuda_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_cuda_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
-  return process_group->_reduce_scatter_base(
+  auto work = process_group->_reduce_scatter_base(
       output_tensor,
       input_tensor,
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
 c10::intrusive_ptr<Work> gather_cpu_(

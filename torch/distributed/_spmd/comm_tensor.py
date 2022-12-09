@@ -95,6 +95,7 @@ class CommTensor(torch.Tensor):
         "broadcast_",
         "reduce_scatter_",
         "scatter_",
+        "_reduce_scatter_base_",
     ]
 
     _tensor: torch.Tensor
