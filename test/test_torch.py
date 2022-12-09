@@ -114,6 +114,8 @@ class TestVitalSignsCuda(TestCase):
             self.assertIn('CUDA.used\t\t true', torch.read_vitals())
 
 
+is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
+
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -356,7 +358,7 @@ class TestTorchDeviceType(TestCase):
             s0.tolist()
 
         with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
@@ -3914,7 +3916,7 @@ else:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
     @onlyCUDA
-    @largeTensorTest('10GB', device='cpu')
+    @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -3924,7 +3926,8 @@ else:
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
         actual_gpu = torch.pdist(x.to(device), p=2)         # 5 GB on GPU
-        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU
+        # Workaround for large memory overhead of self.assertTrue (see #84944)
+        self.assertTrue(torch.allclose(expected_cpu, actual_gpu.cpu()))
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
@@ -6531,25 +6534,12 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 warnings.resetwarnings()
                 f()
-                self.assertEqual(len(w), 1)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
                 warning = w[0].message
                 self.assertTrue(warning, DeprecationWarning)
                 self.assertTrue(re.search(
                     '^TypedStorage is deprecated',
                     str(warning)))
-
-        # Check that only one warning is raised from calling multiple
-        # TypedStorage functions if warnings are not reset between each
-        with warnings.catch_warnings(record=True) as w:
-            warnings.resetwarnings()
-            for f in funcs:
-                f()
-            self.assertEqual(len(w), 1)
-            warning = w[0].message
-            self.assertTrue(warning, DeprecationWarning)
-            self.assertTrue(re.search(
-                '^TypedStorage is deprecated',
-                str(warning)))
 
     def test_from_file(self):
         def assert_with_filename(filename):
@@ -8474,6 +8464,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         y2 = y1.imag
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
+
+    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
+    def test_no_cuda_monkeypatch(self):
+        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
+        # is not available.
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+            torch.cuda.Stream()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+            torch.cuda.Event()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+            torch.cuda.graphs.CUDAGraph()
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
