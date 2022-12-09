@@ -1751,7 +1751,7 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
   // TODO: add more assumptions as needed
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
     input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
-    beepidiboop(input, output, &F::aa_filter, F::interp_size);
+    upsample_avx_bilinear_or_bicubic(input, output, &F::aa_filter, F::interp_size);
   } else {
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
         output, input, align_corners, {scales_h, scales_w});

@@ -1,64 +1,18 @@
 #pragma once
 #ifdef CPU_CAPABILITY_AVX2
 
-#include <ATen/Context.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorIterator.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/cpu/vec/vec.h>
-#include <ATen/native/UpSample.h>
-#include <ATen/native/cpu/utils.h>
+#include <ATen/cpu/vec/intrinsics.h>
 #include <c10/util/irange.h>
 
 #include <stdio.h> // TODO: remove
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_native.h>
-#include <ATen/ops/ones.h>
-#endif
-
-#include <iostream>
-
-// TODO: remove defines below
-#define INT16 short
-#define INT32 int
-
-#define UINT16 unsigned INT16
-#define UINT32 unsigned INT32
-
-/* Microsoft compiler doesn't limit intrinsics for an architecture.
-   This macro is set only on x86 and means SSE2 and above including AVX2. */
-#if defined(_M_X64) || _M_IX86_FP == 2
-#define __SSE4_2__
-#endif
-
-#if defined(__SSE4_2__)
-#include <emmintrin.h>
-#include <mmintrin.h>
-#include <smmintrin.h>
-#endif
-
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
-
-#if defined(__SSE4_2__)
-static __m128i inline mm_cvtepu8_epi32(void* ptr) {
-  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(INT32*)ptr));
-}
-#endif
-
-#if defined(__AVX2__)
-static __m256i inline mm256_cvtepu8_epi32(void* ptr) {
-  return _mm256_cvtepu8_epi32(_mm_loadl_epi64((__m128i*)ptr));
-}
-#endif
+#include <iostream> // TODO: remove
 
 namespace {
+
+static __m128i inline mm_cvtepu8_epi32(void* ptr) {
+  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
+}
 
 typedef double (*aa_filter_fn_t)(
     double x); // TODO: use aa_filter_fn_t from UpSampleKernel.cpp file instead?
@@ -196,12 +150,12 @@ int precompute_coeffs( // TODO: This is redundant with
 
 int normalize_coeffs_8bpc(int outSize, int ksize, double* prekk) {
   int x;
-  INT16* kk;
+  int16_t* kk;
   int coefs_precision;
   double maxkk;
 
   // use the same buffer for normalized coefficients
-  kk = (INT16*)prekk;
+  kk = (int16_t*)prekk;
 
   maxkk = prekk[0];
   for (x = 0; x < outSize * ksize; x++) {
@@ -229,39 +183,39 @@ int normalize_coeffs_8bpc(int outSize, int ksize, double* prekk) {
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
-    UINT32* lineOut0,
-    UINT32* lineOut1,
-    UINT32* lineOut2,
-    UINT32* lineOut3,
-    UINT32* lineIn0,
-    UINT32* lineIn1,
-    UINT32* lineIn2,
-    UINT32* lineIn3,
+    uint32_t* lineOut0,
+    uint32_t* lineOut1,
+    uint32_t* lineOut2,
+    uint32_t* lineOut3,
+    uint32_t* lineIn0,
+    uint32_t* lineIn1,
+    uint32_t* lineIn2,
+    uint32_t* lineIn3,
     int xsize,
     int* xbounds,
-    INT16* kk,
+    int16_t* kk,
     int kmax,
     int coefs_precision);
 void ImagingResampleHorizontalConvolution8u(
-    UINT32* lineOut,
-    UINT32* lineIn,
+    uint32_t* lineOut,
+    uint32_t* lineIn,
     int xsize,
     int* xbounds,
-    INT16* kk,
+    int16_t* kk,
     int kmax,
     int coefs_precision);
 void ImagingResampleVerticalConvolution8u(
-    UINT32* lineOut,
-    UINT32* imIn,
+    uint32_t* lineOut,
+    uint32_t* imIn,
     int xmin,
     int xmax,
-    INT16* k,
+    int16_t* k,
     int coefs_precision,
     int xin);
 
 void ImagingResampleHorizontal_8bpc(
-    UINT32* unpacked_output_p,
-    UINT32* unpacked_input_p,
+    uint32_t* unpacked_output_p,
+    uint32_t* unpacked_input_p,
     int offset,
     int ksize,
     int* bounds,
@@ -269,13 +223,12 @@ void ImagingResampleHorizontal_8bpc(
     int xout,
     int yout,
     int xin) {
-  int ss0;
-  int xx, yy, x, xmin, xmax;
-  INT16 *k, *kk;
+  int yy;
+  int16_t *kk;
   int coefs_precision;
 
   // use the same buffer for normalized coefficients
-  kk = (INT16*)prekk;
+  kk = (int16_t*)prekk;
   coefs_precision = normalize_coeffs_8bpc(xout, ksize, prekk);
 
   yy = 0;
@@ -308,21 +261,20 @@ void ImagingResampleHorizontal_8bpc(
 }
 
 void ImagingResampleVertical_8bpc(
-    UINT32* unpacked_output_p,
-    UINT32* unpacked_input_p,
+    uint32_t* unpacked_output_p,
+    uint32_t* unpacked_input_p,
     int offset,
     int ksize,
     int* bounds,
     double* prekk,
     int xout,
     int yout) {
-  int ss0;
-  int xx, yy, y, ymin, ymax;
-  INT16 *k, *kk;
+  int yy, ymin, ymax;
+  int16_t *k, *kk;
   int coefs_precision;
 
   // use the same buffer for normalized coefficients
-  kk = (INT16*)prekk;
+  kk = (int16_t*)prekk;
   coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
 
   for (yy = 0; yy < yout; yy++) {
@@ -340,8 +292,8 @@ void ImagingResampleVertical_8bpc(
   }
 }
 
-UINT32* ImagingResampleInner(
-    UINT32* unpacked_input_p,
+uint32_t* ImagingResampleInner(
+    uint32_t* unpacked_input_p,
     int xin,
     int yin,
     int xout,
@@ -353,8 +305,8 @@ UINT32* ImagingResampleInner(
   int ksize_horiz, ksize_vert;
   int *bounds_horiz, *bounds_vert;
   double *kk_horiz, *kk_vert;
-  UINT32* unpacked_output_p = NULL;
-  UINT32* unpacked_output_temp_p = NULL;
+  uint32_t* unpacked_output_p = NULL;
+  uint32_t* unpacked_output_temp_p = NULL;
 
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
@@ -390,7 +342,7 @@ UINT32* ImagingResampleInner(
     //     ResampleHorizontal(
     //         imTemp, imIn, ybox_first, ksize_horiz, bounds_horiz, kk_horiz);
     // }
-    unpacked_output_temp_p = (UINT32*)malloc(sizeof(UINT32) * xout * yin);
+    unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
     ImagingResampleHorizontal_8bpc(
         unpacked_output_temp_p,
         unpacked_input_p,
@@ -419,7 +371,7 @@ UINT32* ImagingResampleInner(
   /* vertical pass */
   if (need_vertical) {
     // imOut = ImagingNewDirty(imIn->mode, imIn->xsize, ysize);
-    unpacked_output_p = (UINT32*)malloc(sizeof(UINT32) * xout * yout);
+    unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
     // if (imOut) {
     ImagingResampleVertical_8bpc(
         unpacked_output_p,
@@ -454,23 +406,21 @@ UINT32* ImagingResampleInner(
   return unpacked_output_p;
 }
 
-void beepidiboop(
+void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& input,
     const at::Tensor& output,
     aa_filter_fn_t filter,
     int interp_size) {
-  // Assume shape is 1, 3, H, W  and layout is channels_last
 
   auto batch_size = input.size(0);
-  auto num_channels = input.size(1);
   auto xin = input.size(3);
   auto yin = input.size(2);
   auto xout = output.size(3);
   auto yout = output.size(2);
   auto num_pixels_input = xin * yin;
-  auto num_pixels_output = xout * yout;
 
-  UINT32* unpacked_input_p = (UINT32*)malloc(sizeof(UINT32) * num_pixels_input);
+  uint32_t* unpacked_input_p =
+      (uint32_t*)malloc(sizeof(uint32_t) * num_pixels_input);
 
   for (const auto i : c10::irange(batch_size)) {
     unpack_rgb(
@@ -478,10 +428,9 @@ void beepidiboop(
         input[i],
         input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-    UINT32* unpacked_output_p = ImagingResampleInner(
+    uint32_t* unpacked_output_p = ImagingResampleInner(
         unpacked_input_p, xin, yin, xout, yout, filter, interp_size);
 
-    uint8_t* packed_output_p = (uint8_t*)output[i].data_ptr<uint8_t>();
     pack_rgb(
         (const uint8_t*)unpacked_output_p,
         output[i],
@@ -491,21 +440,21 @@ void beepidiboop(
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
-    UINT32* lineOut0,
-    UINT32* lineOut1,
-    UINT32* lineOut2,
-    UINT32* lineOut3,
-    UINT32* lineIn0,
-    UINT32* lineIn1,
-    UINT32* lineIn2,
-    UINT32* lineIn3,
+    uint32_t* lineOut0,
+    uint32_t* lineOut1,
+    uint32_t* lineOut2,
+    uint32_t* lineOut3,
+    uint32_t* lineIn0,
+    uint32_t* lineIn1,
+    uint32_t* lineIn2,
+    uint32_t* lineIn3,
     int xsize,
     int* xbounds,
-    INT16* kk,
+    int16_t* kk,
     int kmax,
     int coefs_precision) {
   int xmin, xmax, xx, x;
-  INT16* k;
+  int16_t* k;
 
   for (xx = 0; xx < xsize; xx++) {
     xmin = xbounds[xx * 2 + 0];
@@ -522,250 +471,60 @@ void ImagingResampleHorizontalConvolution8u4x(
     for (; x < xmax - 3; x += 4) {
       __m256i pix, mmk0, mmk1, source;
 
-      mmk0 = _mm256_set1_epi32(*(INT32*)&k[x]);
-      mmk1 = _mm256_set1_epi32(*(INT32*)&k[x + 2]);
+      mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
+      mmk1 = _mm256_set1_epi32(*(int32_t*)&k[x + 2]);
 
       source = _mm256_inserti128_si256(
           _mm256_castsi128_si256(_mm_loadu_si128((__m128i*)&lineIn0[x + xmin])),
           _mm_loadu_si128((__m128i*)&lineIn1[x + xmin]),
           1);
-      pix = _mm256_shuffle_epi8(
-          source,
-          _mm256_set_epi8(
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0,
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0));
+      // clang-format off
+      pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0,
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk0));
-      pix = _mm256_shuffle_epi8(
-          source,
-          _mm256_set_epi8(
-              -1,
-              15,
-              -1,
-              11,
-              -1,
-              14,
-              -1,
-              10,
-              -1,
-              13,
-              -1,
-              9,
-              -1,
-              12,
-              -1,
-              8,
-              -1,
-              15,
-              -1,
-              11,
-              -1,
-              14,
-              -1,
-              10,
-              -1,
-              13,
-              -1,
-              9,
-              -1,
-              12,
-              -1,
-              8));
+      pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+        -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8,
+        -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8));
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk1));
 
       source = _mm256_inserti128_si256(
           _mm256_castsi128_si256(_mm_loadu_si128((__m128i*)&lineIn2[x + xmin])),
           _mm_loadu_si128((__m128i*)&lineIn3[x + xmin]),
           1);
-      pix = _mm256_shuffle_epi8(
-          source,
-          _mm256_set_epi8(
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0,
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0));
+      pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0,
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk0));
-      pix = _mm256_shuffle_epi8(
-          source,
-          _mm256_set_epi8(
-              -1,
-              15,
-              -1,
-              11,
-              -1,
-              14,
-              -1,
-              10,
-              -1,
-              13,
-              -1,
-              9,
-              -1,
-              12,
-              -1,
-              8,
-              -1,
-              15,
-              -1,
-              11,
-              -1,
-              14,
-              -1,
-              10,
-              -1,
-              13,
-              -1,
-              9,
-              -1,
-              12,
-              -1,
-              8));
+      pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+        -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8,
+        -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8));
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk1));
     }
 
     for (; x < xmax - 1; x += 2) {
       __m256i pix, mmk;
 
-      mmk = _mm256_set1_epi32(*(INT32*)&k[x]);
+      mmk = _mm256_set1_epi32(*(int32_t*)&k[x]);
 
       pix = _mm256_inserti128_si256(
           _mm256_castsi128_si256(_mm_loadl_epi64((__m128i*)&lineIn0[x + xmin])),
           _mm_loadl_epi64((__m128i*)&lineIn1[x + xmin]),
           1);
-      pix = _mm256_shuffle_epi8(
-          pix,
-          _mm256_set_epi8(
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0,
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0));
+      pix = _mm256_shuffle_epi8(pix, _mm256_set_epi8(
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0,
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
 
       pix = _mm256_inserti128_si256(
           _mm256_castsi128_si256(_mm_loadl_epi64((__m128i*)&lineIn2[x + xmin])),
           _mm_loadl_epi64((__m128i*)&lineIn3[x + xmin]),
           1);
-      pix = _mm256_shuffle_epi8(
-          pix,
-          _mm256_set_epi8(
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0,
-              -1,
-              7,
-              -1,
-              3,
-              -1,
-              6,
-              -1,
-              2,
-              -1,
-              5,
-              -1,
-              1,
-              -1,
-              4,
-              -1,
-              0));
+      pix = _mm256_shuffle_epi8(pix, _mm256_set_epi8(
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0,
+        -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk));
+      // clang-format on
     }
 
     for (; x < xmax; x++) {
@@ -802,15 +561,15 @@ void ImagingResampleHorizontalConvolution8u4x(
 }
 
 void ImagingResampleHorizontalConvolution8u(
-    UINT32* lineOut,
-    UINT32* lineIn,
+    uint32_t* lineOut,
+    uint32_t* lineIn,
     int xsize,
     int* xbounds,
-    INT16* kk,
+    int16_t* kk,
     int kmax,
     int coefs_precision) {
   int xmin, xmax, xx, x;
-  INT16* k;
+  int16_t* k;
 
   for (xx = 0; xx < xsize; xx++) {
     __m128i sss;
@@ -831,151 +590,24 @@ void ImagingResampleHorizontalConvolution8u(
         __m256i ksource =
             _mm256_insertf128_si256(_mm256_castsi128_si256(tmp), tmp, 1);
 
+        // clang-format off
         source = _mm256_loadu_si256((__m256i*)&lineIn[x + xmin]);
-
-        pix = _mm256_shuffle_epi8(
-            source,
-            _mm256_set_epi8(
-                -1,
-                7,
-                -1,
-                3,
-                -1,
-                6,
-                -1,
-                2,
-                -1,
-                5,
-                -1,
-                1,
-                -1,
-                4,
-                -1,
-                0,
-                -1,
-                7,
-                -1,
-                3,
-                -1,
-                6,
-                -1,
-                2,
-                -1,
-                5,
-                -1,
-                1,
-                -1,
-                4,
-                -1,
-                0));
-        mmk = _mm256_shuffle_epi8(
-            ksource,
-            _mm256_set_epi8(
-                11,
-                10,
-                9,
-                8,
-                11,
-                10,
-                9,
-                8,
-                11,
-                10,
-                9,
-                8,
-                11,
-                10,
-                9,
-                8,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0));
+        pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+          -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0,
+          -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
+        mmk = _mm256_shuffle_epi8(ksource, _mm256_set_epi8(
+          11,10, 9,8, 11,10, 9,8, 11,10, 9,8, 11,10, 9,8,
+          3,2, 1,0, 3,2, 1,0, 3,2, 1,0, 3,2, 1,0));
         sss256 = _mm256_add_epi32(sss256, _mm256_madd_epi16(pix, mmk));
 
-        pix = _mm256_shuffle_epi8(
-            source,
-            _mm256_set_epi8(
-                -1,
-                15,
-                -1,
-                11,
-                -1,
-                14,
-                -1,
-                10,
-                -1,
-                13,
-                -1,
-                9,
-                -1,
-                12,
-                -1,
-                8,
-                -1,
-                15,
-                -1,
-                11,
-                -1,
-                14,
-                -1,
-                10,
-                -1,
-                13,
-                -1,
-                9,
-                -1,
-                12,
-                -1,
-                8));
-        mmk = _mm256_shuffle_epi8(
-            ksource,
-            _mm256_set_epi8(
-                15,
-                14,
-                13,
-                12,
-                15,
-                14,
-                13,
-                12,
-                15,
-                14,
-                13,
-                12,
-                15,
-                14,
-                13,
-                12,
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4));
+        pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+          -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8,
+          -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8));
+        mmk = _mm256_shuffle_epi8(ksource, _mm256_set_epi8(
+          15,14, 13,12, 15,14, 13,12, 15,14, 13,12, 15,14, 13,12,
+          7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 7,6, 5,4));
         sss256 = _mm256_add_epi32(sss256, _mm256_madd_epi16(pix, mmk));
+        // clang-format on
       }
 
       for (; x < xmax - 3; x += 4) {
@@ -987,77 +619,15 @@ void ImagingResampleHorizontalConvolution8u(
         tmp = _mm_loadu_si128((__m128i*)&lineIn[x + xmin]);
         source = _mm256_insertf128_si256(_mm256_castsi128_si256(tmp), tmp, 1);
 
-        pix = _mm256_shuffle_epi8(
-            source,
-            _mm256_set_epi8(
-                -1,
-                15,
-                -1,
-                11,
-                -1,
-                14,
-                -1,
-                10,
-                -1,
-                13,
-                -1,
-                9,
-                -1,
-                12,
-                -1,
-                8,
-                -1,
-                7,
-                -1,
-                3,
-                -1,
-                6,
-                -1,
-                2,
-                -1,
-                5,
-                -1,
-                1,
-                -1,
-                4,
-                -1,
-                0));
-        mmk = _mm256_shuffle_epi8(
-            ksource,
-            _mm256_set_epi8(
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4,
-                7,
-                6,
-                5,
-                4,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0,
-                3,
-                2,
-                1,
-                0));
+        // clang-format off
+        pix = _mm256_shuffle_epi8(source, _mm256_set_epi8(
+          -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8,
+          -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
+        mmk = _mm256_shuffle_epi8(ksource, _mm256_set_epi8(
+          7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 
+          3,2, 1,0, 3,2, 1,0, 3,2, 1,0, 3,2, 1,0));
         sss256 = _mm256_add_epi32(sss256, _mm256_madd_epi16(pix, mmk));
+        // clang-format on
       }
 
       sss = _mm_add_epi32(
@@ -1066,7 +636,7 @@ void ImagingResampleHorizontalConvolution8u(
     }
 
     for (; x < xmax - 1; x += 2) {
-      __m128i mmk = _mm_set1_epi32(*(INT32*)&k[x]);
+      __m128i mmk = _mm_set1_epi32(*(int32_t*)&k[x]);
       __m128i source = _mm_loadl_epi64((__m128i*)&lineIn[x + xmin]);
       __m128i pix = _mm_shuffle_epi8(
           source,
@@ -1086,11 +656,11 @@ void ImagingResampleHorizontalConvolution8u(
 }
 
 void ImagingResampleVerticalConvolution8u(
-    UINT32* lineOut,
-    UINT32* imIn,
+    uint32_t* lineOut,
+    uint32_t* imIn,
     int xmin,
     int xmax,
-    INT16* k,
+    int16_t* k,
     int coefs_precision,
     int xin) {
   int x;
@@ -1111,16 +681,14 @@ void ImagingResampleVerticalConvolution8u(
       __m256i pix, mmk;
 
       // Load two coefficients at once
-      mmk = _mm256_set1_epi32(*(INT32*)&k[x]);
+      mmk = _mm256_set1_epi32(*(int32_t*)&k[x]);
 
-      // source1 = _mm256_loadu_si256(  // top line
-      //     (__m256i *) &imIn->image32[x + xmin][xx]);
-      source1 = _mm256_loadu_si256( // top line
-          (__m256i*)(imIn + (x + xmin) * xin + xx));
-      // source2 = _mm256_loadu_si256(  // bottom line
-      //     (__m256i *) &imIn->image32[x + 1 + xmin][xx]);
-      source2 = _mm256_loadu_si256( // bottom line
-          (__m256i*)(imIn + (x + 1 + xmin) * xin + xx));
+      // Load 2 lines
+      //                           (__m256i *) &imIn->image32[x + xmin][xx]
+      source1 = _mm256_loadu_si256((__m256i*)(imIn + (x + xmin) * xin + xx));
+      //                           (__m256i *) &imIn->image32[x + 1 + xmin][xx]
+      source2 =
+          _mm256_loadu_si256((__m256i*)(imIn + (x + 1 + xmin) * xin + xx));
 
       source = _mm256_unpacklo_epi8(source1, source2);
       pix = _mm256_unpacklo_epi8(source, _mm256_setzero_si256());
@@ -1138,10 +706,8 @@ void ImagingResampleVerticalConvolution8u(
       __m256i source, source1, pix, mmk;
       mmk = _mm256_set1_epi32(k[x]);
 
-      // source1 = _mm256_loadu_si256(  // top line
-      //     (__m256i *) &imIn->image32[x + xmin][xx]);
-      source1 = _mm256_loadu_si256( // top line
-          (__m256i*)(imIn + (x + xmin) * xin + xx));
+      //                           (__m256i *) &imIn->image32[x + xmin][xx])
+      source1 = _mm256_loadu_si256((__m256i*)(imIn + (x + xmin) * xin + xx));
 
       source = _mm256_unpacklo_epi8(source1, _mm256_setzero_si256());
       pix = _mm256_unpacklo_epi8(source, _mm256_setzero_si256());
@@ -1175,16 +741,13 @@ void ImagingResampleVerticalConvolution8u(
       __m128i pix, mmk;
 
       // Load two coefficients at once
-      mmk = _mm_set1_epi32(*(INT32*)&k[x]);
+      mmk = _mm_set1_epi32(*(int32_t*)&k[x]);
 
-      // source1 = _mm_loadl_epi64(  // top line
-      //     (__m128i *) &imIn->image32[x + xmin][xx]);
-      source1 = _mm_loadl_epi64( // top line
-          (__m128i*)(imIn + (x + xmin) * xin + xx));
-      // source2 = _mm_loadl_epi64(  // bottom line
-      //     (__m128i *) &imIn->image32[x + 1 + xmin][xx]);
-      source2 = _mm_loadl_epi64( // bottom line
-          (__m128i*)(imIn + (x + 1 + xmin) * xin + xx));
+      // Load 2 lines
+      //                        (__m128i *) &imIn->image32[x + xmin][xx])
+      source1 = _mm_loadl_epi64((__m128i*)(imIn + (x + xmin) * xin + xx));
+      //                        (__m128i *) &imIn->image32[x + 1 + xmin][xx]
+      source2 = _mm_loadl_epi64((__m128i*)(imIn + (x + 1 + xmin) * xin + xx));
 
       source = _mm_unpacklo_epi8(source1, source2);
       pix = _mm_unpacklo_epi8(source, _mm_setzero_si128());
@@ -1196,10 +759,8 @@ void ImagingResampleVerticalConvolution8u(
       __m128i source, source1, pix, mmk;
       mmk = _mm_set1_epi32(k[x]);
 
-      // source1 = _mm_loadl_epi64(  // top line
-      //     (__m128i *) &imIn->image32[x + xmin][xx]);
-      source1 = _mm_loadl_epi64( // top line
-          (__m128i*)(imIn + (x + xmin) * xin + xx));
+      //                        (__m128i *) &imIn->image32[x + xmin][xx]);
+      source1 = _mm_loadl_epi64((__m128i*)(imIn + (x + xmin) * xin + xx));
 
       source = _mm_unpacklo_epi8(source1, _mm_setzero_si128());
       pix = _mm_unpacklo_epi8(source, _mm_setzero_si128());
@@ -1223,15 +784,13 @@ void ImagingResampleVerticalConvolution8u(
       __m128i pix, mmk;
 
       // Load two coefficients at once
-      mmk = _mm_set1_epi32(*(INT32*)&k[x]);
+      mmk = _mm_set1_epi32(*(int32_t*)&k[x]);
 
-      // source1 = _mm_cvtsi32_si128(  // top line
-      //     *(int *) &imIn->image32[x + xmin][xx]);
+      // Load 2 lines
+      //                           *(int *) &imIn->image32[x + xmin][xx]
       source1 = _mm_cvtsi32_si128(*(int*)(imIn + (x + xmin) * xin + xx));
-      // source2 = _mm_cvtsi32_si128(  // bottom line
-      //     *(int *) &imIn->image32[x + 1 + xmin][xx]);
-      source2 = _mm_cvtsi32_si128( // bottom line
-          *(int*)(imIn + (x + 1 + xmin) * xin + xx));
+      //                          *(int *) &imIn->image32[x + 1 + xmin][xx]
+      source2 = _mm_cvtsi32_si128(*(int*)(imIn + (x + 1 + xmin) * xin + xx));
 
       source = _mm_unpacklo_epi8(source1, source2);
       pix = _mm_unpacklo_epi8(source, _mm_setzero_si128());
@@ -1239,7 +798,7 @@ void ImagingResampleVerticalConvolution8u(
     }
 
     for (; x < xmax; x++) {
-      // __m128i pix = mm_cvtepu8_epi32(&imIn->image32[x + xmin][xx]);
+      //                             &imIn->image32[x + xmin][xx]
       __m128i pix = mm_cvtepu8_epi32(imIn + (x + xmin) * xin + xx);
       __m128i mmk = _mm_set1_epi32(k[x]);
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
