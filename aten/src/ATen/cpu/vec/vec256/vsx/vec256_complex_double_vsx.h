@@ -142,7 +142,7 @@ class Vectorized<ComplexDbl> {
           vec_vsx_ld(offset16, reinterpret_cast<const double*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -282,6 +282,10 @@ class Vectorized<ComplexDbl> {
   Vectorized<ComplexDbl> log10() const {
     auto ret = log();
     return ret.elwise_mult(vd_log10e_inv);
+  }
+
+  Vectorized<ComplexDbl> log1p() const {
+    return map(std::log1p);
   }
 
   Vectorized<ComplexDbl> asin() const {
@@ -478,10 +482,6 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> igammac(const Vectorized<ComplexDbl>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexDbl> log1p() const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
