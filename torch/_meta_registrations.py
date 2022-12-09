@@ -1856,11 +1856,48 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
 @register_meta(
     [
         aten._scaled_dot_product_flash_attention,
+    ]
+)
+def meta__scaled_dot_product_flash(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    return_softmax: bool = False,
+    is_causal: bool = False,
+):
+    logsumexp = torch.empty(
+        (query.size(0), query.size(1), query.size(2)),
+        dtype=torch.float,
+        device=query.device,
+    )
+    softmax = torch.empty(
+        (query.size(0), query.size(1), query.size(2), key.size(2)),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    return torch.empty_like(query), logsumexp, softmax
+
+
+@register_meta(
+    [
         aten._scaled_dot_product_efficient_attention,
     ]
 )
-def meta__scaled_dot_product(self, k, v, attn_mask, dropout_p, training, out=None):
-    return self.new_empty(self.shape)
+def meta__scaled_dot_product_efficient(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    compute_log_sumexp: bool,
+    is_causal: bool = False,
+):
+    logsumexp_dim = math.ceil(query.size(2) // 32) * 32 if compute_log_sumexp else 0
+    logsum_exp = torch.empty(
+        (query.size(0), query.size(1), logsumexp_dim),
+        dtype=torch.float,
+        device=query.device,
+    )
+    return torch.empty_like(query), logsum_exp
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
