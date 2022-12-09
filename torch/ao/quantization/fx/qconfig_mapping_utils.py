@@ -22,7 +22,7 @@ from torch.nn.intrinsic import _FusedModule
 from ..utils import (
     _parent_name,
     _get_qconfig_dtypes,
-    get_combined_dict
+    _get_combined_dict
 )
 from ..qconfig_mapping import (
     _OBJECT_TYPE_DICT_KEY,
@@ -343,7 +343,7 @@ def _update_qconfig_for_qat(
     Update the qconfig_dict to account for module swaps during QAT.
     During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
     """
-    all_qat_mappings = get_combined_dict(
+    all_qat_mappings = _get_combined_dict(
         get_default_qat_module_mappings(), additional_qat_module_mapping)
     object_type_dict = qconfig_mapping.object_type_qconfigs
     new_object_type_dict = object_type_dict.copy()
