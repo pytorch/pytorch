@@ -725,8 +725,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.shape_env = shape_env
 
-        self.fakified_real_tensors = set()
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -769,13 +767,12 @@ class FakeTensorMode(TorchDispatchMode):
                     out = out.clone()
                 return converter(self, out, make_constant=True)
 
-        flat_arg_tensors = tree_flatten_only(torch.Tensor, (args, kwargs))
         # See [subclass inputs] below
         # NB: If you're seeing a mysterious infinite loop involving fake
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        if self.check_for_subclass(flat_arg_tensors):
+        if self.check_for_subclass(args, kwargs):
             return NotImplemented
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
@@ -791,7 +788,7 @@ class FakeTensorMode(TorchDispatchMode):
             return converter(self, args[0])
 
         args, kwargs = self.validate_and_convert_non_fake_tensors(
-            flat_arg_tensors, func, converter, args, kwargs
+            func, converter, args, kwargs
         )
 
         # The current constant handling only support tracing systems
@@ -907,36 +904,43 @@ class FakeTensorMode(TorchDispatchMode):
     # fake tensor is not supported.  What we actually wanted to happen
     # was to give the subclass a chance to figure out what it wants to
     # before erroring out. Returning NotImplemented here allows this.
-    def check_for_subclass(self, flat_arg_tensors):
+    def check_for_subclass(self, args, kwargs):
+        def check(x):
+            return (
+                not isinstance(x, FakeTensor)
+                and type(x) is not torch.Tensor
+                and type(x) is not torch.nn.Parameter
+            )
+
         return any(
-            not isinstance(x, FakeTensor)
-            and type(x) is not torch.Tensor
-            and type(x) is not torch.nn.Parameter
-            for x in flat_arg_tensors
+            tree_flatten_only(bool, tree_map_only(torch.Tensor, check, (args, kwargs)))
         )
 
-    def validate_and_convert_non_fake_tensors(
-        self, flat_arg_tensors, func, converter, args, kwargs
-    ):
+    def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
         """
-        for x in flat_arg_tensors:
-            if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
+
+        def validate(x):
+            print("X", x)
+            if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
-                        f"Can't call inplace view ops on global variables or model attributes, Found in {func}(*{args}, **{kwargs})"
+                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
                     )
                 if not self.allow_non_fake_inputs:
                     raise Exception(
-                        "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                        f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
+                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                        f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
                     )
+
+                return converter(self, x)
+            return x
 
         return tree_map_only(
             torch.Tensor,
-            lambda x: x if isinstance(x, FakeTensor) else converter(self, x),
+            validate,
             (args, kwargs),
         )
 

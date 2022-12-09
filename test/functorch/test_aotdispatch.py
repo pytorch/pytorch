@@ -1253,7 +1253,7 @@ def forward(self, primals_1, primals_2):
         # No more param lifting
         self.assertEqual(inp_count, 1)
 
-        with self.assertRaisesRegex(Exception, "Invoking operators with non-Fake Tensor"):
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors to FakeTensors"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
 
     def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
@@ -1272,7 +1272,7 @@ def forward(self, primals_1, primals_2):
         m = M().eval()
         inp = torch.randn(2, 5)
         # inplace mutation on attr is not allowed
-        with self.assertRaisesRegex(Exception, "Can't call inplace view ops on global variables"):
+        with self.assertRaisesRegex(Exception, "Can't call metadata"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
 
