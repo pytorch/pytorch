@@ -32,6 +32,28 @@ def _use_grad_for_differentiable(func):
         return ret
     return _use_grad
 
+def _get_value(x):
+    import torch._dynamo
+    # item is significantly faster than a cpu tensor in eager mode
+    if torch._dynamo.is_compiling():
+        return x
+    else:
+        return x.item()
+
+def _stack_if_compiling(x):
+    import torch._dynamo
+
+    if torch._dynamo.is_compiling():
+        return torch.stack(x)
+    else:
+        return x
+
+def _dispatch_sqrt(x):
+    import math
+    if isinstance(x, torch.Tensor):
+        return x.sqrt()
+    else:
+        return math.sqrt(x)
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following

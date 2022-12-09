@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -233,15 +233,16 @@ def _single_tensor_nadam(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
+        step = _get_value(step_t)
 
-        bias_correction2 = 1 - beta2 ** step_t
+        bias_correction2 = 1 - beta2 ** step
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
         # calculate the momentum cache \mu^{t} and \mu^{t+1}
-        mu = beta1 * (1. - 0.5 * (0.96 ** (step_t * momentum_decay)))
-        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step_t + 1) * momentum_decay)))
+        mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
+        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
 
         # update mu_product
         mu_product *= mu
@@ -281,9 +282,9 @@ def _multi_tensor_nadam(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
-    bias_correction2 = [1 - beta2 ** step for step in state_steps]
-    mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]
-    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+    bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
+    mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in state_steps]
+    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
                 for step in state_steps]
 
     # update mu_products
@@ -300,14 +301,14 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
 
     exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-    bias_correction_sqrt = [bc.sqrt() for bc in bias_correction2]
+    bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size_grads = torch.stack([(lr * (1. - mu) / (1. - mu_product)) * -1
-                                  for mu_product, mu in zip(mu_products, mus)])
-    step_size_expavg = torch.stack([(lr * mu_next / (1. - mu_product * mu_next)) * -1
-                                   for mu_product, mu_next in zip(mu_products, mu_nexts)])
+    step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
+                                           for mu_product, mu in zip(mu_products, mus)])
+    step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
+                                            for mu_product, mu_next in zip(mu_products, mu_nexts)])
 
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size_expavg)
