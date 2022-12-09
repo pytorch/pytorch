@@ -6,7 +6,7 @@ import traceback
 import types
 import weakref
 from traceback import FrameSummary
-from typing import Callable, cast, Dict, List, Optional, Set
+from typing import cast, Dict, List, Optional
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -23,7 +23,8 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
-from .guards import CheckFunctionManager, Guard, GuardedCode
+from .guards import CheckFunctionManager, GuardedCode
+from .hooks import Hooks
 from .output_graph import CompilerFn, OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
@@ -266,7 +267,6 @@ def exception_handler(e, code, frame=None):
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
-    guard_export_fn=None,
     one_graph: bool = True,
     export: bool = False,
 ):
@@ -274,7 +274,7 @@ def convert_frame_assert(
     init_logging()
 
     @dynamo_timed
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int):
+    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -344,7 +344,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
-            guard_export_fn,
+            hooks,
             frame,
         )
 
@@ -360,7 +360,7 @@ def _compile(
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
-    guard_export_fn: Optional[Callable[[Set[Guard]], None]] = None,
+    hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
@@ -432,7 +432,13 @@ def _compile(
         assert output is not None
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(output, output.guards, locals, globals)
+        check_fn = CheckFunctionManager(
+            output,
+            output.guards,
+            locals,
+            globals,
+            hooks.guard_fail_fn if hooks else None,
+        )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
@@ -443,8 +449,8 @@ def _compile(
             )
             log.info(guard_str)
 
-        if guard_export_fn is not None:
-            guard_export_fn(output.guards)
+        if hooks.guard_export_fn is not None:
+            hooks.guard_export_fn(output.guards)
 
         return guarded_code
     except (
@@ -460,14 +466,14 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, guard_export_fn=None):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int):
+    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size)
+            result = inner_convert(frame, cache_size, hooks)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
@@ -501,9 +507,9 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
+            hooks,
             one_graph=False,
             export=False,
-            guard_export_fn=None,
             frame=None,
         )
     except Exception:
