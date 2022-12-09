@@ -1853,7 +1853,7 @@ class TensorOrArrayPair(TensorLikePair):
 
     def _handle_hybrid_sparse_csr(self, actual, expected):
         compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
+        if not ((actual.layout in compressed_sparse_layouts) or (expected.layout in compressed_sparse_layouts)):
             return actual, expected
 
         def to_dense(tensor):
@@ -1863,7 +1863,8 @@ class TensorOrArrayPair(TensorLikePair):
             def partial_to_dense(tensor):
                 if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
                     return tensor.to_dense()
-                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
+                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
+                return torch.stack(lst) if lst else tensor.to_dense()
 
             return partial_to_dense(tensor)
 
@@ -3259,7 +3260,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
                 if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}") from error
                     time.sleep(random.random())
                     continue
                 raise
@@ -4000,8 +4001,8 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     """
     try:
         return next(iter(samples))
-    except StopIteration:
-        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
+    except StopIteration as e:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input') from e
 
 # this helper method is to recursively
 # clone the tensor-type input of operators tested by OpInfo

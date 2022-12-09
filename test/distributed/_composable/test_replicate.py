@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
-from torch.distributed._composable.replicate import mark_root_module, replicate
+from torch.distributed._composable.replicate import replicate
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -91,15 +91,22 @@ class ReplicateTest(MultiProcessTestCase):
 
     def test_replicate_single_module(self):
         model = Net()
-        replicate_model = mark_root_module(replicate(deepcopy(model)))
+        replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
     def test_replicate_multi_module(self):
         model = Net()
-        replicate_model = mark_root_module(deepcopy(model))
+        replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
         replicate(replicate_model.fc2)
         replicate(replicate_model.fc3)
+        self._compare_module(model, replicate_model)
+
+    def test_replicate_with_kwargs(self):
+        model = Net()
+        replicate_model = replicate(
+            deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
+        )
         self._compare_module(model, replicate_model)
 
 
