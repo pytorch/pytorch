@@ -883,8 +883,7 @@ def _run_test_with_mt_pg(self, timeout, world_size, callback):
         print(f"Rank {rank} raised:")
         for line in traceback.format_exception(*exc_info):
             sys.stdout.write(line)
-    if failed_ranks:
-        raise failed_ranks[0][1][1]  # re-throw the first exception
+    self.assertEqual([], failed_ranks, "Some ranks failed")
 
 
 def spawn_threads_and_init_comms(

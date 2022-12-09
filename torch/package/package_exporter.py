@@ -8,7 +8,6 @@ import types
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import (
     Any,
@@ -423,20 +422,17 @@ class PackageExporter:
             return False
 
     def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
-        filename = None
-        spec = getattr(module, "__spec__", None)
-        if spec is not None:
-            loader = getattr(spec, "loader", None)
-            if loader is not None and isinstance(loader, SourceFileLoader):
-                try:
-                    filename = loader.get_filename(module.__name__)
-                except ImportError:
-                    pass
-        if filename is None:
-            filename = getattr(module, "__file__", None)
-        if isinstance(filename, str) and filename.endswith(".py"):
-            return "".join(linecache.getlines(filename, module.__dict__))
-        return None
+        filename = getattr(module, "__file__", None)
+        result = (
+            None
+            if filename is None or not filename.endswith(".py")
+            else linecache.getlines(filename, module.__dict__)
+        )
+
+        if result is None:
+            return None
+
+        return "".join(result)
 
     def add_dependency(self, module_name: str, dependencies=True):
         """Given a module, add it to the dependency graph according to patterns
@@ -652,7 +648,7 @@ class PackageExporter:
                         field = arg
                         memo[memo_count] = arg
                     elif (
-                        opcode.name == "LONG_BINGET"
+                        opcode.name == "BINGET_LONG"
                         or opcode.name == "BINGET"
                         or opcode.name == "GET"
                     ):
@@ -662,9 +658,6 @@ class PackageExporter:
                     elif opcode.name == "MEMOIZE":
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
-                        if module is None:
-                            # If not module was passed on in the entries preceeding this one, continue.
-                            continue
                         assert isinstance(module, str)
                         if module not in all_dependencies:
                             all_dependencies.append(module)

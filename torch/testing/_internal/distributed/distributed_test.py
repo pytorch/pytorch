@@ -900,7 +900,7 @@ class DistributedTest:
         @skip_if_no_gpu
         def test_new_subgroups_group_size_exceeds_world_size(self):
             with self.assertRaisesRegex(
-                ValueError, "must not exceed"
+                ValueError, "The arg 'group_size' must not exceed the world size"
             ):
                 dist.new_subgroups(100)
 

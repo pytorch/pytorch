@@ -2425,8 +2425,12 @@ class ExternKernel(InputsKernel):
         index = V.graph.sizevars.simplify_with_ranges(
             list(rw.reads)[0].index, rw.var_ranges
         )
-        strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
-        offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+        strides, offset = V.graph.sizevars.maybe_stride_and_offset_vars(
+            index, rw.range_vars
+        )
+        if offset is None or any(s is None for s in strides):
+            raise NotImplementedError()
+
         expected = sympy_dot(rw.range_vars, strides) + offset
 
         if index != expected:
@@ -3964,8 +3968,6 @@ class LoopBodyBlock:
             )
 
         class CaptureIndexing(V.WrapperHandler):
-            self.name = "CaptureIndexing"
-
             def load(self, name: str, index: sympy.Expr):
                 index = add_index(index, "reads", name)
                 return self._inner.load(name, index)
@@ -4048,7 +4050,6 @@ class LoopBodyBlock:
                 self.garbage_collect_values = False
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
-                self.name = V.get_ops_handler().name
 
         return InterpreterShim().run(V.get_ops_handler())
 

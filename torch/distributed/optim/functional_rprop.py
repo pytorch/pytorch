@@ -1,11 +1,10 @@
-from typing import Dict, List, Optional, Tuple
-
+from typing import List, Dict, Optional, Tuple
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
 
-__all__: List[str] = []
+__all__ : List[str] = []
 
 # Define a TorchScript compatible Functional Rprop Optimizer
 # where we use these optimizer in a functional way.
@@ -46,12 +45,12 @@ class _FunctionalRprop(object):
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
     def step(self, gradients: List[Optional[Tensor]]):
-        params = self.param_group["params"]
+        params = self.param_group['params']
         params_with_grad = []
         grads = []
         prevs = []
         step_sizes = []
-        lr = self.defaults["lr"]
+        lr = self.defaults['lr']
         etaminus, etaplus = self.etas
         step_size_min, step_size_max = self.step_sizes
 
@@ -70,28 +69,24 @@ class _FunctionalRprop(object):
                 if param not in self.state:
                     self.state[param] = {}
                     state = self.state[param]
-                    state["step"] = torch.tensor(0.0)
-                    state["prev"] = torch.zeros_like(
-                        param, memory_format=torch.preserve_format
-                    )
-                    state["step_size"] = torch.full_like(gradient, lr)
+                    state['step'] = torch.tensor(0.0)
+                    state['prev'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state['step_size'] = torch.full_like(gradient, lr)
 
                 state = self.state[param]
-                prevs.append(state["prev"])
-                step_sizes.append(state["step_size"])
+                prevs.append(state['prev'])
+                step_sizes.append(state['step_size'])
 
-                state["step"] += 1
+                state['step'] += 1
 
         with torch.no_grad():
-            F.rprop(
-                params_with_grad,
-                grads,
-                prevs,
-                step_sizes,
-                step_size_min=step_size_min,
-                step_size_max=step_size_max,
-                etaminus=etaminus,
-                etaplus=etaplus,
-                foreach=self.foreach,
-                maximize=self.maximize,
-            )
+            F.rprop(params_with_grad,
+                    grads,
+                    prevs,
+                    step_sizes,
+                    step_size_min=step_size_min,
+                    step_size_max=step_size_max,
+                    etaminus=etaminus,
+                    etaplus=etaplus,
+                    foreach=self.foreach,
+                    maximize=self.maximize)

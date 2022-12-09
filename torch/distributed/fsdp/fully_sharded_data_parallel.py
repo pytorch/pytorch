@@ -22,6 +22,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -45,8 +46,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
-    HYBRID_SHARDING_STRATEGIES,
-    ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
@@ -188,12 +187,8 @@ class FullyShardedDataParallel(nn.Module):
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
-        process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
-            This is the process group used for collective communications and
-            the one over which the model is sharded. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD`` users can
-            pass in a tuple of process groups representing the groups to shard and replicate across,
-            respectively.
+        process_group (Optional[ProcessGroup]):
+            This is the process group used for collective communications.
         sharding_strategy (Optional[ShardingStrategy]):
             This configures the sharding strategy used by FSDP, which may trade
             off memory saving and communication overhead. See
@@ -317,7 +312,7 @@ class FullyShardedDataParallel(nn.Module):
     def __init__(
         self,
         module: nn.Module,
-        process_group: ProcessGroupType = None,
+        process_group: Optional[ProcessGroup] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
@@ -338,12 +333,6 @@ class FullyShardedDataParallel(nn.Module):
         # Add module annotations for Dynamo support (see function for details)
         _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
 
-        # Initializes self.process_group, along with rank and world size. This will
-        # also set another attribute, _inter_node_pg, to control the process group
-        # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
-        # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
-        # the same process group state as the root FSDP module.
-        _init_process_group_state(self, process_group, sharding_strategy, auto_wrap_policy)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -366,14 +355,9 @@ class FullyShardedDataParallel(nn.Module):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
             }
-            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-                # Share root process groups with children to maintain
-                # the invariant that all FSDP modules will have the same
-                # process groups.
-                fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
-
             _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
 
+        _init_process_group_state(self, process_group)
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
         _init_core_state(
