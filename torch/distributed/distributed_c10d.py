@@ -2517,7 +2517,7 @@ def all_gather_coalesced(
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_coalesced")
         return
-    _check_tensor_list(input_tensor_list, "tensor_list")
+    _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
@@ -3543,7 +3543,7 @@ def new_subgroups(
         group_size = torch.cuda.device_count()
     world_size = get_world_size()
     if world_size < group_size:
-        raise ValueError("The arg 'group_size' must not exceed the world size")
+        raise ValueError(f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})")
     if world_size % group_size != 0:
         raise ValueError("The world size must be divisible by 'group_size'")
 

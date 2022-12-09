@@ -72,7 +72,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_reduction_batch_rule");
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
@@ -168,7 +168,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 #define REDUCTION_BOXED_ARGS(op, dim_pos) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_reduction_batch_rule<dim_pos>>());
 
-// Skipping frobenius/nuclear/all/any since they don't have opinfo tests right now :P
+// Skipping all/any since they don't have opinfo tests right now :P
 
 Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
   return at::norm((self - other), p);
@@ -412,7 +412,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED(_softmax);
   REDUCTION_BOXED(sort);
   REDUCTION_BOXED_ARGS(sort.stable, 2);
-  REDUCTION_BOXED(argsort);
   REDUCTION_BOXED(std_mean.correction);
   m.impl("sum", sum_decomp);
   REDUCTION_BOXED(sum.dim_IntList);

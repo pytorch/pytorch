@@ -49,6 +49,22 @@ c10::intrusive_ptr<Work> recv_cuda_(
       tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<Work> recv_any_source_cpu_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recvAnysource(tensor_vec, static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> recv_any_source_cuda_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recvAnysource(tensor_vec, static_cast<int>(tag));
+}
+
 c10::intrusive_ptr<Work> reduce_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -225,6 +241,24 @@ c10::intrusive_ptr<Work> _allgather_base_cuda_(
   return process_group->_allgather_base(output_tensor, input_tensor);
 }
 
+c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
+c10::intrusive_ptr<Work> allgather_coalesced_cuda_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
 reduce_scatter_cpu_(
     const std::vector<at::Tensor>& output_tensors,
@@ -257,6 +291,32 @@ reduce_scatter_cuda_(
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base_cpu_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->_reduce_scatter_base(
+      output_tensor,
+      input_tensor,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base_cuda_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->_reduce_scatter_base(
+      output_tensor,
+      input_tensor,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> gather_cpu_(
@@ -339,6 +399,36 @@ c10::intrusive_ptr<Work> alltoall_cuda_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> alltoall_base_cpu_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> alltoall_base_cuda_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> barrier_cpu(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -353,6 +443,17 @@ c10::intrusive_ptr<Work> barrier_cuda(
     int64_t timeout) {
   return process_group->barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
+}
+
+void monitored_barrier_cpu_(
+    at::Tensor /* unused */,
+    const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout,
+    bool wait_all_ranks) {
+  process_group->monitoredBarrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
+      wait_all_ranks);
 }
 
 // register functions to dispatcher
@@ -371,6 +472,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("recv_", recv_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("recv_any_source_", recv_any_source_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("recv_any_source_", recv_any_source_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -432,11 +541,27 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("allgather_coalesced_", allgather_coalesced_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("allgather_coalesced_", allgather_coalesced_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("reduce_scatter_", reduce_scatter_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -464,11 +589,23 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("alltoall_base_", alltoall_base_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("alltoall_base_", alltoall_base_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("barrier", barrier_cpu);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("barrier", barrier_cuda);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("monitored_barrier_", monitored_barrier_cpu_);
 }
 
 } // namespace
