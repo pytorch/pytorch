@@ -898,23 +898,8 @@ class Scheduler:
         ndim = len(dep1.size)
         c = canonicalization_prefix()
         index_vars = [sympy_symbol(f"{c}{i}") for i in range(ndim)]
-        (
-            strides1,
-            offset1,
-        ) = sizevars.maybe_stride_and_offset_vars(dep1.index, index_vars)
-        (
-            strides2,
-            offset2,
-        ) = sizevars.maybe_stride_and_offset_vars(dep2.index, index_vars)
-
-        if any(
-            x is None
-            for x in itertools.chain(strides1, (offset1,), strides2, (offset2,))
-        ):
-            return None
-
-        if offset1 != offset2:
-            return None
+        strides1 = sizevars.stride_vars(dep1.index, index_vars)
+        strides2 = sizevars.stride_vars(dep2.index, index_vars)
 
         dep1_permutation = sorted(range(ndim), key=lambda i: expr_key(strides1[i]))
         dep2_permutation = sorted(range(ndim), key=lambda i: expr_key(strides2[i]))
@@ -926,6 +911,17 @@ class Scheduler:
             for d1, d2 in zip(dep1_permutation, dep2_permutation)
         )
         if not valid:
+            return None
+
+        # Sanity check, if we apply the reordering to the index expression, it should be equal
+        dep2_reindexed = sympy_subs(
+            dep2.index,
+            {
+                index_vars[d2]: index_vars[d1]
+                for d1, d2 in zip(dep1_permutation, dep2_permutation)
+            },
+        )
+        if dep1.index != dep2_reindex:
             return None
 
         # Permute node2 to iteration in the same order as node1
