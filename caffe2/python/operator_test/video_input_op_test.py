@@ -13,8 +13,8 @@ from caffe2.python import model_helper, workspace
 
 try:
     import lmdb
-except ImportError:
-    raise unittest.SkipTest("python-lmdb is not installed")
+except ImportError as e:
+    raise unittest.SkipTest("python-lmdb is not installed") from e
 
 
 class VideoInputOpTest(unittest.TestCase):
