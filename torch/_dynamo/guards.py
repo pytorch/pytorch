@@ -555,31 +555,6 @@ class GuardBuilder:
 from sympy.printing.str import StrPrinter
 
 
-@dataclasses.dataclass
-class TensorReference(object):
-    """
-    TensorReference objects are entirely optional. They are created to give us hints
-    into where the symbolic shape came from.
-
-    ref_id: The id of the tensor
-    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
-    idx: An index in the structure
-
-    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
-    TensorReference(ref_id=12345, kind="size", idx=2)
-    """
-
-    ref_id: Optional[int] = None
-    kind: Optional[str] = None
-    idx: Optional[int] = None
-    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
-    # But it is a Optional[Union["sympy.Expr", int]]
-    expr: Optional[object] = None  # Populated after association
-
-    def __hash__(self):
-        return hash((self.ref_id, self.kind, self.idx))
-
-
 class ShapeGuardPrinter(StrPrinter):
     def __init__(
         self,
@@ -589,7 +564,7 @@ class ShapeGuardPrinter(StrPrinter):
         self.symbol_to_source = symbol_to_source
 
     def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, Symbol)
+        assert isinstance(expr, Symbol), str(type(expr))
         assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}, {expr.shape_env}) not in {self.symbol_to_source}"
         return self.symbol_to_source[expr][0]
 
@@ -666,8 +641,27 @@ class CheckFunctionManager:
         tensor_check_ids = local_builder.tensor_check_ids.copy()
         tensor_check_ids.update(global_builder.tensor_check_ids)
 
+        check_tensors_fn = None
+        check_tensors_verbose_fn = None
+        if tensor_check_names:
+            tensor_check_examples = (
+                local_builder.tensor_check_examples
+                + global_builder.tensor_check_examples
+            )
+            tensor_guards = TensorGuards(
+                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+            )
+            check_tensors_fn = tensor_guards.check
+            check_tensors_verbose_fn = tensor_guards.check_verbose
+            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
+            verbose_args = ", ".join(
+                tensor_check_names + ["tensor_check_names=tensor_check_names"]
+            )
+            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+
         # Let's handle ShapeEnv guards.  To do this, we will resolve
-        # shape variables to sources from GraphArgs
+        # shape variables to sources from GraphArgs.  This must happen after
+        # tensor checks.
         if self.output_graph.shape_env:
             symbol_to_source = collections.defaultdict(list)
 
@@ -704,7 +698,9 @@ class CheckFunctionManager:
                     raise
             # Generate duck sizing guards
             for sources in symbol_to_source.values():
-                exprs.append(" == ".join(sources))
+                if len(sources) > 1:
+                    exprs.append(" == ".join(sources))
+            print(exprs)
             if exprs:
                 expr_as_str = " and ".join(exprs)
                 code_parts.append(expr_as_str)
@@ -718,24 +714,6 @@ class CheckFunctionManager:
                         code_list=expr_as_str,
                     )
                 )
-
-        check_tensors_fn = None
-        check_tensors_verbose_fn = None
-        if tensor_check_names:
-            tensor_check_examples = (
-                local_builder.tensor_check_examples
-                + global_builder.tensor_check_examples
-            )
-            tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
-            )
-            check_tensors_fn = tensor_guards.check
-            check_tensors_verbose_fn = tensor_guards.check_verbose
-            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_args = ", ".join(
-                tensor_check_names + ["tensor_check_names=tensor_check_names"]
-            )
-            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         def direct_equality(a, b):
             return a == b

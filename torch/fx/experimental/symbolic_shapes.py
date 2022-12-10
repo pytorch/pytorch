@@ -427,17 +427,17 @@ def _lru_cache(fn, maxsize=None):
 
 
 # This stub exists so we can easily add metadata to sympy symbols
-class Symbol(sympy.Symbol):
-    __slots__: List[str] = ['snames', 'shape_env']
+# NB: This inherits from Dummy, not Symbol, because Symbols with the same
+# name get interned.  This is bad for us as we want the metadata (snames)
+# to vary across different invocations and not leak.
+class Symbol(sympy.Dummy):
+    __slots__: List[str] = ['snames']
     snames: List[str]
 
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls, *args, **kwargs)
         self.snames = []
         return self
-
-
-COUNTER = 0
 
 class ShapeEnv(object):
     def __init__(self):
@@ -540,10 +540,7 @@ class ShapeEnv(object):
 
         # Create a duck sized int if necessary
         if val not in self.val_to_var:
-            global COUNTER
-            sympy_expr = Symbol(f"s{COUNTER}", positive=True, integer=True)
-            COUNTER += 1
-            sympy_expr.shape_env = self
+            sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr
 

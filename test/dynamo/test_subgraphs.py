@@ -31,7 +31,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(v2, v1)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
         self.assertTrue(torch._dynamo.testing.same(r2, correct2))
-        self.assertEqual(cnt.frame_count, frame_count)
+        self.assertEqual(cnt.frame_count, frame_count, f"actual {cnt.frame_count} != expected {frame_count}")
         self.assertEqual(cnt.op_count, op_count)
 
     def test_control_flow1(self):
