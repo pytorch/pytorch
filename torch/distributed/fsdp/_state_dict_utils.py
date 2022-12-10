@@ -1,4 +1,3 @@
-import functools
 import math
 import warnings
 from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
@@ -129,7 +128,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-       _clear_grads_if_needed(_all_handles(fsdp_state))
+        _clear_grads_if_needed(_all_handles(fsdp_state))
 
 def _common_unshard_pre_state_dict_hook(
     module: nn.Module,
