@@ -599,21 +599,22 @@ def _post_backward_hook(
         pre_allocated_sharded_grad = handle.uses_sharded_strategy
         # Define `full_prec_sharded_grad` for all strategies
         pre_allocated_full_prec_sharded_grad = needs_cast_to_full_prec_param_dtype
-        full_prec_sharded_grad: Optional[torch.Tensor] = (
-            torch.empty(
-                handle.flat_param._sharded_size,
-                dtype=handle.flat_param.dtype,
-                device=handle.device,
+        with torch.cuda.stream(state._streams["default"]):
+            full_prec_sharded_grad: Optional[torch.Tensor] = (
+                torch.empty(
+                    handle.flat_param._sharded_size,
+                    dtype=handle.flat_param.dtype,
+                    device=handle.device,
+                )
+                if needs_cast_to_full_prec_param_dtype
+                else None
             )
-            if needs_cast_to_full_prec_param_dtype
-            else None
-        )
 
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
         current_stream = torch.cuda.current_stream()
         state._streams["post_backward"].wait_stream(current_stream)
-        if pre_allocated_unsharded_grad and current_stream != state._streams["default"]:
+        if handle.uses_sharded_strategy and current_stream != state._streams["default"]:
             state._streams["post_backward"].wait_stream(state._streams["default"])
 
         with torch.cuda.stream(state._streams["post_backward"]):
