@@ -988,7 +988,7 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         self.assertExpectedInline(
             fx_g.shape_env.codegen_guards(fx_placeholder_vals(fx_g), ["a", "b"]),
-            """a.size()[0] == 2*b.size()[0] and a.stride()[0] == 1 and a.storage_offset() == 0 and b.stride()[0] == 1 and b.storage_offset() == 0"""  # noqa: B950
+            """a.size()[0] == 2*b.size()[0] and a.stride()[0] == 1 and a.storage_offset() == 0 and b.stride()[0] == 1 and b.storage_offset() == 0 and b.size()[0] != 0 and b.size()[0] != 1"""  # noqa: B950
         )
 
     def test_sym_storage_offset(self):

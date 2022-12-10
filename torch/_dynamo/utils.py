@@ -26,7 +26,6 @@ from functools import lru_cache
 from typing import Any, Dict, List
 
 import numpy as np
-import sympy
 
 import torch
 from torch import fx

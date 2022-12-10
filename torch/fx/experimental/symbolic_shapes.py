@@ -1,5 +1,4 @@
 import torch
-import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import operator
@@ -8,12 +7,11 @@ import math
 import functools
 import threading
 from contextlib import contextmanager
-from functools import lru_cache, partial
+from functools import lru_cache
 import traceback
 import collections
 import textwrap
 import logging
-from torch._subclasses.meta_utils import MetaConverter
 from torch import SymInt, SymFloat
 
 try:
@@ -462,7 +460,7 @@ class ShapeGuardPrinter(StrPrinter):
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, Symbol), str(type(expr))
-        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}, {expr.shape_env}) not in {self.symbol_to_source}"
+        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
         return self.symbol_to_source[expr][0]
 
 
@@ -601,21 +599,94 @@ class ShapeEnv(object):
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
     def codegen_guards(self, placeholders, sources):
-        symbol_to_source = collections.defaultdict(list)
-        extra_eqs = []
+        # It took a lot of sweat to figure out the algorithm here.  Let's
+        # explain how it works.
+        #
+        # The ShapeEnv lifecycle looks something like this:
+        #
+        # - For each input, you either generate a fresh Sympy symbol (s0) to
+        #   represent its value (a binding site), or you reuse some
+        #   preexisting symbol or expression, skipping the symbol allocation
+        #   (e.g., duck sizing to a preexisting symbol, or expressing a
+        #   stride as a multiplication of a separate stride and size.)
+        #   Naively, you might expect to bind a fresh Sympy symbol for
+        #   every input, but this is fairly wasteful as most of these
+        #   symbols immediately simplify away, and if you don't eagerly
+        #   specialize, e.g., 0/1 symbols, you end up with very complicated
+        #   expressions that are not optimizable in practice.
+        #
+        # - You perform some compute on these symbols, occasionally
+        #   introducing guards on boolean expressions on these symbols.
+        #   In particular, whenever we guard on equality (_maybe_guard_eq),
+        #   we can simplify shapes; e.g., when s0 == s1 * 2, we can now
+        #   replace all occurrences of s0 with s1 * 2.  Sometimes, a
+        #   boolean expression evaluation doesn't introduce a guard, as
+        #   the guard is already entailed by the simplifications we have
+        #   applied.
+        #
+        # - In the end, you have a bunch of replacements (saying how to
+        #   simplify shapes) and a bunch of guards (all the equality guards
+        #   are trivial, because they're covered by the replacements).
+        #
+        # From the ShapeEnv, we must generate a Python expression that, when
+        # evaluated on a set of inputs, tells us whether or not these boolean
+        # expressions would have evaluated in the same way.  However,
+        # we cannot easily compute this, as we elide recording boolean
+        # expressions when we think they are vacuously true.  Thus, we seek
+        # an approximation: we must generate an expression, if true, would have
+        # produced an "equivalent" ShapeEnv, which would answer guard
+        # expressions in the same way.
+        #
+        # Our notion of equivalence is a bit subtle.  For example, consider
+        # the ShapeEnv created from an input of size (5, 4) versus (4, 4)
+        # (no other guards.)  Duck sizing would generate (s0, s1) in the first
+        # case but (s0, s0) in the second.  We do NOT assume that size
+        # variables are disjoint; so in fact a graph that assumes the input
+        # could be (s0, s1) subsumes (s0, s0) (setting s0 == s1), but not
+        # vice versa.  However, consider an analogous case (1,) versus (2,).
+        # Duck sizing generates (1,) and (s0,); the (s0,) graph does NOT
+        # subsume the (1,) graph because we assume that any size variables
+        # is NOT 0/1 (and make simplifications according to this; e.g., if
+        # we queried s0 == 0, we would immediately return False without
+        # returning a guard.)
+        #
+        # So, it is perhaps easier to flip things on their head: the guard
+        # expressions we generate here say what simplifications are valid,
+        # and what are not.  Below, we explain each of the guard expressions
+        # we generate
 
-        exprs = []
+        # TODO: Make this more efficient by binding all the size/stride/offsets
+        # to locals before performing tests on them.
+
+        # Actual codegen must be delayed as we don't necessarily know what
+        # the symbol mapping is
+        input_guards = []
+
+        symbol_to_source = collections.defaultdict(list)
+
+        # How do we know what the value of s0 is?  Fresh variables can only be
+        # bound by inputs, so there MUST be some other input which binds the
+        # variable.  If there is no such input, this is an error in our
+        # system.  We record where all symbols come from, to help you diagnose
+        # why those symbols didn't occur.
+        #
+        # In fact, generally speaking it is only possible for the "outermost"
+        # user of a ShapeEnv to evaluate the guards, because some inputs may
+        # not be available to inner levels.  For example, Dynamo can guard on
+        # tensors that never actually become graph arguments (they are
+        # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val):
             if isinstance(val, SymInt):
                 s = val.node.expr
+
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(f"-{source}")
-                else:
-                    extra_eqs.append((source, s))
+
+                input_guards.append((source, s))
             else:
-                exprs.append(f"{source} == {val}")
+                input_guards.append((source, sympy.Integer(val)))
 
         for t, source in zip(placeholders, sources):
             if t is None:
@@ -627,9 +698,20 @@ class ShapeEnv(object):
                 track_symint(f"{source}.stride()[{i}]", s)
             track_symint(f"{source}.storage_offset()", t.storage_offset())
 
-        for source, s in extra_eqs:
-            exprs.append(f"{source} == {ShapeGuardPrinter(symbol_to_source).doprint(s)}")
+        # 1. Every input must equal the final simplified symbolic expression
+        #    stored on the placeholder.  Given a placeholder (s0*2, s1),
+        #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
+        #    This does a lot of work: it covers duck sizing and equality guards.
+        exprs = []
+        for source, expr in input_guards:
+            sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
+            # Small optimization
+            if source == sexpr:
+                continue
+            exprs.append(f"{source} == {sexpr}")
 
+        # 2. Every guard must evaluate to True (but remember many guards
+        #    like s0 == s1*2 because trivial due to simplification)
         for g, tb in self.guards:
             if self._maybe_evaluate_static(g) is not None:
                 continue
@@ -640,9 +722,12 @@ class ShapeEnv(object):
                 logging.warning(f"failing guard allocated at {tb}")
                 raise
 
+        # 3. Every symbol must not be equal to 0/1
         for sources in symbol_to_source.values():
-            if len(sources) > 1:
-                exprs.append(" == ".join(sources))
+            assert sources
+            # We must assert that each symbol is not zero or one, as we make
+            # negative inferences on shape variables
+            exprs.append(f"{sources[0]} != 0 and {sources[0]} != 1")
 
         if exprs:
             return " and ".join(exprs)
@@ -799,6 +884,10 @@ class ShapeEnv(object):
 
         if isinstance(expr, sympy.Eq):
             self._maybe_guard_eq(expr)
+            # TODO: If we successfully eliminate a symbol via equality, it
+            # is not actually necessary to save a guard for the equality,
+            # as we will implicitly generate a guard when we match that
+            # input against the symbol
         concrete_val = self.size_hint(expr)
 
         # TODO: optimize this; avoid formatting traces until we need them

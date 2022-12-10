@@ -31,7 +31,11 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(v2, v1)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
         self.assertTrue(torch._dynamo.testing.same(r2, correct2))
-        self.assertEqual(cnt.frame_count, frame_count, f"actual {cnt.frame_count} != expected {frame_count}")
+        self.assertEqual(
+            cnt.frame_count,
+            frame_count,
+            f"actual {cnt.frame_count} != expected {frame_count}",
+        )
         self.assertEqual(cnt.op_count, op_count)
 
     def test_control_flow1(self):
@@ -379,6 +383,61 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(i), torch.randn(i))
         # just one graph
         self.assertEqual(cnt_dynamic.frame_count, 1)
+
+    def test_dynamic_duck_size(self):
+        def fn(a, b):
+            if a.size(0) == b.size(0):
+                return a + b
+            else:
+                return a.sum() + b.sum()
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self.assertEqual(opt_fn(x, x), fn(x, x))
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
+
+    def test_dynamic_order_dependence(self):
+        def fn(a, b):
+            return a.sum() + b.sum()
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(opt_fn(x, x), fn(x, x))
+        # NB: This COULD validly be 2, but we don't test disjointness in the
+        # guards for when x and y didn't duck size together, so we end up
+        # with a generic graph that also works when x and y happen to duck
+        # size together.
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
+        torch._dynamo.reset()
+        cnt_dynamic.frame_count = 0
+        self.assertEqual(opt_fn(x, x), fn(x, x))  # this overspecializes!
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
+
+    def test_dynamic_zero_inference(self):
+        def fn(a):
+            if a.size(0) != 0:
+                return a * 2
+            else:
+                return a + 1
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        x = torch.randn(0)
+        y = torch.randn(2)
+        self.assertEqual(opt_fn(y), fn(y))
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt_dynamic.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):

@@ -696,7 +696,13 @@ class VariableBuilder:
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value, is_tensor=False)
+                    GraphArg(
+                        self.get_source(),
+                        wrapped_value,
+                        True,
+                        fake_tensor_value,
+                        is_tensor=False,
+                    )
                 )
             return unspec_var
 
