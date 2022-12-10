@@ -603,16 +603,11 @@ def _post_backward_hook(
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
-            if (
+            needs_cast_to_reduce_dtype = (
                 handle._uses_reduce_mixed_precision
                 and not _low_precision_hook_enabled(state)
                 and param.grad.dtype != handle._config.low_prec_reduce_dtype
-            ):
-                # TODO: Use the low precision communication hook directly
-                # TODO: We can avoid the double copy (first to `reduce_dtype`,
-                # then to `padded_unsharded_grad`) in the padding case.
-                param.grad.data = param.grad.to(handle._config.low_prec_reduce_dtype)
-
+            )
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
                 # race where the second backward pass computation precedes
@@ -643,6 +638,9 @@ def _post_backward_hook(
                         f"{unsharded_grad.dtype} but pre-allocated with dtype "
                         f"{padded_unsharded_grad.dtype} {handle._config}"
                     )
+                    # NOTE: If `unsharded_grad` is in full precision and
+                    # `padded_unsharded_grad` is in low precision, then the
+                    # `copy_()` includes the downcast.
                     padded_unsharded_grad[: unsharded_grad.numel()].copy_(
                         unsharded_grad
                     )
@@ -651,7 +649,11 @@ def _post_backward_hook(
                     padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
-                    padded_unsharded_grad = unsharded_grad
+                    padded_unsharded_grad = (
+                        unsharded_grad.to(handle._config.low_prec_reduce_dtype)
+                        if needs_cast_to_reduce_dtype
+                        else unsharded_grad
+                    )
                 # TODO: Move this allocation to the default stream as well.
                 new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
