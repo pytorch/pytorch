@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
@@ -423,8 +423,8 @@ def forward(self, x_1):
         def f(a, b):
             return torch.allclose(a, b)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
+        self.assertRaises(
+            DataDependentOutputException,
             lambda: make_fx(f, tracing_mode=self.tracing_mode)(
                 torch.zeros(3), torch.zeros(3)
             )
@@ -454,7 +454,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2])
             blowup = val.repeat(1000)
-            return blowup.sum().item()
+            return bool(blowup.sum().item() == 2)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -465,7 +465,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2.0])
             val.normal_()
-            return val.item()
+            return bool(val.item() == 2.1)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -892,19 +892,6 @@ def forward(self, a_1):
     sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
     return div""")
-
-    def test_unbacked_error(self):
-        def f(a):
-            r = a.item()
-            if r != 0:
-                return a * 2
-            else:
-                return a + 3
-
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: make_fx(f, tracing_mode="symbolic")(torch.tensor([1])),
-            """Size hint has variables we don't have underlying values for"""
-        )
 
     def test_cat(self):
         def f(a, b):

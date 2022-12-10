@@ -9,13 +9,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 
 import torch
 from torch._ops import OpOverload
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._prims_common import is_float_dtype, is_integer_dtype
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -376,9 +376,7 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(
-    lambda func: func is torch.ops.aten._local_scalar_dense.default
-)
+@register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if fake_mode.shape_env is None:
         # Without symints/symfloats, cannot handle this

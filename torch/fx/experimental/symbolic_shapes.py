@@ -442,12 +442,14 @@ def _lru_cache(fn, maxsize=None):
 # name get interned.  This is bad for us as we want the metadata (snames)
 # to vary across different invocations and not leak.
 class Symbol(sympy.Dummy):
-    __slots__: List[str] = ['snames']
+    __slots__: List[str] = ['snames', 'stack']
     snames: List[str]
+    stack: Optional[str]
 
     def __new__(cls, *args, **kwargs):
         self = super().__new__(cls, *args, **kwargs)
         self.snames = []
+        self.stack = None
         return self
 
 
@@ -552,11 +554,13 @@ class ShapeEnv(object):
         return SymInt(SymNode(sym, self, int))
 
     def create_unbacked_symfloat(self):
-        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         return SymFloat(SymNode(symbol, self, float))
 
     def create_unbacked_symint(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         return SymInt(SymNode(symbol, self, int))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
@@ -827,8 +831,26 @@ class ShapeEnv(object):
         your code is still valid for arbitrary shapes (such as optimization decisions)
         """
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
-        assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
+        if len(result_expr.free_symbols) != 0:
+            raise self._make_data_dependent_error(result_expr)
         return result_expr
+
+    def _make_data_dependent_error(self, expr):
+        # TODO: in a Dynamo context, having user code, and having the
+        # name of the local, will be much better
+        accesses = '\n\n'.join(
+            f"Data dependent variable '{s}' allocated at:\n{s.stack}"
+            for s in expr.free_symbols
+        )
+        return RuntimeError(
+            f"\n\n{accesses}\n"
+            "RuntimeError: It appears that you're trying to get a value out of symbolic int/float "
+            "whose value is data-dependent (and thus we do not know the true value.)  "
+            f"The expression we were trying to evaluate is {expr}.  "
+            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            # TODO: Help text about how to use our runtime tests to fix this
+            # problem
+        )
 
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
