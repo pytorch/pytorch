@@ -570,6 +570,11 @@ def _post_backward_hook(
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
         state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+        current_stream = torch.cuda.current_stream()
+        if state._stream_to_name[current_stream] != "unshard":
+            raise RuntimeError(
+                f"[Rank {state.rank}] post-bwd current stream: {state._stream_to_name[current_stream]}"
+            )
 
         with torch.cuda.stream(state._streams["post_backward"]):
             unsharded_grad_data = param.grad.data
