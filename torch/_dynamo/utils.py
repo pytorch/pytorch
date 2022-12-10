@@ -31,6 +31,7 @@ import sympy
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -699,9 +700,11 @@ from torch._subclasses import (  # noqa: F401
 )
 
 
-def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False):
+def make_fake_tensor(
+    e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False, *, sname: str
+):
     fake_tensor = fake_mode.from_tensor(
-        e, static_shapes=static_shapes, ignore_subclass=ignore_subclass
+        e, static_shapes=static_shapes, ignore_subclass=ignore_subclass, sname=sname
     )
     if tx is not None:
         from torch._dynamo.guards import TensorReference
@@ -748,31 +751,24 @@ def wrap_fake_exception(fn):
         raise unimplemented(msg) from e
 
 
-def wrap_to_fake_tensor(e, fake_mode):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(
-                e, fake_mode, static_shapes=config.dynamic_shapes is False
-            )
-        )
-    else:
-        return e
-
-
-def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False):
-    # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
-    # However, get_fake_value takes args and passes them through this, which may include fake tensors.
-    # see tree_map(fake_wrapper, args) in get_fake_value.
-    # TODO: Check if we should remove FakeTensor isinstance check when
-    # ignore_subclass
-    if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
-        static_shapes = config.dynamic_shapes is False
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False
+):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
+        static_shapes = static_shapes or config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
             static_shapes = True
         return wrap_fake_exception(
             lambda: make_fake_tensor(
-                e, tx.fake_mode, static_shapes, tx, ignore_subclass=ignore_subclass
+                e,
+                tx.fake_mode,
+                static_shapes,
+                tx,
+                ignore_subclass=ignore_subclass,
+                sname=sname,
             )
         )
     else:
@@ -1053,7 +1049,11 @@ def get_fake_value(node, tx):
     from .exc import TorchRuntimeError, unimplemented, Unsupported
 
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def fake_wrapper(e):
+        if isinstance(e, torch.Tensor):
+            assert isinstance(e, FakeTensor)
+        return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
