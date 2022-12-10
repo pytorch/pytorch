@@ -49,7 +49,7 @@ Difference between this file and torchgen.api.cpp.py:
     torchgen.api.cpp, so that we can do stuff like ATen mode (running ATen kernels in Executorch).
 
   - Executorch doesn't support Dimname.
-  
+
   - Executorch runtime doesn't support SymInt, will treat it as int.
 """
 

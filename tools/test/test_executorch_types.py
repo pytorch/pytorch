@@ -14,12 +14,7 @@ from torchgen.api.types import (
     voidT,
 )
 from torchgen.executorch.api.et_cpp import argument_type, return_type, returns_type
-from torchgen.executorch.api.types import (
-    ArrayRefCType,
-    scalarT,
-    tensorListT,
-    tensorT,
-)
+from torchgen.executorch.api.types import ArrayRefCType, scalarT, tensorListT, tensorT
 from torchgen.model import Argument, FunctionSchema, Return
 
 
@@ -55,9 +50,20 @@ class ExecutorchCppTest(unittest.TestCase):
                 "Scalar[] spacing",
                 NamedCType("spacing", ArrayRefCType(ConstRefCType(BaseCType(scalarT)))),
             ),
-            ("Tensor?[] weight", NamedCType("weight", ArrayRefCType(OptionalCType(BaseCType(tensorT))))),
-            ("SymInt[]? output_size", NamedCType("output_size", OptionalCType(ArrayRefCType(BaseCType(longT))))),
-            ("int[]? dims", NamedCType("dims", OptionalCType(ArrayRefCType(BaseCType(longT))))),
+            (
+                "Tensor?[] weight",
+                NamedCType("weight", ArrayRefCType(OptionalCType(BaseCType(tensorT)))),
+            ),
+            (
+                "SymInt[]? output_size",
+                NamedCType(
+                    "output_size", OptionalCType(ArrayRefCType(BaseCType(longT)))
+                ),
+            ),
+            (
+                "int[]? dims",
+                NamedCType("dims", OptionalCType(ArrayRefCType(BaseCType(longT)))),
+            ),
         ]
         for d in data:
             self._test_argumenttype_type(*d)

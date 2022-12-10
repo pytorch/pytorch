@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from typing import List, Optional, Set
 
-from torchgen.api.types import Binding, CType
 import torchgen.api.cpp as aten_cpp
+
+from torchgen.api.types import Binding, CType
 from torchgen.model import FunctionSchema, NativeFunction
 
 
@@ -55,7 +56,9 @@ class ExecutorchCppSignature:
         return et_cpp.returns_type(self.func.returns)
 
     @staticmethod
-    def from_native_function(f: NativeFunction, *, prefix: str = "") -> "ExecutorchCppSignature":
+    def from_native_function(
+        f: NativeFunction, *, prefix: str = ""
+    ) -> "ExecutorchCppSignature":
         return ExecutorchCppSignature(
             func=f.func, prefix=prefix, cpp_no_default_args=f.cpp_no_default_args
         )
