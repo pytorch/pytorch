@@ -647,11 +647,7 @@ def _post_backward_hook(
                     padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
-                    padded_unsharded_grad = unsharded_grad(
-                        unsharded_grad.to(handle._config.low_prec_reduce_dtype)
-                        if needs_cast_to_reduce_dtype
-                        else unsharded_grad
-                    )
+                    padded_unsharded_grad = unsharded_grad
                 # TODO: Move this allocation to the default stream as well.
                 new_sharded_grad = torch.empty(
                     handle.flat_param._sharded_size,
