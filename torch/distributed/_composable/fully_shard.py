@@ -77,6 +77,15 @@ def fully_shard(
         sync_module_states,
     )
     state = _init_state_dict_state(state)
+    for submodule in module.modules():
+        if submodule not in state._ignored_modules:
+            # Register post and pre hooks for save and load.
+#            submodule.register_state_
+#    self._register_state_dict_hook(_post_state_dict_hook)
+#        self._register_load_state_dict_pre_hook(
+#            _pre_load_state_dict_hook, with_module=True
+#        )
+#        self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
     modules = list(module.modules())
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
