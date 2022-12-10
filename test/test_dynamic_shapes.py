@@ -338,7 +338,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s1, 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
     @skipIfNoSympy
     def test_sym_int(self):
@@ -347,19 +347,19 @@ class TestPySymInt(TestCase):
         r = sym_int(a0)
         self.assertEqual(r, 5)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s1, 5)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 5)""")
 
         a1 = create_symint(shape_env, 7)
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s3/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
 
         a2 = create_symint(shape_env, -3)
         r = sym_int(a2 / 2)
         self.assertEqual(guard_int(r), -1)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s5/2), -1)""")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s2/2), -1)""")
 
     @skipIfNoSympy
     def test_sym_sqrt(self):
@@ -368,7 +368,7 @@ class TestPySymInt(TestCase):
         r = sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s1), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
 
     @skipIfNoSympy
     def test_sym_floor(self):
@@ -377,7 +377,7 @@ class TestPySymInt(TestCase):
         r = math.floor(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s1/2), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
 
     @skipIfNoSympy
     def test_int_conversion(self):
@@ -424,18 +424,18 @@ class TestPySymInt(TestCase):
 
         self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s1, s3], b_1: f32[s7, s3]):
+    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
         # No stacktrace found for following nodes
-        sym_size: Sym(s1) = torch.ops.aten.sym_size(a_1, 0)
-        sym_size_1: Sym(s7) = torch.ops.aten.sym_size(b_1, 0)
-        add: Sym(s1 + s7) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
-        sym_size_2: Sym(s3) = torch.ops.aten.sym_size(a_1, 1)
-        sym_size_3: Sym(s3) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
-        add_1: Sym(2*s3) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s1 + s7, 2*s3] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        sym_size: Sym(s0) = torch.ops.aten.sym_size(a_1, 0)
+        sym_size_1: Sym(s2) = torch.ops.aten.sym_size(b_1, 0)
+        add: Sym(s0 + s2) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
+        sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
+        sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
+        add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
+        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s1 + s7, 2*s3] = native_dropout[0]
-        getitem_1: b8[s1 + s7, 2*s3] = native_dropout[1];  native_dropout = None
+        getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
+        getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 # This environment variable controls whether or not we print expected failure
