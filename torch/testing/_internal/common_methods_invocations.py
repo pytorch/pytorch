@@ -7782,7 +7782,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'log1p',
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
     ),
 
     ForeachFuncInfo(
@@ -9893,7 +9893,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.log1p',),
                    domain=(-1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11896,7 +11896,7 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
@@ -11934,7 +11934,7 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
