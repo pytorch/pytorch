@@ -1941,7 +1941,10 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 @register_meta(c10d.allreduce_)
 def allreduce__meta(tensors, process_group, reduce_op, timeout):
     out_tensors = [torch.empty_like(t) for t in tensors]
-    return (out_tensors, None)
+    # must return instance of torchbind Work, not pybind work
+    # TODO: how do we subclass this or modify it so it can be waited on?
+    work = torch.classes.c10d.Work()
+    return (out_tensors, work)
 
 
 # We must also trigger meta registrations from PrimTorch ref
