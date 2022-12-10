@@ -566,8 +566,9 @@ def _post_backward_hook(
         if not state._sync_gradients:
             return
 
-        # Only define `padded_unsharded_grad` for sharded strategies
-        pre_allocated_grad = False
+        # Only define `padded_unsharded_grad` and `new_sharded_grad` for
+        # sharded strategies
+        pre_allocated_unsharded_grad = False
         if handle.uses_sharded_strategy:
             if handle._uses_reduce_mixed_precision:
                 grad_dtype = handle._config.low_prec_reduce_dtype
@@ -575,26 +576,33 @@ def _post_backward_hook(
                 grad_dtype = handle._config.low_prec_param_dtype
             else:
                 grad_dtype = param.grad.dtype
-            # Pre-allocate the padded unsharded gradient in the default stream
-            # if the gradient needs padding
+            # Pre-allocate the (padded) sharded gradient and the padded
+            # unsharded gradient if the gradient needs padding, both in the
+            # default stream
             with torch.cuda.stream(state._streams["default"]):
+                new_sharded_grad = torch.empty(
+                    handle.flat_param._sharded_size,
+                    dtype=grad_dtype,
+                    device=handle.device,
+                )
                 padded_unsharded_grad: Optional[torch.Tensor] = (
                     torch.empty(
                         handle.flat_param._padded_unsharded_size,
                         dtype=grad_dtype,
-                        device=state.compute_device,
+                        device=handle.device,
                     )
                     if handle.flat_param._padded_unsharded_size
                     != handle.flat_param._unpadded_unsharded_size
                     else None
                 )
-            pre_allocated_grad = padded_unsharded_grad is not None
+            pre_allocated_unsharded_grad = padded_unsharded_grad is not None
+        pre_allocated_sharded_grad = handle.uses_sharded_strategy
 
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
         current_stream = torch.cuda.current_stream()
         state._streams["post_backward"].wait_stream(current_stream)
-        if pre_allocated_grad and current_stream != state._streams["default"]:
+        if pre_allocated_unsharded_grad and current_stream != state._streams["default"]:
             state._streams["post_backward"].wait_stream(state._streams["default"])
 
         with torch.cuda.stream(state._streams["post_backward"]):
@@ -624,7 +632,7 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                if pre_allocated_grad:
+                if pre_allocated_unsharded_grad:
                     p_assert(
                         padded_unsharded_grad.numel() - unsharded_grad.numel()
                         == numel_to_pad,
@@ -654,8 +662,6 @@ def _post_backward_hook(
                         if needs_cast_to_reduce_dtype
                         else unsharded_grad
                     )
-                # TODO: Move this allocation to the default stream as well.
-                new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
@@ -670,6 +676,7 @@ def _post_backward_hook(
                         grad=new_sharded_grad,
                     )
 
+                # TODO: Move this allocation to the default stream as well.
                 _cast_grad_to_param_dtype(state, handle, new_sharded_grad, param)
 
                 # Save the sharded gradient in `_saved_grad_shard` to support
@@ -712,10 +719,15 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 unsharded_grad_data, state._streams["post_backward"]
             )
-            if pre_allocated_grad:
-                # Same pattern for the pre-allocated padded unsharded gradient
+            # Same pattern for the pre-allocated sharded and padded unsharded
+            # gradients
+            if pre_allocated_unsharded_grad:
                 _no_dispatch_record_stream(
                     padded_unsharded_grad, state._streams["post_backward"]
+                )
+            if pre_allocated_sharded_grad:
+                _no_dispatch_record_stream(
+                    new_sharded_grad, state._streams["post_backward"]
                 )
 
             if handle._use_orig_params:
