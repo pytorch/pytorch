@@ -225,6 +225,10 @@ def _single_tensor_asgd(
     maximize: bool,
     differentiable: bool,
 ):
+    def _to_tensor(x):
+        if not isinstance(x, torch.Tensor):
+            return torch.tensor(x)
+        return x
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -241,25 +245,23 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = _get_value(step_t)
+        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        eta_value = _get_value(eta)
         # decay term
-        param.mul_(1 - lambd * eta)
+        param.mul_(1 - lambd * eta_value)
 
         # update parameter
-        param.add_(grad, alpha=-eta)
+        param.add_(grad, alpha=-eta_value)
 
-        from torch._dynamo import is_compiling
         # averaging
-        if is_compiling() or mu != 1:  # avoid data dependent control if we are compiling
+        if torch._dynamo.is_compiling() or mu.item() != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
-
-
 
         new_eta = _to_tensor(lr / ((1 + lambd * lr * step) ** alpha))
         eta.copy_(new_eta)
@@ -314,10 +316,9 @@ def _multi_tensor_asgd(
     # update parameter
     torch._foreach_add_(params, grads, alpha=-eta)
 
-    from torch._dynamo import is_compiling
     # averaging
     for i in range(len(axs)):
-        if is_compiling() or mus[i] != 1:  # avoid data dependent control if we are compiling
+        if torch._dynamo.is_compiling() or mus[i] != 1:  # avoid data dependent control if we are compiling
             axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
             axs[i].copy_(params[i])

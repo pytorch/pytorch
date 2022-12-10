@@ -253,10 +253,8 @@ def _single_tensor_nadam(params: List[Tensor],
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(bias_correction2).sqrt()
         denom = denom.add(eps)
-        grad = grad * (-lr * (1. - mu) / (1. - mu_product))
-        exp_avg = exp_avg * (-lr * mu_next) / (1. - mu_product_next)
-        param.addcdiv_(grad, denom)
-        param.addcdiv_(exp_avg, denom)
+        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+        param.addcdiv_(exp_avg, denom, value=(-lr * mu_next) / (1. - mu_product_next))
 
 
 def _multi_tensor_nadam(params: List[Tensor],

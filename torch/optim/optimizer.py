@@ -4,6 +4,7 @@ from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
+import math
 
 from typing import Callable, Dict
 
@@ -21,6 +22,7 @@ class _RequiredParameter(object):
 
 required = _RequiredParameter()
 
+
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         prev_grad = torch.is_grad_enabled()
@@ -33,7 +35,6 @@ def _use_grad_for_differentiable(func):
     return _use_grad
 
 def _get_value(x):
-    import torch._dynamo
     # item is significantly faster than a cpu tensor in eager mode
     if torch._dynamo.is_compiling():
         return x
@@ -41,15 +42,12 @@ def _get_value(x):
         return x.item()
 
 def _stack_if_compiling(x):
-    import torch._dynamo
-
     if torch._dynamo.is_compiling():
         return torch.stack(x)
     else:
         return x
 
 def _dispatch_sqrt(x):
-    import math
     if isinstance(x, torch.Tensor):
         return x.sqrt()
     else:
