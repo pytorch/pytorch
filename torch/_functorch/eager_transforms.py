@@ -1274,7 +1274,7 @@ def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
     return tree_map(lambda t: _maybe_unwrap_functional_tensor(t, reapply_views=reapply_views), tensor_pytree)
 
 
-def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
+def functionalize(func: Callable, *, remove: str = 'mutations', _disallow_input_mutation: bool = False) -> Callable:
     """
     functionalize is a transform that can be used to remove (intermediate)
     mutations and aliasing from a function, while preserving the function's
@@ -1445,6 +1445,8 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:
+            levels_before = []
+            levels_after = []
             func_level = _func_increment_nesting(reapply_views)
             func_args = _wrap_all_tensors_to_functional(args, func_level)
             func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
