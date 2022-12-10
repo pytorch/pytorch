@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS, default_hooks
+from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
@@ -33,6 +33,7 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
+
 
 @no_type_check
 def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
@@ -66,6 +67,7 @@ def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
             raise ValueError(
                 f"For {fsdp_root.sharding_strategy}, inter-node process groups do not match"
             )
+
 
 @no_type_check
 def _lazy_init(
@@ -360,7 +362,6 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
 
-
     free_unsharded_flat_params = [
         not state._is_root
         and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
@@ -577,8 +578,9 @@ def _post_backward_hook(
             else:
                 grad_dtype = param.grad.dtype
             # Pre-allocate the (padded) sharded gradient and the padded
-            # unsharded gradient if the gradient needs padding, both in the
-            # default stream
+            # unsharded gradient if the gradient needs padding or if the
+            # gradient needs to be of a different dtype, both in the default
+            # stream
             with torch.cuda.stream(state._streams["default"]):
                 new_sharded_grad = torch.empty(
                     handle.flat_param._sharded_size,
@@ -591,8 +593,15 @@ def _post_backward_hook(
                         dtype=grad_dtype,
                         device=handle.device,
                     )
-                    if handle.flat_param._padded_unsharded_size
-                    != handle.flat_param._unpadded_unsharded_size
+                    if (
+                        handle.flat_param._padded_unsharded_size
+                        != handle.flat_param._unpadded_unsharded_size
+                        or (
+                            handle._uses_reduce_mixed_precision
+                            and handle._config.low_prec_reduce_dtype
+                            != handle._config.low_prec_param_dtype
+                        )
+                    )
                     else None
                 )
             pre_allocated_unsharded_grad = padded_unsharded_grad is not None
@@ -611,11 +620,6 @@ def _post_backward_hook(
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
-            needs_cast_to_reduce_dtype = (
-                handle._uses_reduce_mixed_precision
-                and not _low_precision_hook_enabled(state)
-                and param.grad.dtype != handle._config.low_prec_reduce_dtype
-            )
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
                 # race where the second backward pass computation precedes
@@ -652,7 +656,9 @@ def _post_backward_hook(
                     )
                     # TODO: `clip_grad_norm_()` assumes padding is zeroed. We
                     # need to trim padding before computing local norms.
-                    padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
+                    padding_numel = (
+                        padded_unsharded_grad.numel() - unsharded_grad.numel()
+                    )
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
                     padded_unsharded_grad = unsharded_grad
@@ -663,7 +669,7 @@ def _post_backward_hook(
                 )
                 if handle._config.sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy._HYBRID_SHARD_ZERO2
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
                 ):
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
