@@ -26,7 +26,6 @@ from functools import lru_cache
 from typing import Any, Dict, List
 
 import numpy as np
-import sympy
 
 import torch
 from torch import fx
@@ -703,41 +702,9 @@ from torch._subclasses import (  # noqa: F401
 def make_fake_tensor(
     e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False, *, sname: str
 ):
-    fake_tensor = fake_mode.from_tensor(
+    return fake_mode.from_tensor(
         e, static_shapes=static_shapes, ignore_subclass=ignore_subclass, sname=sname
     )
-    if tx is not None:
-        from torch._dynamo.guards import TensorReference
-
-        def _record(tensor_ref):
-            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
-
-        def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
-            return sym_expr
-
-        def _record_ref(e, index, symbol, kind):
-            sym_expr = _extract(symbol)
-            if sym_expr:
-                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                _record(tensor_ref)
-
-        for index, symbol in enumerate(fake_tensor.size()):
-            _record_ref(e, index, symbol, "size")
-
-        for index, symbol in enumerate(fake_tensor.stride()):
-            _record_ref(e, index, symbol, "stride")
-
-        offset = fake_tensor.storage_offset()
-        _record_ref(e, None, offset, "storage_offset")
-
-    return fake_tensor
 
 
 def wrap_fake_exception(fn):

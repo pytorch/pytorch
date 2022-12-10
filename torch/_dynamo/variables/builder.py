@@ -111,6 +111,13 @@ class GraphArg:
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
+    # UnspecializedNumpyVariable and UnspecializedPythonVariable
+    # often masquerade as tensors.  We MUST NOT generate shape guard code
+    # that actually tries to access tensor properties on these values.
+    # is_tensor lets us tell if this graph arg actually is a tensor
+    # or not.
+    is_tensor: bool = True
+
     def __post_init__(self):
         if isinstance(self.example, torch.Tensor):
             assert isinstance(
@@ -689,7 +696,13 @@ class VariableBuilder:
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
+                    GraphArg(
+                        self.get_source(),
+                        wrapped_value,
+                        True,
+                        fake_tensor_value,
+                        is_tensor=False,
+                    )
                 )
             return unspec_var
 
