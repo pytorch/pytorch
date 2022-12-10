@@ -11,14 +11,14 @@ from copy import deepcopy
 from typing import List
 from unittest.mock import patch
 
-import functorch._src.config
-
 import numpy as np
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+
+import torch._functorch.config
 
 try:
     from test_minifier import requires_cuda
@@ -1681,7 +1681,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    @patch.object(functorch._src.config, "use_dynamic_shapes", True)
+    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
@@ -1856,8 +1856,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __getattr__(self, item: str):
                 try:
                     return self.data[item]
-                except KeyError:
-                    raise AttributeError
+                except KeyError as e:
+                    raise AttributeError from e
 
         def tokenization(x):
             encoding = BatchEncoding({"key": x})
@@ -1946,6 +1946,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 100)
+
+    def test_avoid_dupe_specialization(self):
+        def f(x, y):
+            return (x + y) * 1
+
+        opt_f = torch._dynamo.optimize("aot_eager")(f)
+
+        for b in [True, False]:
+            x = torch.randn(4, requires_grad=b)
+            y = torch.randn(4, requires_grad=b)
+            self.assertEqual(f(x, x), opt_f(x, x))
+            self.assertEqual(f(x, y), opt_f(x, y))
 
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
@@ -2059,7 +2071,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @patch.object(functorch._src.config, "use_dynamic_shapes", True)
+    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -2114,6 +2126,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             # Assert running_mean/var
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_dynamic_shapes_right_side(self):
+        def f(x):
+            return torch.ones(5 * x.shape[0])
+
+        inp = torch.randn(6, 5)
+
+        gm, _ = torch._dynamo.export(
+            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
+        )
+        self.assertEqual(gm(inp).shape, f(inp).shape)
 
 
 if __name__ == "__main__":
