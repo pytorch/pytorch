@@ -26,7 +26,7 @@ from torch.fx import Proxy
 from torch import SymInt, SymFloat
 from torch.utils.weak import WeakTensorKeyDictionary
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -686,6 +686,13 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
 def get_torch_dispatch_modes():
     return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+
+
+def get_innermost_proxy_mode():
+    for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
+        if isinstance(m, ProxyTorchDispatchMode):
+            return m
+    return None
 
 
 @contextlib.contextmanager

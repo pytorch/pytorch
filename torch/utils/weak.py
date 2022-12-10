@@ -3,6 +3,9 @@ from collections.abc import MutableMapping
 from typing import Dict
 
 
+__all__ = ['WeakTensorRefKey', 'WeakTensorKeyDictionary']
+
+
 # Utility classes for working with weak references to tensors
 
 # torch.Tensors cannot be used as a key in a dictionary
