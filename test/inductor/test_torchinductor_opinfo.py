@@ -62,7 +62,7 @@ TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
-ALL_SAMPLES = True #os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
+ALL_SAMPLES = True  # os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
@@ -673,17 +673,17 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
-        elif (
-            dtype
-            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
-            or dtype
-            in inductor_gradient_expected_failures_single_sample[device_type].get(
-                op_name, set()
-            )
+        elif dtype in inductor_expected_failures_single_sample[device_type].get(
+            op_name, set()
+        ) or dtype in inductor_gradient_expected_failures_single_sample[
+            device_type
+        ].get(
+            op_name, set()
         ):
             test_expect = TestExpect.XFAILURE
         elif (
-            dtype in inductor_expected_failures_all_samples[device_type].get(op_name, set())
+            dtype
+            in inductor_expected_failures_all_samples[device_type].get(op_name, set())
             and ALL_SAMPLES
         ):
             test_expect = TestExpect.XFAILURE
