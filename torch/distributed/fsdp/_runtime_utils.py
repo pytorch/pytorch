@@ -619,9 +619,13 @@ def _post_backward_hook(
                     len(unsharded_grad.size()) == 1,
                     f"Expects gradient to be flattened but got {unsharded_grad.size()}",
                 )
-                chunks = list(unsharded_grad.chunk(state.world_size))
                 numel_to_pad = (
-                    state.world_size * chunks[0].numel() - unsharded_grad.numel()
+                    0
+                    if not handle.uses_sharded_strategy
+                    else (
+                        handle.flat_param._padded_unsharded_size.numel()
+                        - handle.flat_param._unpadded_unsharded_size.numel()
+                    )
                 )
                 if pre_allocated_unsharded_grad:
                     p_assert(
@@ -644,7 +648,7 @@ def _post_backward_hook(
                     )
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
-                    padded_unsharded_grad = (
+                    padded_unsharded_grad = unsharded_grad(
                         unsharded_grad.to(handle._config.low_prec_reduce_dtype)
                         if needs_cast_to_reduce_dtype
                         else unsharded_grad
