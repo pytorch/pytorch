@@ -791,8 +791,9 @@ def _cast_grad_to_param_dtype(
     dtype cast happens in the hook instead.
     """
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-    if not _low_precision_hook_enabled(state) and (
-        handle._uses_param_mixed_precision or handle._uses_reduce_mixed_precision
+    if (
+        not _low_precision_hook_enabled(state)
+        and sharded_grad.dtype != param.dtype
     ):
         low_prec_grad_data = sharded_grad.data
         sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)
