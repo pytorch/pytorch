@@ -229,6 +229,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(expected, actual)
 
     # Tests that SchemaCheckMode wraps torch.Tensor when there is a kwarg tensor input
+    @unittest.SkipIf(not torch._C.has_spectral, "ATen not built with FFT.")
     def test_schema_check_mode_functionality_kwarg_tensor(self):
         x = torch.rand((3, 5))
         w = torch.rand((4))
