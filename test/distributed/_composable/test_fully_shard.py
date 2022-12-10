@@ -419,7 +419,7 @@ class TestMixedPrecision(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
         float16 = MixedPrecision(param_dtype=torch.float16)
 
         model = SaveForwardInputsModel(forward_inputs).cuda()

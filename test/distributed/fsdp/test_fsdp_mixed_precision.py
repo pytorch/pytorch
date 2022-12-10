@@ -834,9 +834,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs(self):
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
         float16 = MixedPrecision(
-            param_dtype=torch.float16, apply_to_forward_inputs=False
+            param_dtype=torch.float16, cast_forward_inputs=False
         )
 
         model = SaveForwardInputsModel(
@@ -857,9 +857,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs_error(self):
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
         float16 = MixedPrecision(
-            param_dtype=torch.float16, apply_to_forward_inputs=False
+            param_dtype=torch.float16, cast_forward_inputs=False
         )
 
         model = SaveForwardInputsModel(
