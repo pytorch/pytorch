@@ -4,6 +4,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import eval_frame
+from torch._dynamo.hooks import Hooks
 
 c = 10
 
@@ -32,7 +33,7 @@ def fn3():
 
 
 with_debug_nops = eval_frame._optimize_catch_errors(
-    torch._dynamo.testing.debug_insert_nops
+    torch._dynamo.testing.debug_insert_nops, Hooks(None, None)
 )
 
 
