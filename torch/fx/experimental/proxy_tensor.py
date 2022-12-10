@@ -26,7 +26,7 @@ from torch.fx import Proxy
 from torch import SymInt, SymFloat
 from torch.utils.weak import WeakTensorKeyDictionary
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy", "py_sym_types"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -379,7 +379,7 @@ class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__()
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = weakref.WeakKeyDictionary()
+        self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -556,8 +556,8 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         self.new_graph = new_graph
         self.tracer = torch.fx.proxy.GraphAppendingTracer(self.new_graph)
         # Blegh
-        self.tracer.tensor_tracker = WeakTensorKeyDictionary()
-        self.tracer.symnode_tracker = weakref.WeakKeyDictionary()
+        self.tracer.tensor_tracker = WeakTensorKeyDictionary()  # type: ignore[attr-defined]
+        self.tracer.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[attr-defined]
         self.decomposition_table = decomposition_table
         if self.decomposition_table is None:
             self.decomposition_table = {}
