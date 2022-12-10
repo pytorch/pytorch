@@ -1150,11 +1150,27 @@ Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArray
   return result;
 }
 
+template <typename T>
+inline void setStridedUnchecked(
+    const Tensor& self,
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
+  auto* self_ = self.unsafeGetTensorImpl();
+  self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
+}
+
 Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
   auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  setStrided(result, sym_size, sym_stride, sym_storage_offset);
+  // NB: The reason this is unchecked is to ensure we don't generate
+  // guards on the base storage itself when performing as_strided calls.
+  // Although technically these guards are necessary, in practice they
+  // cause a lot of guards that falsely refer to base symbols.  We will instead
+  // rely on AOTAutograd to sort out if we actually have dependence on view
+  // bases / storage size.
+  setStridedUnchecked(result, sym_size, sym_stride, sym_storage_offset);
   return result;
 }
 
