@@ -1683,15 +1683,7 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
-  if(NOT MSVC)
-    set(CMAKE_C_STANDARD 11 CACHE STRING "The C standard whose features are requested to build this target.")
-  endif()
-
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
-  endif()
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
