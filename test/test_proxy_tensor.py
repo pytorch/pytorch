@@ -987,7 +987,7 @@ def forward(self, a_1):
             assert b.shape[0] == 8
             return a.cos()
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
-        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()), """Eq(s5, 8) & Eq(s1, 2*s5)""")
+        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()), """Eq(s1, 8) & Eq(s0, 2*s1)""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
