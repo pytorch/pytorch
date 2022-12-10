@@ -1155,9 +1155,9 @@ inline void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
-    T storage_offset) {
+    T&& storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
+  self_->set_sizes_and_strides(size, stride, c10::make_optional(std::forward<T>(storage_offset)));
 }
 
 Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
