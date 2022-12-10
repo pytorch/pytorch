@@ -603,11 +603,6 @@ def _post_backward_hook(
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
-            needs_cast_to_reduce_dtype = (
-                handle._uses_reduce_mixed_precision
-                and not _low_precision_hook_enabled(state)
-                and param.grad.dtype != handle._config.low_prec_reduce_dtype
-            )
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
                 # race where the second backward pass computation precedes
@@ -762,8 +757,9 @@ def _cast_grad_to_param_dtype(
     dtype cast happens in the hook instead.
     """
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-    if not _low_precision_hook_enabled(state) and (
-        handle._uses_param_mixed_precision or handle._uses_reduce_mixed_precision
+    if (
+        not _low_precision_hook_enabled(state)
+        and sharded_grad.dtype != param.dtype
     ):
         low_prec_grad_data = sharded_grad.data
         sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)

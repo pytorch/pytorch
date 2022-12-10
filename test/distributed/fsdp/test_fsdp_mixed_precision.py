@@ -307,6 +307,8 @@ class TestFSDPMixedPrecision(FSDPTest):
         )
 
         for t in tensors:
+            if self.rank == 0 and expected_dtype != t.dtype:
+                print(f"[Rank 0] expected {expected_dtype} got {t.dtype}")
             self.assertEqual(expected_dtype, t.dtype)
 
         return orig_reduce_scatter(*args, **kwargs)
