@@ -423,12 +423,15 @@ def forward(self, x_1):
         def f(a, b):
             return torch.allclose(a, b)
 
-        self.assertRaises(
-            DataDependentOutputException,
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)(
                 torch.zeros(3), torch.zeros(3)
             )
-        )
+
+        if self.tracing_mode == "symbolic":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_proxy_tensor_mut(self):
         def f():
