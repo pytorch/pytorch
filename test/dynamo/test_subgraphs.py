@@ -354,7 +354,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         cnt_static = torch._dynamo.testing.CompileCounter()
         with patch("torch._dynamo.config.dynamic_shapes", False):
             opt_fn = torch._dynamo.optimize(cnt_static)(fn)
-            for i in range(10):
+            for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         self.assertEqual(cnt_static.frame_count, 10)
 
@@ -362,7 +362,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
         with patch("torch._dynamo.config.dynamic_shapes", True):
             opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
-            for i in range(10):
+            # NB: must not do 0, 1 as they specialized
+            for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
@@ -374,7 +375,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
-        for i in range(10):
+        for i in range(2, 12):
             opt_fn(torch.randn(i), torch.randn(i))
         # just one graph
         self.assertEqual(cnt_dynamic.frame_count, 1)

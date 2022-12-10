@@ -552,23 +552,6 @@ class GuardBuilder:
         )
 
 
-from sympy.printing.str import StrPrinter
-
-
-class ShapeGuardPrinter(StrPrinter):
-    def __init__(
-        self,
-        symbol_to_source,
-    ):
-        super().__init__()
-        self.symbol_to_source = symbol_to_source
-
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, Symbol), str(type(expr))
-        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}, {expr.shape_env}) not in {self.symbol_to_source}"
-        return self.symbol_to_source[expr][0]
-
-
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that consistutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -662,47 +645,14 @@ class CheckFunctionManager:
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from GraphArgs.  This must happen after
         # tensor checks.
-        if self.output_graph.shape_env:
-            symbol_to_source = collections.defaultdict(list)
-
-            exprs = []
-            def track_symint(source, val):
-                if isinstance(val, SymInt):
-                    s = val.node.expr
-                    if isinstance(s, sympy.Symbol):
-                        symbol_to_source[s].append(source)
-                    elif isinstance(-s, sympy.Symbol):
-                        symbol_to_source[-s].append(f"-{source}")
-                else:
-                    exprs.append(f"{source} == {val}")
-
-            for a in self.output_graph.graphargs:
-                t = a.fake_tensor
-                if t is None:
-                    continue
-                # TODO: size(i)/stride(i) more efficient
-                for i, s in enumerate(t.size()):
-                    track_symint(f"{a.source.name()}.size()[{i}]", s)
-                for i, s in enumerate(t.stride()):
-                    track_symint(f"{a.source.name()}.stride()[{i}]", s)
-                track_symint(f"{a.source.name()}.storage_offset()", t.storage_offset())
-
-            shape_env = self.output_graph.shape_env
-            shape_guards = [(shape_env.simplify(g), tb) for g, tb in shape_env.guards if shape_env._maybe_evaluate_static(g) is None]
-            for g, tb in shape_guards:
-                try:
-                    exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
-                except Exception:
-                    # TODO: this is getting suppressed smh
-                    logging.warning(f"failing guard allocated at {tb}")
-                    raise
-            # Generate duck sizing guards
-            for sources in symbol_to_source.values():
-                if len(sources) > 1:
-                    exprs.append(" == ".join(sources))
-            print(exprs)
-            if exprs:
-                expr_as_str = " and ".join(exprs)
+        # NB: self.output_graph can be None in the debug_nops tests
+        if self.output_graph and self.output_graph.shape_env:
+            graphargs = self.output_graph.graphargs
+            expr_as_str = self.output_graph.shape_env.codegen_guards(
+                [a.fake_tensor for a in graphargs if a.is_tensor],
+                [a.source.name() for a in graphargs if a.is_tensor]
+            )
+            if expr_as_str != "True":
                 code_parts.append(expr_as_str)
                 verbose_code_parts.append(expr_as_str)
                 # TODO: this is a hack

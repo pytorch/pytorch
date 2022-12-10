@@ -12,12 +12,14 @@ from functools import lru_cache, partial
 import traceback
 import collections
 import textwrap
+import logging
 from torch._subclasses.meta_utils import MetaConverter
 from torch import SymInt, SymFloat
 
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import]
+    from sympy.printing.str import StrPrinter
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -139,6 +141,16 @@ def to_node(self, num):
         # NotImplemented is important so that Python tries the
         # other magic method
         return NotImplemented
+
+# Given a GraphModule, return all the FakeTensors for all the placeholders
+def fx_placeholder_vals(gm):
+    return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
+
+# Given a GraphModule and arguments to run it with, evaluate that the guards
+# for its associated ShapeEnv are satisfied by the passed arguments.  This
+# WILL check for duck sizing.
+def eval_guards(gm, *args):
+    return gm.shape_env.evaluate_guards_for_args(fx_placeholder_vals(gm), args)
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -439,6 +451,22 @@ class Symbol(sympy.Dummy):
         self.snames = []
         return self
 
+
+class ShapeGuardPrinter(StrPrinter):
+    def __init__(
+        self,
+        symbol_to_source,
+    ):
+        super().__init__()
+        self.symbol_to_source = symbol_to_source
+
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, Symbol), str(type(expr))
+        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}, {expr.shape_env}) not in {self.symbol_to_source}"
+        return self.symbol_to_source[expr][0]
+
+
+
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
@@ -567,21 +595,64 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    def evaluate_guards_for_args(self, *args):
-        new_env = ShapeEnv()
-        # NB: This must be kept in sync with create_aot_dispatcher_function
-        # and wrap_fake_symbolic
-        meta_converter = MetaConverter()
-        pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
-        return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
+    # Generates a Python string which, when evaluated in a context that
+    # defines tensors for all the sources, returns True or False depending
+    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # but this is also helpful for manual testing of guards (see
+    # evaluate_guards_for_args)
+    def codegen_guards(self, placeholders, sources):
+        symbol_to_source = collections.defaultdict(list)
+        extra_eqs = []
 
-    def get_guard_expr(self):
-        """
-        Returns a sympy expression representing all of the shape env guards.
+        exprs = []
+        def track_symint(source, val):
+            if isinstance(val, SymInt):
+                s = val.node.expr
+                if isinstance(s, sympy.Symbol):
+                    symbol_to_source[s].append(source)
+                elif isinstance(-s, sympy.Symbol):
+                    symbol_to_source[-s].append(f"-{source}")
+                else:
+                    extra_eqs.append((source, s))
+            else:
+                exprs.append(f"{source} == {val}")
 
-        NOTE: Does not include implicit 0/1 or duck-shaping guards
-        """
-        return sympy.And(*[guard for guard, _ in self.guards])
+        for t, source in zip(placeholders, sources):
+            if t is None:
+                continue
+            # TODO: size(i)/stride(i) more efficient
+            for i, s in enumerate(t.size()):
+                track_symint(f"{source}.size()[{i}]", s)
+            for i, s in enumerate(t.stride()):
+                track_symint(f"{source}.stride()[{i}]", s)
+            track_symint(f"{source}.storage_offset()", t.storage_offset())
+
+        for source, s in extra_eqs:
+            exprs.append(f"{source} == {ShapeGuardPrinter(symbol_to_source).doprint(s)}")
+
+        for g, tb in self.guards:
+            if self._maybe_evaluate_static(g) is not None:
+                continue
+            g = self.simplify(g)
+            try:
+                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
+            except Exception:
+                logging.warning(f"failing guard allocated at {tb}")
+                raise
+
+        for sources in symbol_to_source.values():
+            if len(sources) > 1:
+                exprs.append(" == ".join(sources))
+
+        if exprs:
+            return " and ".join(exprs)
+        else:
+            return "True"
+
+    def evaluate_guards_for_args(self, placeholders, args):
+        arg_names = [f"t{i}" for i in range(len(args))]
+        code = self.codegen_guards(placeholders, arg_names)
+        return eval(code, {}, dict(zip(arg_names, args)))
 
     def get_nontrivial_guards(self):
         return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
