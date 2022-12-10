@@ -107,6 +107,7 @@ class CommTensor(torch.Tensor):
         # Use non-CommTensor to avoid nested CommTensor Wrapping
         r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
         # The tensor object wrapped by this CommTensor
+        # NB: THIS CAN BE A CommTensor; see test_nested_comm_tensor_wrapping
         r._tensor = tensor  # type: ignore[attr-defined]
         # Record the LAST `work` object returned by collective communication
         # operations. If this is None, it means no collectives have called
@@ -128,7 +129,7 @@ class CommTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # shared states when unwrapping args
-        tracer: Optional[torch.fx.Tracer] = _get_tracer()
+        tracer: Optional[torch.fx.Tracer] = None
         work: Optional[torch.distributed._Work] = None
 
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
@@ -138,6 +139,14 @@ class CommTensor(torch.Tensor):
                 nonlocal tracer, work
 
                 work = e._work
+                # TODO(ezyang): I don't really understand what's going on
+                # here, but it seems that tracer doesn't reflect whether or
+                # not there is ambient tracing going on, but rather, whether
+                # or not we will trace THIS particular invocation.  If we
+                # have a nested CommTensor, the outer layer doesn't actually
+                # trace and we only trace the inner layer
+                if not isinstance(e._tensor, CommTensor):
+                    tracer = _get_tracer()
 
                 if work is not None:
                     if tracer is not None:
@@ -192,6 +201,7 @@ class CommTensor(torch.Tensor):
 
                 # get proxy for output tuple
                 proxy_res = func(*proxy_args, **proxy_kwargs)
+                assert isinstance(proxy_res, torch.fx.Proxy)
                 # insert a node that wraps the output tuple into
                 # _CommResult(tensor, work)
                 comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
