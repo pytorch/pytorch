@@ -647,12 +647,6 @@ def _post_backward_hook(
                         f"shape {padded_unsharded_grad.shape} and unpadded "
                         f"shape {unsharded_grad.shape}",
                     )
-                    p_assert(
-                        unsharded_grad.dtype == padded_unsharded_grad.dtype,
-                        "Expects the padded unsharded gradient to have dtype "
-                        f"{unsharded_grad.dtype} but pre-allocated with dtype "
-                        f"{padded_unsharded_grad.dtype} {handle._config}"
-                    )
                     # NOTE: If `unsharded_grad` is in full precision and
                     # `padded_unsharded_grad` is in low precision, then the
                     # `copy_()` includes the downcast.
