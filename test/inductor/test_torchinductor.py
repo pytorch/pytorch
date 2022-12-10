@@ -6044,7 +6044,7 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
-        def test_input_is_view(self):
+        def test_input_is_inplace_view(self):
             @torch._dynamo.optimize("inductor")
             def fn(a):
                 unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
