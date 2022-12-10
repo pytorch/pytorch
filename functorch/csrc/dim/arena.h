@@ -222,13 +222,13 @@ struct Arena {
         }
         int to_allocate = sizeof(T)*n;
         int to_allocate_rounded = ALIGNMENT * ((to_allocate - 1) / ALIGNMENT + 1);
-        T* result = (T*) (buffer_ + allocated_);
+        auto prev_allocated = allocated_;
         allocated_ += to_allocate_rounded;
         if (C10_UNLIKELY_OR_CONST(allocated_ > ARENA_MAX_SIZE)) {
             overflow_.emplace_back(new char[to_allocate]);
             return (T*) &overflow_.back()[0];
         }
-        return result;
+        return (T*) (buffer_ + prev_allocated);
     }
     TensorRef autorelease(at::Tensor s) {
         auto ref = TensorRef(s);
