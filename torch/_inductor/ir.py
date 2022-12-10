@@ -620,41 +620,50 @@ class Reduction(Loops):
             src_dtype,
             ReductionHint.DEFAULT,
         )
-        read_writes = ComputedBuffer(
-            name=None,
-            layout=FlexibleLayout(
-                device=r.get_device(),
-                dtype=r.get_dtype(),
-                size=r.get_size(),
-            ),
-            data=r,
-        ).get_read_writes()
-        # try finding the full size producer
-        # TODO this will fail for something like ((1, N) * (N, 1)).sum()
-        # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
-        range_vars = [
-            r
-            for r in read_writes.range_vars
-            if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
-        ]
-        indices = []
-        for md in sorted(read_writes.reads, key=lambda x: x.name):
-            if all([r in md.index.free_symbols for r in range_vars]):
-                indices.append(md.index)
-                if md.name in V.graph.name_to_buffer:
-                    buf = V.graph.name_to_buffer[md.name]
-                    buf.decide_layout()
+
+        def get_read_indices(r):
+            cb = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=r.get_device(),
+                    dtype=r.get_dtype(),
+                    size=r.get_size(),
+                ),
+                data=r,
+            )
+            read_writes = cb.get_read_writes()
+            # try finding the full size producer
+            # TODO this will fail for something like ((1, N) * (N, 1)).sum()
+            # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+            range_vars = [
+                r
+                for r in read_writes.range_vars
+                if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+            ]
+            indices = []
+            changed = False
+            for md in sorted(read_writes.reads, key=lambda x: x.name):
+                if all([r in md.index.free_symbols for r in range_vars]):
+                    indices.append(md.index)
+                    if md.name in V.graph.name_to_buffer:
+                        buf = V.graph.name_to_buffer[md.name]
+                        original_stride = buf.layout.stride
+                        buf.decide_layout()
+                        if buf.layout.stride != original_stride:
+                            changed = True
+            return indices, changed
+
+        indices, changed = get_read_indices(r)
+        if changed:
+            indices, _ = get_read_indices(r)
+
         if len(indices) == 0:
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
-        for md in sorted(read_writes.writes):
-            write_index = md.index
-        xranges = write_index.free_symbols
-        reduction_vars = [
-            rv
-            for rv in range_vars
-            if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
-        ]
+
+        _, (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+            r.get_size(), r.get_reduction_size()
+        )
         num_outer = 0
         num_inner = 0
         for i in indices:
