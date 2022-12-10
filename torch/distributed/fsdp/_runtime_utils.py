@@ -268,7 +268,7 @@ def _pre_forward(
     module: nn.Module,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-) -> Tuple[Tuple[Any], Dict[str, Any]]:
+) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """
     Runs the pre-forward logic. This includes an opportunity to unshard
     currently sharded parameters such as those for the current forward and
