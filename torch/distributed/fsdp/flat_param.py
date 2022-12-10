@@ -346,7 +346,6 @@ class FlatParamHandle:
     ):
         super().__init__()
         self.device = device
-        self._config = config
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -356,6 +355,7 @@ class FlatParamHandle:
         self._comm_module = comm_module
         self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
+        self._config = self._sanitize_config(config)
 
     def _init_flat_param(
         self,
@@ -494,6 +494,37 @@ class FlatParamHandle:
             flat_param_data = torch.cat(flat_params, dim=0)
         flat_param = FlatParameter(flat_param_data, requires_grad=requires_grad)
         return flat_param
+
+    def _sanitize_config(self, handle_config: HandleConfig) -> HandleConfig:
+        """
+        Precondition: ``self.flat_param`` is set via :meth:`_init_flat_param`.
+
+        Returns:
+            HandleConfig: The same config as ``handle_config`` except with the
+            low precision dtypes set to ``None`` if they match the original
+            parameter dtype.
+        """
+        param_dtype = self.flat_param.dtype
+        # For any `MixedPrecision` dtype arg, we set it to `None` if it matches
+        # the original parameter dtype to preserve the invariant that we apply
+        # mixed precision semantics iff `low_prec_param_dtype is None`.
+        low_prec_param_dtype = (
+            None
+            if handle_config.low_prec_param_dtype == param_dtype
+            else handle_config.low_prec_param_dtype
+        )
+        low_prec_reduce_dtype = (
+            None
+            if handle_config.low_prec_reduce_dtype == param_dtype
+            else handle_config.low_prec_reduce_dtype
+        )
+        return HandleConfig(
+            handle_config.sharding_strategy,
+            handle_config.offload_params,
+            low_prec_param_dtype,
+            low_prec_reduce_dtype,
+            handle_config.keep_low_precision_grads,
+        )
 
     ###################################
     # SHARD INITIALIZATION & METADATA #
@@ -895,6 +926,10 @@ class FlatParamHandle:
             # tensor as the all-gather destination to preserve the invariant
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
+            if self.rank == 0:
+                print(
+                    f"[Rank 0] {unsharded_flat_param.dtype} {self._config.low_prec_param_dtype}"
+                )
             p_assert(
                 unsharded_flat_param.dtype != self._config.low_prec_param_dtype,
                 f"Expects full precision but got {self._config.low_prec_param_dtype}",
