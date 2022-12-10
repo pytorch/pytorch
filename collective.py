@@ -11,7 +11,7 @@ def _per_rank_init(rank, world_size, backend="nccl"):
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6789'
+    os.environ['MASTER_PORT'] = '16789'
     dist.init_process_group(backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
@@ -76,7 +76,7 @@ class Tester():
     def test_meta(self):
         x = torch.empty((2,3,4), device="meta")
         with _per_rank_init(self.rank, self.world_size, backend="gloo"):
-            dist.all_reduce(x, group=dist.group.WORLD)
+            dist.all_reduce(x, group=dist.group.WORLD, async_op=True)
 
 t = Tester()
 # t.test_trace_allreduce()

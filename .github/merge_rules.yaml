@@ -1,6 +1,7 @@
 - name: ONNX exporter
   patterns:
   - .jenkins/caffe2/*
+  - .jenkins/onnx/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
@@ -20,6 +21,11 @@
   approved_by:
   - BowenBao
   - abock
+  - justinchuby
+  - shubhambhokare1
+  - thiagocrepaldi
+  - titaiwangms
+  - wschin
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -228,9 +234,14 @@
   - wanchaol
   - fduwjj
   - H-Huang
-  - d4l3k
   - aazzolini
   - kwen2501
+  - XilunWu
+  - wz337
+  - awgu
+  - fegin
+  - kumpera
+  - yhcharles
   mandatory_checks_name:
   - EasyCLA
   - Lint
