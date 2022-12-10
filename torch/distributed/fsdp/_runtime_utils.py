@@ -590,7 +590,7 @@ def _post_backward_hook(
         # computation) to finish before reduce-scattering the gradient
         current_stream = torch.cuda.current_stream()
         state._streams["post_backward"].wait_stream(current_stream)
-        if pre_allocated_unsharded_grad and current_stream != state._streams["default"]:
+        if handle.uses_sharded_strategy and current_stream != state._streams["default"]:
             state._streams["post_backward"].wait_stream(state._streams["default"])
 
         with torch.cuda.stream(state._streams["post_backward"]):
