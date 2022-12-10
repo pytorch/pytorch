@@ -119,8 +119,9 @@ class MixedPrecision:
             pass. This may be set to ``False`` to save memory if using custom
             optimizers that can perform the optimizer step in ``reduce_dtype``.
             (Default: ``False``)
-        cast_forward_inputs (bool): Apply ``param_dtype`` to forward
-            arguments and keyword arguments. (Default: ``True``)
+        cast_forward_inputs (bool): Cast floating point tensors in the forward
+            arguments and keyword arguments to ``param_dtype``.
+            (Default: ``True``)
 
     .. note:: This API is experimental and subject to change.
 
