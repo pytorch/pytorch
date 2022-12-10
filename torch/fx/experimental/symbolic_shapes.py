@@ -148,18 +148,11 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None, symbol=None):
+    def __init__(self, expr, shape_env, pytype, constant=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
         self.constant = constant
-        # Unlike expr, sympy.Symbol is guaranteed to either be a
-        # symbol or its negation a symbol, and it never gets simplified into a
-        # constant or another symbol.  This only exists for freshly
-        # create_symint; intermediate values are None.  The usage of this
-        # property is fairly short-lived: it lives long enough so that Dynamo
-        # can get its hands on symbols and setup Source associations
-        self.symbol: Optional[sympy.Expr] = symbol
 
     @property
     def expr(self):
@@ -435,6 +428,10 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+# This stub exists so we can easily add metadata to sympy symbols
+class Symbol(sympy.Symbol):
+    __slots__: List[str] = []
+
 
 class ShapeEnv(object):
     def __init__(self):
@@ -451,8 +448,6 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.tls = threading.local()
-        # Set holds symbols which definitely are not 0 or 1.
-        self.definitely_not_01: Set["sympy.Symbol"] = set()
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -472,13 +467,13 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, *, sname: str):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        size = [self.create_symbol(i) for i in ex.size()]
+        size = [self.create_symbol(val, sname=f"{sname}.size({i})") for i, val in enumerate(ex.size())]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -506,61 +501,62 @@ class ShapeEnv(object):
                         if stride[i] is None
                     ]
                 )
-                stride[i] = self.create_symbol(val)
+                stride[i] = self.create_symbol(val, sname=f"{sname}.stride({i})")
         assert all(x is not None for x in stride)
         sym_size = [self.create_symintnode(i) for i in size]
         sym_stride = []
-        for stride_expr in stride:
+        for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
-            # TODO: We actually allocated an unnecessary extra symbol
-            # here in the smallest unbound stride case, but it's not
-            # a big deal because the non-0/1 symbol immediately
-            # evaporates from its duck-sizing simplification
-            s = self.create_symbol(val, simplify=False)
             assert stride_expr is not None
-            assert isinstance(s, sympy.Symbol)
-            self.replacements[s] = stride_expr
-            sym_stride.append(self.create_symintnode(s))
-        return sym_size, sym_stride
+            sym_stride.append(self.create_symintnode(stride_expr))
+        sym_storage_offset = self.create_symintnode(self.create_symbol(ex.storage_offset(), sname=f"{sname}.storage_offset()"))
+        return sym_size, sym_stride, sym_storage_offset
 
     def create_symintnode(self, sym: "sympy.Expr"):
-        assert isinstance(sym, sympy.Symbol) or isinstance(-sym, sympy.Symbol)
-        return SymInt(SymNode(sym.xreplace(self.replacements), self, int, symbol=sym))
+        return SymInt(SymNode(sym, self, int))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, *, simplify: bool = True) -> "sympy.Expr":
+    def create_symbol(self, val: int, *, sname: str) -> "sympy.Expr":
+        assert isinstance(sname, str), f"{type(sname)} {sname}"
+
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 
         if val < 0:
-            return -self.create_symbol(-val, simplify=simplify)
+            return -self.create_symbol(-val, sname=f"-{sname}")
 
-        symbol = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-        self.var_to_val[symbol] = sympy.Integer(val)
-
-        if not simplify:
-            return symbol
-
-        # Now attempt to simplify this symbol
-        # TODO: Create a guard whenever this happens
+        # Now attempt to duck size this value
+        # TODO: Use site has to duck size
         # TODO: Do this duck sizing lazily later
 
-        # This implements duck-shaping: input sizes that match are assigned
-        # the same symint
+        # Create a duck sized int if necessary
         if val not in self.val_to_var:
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             self.val_to_var[val] = sympy_expr
-            self.definitely_not_01.add(sympy_expr)
 
-        self.replacements[symbol] = self.val_to_var[val]
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        return self.duck_int(val)
 
-        # Return the *symbol*; you're expected to apply the replacement to get
-        # the simplified variable
-        return symbol
+    # Given a concrete integer value, return the duck sized symbol associated
+    # with it; e.g., suppose we already have a tensor of size 3 in scope,
+    # which was assigned s3, then shape_env.duck_int(3) we will get back s3.
+    # This has some pretty tricky preconditions associated with it, so if
+    # you are in a binding context, you probably wanted create_symbol instead.
+    def duck_int(self, val):
+        assert val in self.val_to_var, (
+            "Direct call to duck_int MUST only duck size an integer values "
+            "that have already produced by inputs (allocated "
+            "by create_symbol), or we risk being unable to instantiate the "
+            "symbolic variable later.  However, at time of this call "
+            f"val={val} was not duck sized.  Bound duck sized integers: "
+            f"{list(self.val_to_var.keys())}"
+        )
+        return self.val_to_var[val]
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
@@ -606,7 +602,6 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
-            if k in self.definitely_not_01
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
