@@ -89,9 +89,21 @@ py::handle type_caster<c10::Scalar>::cast(
     return_value_policy /* policy */,
     handle /* parent */) {
   if (scalar.isIntegral(/*includeBool*/ false)) {
-    return py::cast(scalar.toSymInt()).release();
+    // We have to be careful here; we cannot unconditionally route through
+    // SymInt because integer data from Tensors can easily be MIN_INT or
+    // very negative, which conflicts with the allocated range.
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymInt()).release();
+    } else {
+      return py::cast(scalar.toLong()).release();
+    }
   } else if (scalar.isFloatingPoint()) {
-    return py::cast(scalar.toSymFloat()).release();
+    // This isn't strictly necessary but we add it for symmetry
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymFloat()).release();
+    } else {
+      return py::cast(scalar.toDouble()).release();
+    }
   } else if (scalar.isBoolean()) {
     return py::cast(scalar.toBool()).release();
   } else if (scalar.isComplex()) {
