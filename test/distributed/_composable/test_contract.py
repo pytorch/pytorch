@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import (
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable import contract
+from torch.distributed._composable import _get_registry, contract
 
 from copy import deepcopy
 from typing import Tuple
@@ -129,11 +129,11 @@ class TestContract(TestCase):
 
         model = ToyModel()
         model = api1(model)
-        self.assertEqual(1, len(api2.registry(model)))
-        self.assertTrue("api1" in api2.registry(model))
+        self.assertEqual(1, len(_get_registry(model)))
+        self.assertTrue("api1" in _get_registry(model))
         model = api2(model)
-        self.assertEqual(2, len(api2.registry(model)))
-        self.assertTrue([api2.registry(model).keys()], ["api1", "api2"])
+        self.assertEqual(2, len(_get_registry(model)))
+        self.assertTrue([_get_registry(model).keys()], ["api1", "api2"])
 
         with self.assertRaisesRegex(
             AssertionError, "api1 has already been applied"

@@ -78,7 +78,7 @@ def contract(func):
 
         # get global registry
         default_registry: Dict[str, RegistryItem] = OrderedDict()
-        registry: Dict[str, RegistryItem] = module.__dict__.setdefault(
+        registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
             REGISTRY_KEY, default_registry
         )
 
@@ -146,9 +146,7 @@ def contract(func):
                     f"New FQNs: {new_only}"
                 )
 
-        check_fqn(
-            list(orig_named_params.keys()), list(new_named_params.keys())
-        )
+        check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
         check_fqn(
             list(orig_named_buffers.keys()), list(new_named_buffers.keys())
         )
@@ -174,10 +172,13 @@ def contract(func):
 
     wrapper.state = get_state  # type: ignore[attr-defined]
 
-    def get_registry(module: nn.Module) -> OrderedDict[str, RegistryItem]:
-        default_registry: Dict[str, RegistryItem] = OrderedDict()
-        return module.__dict__.setdefault(REGISTRY_KEY, default_registry)
-
-    wrapper.registry = get_registry
-
     return wrapper
+
+
+def _get_registry(module: nn.Module) -> OrderedDict[str, RegistryItem]:
+    r"""
+    Get an ``OrderedDict`` of composable APIs that have been applied to the
+    ``module``, indexed by the API name.
+    """
+    default_registry: Dict[str, RegistryItem] = OrderedDict()
+    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
