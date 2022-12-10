@@ -32,6 +32,7 @@ Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) 
 
 std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level) {
   std::vector<Tensor> res;
+  res.reserve(tensors.size());
   for (const auto & tensor : tensors) {
     res.emplace_back(makeBatched(tensor, bdim, level));
   }
