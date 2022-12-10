@@ -439,7 +439,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed,
     c10::SymIntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
