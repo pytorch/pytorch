@@ -131,7 +131,10 @@ class TORCH_API LazyGraphExecutor {
 
   hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
 
- private:
+ protected:
+  // TODO(alanwaketan): Revisit if all of them need to be accessible to
+  // derived classes.
+
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
     // the IR graph above them).
@@ -158,6 +161,7 @@ class TORCH_API LazyGraphExecutor {
     std::vector<size_t> parameter_sequence;
   };
 
+ private:
   struct CompilationResult {
     BackendDevice device;
     size_t emitted_nodes = 0;
@@ -196,24 +200,35 @@ class TORCH_API LazyGraphExecutor {
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices);
 
-  std::vector<BackendDataPtr> FetchTensorData(
+  std::vector<BackendDataPtr> SetTensorData(
       std::vector<LazyTensorPtr>* tensors,
       const SyncTensorsConfig& config,
-      c10::ArrayRef<size_t> indices);
+      c10::ArrayRef<size_t> indices,
+      const std::vector<torch::lazy::BackendDataPtr>& tensor_data_vec);
+
+  void ExtractIRAndPrepareTensorData(
+      std::vector<LazyTensorPtr>* tensors,
+      const SyncTensorsConfig& config,
+      c10::ArrayRef<size_t> indices,
+      std::vector<Value>& ir_values,
+      std::vector<BackendDataPtr>& tensor_data_vec);
 
   PostOrderData RunPostOrder(
-      const std::vector<LazyTensorPtr>& tensors,
+      const std::vector<Value>& ir_values,
       SyncTensorCollection* coll);
+
   std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
-      PostOrderData* po_data);
+      PostOrderData* po_data,
+      const std::vector<BackendDataPtr>& tensor_data_vec);
 
   CompilationResult Compile(
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<std::string> devices,
       const SyncTensorCollection& coll,
-      PostOrderData* po_data);
+      PostOrderData* po_data,
+      const std::vector<Value>& ir_values);
 
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
 
@@ -235,7 +250,8 @@ class TORCH_API LazyGraphExecutor {
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
       std::vector<BackendDataPtr> parameters_data,
-      ComputationCache::TypePtr cached_computation);
+      ComputationCache::TypePtr cached_computation,
+      const std::vector<BackendDataPtr>& tensor_data_vec);
 
   std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensorPtr>* tensors);
 

@@ -62,6 +62,7 @@ TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
+ALL_SAMPLES = True #os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
@@ -104,7 +105,7 @@ def print_seen():
         nl = "\n"
         print(
             f"""
-inductor_expected_failures_all_samples[\"{device_type}\"] = {{
+inductor_expected_failures_single_sample[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
 """
@@ -139,9 +140,9 @@ inductor_skips["cuda"] = {
     "_native_batch_norm_legit": {f16, f32, f64},
 }
 
-inductor_expected_failures_all_samples = defaultdict(dict)
+inductor_expected_failures_single_sample = defaultdict(dict)
 
-inductor_expected_failures_all_samples["cpu"] = {
+inductor_expected_failures_single_sample["cpu"] = {
     "T": {b8, f16, f32, f64, i32, i64},
     "H": {b8, f16, f32, f64, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
@@ -200,11 +201,12 @@ inductor_expected_failures_all_samples["cpu"] = {
     "linalg.pinv.singular": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
+    "masked.var": {f16},
+    "masked_fill": {f16},
+    "masked_scatter": {f16, f32, f64},
     "norm": {f16},
     "renorm": {f16, f32, f64},
     "repeat": {b8, f16, f32, f64, i32, i64},
-    "masked_fill": {f16},
-    "masked_scatter": {f16, f32, f64},
     "scatter": {b8, i64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_no_dim": {f16},
@@ -243,7 +245,6 @@ inductor_expected_failures_all_samples["cpu"] = {
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "tril": {f16},
     "triu": {f16},
@@ -256,7 +257,7 @@ inductor_expected_failures_all_samples["cpu"] = {
 }
 
 
-inductor_expected_failures_all_samples["cuda"] = {
+inductor_expected_failures_single_sample["cuda"] = {
     "T": {b8, f16, f32, f64, i32, i64},
     "H": {b8, f16, f32, f64, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
@@ -343,10 +344,10 @@ inductor_expected_failures_all_samples["cuda"] = {
     "scatter": {b8, i64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "std_mean.unbiased": {f16},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
@@ -431,8 +432,8 @@ inductor_override_kwargs = {
 }
 
 # passes with single input
-inductor_passes_for_single_sample = defaultdict(dict)
-inductor_passes_for_single_sample["cpu"] = {
+inductor_expected_failures_all_samples = defaultdict(dict)
+inductor_expected_failures_all_samples["cpu"] = {
     "__rpow__": {f16, i32, i64},
     "__rmatmul__": {f32, f64, i32, i64},
     "_native_batch_norm_legit": {f32},
@@ -521,7 +522,7 @@ inductor_passes_for_single_sample["cpu"] = {
     "signal.windows.kaiser": {f16, f32, f64},
     "unflatten": {b8, i32, i64},
 }
-inductor_passes_for_single_sample["cuda"] = {
+inductor_expected_failures_all_samples["cuda"] = {
     "__rpow__": {f16},
     "rsub": {f16, f32, f64, i32, i64},
     "__rmatmul__": {f16, f32, f64},
@@ -673,13 +674,17 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
         elif (
-            dtype in inductor_passes_for_single_sample[device_type].get(op_name, set())
-            or dtype
-            in inductor_expected_failures_all_samples[device_type].get(op_name, set())
+            dtype
+            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
             or dtype
             in inductor_gradient_expected_failures_single_sample[device_type].get(
                 op_name, set()
             )
+        ):
+            test_expect = TestExpect.XFAILURE
+        elif (
+            dtype in inductor_expected_failures_all_samples[device_type].get(op_name, set())
+            and ALL_SAMPLES
         ):
             test_expect = TestExpect.XFAILURE
         else:
@@ -753,10 +758,15 @@ class TestInductorOpInfo(TestCase):
 
         except Exception as e:
 
+            # This is prevalent on CI machines but it is not
+            # indicative of Inductor failure.
+            if e is OSError:
+                return
+
             if test_expect is TestExpect.XFAILURE:
                 if (
                     dtype
-                    in inductor_passes_for_single_sample[device_type].get(
+                    in inductor_expected_failures_all_samples[device_type].get(
                         op_name, set()
                     )
                     and count == 0
