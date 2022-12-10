@@ -245,7 +245,7 @@ def _single_tensor_asgd(
 
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
