@@ -109,8 +109,10 @@ size_t getDefaultNumThreads() {
    * detect if we are running under tsan, for now capping the default
    * threadcount to the tsan limit unconditionally.
    */
+#ifdef USE_TSAN
   int tsanThreadLimit = 63;
   numThreads = std::min(numThreads, tsanThreadLimit);
+#endif
 
   return numThreads;
 }
