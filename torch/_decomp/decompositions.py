@@ -1141,7 +1141,7 @@ def normalize(input, norm_dims, eps):
     rstd = torch.rsqrt(biased_var + eps)
 
     out = (input - mean) * rstd
-    return out, mean, rstd
+    return out, mean, rstd, biased_var
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -1332,21 +1332,21 @@ def native_batch_norm_helper(
     new_running_mean = running_mean
     new_running_var = running_var
     if training:
-        output, mean, rstd = normalize(input, reduction_dims, eps)
-
+        output, mean, rstd, biased_var = normalize(input, reduction_dims, eps)
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
             new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
             if not functional:
                 running_mean.copy_(new_running_mean)
+
         if running_var is not None:
             n = input.numel() / input.shape[1]
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
-                n / (n - 1)
+            unbiased_var = _squeeze_multiple(biased_var, reduction_dims) * (
+               n / (n - 1)
             )
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
