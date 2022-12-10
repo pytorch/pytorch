@@ -655,11 +655,7 @@ def _post_backward_hook(
                     padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
-                    padded_unsharded_grad = unsharded_grad(
-                        unsharded_grad.to(handle._config.low_prec_reduce_dtype)
-                        if needs_cast_to_reduce_dtype
-                        else unsharded_grad
-                    )
+                    padded_unsharded_grad = unsharded_grad
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
