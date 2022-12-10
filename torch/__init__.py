@@ -162,7 +162,7 @@ def _preload_cuda_deps():
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -181,7 +181,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        platform.system() != 'Windows':
+        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -956,7 +956,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1173,6 +1173,7 @@ def compile(model: Optional[Callable] = None, *,
             return torch.sin(x) + torch.cos(x)
 
     """
+    _C._log_api_usage_once("torch.compile")
     # Decorator mode
     if model is None:
         def fn(model: Callable):
