@@ -17,14 +17,14 @@ from .base import typestr, VariableTracker
 default_tensor_values = {}
 
 
-def wrap_bound_arg(val, options, tx, source=None):
+def wrap_bound_arg(tx, val, options, source=None):
     if isinstance(val, dict):
         return variables.ConstDictVariable(
-            {k: wrap_bound_arg(v, options, tx) for k, v in val.items()}, dict, **options
+            {k: wrap_bound_arg(tx, v, options) for k, v in val.items()}, dict, **options
         )
     elif isinstance(val, (tuple, list)):
         cls = variables.BaseListVariable.cls_for(type(val))
-        return cls([wrap_bound_arg(x, options, tx) for x in val], **options)
+        return cls([wrap_bound_arg(tx, x, options) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
@@ -60,11 +60,11 @@ def wrap_bound_arg(val, options, tx, source=None):
         return val
 
 
-def wrap_args_kwargs(result, options, tx):
+def wrap_args_kwargs(tx, result, options):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
-            result[k] = wrap_bound_arg(v, options, tx)
+            result[k] = wrap_bound_arg(tx, v, options)
 
 
 def init_cellvars(parent, result, code):
@@ -143,7 +143,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert not self.is_constant
         options = VariableTracker.propagate([self])
         tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, options=options, tx=tx)
+        wrap = functools.partial(wrap_bound_arg, tx=tx, options=options)
 
         fn: types.FunctionType = self.fn
         # TODO comment
@@ -179,7 +179,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(result, options, tx)
+        wrap_args_kwargs(tx, result, options)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -423,7 +423,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-        wrap_args_kwargs(result, VariableTracker.propagate(self), tx)
+        wrap_args_kwargs(tx, result, VariableTracker.propagate(self))
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
