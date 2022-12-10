@@ -311,7 +311,7 @@ def trace(data):
     return out.getvalue()
 
 class PlotWriter:
-    def __init__(self, categories: List[str]=None):
+    def __init__(self, categories: List[str] = None):
         string_table: List[str] = []
 
         # compresses lists of strings that have common suffixes
@@ -345,6 +345,7 @@ class PlotWriter:
 
         @cache
         def intern_category(cat):
+            assert categories is not None
             categories.append(cat)
             return len(categories) - 1
 
@@ -364,6 +365,7 @@ class PlotWriter:
             # lazily create since we will not always have categories
             if categories is not None:
                 assert category >= 0 and category < len(categories)
+                assert elements_category is not None
                 elements_category.append(category)
 
             return len(elements_size) - 1
@@ -462,7 +464,9 @@ def profile_plot(memory_profile, device=None):
         if category is None:
             category = Category.TEMPORARY
         stack = allocation_stacks.get(tensor_key, ())
-        return w.add_element(size, [f"{_format_size(size)} allocation ({category.name.lower()})", *(p.name for p in stack)], category.value)
+        return w.add_element(size,
+                             [f"{_format_size(size)} allocation ({category.name.lower()})", *(p.name for p in stack)],
+                             category.value - 1)
 
     kv_to_elem = {}
     for time, action, (tensor_key, version), size in memory_profile.timeline:
@@ -541,7 +545,7 @@ function process_alloc_data(fraction_of_memory_reported=1) {
         current.push(elem)
         let color = elem
         if (alloc_data.elements_category !== null) {
-            color = alloc_data.elements_category[elem] - 1
+            color = alloc_data.elements_category[elem]
         }
         let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: size, color: color}
         current_data.push(e)
