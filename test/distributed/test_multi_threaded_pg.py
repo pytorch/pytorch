@@ -127,6 +127,13 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
+    def test_random_seed_consistency(self):
+        rng = torch.Generator()  # TODO: we need to hide this instantiation from test
+        self_tensor = torch.rand(3, 3, generator=rng)  # TODO: we need to hide generator=rng from test
+        rank_0_tensor = self_tensor.clone()
+        dist.broadcast(rank_0_tensor, src=0)
+        self.assertEqual(rank_0_tensor, self_tensor)
+
 
 if __name__ == "__main__":
     run_tests()
