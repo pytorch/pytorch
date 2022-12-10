@@ -127,6 +127,7 @@ def _lazy_init(
         )
         fsdp_module._is_root = False
         fsdp_module._streams = state._streams
+        fsdp_module._stream_to_name = state._stream_to_name
         fsdp_module._exec_order_data = state._exec_order_data
         if fsdp_module.limit_all_gathers != state.limit_all_gathers:
             # Prefer the root's value
@@ -165,6 +166,14 @@ def _init_streams(
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
     state._streams["pre_unshard"] = torch.cuda.Stream()
+    # Default stream for computation
+    state._streams["default"] = torch.cuda.current_stream()
+    state._stream_to_name = {
+        torch.cuda.current_stream(): "default",
+        state._streams["unshard"]: "unshard",
+        state._streams["pre_unshard"]: "pre_unshard",
+        state._streams["post_backward"]: "post_backward",
+    }
 
 
 @no_type_check
