@@ -128,7 +128,7 @@ class ProcessContext:
         # Assume failure. Terminate processes that are still alive.
         for process in self.processes:
             if process.is_alive():
-                process.terminate()
+                process.kill()
             process.join()
 
         # There won't be an error on the queue if the process crashed.
