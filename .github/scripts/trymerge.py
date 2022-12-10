@@ -550,7 +550,7 @@ def add_workflow_conclusions(
                 conclusions[workflow_name] = WorkflowCheckState(
                     name=workflow_name,
                     status="FAILURE",
-                    url=node["url"])
+                    url=workflow_run["url"])
 
     add_conclusions(checksuites["edges"])
     while bool(checksuites["pageInfo"]["hasNextPage"]):
