@@ -960,27 +960,27 @@ class SaveForwardInputsModule(nn.Module):
     def __init__(
         self,
         forward_inputs: Dict[nn.Module, torch.Tensor],
-        convert_inputs: bool,
+        cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
         self.forward_inputs = forward_inputs
-        self.convert_inputs = convert_inputs
+        self.cast_forward_inputs = cast_forward_inputs
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.forward_inputs[self] = x
-        return self.l(x.to(self.l.weight.dtype) if self.convert_inputs else x)
+        return self.l(x.to(self.l.weight.dtype) if self.cast_forward_inputs else x)
 
 
 class SaveForwardInputsModel(nn.Module):
     def __init__(
         self,
         forward_inputs: Dict[nn.Module, torch.Tensor],
-        convert_inputs: bool,
+        cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
-        self.c1 = SaveForwardInputsModule(forward_inputs, convert_inputs)
-        self.c2 = SaveForwardInputsModule(forward_inputs, convert_inputs)
+        self.c1 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
+        self.c2 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
         self.forward_inputs = forward_inputs
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
