@@ -835,6 +835,18 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
 
+    def test_item(self):
+        def f(a):
+            r = a.item()
+            return r * a
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1)
+    mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
+    return mul""")
+
 
     def test_neg_shape(self):
         def f(a):
@@ -880,6 +892,19 @@ def forward(self, a_1):
     sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
     return div""")
+
+    def test_unbacked_error(self):
+        def f(a):
+            r = a.item()
+            if r != 0:
+                return a * 2
+            else:
+                return a + 3
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: make_fx(f, tracing_mode="symbolic")(torch.tensor([1])),
+            """Size hint has variables we don't have underlying values for"""
+        )
 
     def test_cat(self):
         def f(a, b):

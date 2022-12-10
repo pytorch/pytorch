@@ -183,6 +183,10 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
+        elif isinstance(e, py_sym_types):
+            # NB: eagerly set meta here, so that the numbering is in order
+            set_meta(proxy, e)
+            set_proxy_slot(e.node, tracer, lambda: proxy)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
@@ -202,7 +206,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             set_meta(proxy_res, inner_res)
         for idx, e in enumerate(inner_res):
             wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
-    elif isinstance(inner_res, torch.Tensor):
+    elif isinstance(inner_res, py_sym_types + (torch.Tensor,)):
         wrap_with_proxy(inner_res, proxy_res, constant)
 
     return inner_res
@@ -281,10 +285,6 @@ def proxy_call(proxy_mode, func, args, kwargs):
             )
             with maybe_disable_fake_tensor_mode():
                 return func(*const_args, **const_kwargs)
-        raise RuntimeError(
-            f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
-            "It's likely that this is caused by data-dependent control flow or similar."
-        )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
         (SymInt, SymFloat),
         fetch_sym_proxy(proxy_mode.tracer),

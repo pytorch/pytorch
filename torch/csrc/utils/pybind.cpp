@@ -79,5 +79,26 @@ py::handle type_caster<c10::SymFloat>::cast(
   }
 }
 
+bool type_caster<c10::Scalar>::load(py::handle src, bool) {
+  TORCH_INTERNAL_ASSERT(0, "pybind11 loading for c10::Scalar NYI (file a bug if you need it)");
+}
+
+py::handle type_caster<c10::Scalar>::cast(
+    c10::Scalar scalar,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  if (scalar.isIntegral(/*includeBool*/ false)) {
+    return py::cast(scalar.toSymInt()).release();
+  } else if (scalar.isFloatingPoint()) {
+    return py::cast(scalar.toSymFloat()).release();
+  } else if (scalar.isBoolean()) {
+    return py::cast(scalar.toBool()).release();
+  } else if (scalar.isComplex()) {
+    return py::cast(scalar.toComplexDouble()).release();
+  } else {
+    TORCH_INTERNAL_ASSERT(0, "unrecognized scalar type ", scalar.type());
+  }
+}
+
 } // namespace detail
 } // namespace pybind11

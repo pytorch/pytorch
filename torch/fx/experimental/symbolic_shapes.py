@@ -1,6 +1,7 @@
 import torch
 from typing import Set, Dict, List, Type, Optional, cast
 import sys
+import itertools
 import operator
 import builtins
 import math
@@ -480,6 +481,8 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.tls = threading.local()
+        self.unbacked_symfloat_counter = itertools.count()
+        self.unbacked_symint_counter = itertools.count()
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -547,6 +550,14 @@ class ShapeEnv(object):
 
     def create_symintnode(self, sym: "sympy.Expr"):
         return SymInt(SymNode(sym, self, int))
+
+    def create_unbacked_symfloat(self):
+        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        return SymFloat(SymNode(symbol, self, float))
+
+    def create_unbacked_symint(self):
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        return SymInt(SymNode(symbol, self, int))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
@@ -767,6 +778,8 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
+            # Do not assume unbacked symints are > 1
+            if k in self.var_to_val
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
