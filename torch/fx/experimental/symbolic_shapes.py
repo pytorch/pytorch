@@ -17,7 +17,7 @@ from torch import SymInt, SymFloat
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import]
-    from sympy.printing.str import StrPrinter
+    from sympy.printing.str import StrPrinter  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
