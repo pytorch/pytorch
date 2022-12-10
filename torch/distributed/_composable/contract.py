@@ -175,7 +175,7 @@ def contract(func):
     return wrapper
 
 
-def _get_registry(module: nn.Module) -> OrderedDict[str, RegistryItem]:
+def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
