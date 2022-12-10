@@ -566,11 +566,6 @@ def _post_backward_hook(
         if not state._sync_gradients:
             return
 
-        needs_cast_to_low_prec_reduce_dtype = (
-            handle._uses_reduce_mixed_precision
-            and not _low_precision_hook_enabled(state)
-            and flat_param.grad.dtype != handle._config.low_prec_reduce_dtype
-        )
         needs_cast_to_full_prec_param_dtype = not _low_precision_hook_enabled(
             state
         ) and (
@@ -583,17 +578,28 @@ def _post_backward_hook(
         if handle.uses_sharded_strategy:
             grad_dtype = _get_grad_reduction_dtype(handle)
             # Pre-allocate the (padded) sharded gradient and the padded
-            # unsharded gradient if the gradient needs padding, both in the
-            # default stream
+            # unsharded gradient if the gradient needs padding or if the
+            # gradient needs to be of a different dtype, both in the default
+            # stream
             with torch.cuda.stream(state._streams["default"]):
                 grad_kwargs = {"dtype": grad_dtype, "device": handle.device}
                 new_sharded_grad = torch.empty(
                     handle.flat_param._sharded_size, **grad_kwargs
                 )
                 padded_unsharded_grad: Optional[torch.Tensor] = (
-                    torch.empty(handle.flat_param._padded_unsharded_size, **grad_kwargs)
-                    if handle.flat_param._padded_unsharded_size
-                    != handle.flat_param._unpadded_unsharded_size
+                    torch.empty(
+                        handle.flat_param._padded_unsharded_size,
+                        **grad_kwargs,
+                    )
+                    if (
+                        handle.flat_param._padded_unsharded_size
+                        != handle.flat_param._unpadded_unsharded_size
+                        or (
+                            handle._uses_reduce_mixed_precision
+                            and handle._config.low_prec_reduce_dtype
+                            != handle._config.low_prec_param_dtype
+                        )
+                    )
                     else None
                 )
             pre_allocated_unsharded_grad = padded_unsharded_grad is not None
