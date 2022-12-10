@@ -6,6 +6,8 @@ from types import ModuleType
 
 import torch
 
+from . import external_utils
+
 try:
     import torch._prims
     import torch._refs
@@ -57,6 +59,7 @@ constant_functions = {
     torch._C._get_tracing_state: None,
     torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
+    external_utils.is_compiling: True,
 }
 
 
@@ -98,7 +101,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = False
+replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
@@ -185,7 +188,7 @@ if "torch." in dynamo_import:
 else:
     base_dir = dirname(dirname(abspath(__file__)))
 
-debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
+debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly
