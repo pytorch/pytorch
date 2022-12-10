@@ -354,7 +354,7 @@ TensorBase empty_symint_meta(
   at::detail::raise_warning_for_complex_half(scalar_type);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
   SymInt size_bytes = dtype.itemsize();
-  for (auto s : size) {
+  for (const auto& s : size) {
     size_bytes = size_bytes * s;
   }
   auto storage_impl = c10::make_intrusive<StorageImpl>(

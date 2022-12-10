@@ -343,7 +343,7 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
-  ~OperatorHandle();
+  ~OperatorHandle() = default;
 
   const OperatorName& operator_name() const {
     return operatorDef_->op.operator_name();
