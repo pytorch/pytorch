@@ -1691,16 +1691,12 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
-  if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
-                                   " -D__CUDA_NO_HALF_OPERATORS__"
-                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
-                                   " -D__CUDA_NO_HALF2_OPERATORS__"
-                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-  else()
-    message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
-  endif()
+  message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
+  string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                 " -D__CUDA_NO_HALF_OPERATORS__"
+                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                 " -D__CUDA_NO_HALF2_OPERATORS__"
+                                 " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
   string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
