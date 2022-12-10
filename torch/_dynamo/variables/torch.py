@@ -325,7 +325,9 @@ class TorchVariable(VariableTracker):
             #   (b) cudnn is available
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
-            return ConstantVariable(torch.backends.cudnn.is_acceptable(*args, **kwargs), **options)
+            return ConstantVariable(
+                torch.backends.cudnn.is_acceptable(*args, **kwargs), **options
+            )
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
