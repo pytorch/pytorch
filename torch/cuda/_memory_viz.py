@@ -429,10 +429,11 @@ def trace_plot(data, device=None, plot_segments=False):
             w.free(idx)
     return w.to_html()
 
-def profile_plot(memory_profile, device=None):
+def profile_plot(profile, device=None):
     import torch
     from torch.profiler._memory_profiler import Action, TensorKey, Category
     from torch._C._profiler import _EventType
+    memory_profile = profile._memory_profile()
 
     if device is None:
         if torch.cuda.is_available():
