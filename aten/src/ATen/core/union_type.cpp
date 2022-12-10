@@ -1,13 +1,14 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
 #include <iostream>
+#include <utility>
 
 namespace c10 {
 
@@ -262,7 +263,7 @@ UnionTypePtr UnionType::create(std::vector<TypePtr> reference) {
       auto not_none = union_type->containedTypes()[0] != NoneType::get()
                       ? union_type->containedTypes()[0]
                       : union_type->containedTypes()[1];
-      return OptionalType::create(not_none);
+      return OptionalType::create(std::move(not_none));
     }
   }
 
@@ -396,7 +397,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
       ss << ", ";
     }
     if (is_annotation_str) {
-      ss << NumberType::get()->annotation_str(printer);
+      ss << NumberType::get()->annotation_str(std::move(printer));
     } else {
       ss << NumberType::get()->str();
     }
@@ -410,7 +411,7 @@ std::string UnionType::str() const {
 }
 
 std::string UnionType::annotation_str_impl(TypePrinter printer) const {
-  return this->unionStr(printer, /*is_annotation_str=*/true);
+  return this->unionStr(std::move(printer), /*is_annotation_str=*/true);
 }
 
 bool UnionType::canHoldType(const Type& type) const {

@@ -30,6 +30,8 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace at {
 namespace meta {
 TORCH_META_FUNC(nll_loss_forward)
@@ -570,7 +572,7 @@ Tensor cross_entropy_loss_label_smoothing(
       smooth_loss = -input.sum(class_dim);
     }
 
-    auto ignore_mask = target == ignore_index;
+    auto ignore_mask = target == std::move(ignore_index);
     smooth_loss.index_put_({ignore_mask}, 0.0);
 
     Tensor ret;
@@ -620,7 +622,7 @@ Tensor cross_entropy_loss_symint(
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
-    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, ignore_index, label_smoothing);
+    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, std::move(ignore_index), label_smoothing);
   } else {
     auto class_dim = self.dim() == 1 ? 0 : 1;
     ret = at::nll_loss_nd_symint(
@@ -628,7 +630,7 @@ Tensor cross_entropy_loss_symint(
         target,
         weight,
         reduction,
-        ignore_index);
+        std::move(ignore_index));
   }
   return ret;
 }
@@ -647,7 +649,7 @@ Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const c10::op
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
@@ -684,9 +686,9 @@ Tensor nll_loss_nd_symint(
   Tensor input_ = self;
   Tensor target_ = target;
   if (input_.dim() == 1 || input_.dim() == 2) {
-    ret = at::nll_loss_symint(input_, target_, weight, reduction, ignore_index);
+    ret = at::nll_loss_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else if (input_.dim() == 4) {
-    ret = at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
+    ret = at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else {
     // dim == 3 or dim > 4
     auto n = input_.sym_sizes()[0];
@@ -705,20 +707,20 @@ Tensor nll_loss_nd_symint(
     target_ = target_.contiguous();
     // support empty batches, see #15870
     if (input_.numel() > 0) {
-      input_ = input_.view_symint({n, c, 1, -1});
+      input_ = input_.view_symint({n, std::move(c), 1, -1});
     } else {
-      input_ = input_.view_symint({n, c, 0, 0});
+      input_ = input_.view_symint({n, std::move(c), 0, 0});
     }
     if (target_.numel() > 0) {
-      target_ = target_.view_symint({n, 1, -1});
+      target_ = target_.view_symint({std::move(n), 1, -1});
     } else {
-      target_ = target_.view_symint({n, 0, 0});
+      target_ = target_.view_symint({std::move(n), 0, 0});
     }
     if (reduction != Reduction::None) {
-      ret = at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
+      ret = at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
     } else {
       auto out =
-          at::nll_loss2d_symint(input_, target_, weight, reduction, ignore_index);
+          at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
       ret = out.view_symint(out_size);
     }
   }

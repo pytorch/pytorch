@@ -587,7 +587,7 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> dilation,
       int64_t groups) {
     const torch::List<int64_t> output_padding({0});
-    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+    return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/false);
   }
 
@@ -599,7 +599,7 @@ class QConv1dPackWeightInt8 final {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
-    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+    return _run(std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
                 /*transpose=*/true);
   }
 
@@ -634,7 +634,7 @@ class QConv1dPackWeightInt8 final {
     }
 #endif
     return PackedConvWeight<2>::prepack(
-        weight, bias, stride, padding, output_padding, dilation, groups,
+        std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
         transpose);
 
   } // x86
@@ -643,7 +643,7 @@ class QConv1dPackWeightInt8 final {
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
-          weight, bias, stride, padding, output_padding, dilation, groups,
+          std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
           transpose);
     }
 #endif
@@ -651,7 +651,7 @@ class QConv1dPackWeightInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
-          weight, bias, stride, padding, output_padding, dilation, groups,
+          std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
           transpose);
     }
 #endif
