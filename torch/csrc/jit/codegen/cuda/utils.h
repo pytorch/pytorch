@@ -82,6 +82,8 @@ enum class DisableOption {
                  //! examined
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
+  GroupedGridWelfordOuterOpt, //! Disable use of outer-optimized
+                              //! grouped grid welford kernel
   IndexHoist, //! Disable index hoisting
   Nvtx, //! Disable NVTX instrumentation
   PredicateElimination, //! Disable predicate elimination

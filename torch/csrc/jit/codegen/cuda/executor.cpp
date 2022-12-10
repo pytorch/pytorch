@@ -709,6 +709,13 @@ LaunchParams FusionExecutor::computeLaunchParams(
     reduction_broadcast_workspace =
         dataTypeSize(kernel_summary.largest_smem_data_type) * welford_factor *
         launch_params.bdimx() * launch_params.bdimy() * launch_params.bdimz();
+
+    if (kernel_summary.has_outer_grouped_grid_welford) {
+      reduction_broadcast_workspace = std::max(
+          reduction_broadcast_workspace,
+          (uint64_t)
+              kernel_summary.outer_grouped_grid_welford_largest_smem_size);
+    }
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

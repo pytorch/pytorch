@@ -19,11 +19,13 @@
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
+#include <nvfuser_resources/block_welford_outer.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
 #include <nvfuser_resources/fused_welford_helper.h>
 #include <nvfuser_resources/fused_welford_impl.h>
+#include <nvfuser_resources/fused_welford_impl_outer.h>
 #include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
@@ -125,6 +127,8 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::fused_welford_helper_cu;
   ss << nvfuser_resources::fused_reduction_cu;
   ss << nvfuser_resources::fused_welford_impl_cu;
+  ss << nvfuser_resources::block_welford_outer_cu;
+  ss << nvfuser_resources::fused_welford_impl_outer_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
@@ -1161,6 +1165,9 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 
     ptxas_log << log.data() << std::endl;
     if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+      if (max_register > 0) {
+        std::cout << "Max register count: " << max_register << std::endl;
+      }
       std::cout << log.data() << std::endl;
     }
     AT_CUDA_NVRTC_CHECK(result);

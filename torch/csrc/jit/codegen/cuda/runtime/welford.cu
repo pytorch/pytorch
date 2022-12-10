@@ -1,3 +1,41 @@
+template <typename DataType>
+struct WelfordTriplet {
+  DataType avg;
+  DataType var;
+  nvfuser_index_t N;
+};
+
+template <typename DataType>
+__inline__ __device__ void copyTriplet(
+    DataType* dst_avg,
+    DataType* dst_var,
+    nvfuser_index_t* dst_N,
+    const WelfordTriplet<DataType>& src) {
+  *dst_avg = src.avg;
+  *dst_var = src.var;
+  *dst_N = src.N;
+}
+
+template <typename DataType>
+__inline__ __device__ void copyTriplet(
+    WelfordTriplet<DataType>& dst,
+    const DataType* src_avg,
+    const DataType* src_var,
+    const nvfuser_index_t* src_N) {
+  dst.avg = *src_avg;
+  dst.var = *src_var;
+  dst.N = *src_N;
+}
+
+template <typename DataType>
+__inline__ __device__ void copyTriplet(
+    WelfordTriplet<DataType>& dst,
+    const WelfordTriplet<DataType>& src) {
+  dst.avg = src.avg;
+  dst.var = src.var;
+  dst.N = src.N;
+}
+
 // -----------------------------------------------------------------------------------------------
 //  Block Welford Primitives
 // -----------------------------------------------------------------------------------------------

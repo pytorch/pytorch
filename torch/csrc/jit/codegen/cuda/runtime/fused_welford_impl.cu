@@ -62,22 +62,22 @@ template <
     int idx,
     bool BROADCAST,
     bool FORWARD_PROTECT_SMEM,
-    typename LocalWelfordTripletTupleT>
+    int NumVals,
+    typename DataType,
+    typename IndexType>
 struct BlockWelfordEach {
   __inline__ __device__ static void reduce(
-      LocalWelfordTripletTupleT& block_result,
-      const LocalWelfordTripletTupleT& partial_result,
-      PtrTuple<
-          typename LocalWelfordTripletTupleT::DataType,
-          typename LocalWelfordTripletTupleT::DataType,
-          typename LocalWelfordTripletTupleT::IndexType> shared_buf,
+      LocalWelfordTripletTuple<NumVals, DataType, IndexType>& block_result,
+      const LocalWelfordTripletTuple<NumVals, DataType, IndexType>&
+          partial_result,
+      PtrTuple<DataType, DataType, IndexType> shared_buf,
       bool has_block_result,
       int tid_in_reduction,
       int num_threads_per_reduction,
       int num_elements_per_reduction,
       int reduction_idx) {
     // Finish the reduction of each tuple value with a smaller offset
-    BlockWelfordEach<idx - 1, BROADCAST, true, LocalWelfordTripletTupleT>::
+    BlockWelfordEach<idx - 1, BROADCAST, true, NumVals, DataType, IndexType>::
         reduce(
             block_result,
             partial_result,
@@ -94,9 +94,6 @@ struct BlockWelfordEach {
       }
       return;
     }
-
-    using DataType = typename LocalWelfordTripletTupleT::DataType;
-    using IndexType = typename LocalWelfordTripletTupleT::IndexType;
 
     LocalTuple<DataType, DataType, IndexType> block_result_i(
         partial_result.avg.val<idx>(0),
@@ -190,19 +187,21 @@ struct BlockWelfordEach {
 template <
     bool BROADCAST,
     bool FORWARD_PROTECT_SMEM,
-    typename LocalWelfordTripletTupleT>
+    int NumVals,
+    typename DataType,
+    typename IndexType>
 struct BlockWelfordEach<
     -1,
     BROADCAST,
     FORWARD_PROTECT_SMEM,
-    LocalWelfordTripletTupleT> {
+    NumVals,
+    DataType,
+    IndexType> {
   __inline__ __device__ static void reduce(
-      LocalWelfordTripletTupleT& block_result,
-      const LocalWelfordTripletTupleT& partial_result,
-      PtrTuple<
-          typename LocalWelfordTripletTupleT::DataType,
-          typename LocalWelfordTripletTupleT::DataType,
-          typename LocalWelfordTripletTupleT::IndexType> shared_buf,
+      LocalWelfordTripletTuple<NumVals, DataType, IndexType>& block_result,
+      const LocalWelfordTripletTuple<NumVals, DataType, IndexType>&
+          partial_result,
+      PtrTuple<DataType, DataType, IndexType> shared_buf,
       bool has_block_result,
       int tid_in_reduction,
       int num_threads_per_reduction,
@@ -215,24 +214,26 @@ struct BlockWelfordEach<
 template <
     bool BROADCAST,
     bool FORWARD_PROTECT_SMEM,
-    typename LocalWelfordTripletTupleT>
+    int NumVals,
+    typename DataType,
+    typename IndexType>
 __inline__ __device__ void blockWelfordEach(
-    LocalWelfordTripletTupleT& block_result,
-    const LocalWelfordTripletTupleT& partial_result,
-    PtrTuple<
-        typename LocalWelfordTripletTupleT::DataType,
-        typename LocalWelfordTripletTupleT::DataType,
-        typename LocalWelfordTripletTupleT::IndexType> shared_buf,
+    LocalWelfordTripletTuple<NumVals, DataType, IndexType>& block_result,
+    const LocalWelfordTripletTuple<NumVals, DataType, IndexType>&
+        partial_result,
+    PtrTuple<DataType, DataType, IndexType> shared_buf,
     bool has_block_result,
     int tid_in_reduction,
     int num_threads_per_reduction,
     int num_elements_per_reduction,
     int reduction_idx) {
   BlockWelfordEach<
-      LocalWelfordTripletTupleT::num_vals - 1,
+      NumVals - 1,
       BROADCAST,
       FORWARD_PROTECT_SMEM,
-      LocalWelfordTripletTupleT>::
+      NumVals,
+      DataType,
+      IndexType>::
       reduce(
           block_result,
           partial_result,
@@ -312,7 +313,7 @@ __device__ __inline__ void ParallelReduce<
 
   // Initial per-block reduction. Result is broadcast if specified
   // and this call is block reduction only.
-  welfordGroupBlock<!GRID_REDUCE && BROADCAST>(
+  welfordGroupBlock<!GRID_REDUCE && BROADCAST, NumArgs, DataType, IndexType>(
       block_result, inp, shared_buf, read_preds, block_reduce_participate);
 
   // If block reduction only, save to out and exit
@@ -423,7 +424,7 @@ __device__ __inline__ void ParallelReduce<
   }
 
   // -- START BLOCK CLEANUP -- //
-  welfordGroupLastBlock(
+  welfordGroupLastBlock<NumArgs, DataType, IndexType>(
       out,
       global_work_buffer,
       LocalWelfordTripletTuple<NumArgs, DataType, IndexType>(
@@ -440,6 +441,79 @@ __device__ __inline__ void ParallelReduce<
 
   // Forward protect the smem buffer
   block_sync::sync();
+}
+
+template <
+    int X_BLOCK,
+    int Y_BLOCK,
+    int Z_BLOCK,
+    int X_THREAD,
+    int Y_THREAD,
+    int Z_THREAD,
+    bool PERSISTENT_REDUCTION,
+    bool BROADCAST>
+template <int NumArgs, typename DataType, typename IndexType>
+__device__ __inline__ void ParallelReduce<
+    X_BLOCK,
+    Y_BLOCK,
+    Z_BLOCK,
+    X_THREAD,
+    Y_THREAD,
+    Z_THREAD,
+    PERSISTENT_REDUCTION,
+    BROADCAST>::
+    welfordGroup(
+        typename MakeRefTuple<NumArgs, DataType>::type out_avg,
+        typename MakeRefTuple<NumArgs, DataType>::type out_var,
+        typename MakeRefTuple<NumArgs, IndexType>::type out_N,
+        const typename MakeConstRefTuple<NumArgs, DataType>::type& inp_avg,
+        const typename MakeConstRefTuple<NumArgs, DataType>::type& inp_var,
+        const typename MakeConstRefTuple<NumArgs, IndexType>::type& inp_N,
+        const typename MakeLocalTuple<NumArgs, DataType>::type& init_avg,
+        const typename MakeLocalTuple<NumArgs, DataType>::type& init_var,
+        const typename MakeLocalTuple<NumArgs, IndexType>::type& init_N,
+        typename MakeVolatilePtrTuple<NumArgs, DataType>::type
+            global_work_buffer_avg,
+        typename MakeVolatilePtrTuple<NumArgs, DataType>::type
+            global_work_buffer_var,
+        typename MakeVolatilePtrTuple<NumArgs, IndexType>::type
+            global_work_buffer_N,
+        int64_t* global_sync_buffer,
+        PtrTuple<DataType, DataType, IndexType> shared_buf,
+        const typename MakeLocalTuple<NumArgs, bool>::type& read_preds,
+        const typename MakeLocalTuple<NumArgs, bool>::type& write_preds,
+        int64_t& cycles,
+        int64_t& count) {
+  int64_t start_counter = 0;
+
+  if (isLastBlockInGrid() &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    start_counter = readCycleCounter();
+  }
+
+  welfordGroup<NumArgs, DataType, IndexType>(
+      out_avg,
+      out_var,
+      out_N,
+      inp_avg,
+      inp_var,
+      inp_N,
+      init_avg,
+      init_var,
+      init_N,
+      global_work_buffer_avg,
+      global_work_buffer_var,
+      global_work_buffer_N,
+      global_sync_buffer,
+      shared_buf,
+      read_preds,
+      write_preds);
+
+  if (isLastBlockInGrid() &&
+      index_utils::maskedIsZero<true, true, true>(threadIdx)) {
+    cycles += readCycleCounter() - start_counter;
+    ++count;
+  }
 }
 
 template <
@@ -501,10 +575,7 @@ __device__ __inline__ void ParallelReduce<
           threadIdx, blockDim);
 
   // Do not protect the smem buffer as it's not always necessary.
-  impl::blockWelfordEach<
-      BLOCK_BROADCAST,
-      false,
-      LocalWelfordTripletTuple<NumVals, DataType, IndexType>>(
+  impl::blockWelfordEach<BLOCK_BROADCAST, false, NumVals, DataType, IndexType>(
       block_result,
       block_result,
       shared_buf,
@@ -599,10 +670,7 @@ __device__ __inline__ void ParallelReduce<
         maskedOffset<isIter(X_THREAD), isIter(Y_THREAD), isIter(Z_THREAD)>(
             threadIdx, blockDim);
 
-    impl::blockWelfordEach<
-        BROADCAST,
-        false,
-        LocalWelfordTripletTuple<NumVals, DataType, IndexType>>(
+    impl::blockWelfordEach<BROADCAST, false, NumVals, DataType, IndexType>(
         last_block_result,
         last_block_result,
         shared_buf,

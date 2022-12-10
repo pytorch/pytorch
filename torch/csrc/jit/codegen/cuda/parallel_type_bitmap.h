@@ -189,6 +189,10 @@ class ParallelTypeBitmap {
     return bitset_ == other.bitset_;
   }
 
+  bool operator!=(const ParallelTypeBitmap& other) const {
+    return !(bitset_ == other.bitset_);
+  }
+
   std::string toString() const;
 
  private:

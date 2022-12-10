@@ -637,7 +637,8 @@ GroupedGridWelford::GroupedGridWelford(
     Val* entrance_index,
     Val* entrances,
     Val* buffer_stride,
-    bool is_allreduce)
+    bool is_allreduce,
+    bool use_outer_opt)
     : GroupedWelfordOp(
           passkey,
           std::move(output_vals),
@@ -666,6 +667,49 @@ GroupedGridWelford::GroupedGridWelford(
     addAttribute(reduction_buffers[1].at(i));
     addAttribute(reduction_buffers[2].at(i));
   }
+
+  addAttribute(
+      IrBuilder::create<Attribute<bool>>(passkey.ir_container_, use_outer_opt));
+}
+
+int GroupedGridWelford::getSmemBufferSize(int bdimx, int bdimy, int bdimz)
+    const {
+  auto out_tv = ir_utils::getTvOutput(this);
+  auto kernel = dynamic_cast<kir::Kernel*>(container());
+  TORCH_INTERNAL_ASSERT(kernel != nullptr);
+
+  // By default, the required size is the same as the normal Welford reduction
+  if (!useOuterOpt()) {
+    return bdimx * bdimy * bdimz * dataTypeSize(out_tv->getDataType().value()) *
+        2 +
+        bdimx * bdimy * bdimz *
+        dataTypeSize(DataType::Index, kernel->indexType());
+  }
+
+  // In the outer-reduction version, the size is blockDim.x * NumberOfWarps *
+  // GroupCount
+
+  int group_count = 1;
+  for (auto axis : out_tv->domain()->domain()) {
+    auto pt = axis->getParallelType();
+    if (pt == ParallelType::Group) {
+      auto extent_int = axis->extent()->getInt();
+      TORCH_INTERNAL_ASSERT(extent_int.has_value());
+      group_count *= (int)extent_int.value();
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(group_count > 1);
+
+  int num_warps = bdimx * bdimy / 32;
+  TORCH_INTERNAL_ASSERT((bdimx * bdimy) % 32 == 0);
+
+  int buf_size_for_avg_var = bdimx * num_warps * group_count *
+      dataTypeSize(out_tv->getDataType().value());
+  int buf_size_for_N =
+      num_warps * dataTypeSize(DataType::Index, kernel->indexType());
+
+  return buf_size_for_avg_var * 2 + buf_size_for_N;
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedGridWelford)

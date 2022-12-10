@@ -565,7 +565,7 @@ void IrPrinter::handle(const ReductionOp* rop) {
 void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
   indent() << "GroupedReductionOp(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(grouped_rop->numExprs())) {
+  for (const auto i : c10::irange(grouped_rop->numHorizontallyGroupedExprs())) {
     indent() << grouped_rop->output(i) << " = reduction( "
              << grouped_rop->input(i)
              << ", op = " << grouped_rop->getReductionOpType(i)
@@ -598,7 +598,7 @@ void IrPrinter::handle(const WelfordOp* wop) {
 void IrPrinter::handle(const GroupedWelfordOp* grouped_wop) {
   indent() << "GroupedWelford(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(grouped_wop->numExprs())) {
+  for (const auto i : c10::irange(grouped_wop->numHorizontallyGroupedExprs())) {
     indent() << grouped_wop->outAvg(i) << " (Avg),\n";
     indent() << grouped_wop->outVar(i) << " (Var),\n";
     indent() << grouped_wop->outN(i) << " (Count)\n";
@@ -868,7 +868,7 @@ void IrPrinter::handle(const kir::GridReduction* node) {
 void IrPrinter::handle(const kir::GroupedGridReduction* node) {
   indent() << "GroupedGridReduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(node->numExprs())) {
+  for (const auto i : c10::irange(node->numHorizontallyGroupedExprs())) {
     indent() << node->output(i) << " = reduction( " << node->input(i)
              << ", op = " << node->getReductionOpType(i)
              << ", initial value = " << node->initVal(i)
@@ -960,7 +960,7 @@ void IrPrinter::handle(const kir::GridWelford* node) {
 void IrPrinter::handle(const kir::GroupedGridWelford* node) {
   indent() << "GroupedGridWelford(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(node->numExprs())) {
+  for (const auto i : c10::irange(node->numHorizontallyGroupedExprs())) {
     indent() << node->outAvg(i) << " (Avg),\n";
     indent() << node->outVar(i) << " (Var),\n";
     indent() << node->outN(i) << " (Count)\n";

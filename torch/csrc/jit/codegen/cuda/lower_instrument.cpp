@@ -54,6 +54,10 @@ class Instrumentor : private kir::IrVisitor {
     profile_.registerExpr(expr);
   }
 
+  void handle(kir::GroupedGridWelford* expr) final {
+    profile_.registerExpr(expr);
+  }
+
   void allocateBuffer() {
     const auto num_profile_entries = profile_.getNumberOfProfileEntries();
 

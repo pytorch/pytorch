@@ -105,6 +105,8 @@ auto parseDisableOptions() {
       {"compile_to_sass", DisableOption::CompileToSass},
       {"fallback", DisableOption::Fallback},
       {"fma", DisableOption::Fma},
+      {"grouped_grid_welford_outer_opt",
+       DisableOption::GroupedGridWelfordOuterOpt},
       {"index_hoist", DisableOption::IndexHoist},
       {"nvtx", DisableOption::Nvtx},
       {"predicate_elimination", DisableOption::PredicateElimination},

@@ -111,7 +111,10 @@ class ValidateSiblings : public IterVisitor {
     if (ptype0 != ptype1) {
       TORCH_CHECK(
           ptype0 == ParallelType::Serial || ptype1 == ParallelType::Serial,
-          "Error promoting parallel types");
+          "Error promoting parallel types: ",
+          ptype0,
+          " and ",
+          ptype1);
       if (ptype0 == ParallelType::Serial) {
         id0->parallelize(ptype1);
       }
@@ -1291,7 +1294,8 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
 void validateGroupedReductions(Fusion* fusion) {
   for (auto expr : StmtSort::getExprs(fusion)) {
     if (auto grouped_reduction_op = dynamic_cast<GroupedReductionOp*>(expr)) {
-      const auto num_exprs = grouped_reduction_op->numExprs();
+      const auto num_exprs =
+          grouped_reduction_op->numHorizontallyGroupedExprs();
       int num_grouped_iterations = 1;
       auto out_tv = ir_utils::getTvOutput(grouped_reduction_op);
       for (auto axis : out_tv->domain()->domain()) {

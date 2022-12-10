@@ -517,6 +517,19 @@ class ParallelReduce {
       int64_t& count,
       Funcs... funcs);
 
+  // User-visible entry point of grouped grid welford +
+  // broadcast. Mostly the same as reduceGroup, and it would be
+  // possible to combine this to reduceGroup, but it might make the
+  // templated data structures even more complicated and difficult to
+  // understand. For now, keep it as a separate function.
+  //
+  // Unlike reduceGroup, though, the data types of welford ops must be
+  // the same. For example, reduceGroup can be used to reduce half and
+  // float values by passing a tuple of, e.g., LocalTuple<half,
+  // float>, but that's not supported here for implementation
+  // simplicity. In practice, it should be really uncommon to group
+  // welford ops with different data types, so this restriction
+  // shouldn't be an issue.
   template <int NumArgs, typename DataType, typename IndexType>
   __device__ __inline__ void welfordGroup(
       typename MakeRefTuple<NumArgs, DataType>::type out_avg,
@@ -538,6 +551,65 @@ class ParallelReduce {
       PtrTuple<DataType, DataType, IndexType> shared_buf,
       const typename MakeLocalTuple<NumArgs, bool>::type& read_preds,
       const typename MakeLocalTuple<NumArgs, bool>::type& write_preds);
+
+  //! Profiled version
+  template <int NumArgs, typename DataType, typename IndexType>
+  __device__ __inline__ void welfordGroup(
+      typename MakeRefTuple<NumArgs, DataType>::type out_avg,
+      typename MakeRefTuple<NumArgs, DataType>::type out_var,
+      typename MakeRefTuple<NumArgs, IndexType>::type out_N,
+      const typename MakeConstRefTuple<NumArgs, DataType>::type& inp_avg,
+      const typename MakeConstRefTuple<NumArgs, DataType>::type& inp_var,
+      const typename MakeConstRefTuple<NumArgs, IndexType>::type& inp_N,
+      const typename MakeLocalTuple<NumArgs, DataType>::type& init_avg,
+      const typename MakeLocalTuple<NumArgs, DataType>::type& init_var,
+      const typename MakeLocalTuple<NumArgs, IndexType>::type& init_N,
+      typename MakeVolatilePtrTuple<NumArgs, DataType>::type
+          global_work_buffer_avg,
+      typename MakeVolatilePtrTuple<NumArgs, DataType>::type
+          global_work_buffer_var,
+      typename MakeVolatilePtrTuple<NumArgs, IndexType>::type
+          global_work_buffer_N,
+      int64_t* global_sync_buffer,
+      PtrTuple<DataType, DataType, IndexType> shared_buf,
+      const typename MakeLocalTuple<NumArgs, bool>::type& read_preds,
+      const typename MakeLocalTuple<NumArgs, bool>::type& write_preds,
+      int64_t& cycles,
+      int64_t& count);
+
+  // This is highly specific to the outer-reduction pattern. All the
+  // assumptions should be asserted with static_assert at the begging of
+  // the fuction.
+  template <int NumVals, typename DataType, int BDIMX, int BDIMY>
+  __device__ __inline__ void welfordGroupOuter(
+      DataType out_avg[NumVals],
+      DataType out_var[NumVals],
+      nvfuser_index_t out_N[NumVals],
+      const DataType in_avg[NumVals],
+      const DataType in_var[NumVals],
+      nvfuser_index_t in_N,
+      DataType* global_buf_avg,
+      DataType* global_buf_var,
+      nvfuser_index_t* global_buf_N,
+      DataType* shared_buf,
+      int64_t* global_sync_buffer);
+
+  // Profiled version
+  template <int NumVals, typename DataType, int BDIMX, int BDIMY>
+  __device__ __inline__ void welfordGroupOuter(
+      DataType out_avg[NumVals],
+      DataType out_var[NumVals],
+      nvfuser_index_t out_N[NumVals],
+      const DataType in_avg[NumVals],
+      const DataType in_var[NumVals],
+      nvfuser_index_t in_N,
+      DataType* global_buf_avg,
+      DataType* global_buf_var,
+      nvfuser_index_t* global_buf_N,
+      DataType* shared_buf,
+      int64_t* global_sync_buffer,
+      int64_t& cycles,
+      int64_t& count);
 
  private:
   __device__ static bool isLastBlockInGrid() {
@@ -1009,6 +1081,7 @@ __device__ __inline__ void ParallelReduce<
             last_block_result, 0, shared_buf, smem_offset + 1, reduction_op);
       }
     }
+
     if (grid_reduce_participate && PERSISTENT_REDUCTION) {
       // If persistent reduction, always broadcast reduced values
       copyTuple(shared_buf, smem_offset, last_block_result);

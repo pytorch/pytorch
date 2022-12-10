@@ -647,7 +647,8 @@ class PredicateChcker : public IterVisitor {
   }
 
   void handle(GroupedReductionOp* grouped_rop) final {
-    for (const auto i : c10::irange(grouped_rop->numExprs())) {
+    for (const auto i :
+         c10::irange(grouped_rop->numHorizontallyGroupedExprs())) {
       auto input = grouped_rop->input(i)->as<TensorView>();
       auto input_def = input->definition();
       // When input_def is null, input must be an input to the fusion,
@@ -709,7 +710,8 @@ class PredicateChcker : public IterVisitor {
   }
 
   void handle(GroupedWelfordOp* grouped_wop) final {
-    for (const auto expr_idx : c10::irange(grouped_wop->numExprs())) {
+    for (const auto expr_idx :
+         c10::irange(grouped_wop->numHorizontallyGroupedExprs())) {
       for (const auto val_idx : c10::irange(3)) {
         auto init = grouped_wop->initVals().at(expr_idx).get(val_idx);
 

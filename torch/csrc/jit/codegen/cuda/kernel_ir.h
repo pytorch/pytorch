@@ -830,7 +830,8 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
       Val* entrance_index,
       Val* entrances,
       Val* buffer_stride,
-      bool is_allreduce = false);
+      bool is_allreduce = false,
+      bool use_outer_opt = false);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
@@ -896,6 +897,15 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
     result->threadPredicate() = thread_predicate;
     return result;
   }
+
+  // True if the outer-optimized kernel should be used
+  bool useOuterOpt() const {
+    auto offset = numGroupedWelfordOpAttr() + 5 + outputs().size();
+    return attribute(offset)->as<Attribute<bool>>()->value;
+  }
+
+  //! Return the required smem buffer size
+  int getSmemBufferSize(int bdimx, int bdimy, int bdimz) const;
 };
 
 //! Represents a WelfordOp with the division by count is hoisted out

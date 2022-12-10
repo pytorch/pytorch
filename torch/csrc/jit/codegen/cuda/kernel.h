@@ -65,6 +65,12 @@ struct KernelSummary {
   //! Do we have any welford op?
   bool has_grid_welford = false;
 
+  //! Do we have any outer grouped grid welford op?
+  bool has_outer_grouped_grid_welford = false;
+
+  //! Largest shared memory buffer size of outer grouped grid welford
+  int outer_grouped_grid_welford_largest_smem_size = 0;
+
   //! Largest shared memory buffer base type
   DataType largest_smem_data_type = DataType::Null;
 

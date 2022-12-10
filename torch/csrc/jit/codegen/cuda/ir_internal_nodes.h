@@ -495,12 +495,12 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
 
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping.
-  size_t numExprs() const {
+  size_t numHorizontallyGroupedExprs() const {
     return getReductionOpTypes().size();
   }
 
   std::vector<Val*> initVals() const {
-    auto size = numExprs();
+    auto size = numHorizontallyGroupedExprs();
     std::vector<Val*> result;
     result.reserve(size);
     for (auto i : c10::irange(2, 2 + size)) {
@@ -777,7 +777,7 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping. As horizontal grouping is not supported,
   //! this always returns 1.
-  size_t numExprs() const {
+  size_t numHorizontallyGroupedExprs() const {
     return 1;
   }
 

@@ -141,6 +141,25 @@ class KernelIrScanner : private IrVisitor {
     if (grid_welford->isAllreduce()) {
       summary_.has_cooperative_grid_reduction = true;
     }
+    if (grid_welford->useOuterOpt()) {
+      summary_.has_outer_grouped_grid_welford = true;
+      const auto& par_dim_map = GpuLower::current()->parallelDimensionMap();
+      auto tidx_val = par_dim_map.get(ParallelType::TIDx);
+      auto tidy_val = par_dim_map.get(ParallelType::TIDy);
+      TORCH_INTERNAL_ASSERT(
+          tidx_val->isConstInt(),
+          "TIDx is expected to be a const int: ",
+          tidx_val->toInlineString());
+      TORCH_INTERNAL_ASSERT(
+          tidy_val->isConstInt(),
+          "TIDy is expected to be a const int: ",
+          tidy_val->toInlineString());
+      auto tidx = static_cast<int>(tidx_val->evaluateInt());
+      auto tidy = static_cast<int>(tidy_val->evaluateInt());
+      summary_.outer_grouped_grid_welford_largest_smem_size = std::max(
+          summary_.outer_grouped_grid_welford_largest_smem_size,
+          grid_welford->getSmemBufferSize(tidx, tidy, 1));
+    }
   }
 
   void handle(GridBroadcast* grid_broadcast) final {

@@ -60,8 +60,8 @@ class FusionInspector : private IterVisitor {
   using IterVisitor::handle;
 
   void handle(ReductionOp* rop) final {
-    /// If it's a grid reduction, keep track of tensors that depend on
-    /// this reduction.
+    // If it's a grid reduction, keep track of tensors that depend on
+    // this reduction.
     // Only consider when out is on register as that is assumed in the
     // fused reduction kernel.
     auto out = ir_utils::getTvOutput(rop);
@@ -72,22 +72,41 @@ class FusionInspector : private IterVisitor {
   }
 
   void handle(WelfordOp* wop) final {
-    /// If it's a grid reduction, keep track of tensors that depend on
-    /// this reduction.
-    // Only consider when out is on register as that is assumed in the
-    // fused reduction kernel.
+    // If it's a grid welford, keep track of tensors that depend on
+    // this reduction.
+
+    // Skip if any of the outputs is not a Local tensor.
+    auto out_tvs = ir_utils::filterByType<TensorView>(wop->outputs());
+    if (std::any_of(out_tvs.begin(), out_tvs.end(), [](auto out_tv) {
+          return out_tv->getMemoryType() != MemoryType::Local;
+        })) {
+      return;
+    }
+
+    // Keep track of all output TVs if grid parallelized
     auto out = ir_utils::getTvOutput(wop);
-    if (out->getMemoryType() == MemoryType::Local &&
-        out->domain()->hasGridReduction()) {
-      reduction_dep_[out].insert(wop);
+    if (out->domain()->hasGridReduction()) {
+      for (auto out : out_tvs) {
+        reduction_dep_[out].insert(wop);
+      }
     }
   }
 
   void handle(GroupedReductionOp* grouped_rop) final {
+    // Skip if any of the outputs is not a Local tensor.
+    auto out_tvs = ir_utils::filterByType<TensorView>(grouped_rop->outputs());
+    if (std::any_of(out_tvs.begin(), out_tvs.end(), [](auto out_tv) {
+          return out_tv->getMemoryType() != MemoryType::Local;
+        })) {
+      return;
+    }
+
+    // Keep track of all output TVs if grid parallelized
     auto out = ir_utils::getTvOutput(grouped_rop);
-    if (out->getMemoryType() == MemoryType::Local &&
-        out->domain()->hasGridReduction()) {
-      reduction_dep_[out].insert(grouped_rop);
+    if (out->domain()->hasGridReduction()) {
+      for (auto out : out_tvs) {
+        reduction_dep_[out].insert(grouped_rop);
+      }
     }
   }
 

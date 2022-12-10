@@ -743,7 +743,7 @@ GroupedWelfordOp::GroupedWelfordOp(
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedWelfordOp)
 
 int GroupedWelfordOp::getExprIndexOfOutput(Val* output_val) const {
-  for (const auto expr_idx : c10::irange(numExprs())) {
+  for (const auto expr_idx : c10::irange(numHorizontallyGroupedExprs())) {
     if (outputVals().at(expr_idx).getNameOf(output_val).has_value()) {
       return expr_idx;
     }
