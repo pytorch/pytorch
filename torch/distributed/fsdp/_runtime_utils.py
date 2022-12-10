@@ -577,11 +577,13 @@ def _post_backward_hook(
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
-            if handle._uses_reduce_mixed_precision and not _low_precision_hook_enabled(
-                state
+            if (
+                handle._uses_reduce_mixed_precision
+                and not _low_precision_hook_enabled(state)
+                and param.grad.dtype != handle._config.low_prec_reduce_dtype
             ):
                 # TODO: Use the low precision communication hook directly
-                param.grad.data = param.grad.to(state.mixed_precision.reduce_dtype)
+                param.grad.data = param.grad.to(handle._config.low_prec_reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
