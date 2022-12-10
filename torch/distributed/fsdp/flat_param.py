@@ -23,8 +23,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _get_root_modules,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -167,6 +167,11 @@ class FlatParameter(nn.Parameter):
             depend on its existence in the future.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
+        _root_modules (Set[nn.Module]): Modules in ``self._modules`` that are
+            root modules (i.e. parent-less) with respect to ``self._modules``.
+            These are the modules for which we register pre/post-forward hooks
+            in the composable code path. There will be one unshard/reshard pair
+            for each root module in this set.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -266,6 +271,7 @@ class FlatParameter(nn.Parameter):
         self._modules = set(pi.module for pi in self._param_infos).union(
             set(spi.module for spi in self._shared_param_infos)
         )
+        self._root_modules = _get_root_modules(self._modules)
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(
@@ -1093,11 +1099,12 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
-                # This cast is meaningful when `param_dtype` is a low precision
-                # dtype.
-                flat_param.grad.data = flat_param.grad.to(
-                    self._config.low_prec_param_dtype
-                )
+                if flat_param.grad.dtype != self._config.low_prec_param_dtype:
+                    flat_param.grad.data = flat_param.grad.to(
+                        self._config.low_prec_param_dtype
+                    )
+                    if self._use_orig_params:
+                        self._use_sharded_grad_views()
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1292,12 +1299,6 @@ class FlatParamHandle:
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if self._use_orig_params and as_params:
-                if type(view) is DTensor:
-                    # A `DTensor` `view` is not compatible with assigning
-                    # `param.data = view`, so we cannot preserve the parameter
-                    # variable.
-                    setattr(module, param_name, nn.Parameter(view))
-                    continue
                 param = self.flat_param._params[i]  # type: ignore[index]
                 setattr(module, param_name, param)
                 param.data = view
@@ -1518,9 +1519,20 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    param.grad = grad[offset : offset + numel_in_shard].reshape(
-                        param.shape
-                    )
+                    if self._keep_low_precision_grads:
+                        # NOTE: This is a hack using `.data` to side step the
+                        # check that parameter/gradient dtypes match. Here,
+                        # `param` has full precision; `grad` has low precision.
+                        if param.grad is None:
+                            # `.grad` must have the same shape as `param`
+                            param.grad = torch.empty_like(param)
+                        param.grad.data = grad[
+                            offset : offset + numel_in_shard
+                        ].reshape(param.shape)
+                    else:
+                        param.grad = grad[offset : offset + numel_in_shard].reshape(
+                            param.shape
+                        )
                 else:
                     param.grad = None
                 offset += numel_in_shard
