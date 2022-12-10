@@ -1,11 +1,11 @@
 import functools
 import warnings
-from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
+from typing import Any, Callable, cast, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS, default_hooks
+from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
@@ -33,6 +33,7 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
+
 
 @no_type_check
 def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
@@ -66,6 +67,7 @@ def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
             raise ValueError(
                 f"For {fsdp_root.sharding_strategy}, inter-node process groups do not match"
             )
+
 
 @no_type_check
 def _lazy_init(
@@ -360,7 +362,6 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
 
-
     free_unsharded_flat_params = [
         not state._is_root
         and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
@@ -576,7 +577,9 @@ def _post_backward_hook(
             # default stream
             with torch.cuda.stream(state._streams["default"]):
                 grad_kwargs = {"dtype": grad_dtype, "device": handle.device}
-                new_sharded_grad = torch.empty(handle.flat_param._sharded_size, **grad_kwargs)
+                new_sharded_grad = torch.empty(
+                    handle.flat_param._sharded_size, **grad_kwargs
+                )
                 padded_unsharded_grad: Optional[torch.Tensor] = (
                     torch.empty(handle.flat_param._padded_unsharded_size, **grad_kwargs)
                     if handle.flat_param._padded_unsharded_size
@@ -636,7 +639,9 @@ def _post_backward_hook(
                     )
                     # TODO: `clip_grad_norm_()` assumes padding is zeroed. We
                     # need to trim padding before computing local norms.
-                    padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
+                    padding_numel = (
+                        padded_unsharded_grad.numel() - unsharded_grad.numel()
+                    )
                     padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
                     padded_unsharded_grad = (
@@ -651,7 +656,7 @@ def _post_backward_hook(
                 )
                 if handle._config.sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy._HYBRID_SHARD_ZERO2
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
                 ):
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
@@ -666,17 +671,23 @@ def _post_backward_hook(
                 # reductions may happen in arbitrary order
                 accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
                 if accumulate_grad:
-                    _check_grad_to_accumulate(new_sharded_grad, flat_param._saved_grad_shard)
+                    _check_grad_to_accumulate(
+                        new_sharded_grad, flat_param._saved_grad_shard
+                    )
                     flat_param._saved_grad_shard += new_sharded_grad
                 else:
                     flat_param._saved_grad_shard = new_sharded_grad
                 sharded_grad = flat_param._saved_grad_shard
             else:
-                state._communication_hook(state._communication_hook_state, flat_param.grad)
+                state._communication_hook(
+                    state._communication_hook_state, flat_param.grad
+                )
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
-                    _cast_grad_to_param_dtype(state, handle, flat_param.grad, flat_param)
+                    _cast_grad_to_param_dtype(
+                        state, handle, flat_param.grad, flat_param
+                    )
                 sharded_grad = flat_param.grad.data
 
             if handle._config.offload_params:
@@ -728,9 +739,9 @@ def _get_grad_reduction_dtype(handle: FlatParamHandle) -> torch.dtype:
     Precondition: ``handle.flat_param.grad is not None``.
     """
     if handle._uses_reduce_mixed_precision:
-        grad_dtype = handle._config.low_prec_reduce_dtype
+        grad_dtype = cast(torch.dtype, handle._config.low_prec_reduce_dtype)
     elif handle._uses_param_mixed_precision:
-        grad_dtype = handle._config.low_prec_param_dtype
+        grad_dtype = cast(torch.dtype, handle._config.low_prec_param_dtype)
     else:
         assert handle.flat_param.grad is not None  # mypy
         grad_dtype = handle.flat_param.grad.dtype
