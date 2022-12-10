@@ -960,7 +960,7 @@ class SaveForwardInputsModule(nn.Module):
     def __init__(
         self,
         forward_inputs: Dict[nn.Module, torch.Tensor],
-        convert_inputs: bool = False,
+        convert_inputs: bool,
     ) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
