@@ -1,21 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import (
-    Callable,
-    Dict,
-    Iterable,
-    Optional,
-    Tuple,
-    Set,
-    Union,
-    Sequence,
-    cast,
-)
+from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 import torch
 from torch import Tensor
-
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
@@ -24,6 +12,8 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_prop_rule,
 )
+
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 
 
 Shape = Tuple[int, ...]
@@ -138,9 +128,7 @@ class Split(DimSpec):
     split_id: int
 
     @classmethod
-    def new(
-        cls, dim: DimSpec, group_shape: Tuple[int, ...], idx: int
-    ) -> DimSpec:
+    def new(cls, dim: DimSpec, group_shape: Tuple[int, ...], idx: int) -> DimSpec:
         assert len(group_shape) > 0
         if len(group_shape) == 1:
             # not really a group, just return the input dim back
@@ -192,9 +180,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
             actual_s = 1
             assert desired_s >= 0
         else:
-            assert isinstance(
-                p, InputDim
-            ), f"DimSpec not supported in expand: {p}"
+            assert isinstance(p, InputDim), f"DimSpec not supported in expand: {p}"
             actual_s = input_shape[p.input_dim]
             assert actual_s == 1 or desired_s == -1 or desired_s == actual_s
         mapping.append(
@@ -234,9 +220,7 @@ def dim_movedim(
     assert len(input) == len(destination)
     input_set = set(input)
     assert len(input_set) == len(input), "Found repeated input dims"
-    assert len(set(destination)) == len(
-        destination
-    ), "Found repeated output dims"
+    assert len(set(destination)) == len(destination), "Found repeated output dims"
     assert max(input) < ndim
     assert max(destination) < ndim
 
@@ -363,9 +347,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
-                tuple(
-                    InputDim(fi) for fi in from_group_dim if from_size[fi] > 1
-                )
+                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] > 1)
             )
             result_pp += [
                 Split.new(flattened, tuple(to_group_shape), i)
@@ -460,23 +442,17 @@ ops: Dict[Callable[..., torch.Tensor], Op] = {
         )
     ),
     torch.ravel: Op(dim_map=lambda tensor: dim_flatten(tensor.ndim)),
-    Tensor.repeat: Op(
-        dim_map=lambda self, *sizes: dim_repeat(self.ndim, sizes)
-    ),
+    Tensor.repeat: Op(dim_map=lambda self, *sizes: dim_repeat(self.ndim, sizes)),
     torch.reshape: Op(
         dim_map=lambda input, shape: view_groups(input.shape, shape),
         shape_argnum=1,
     ),
-    torch.squeeze: Op(
-        dim_map=lambda input, dim=None: dim_squeeze(input.shape, dim)
-    ),
+    torch.squeeze: Op(dim_map=lambda input, dim=None: dim_squeeze(input.shape, dim)),
     torch.tile: Op(dim_map=lambda input, dims: dim_tile(input.ndim, dims)),
     torch.transpose: Op(
         dim_map=lambda input, dim0, dim1: dim_transpose(input.ndim, dim0, dim1)
     ),
-    torch.unsqueeze: Op(
-        dim_map=lambda input, dim: dim_unsqueeze(input.ndim, dim)
-    ),
+    torch.unsqueeze: Op(dim_map=lambda input, dim: dim_unsqueeze(input.ndim, dim)),
     Tensor.view: Op(
         dim_map=lambda input, *shape: view_groups(input.shape, shape),
         shape_argnum=1,
@@ -502,9 +478,7 @@ def propagate_shape_and_sharding(
       if the leftmost split size is divisible by the mesh dimension
     """
     assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = set(
-        s.dim for s in in_shard if isinstance(s, Shard)
-    )
+    sharded_in_dims: Set[int] = set(s.dim for s in in_shard if isinstance(s, Shard))
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     shardable_dims: torch.Tensor = torch.ones(
         (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool
@@ -541,8 +515,7 @@ def propagate_shape_and_sharding(
             return (
                 prod(get_dim_size(a)[0] for a in cmd.input_dims),
                 dim0
-                if isinstance(dim0, InputDim)
-                and dim0.input_dim in sharded_in_dims
+                if isinstance(dim0, InputDim) and dim0.input_dim in sharded_in_dims
                 else None,
             )
         elif isinstance(cmd, Split):
@@ -598,18 +571,14 @@ def propagate_shape_and_sharding(
             dim_map[in_dim.input_dim] = dim
 
     needs_reshard = any(
-        isinstance(placement, Shard)
-        and not shardable_dims[placement.dim][mesh_dim]
+        isinstance(placement, Shard) and not shardable_dims[placement.dim][mesh_dim]
         for mesh_dim, placement in enumerate(in_shard)
     )
 
     output_placements = (
         None
         if needs_reshard
-        else [
-            Shard(dim_map[s.dim]) if isinstance(s, Shard) else s
-            for s in in_shard
-        ]
+        else [Shard(dim_map[s.dim]) if isinstance(s, Shard) else s for s in in_shard]
     )
 
     return (tuple(out_shape), output_placements, shardable_dims)
@@ -631,11 +600,7 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (
-            global_out_shape,
-            shard_out,
-            shardable_dims,
-        ) = propagate_shape_and_sharding(
+        (global_out_shape, shard_out, shardable_dims,) = propagate_shape_and_sharding(
             input_dtensor_spec.placements,
             tuple(global_in_shape),
             rules,
