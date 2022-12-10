@@ -3651,6 +3651,16 @@ def op_add(a, b):
     return a + b
 
 
+@register_lowering(operator.sub)
+def op_sub(a, b):
+    return a - b
+
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):
     return IndexingDiv(a, b)

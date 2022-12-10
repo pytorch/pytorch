@@ -19,7 +19,12 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int, sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import (
+    guard_float,
+    guard_int,
+    sym_float,
+    sym_int,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -2010,12 +2015,15 @@ def upsample_bilinear2d(
     out_w = sym_float(output_size[1])
 
     # Calculate horizontal and vertical scaling factor
-    # TODO: Figure out if scales_h/scales_w matters here
+    # See compute_scales_value and area_pixel_compute_scale in core.
     if out_h > 1:
         if align_corners:
             h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
         else:
-            h_scale_factor = in_h / out_h
+            if scales_h is not None and scales_h > 0:
+                h_scale_factor = 1.0 / scales_h
+            else:
+                h_scale_factor = in_h / out_h
     else:
         h_scale_factor = 0.0
 
@@ -2023,13 +2031,23 @@ def upsample_bilinear2d(
         if align_corners:
             w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
         else:
-            w_scale_factor = in_w / out_w
+            if scales_w is not None and scales_w > 0:
+                w_scale_factor = 1.0 / scales_w
+            else:
+                w_scale_factor = in_w / out_w
     else:
         w_scale_factor = 0.0
 
-    i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
-    j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
+    # TODO: Uses guard_int to materialize a SymPy value because the Scalar
+    # argument of arange doesn't support that.
+    i = torch.arange(guard_int(sym_int(out_h)), dtype=input.dtype, device=input.device)
+    j = torch.arange(guard_int(sym_int(out_w)), dtype=input.dtype, device=input.device)
 
+    # TODO: Not materializing these results in numerical differences.
+    h_scale_factor = guard_float(h_scale_factor)
+    w_scale_factor = guard_float(w_scale_factor)
+
+    # See area_pixel_compute_source_index in core.
     if align_corners:
         x = h_scale_factor * i
         y = w_scale_factor * j
@@ -2037,10 +2055,13 @@ def upsample_bilinear2d(
         x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
         y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
 
+    # TODO: Uses guard_int with clamp because passing a symbolic value returns
+    # an invalid result.
+    # See compute_source_index_and_lambda in core.
     x_floor = torch.floor(x).to(torch.int64)
-    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
+    x_ceil = torch.ceil(x).clamp(max=guard_int(in_h - 1)).to(torch.int64)
     y_floor = torch.floor(y).to(torch.int64)
-    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+    y_ceil = torch.ceil(y).clamp(max=guard_int(in_w - 1)).to(torch.int64)
 
     x_view = x.unsqueeze(1)
     x_floor_view = x_floor.unsqueeze(1)

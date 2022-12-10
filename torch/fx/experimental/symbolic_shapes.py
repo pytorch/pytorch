@@ -99,6 +99,12 @@ def guard_int(a):
     assert isinstance(a, int)
     return a
 
+def guard_float(a):
+    if isinstance(a, SymFloat):
+        return a.node.guard_float("", 0)  # NB: uses Python backtrace
+    assert isinstance(a, float)
+    return a
+
 def sym_float(a):
     if isinstance(a, SymFloat):
         return a
