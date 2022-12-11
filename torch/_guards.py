@@ -168,8 +168,6 @@ class Guard:
 class GuardsContext:
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
-        self.shape_guards: List[ShapeGuard] = []
-
 
 _CURRENT_TRACING_CONTEXT = None
 
