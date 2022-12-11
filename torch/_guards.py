@@ -1,8 +1,9 @@
-import dataclasses
-import enum
-from contextlib import contextmanager
-from typing import Callable, List, Optional, Set
+"""
+torch._guards is the definitional source of truth for general purpose guard structures.
 
+An important thing to keep in mind here is the preservation of layering. There should be no dynamo notions,
+and no guard installation notions here.
+"""
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -26,6 +27,22 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
+<<<<<<< HEAD
+"""
+Base class for a "GuardBuilder" role.
+
+The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
+confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+to torchdynamo's GuardBuilder.
+
+Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
+on GuardSource's select function. 
+
+There is value in keeping this GuardBuilderBase empty to keep layering clean.
+"""
+class GuardBuilderBase:
+    pass
+
 
 @dataclasses.dataclass
 class Guard:
@@ -46,7 +63,7 @@ class Guard:
     # GRAD_MODE and SYMBOL_MATCH.
     name: str
     source: GuardSource
-    create_fn: Callable[["GuardBuilder", "Guard"], None]
+    create_fn: Callable[[GuardBuilderBase, "Guard"], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -106,7 +123,7 @@ class Guard:
             """
         return s
 
-    def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
+    def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
 
     def is_nn_module(self):
@@ -137,36 +154,3 @@ class Guard:
             None,
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
-
-
-class GuardsContext:
-    dynamo_guards: Set[Guard] = set()
-
-    def clear(self):
-        self.dynamo_guards.clear()
-
-
-_CURRENT_TRACING_CONTEXT = None
-
-
-class TracingContext:
-    guards_context = GuardsContext()
-
-    @staticmethod
-    def get() -> Optional["TracingContext"]:
-        return _CURRENT_TRACING_CONTEXT
-
-    def clear(self):
-        self.guards_context.clear()
-
-
-@contextmanager
-def tracing(context: TracingContext):
-    global _CURRENT_TRACING_CONTEXT
-    old_context = _CURRENT_TRACING_CONTEXT
-    _CURRENT_TRACING_CONTEXT = context
-    try:
-        yield _CURRENT_TRACING_CONTEXT
-    finally:
-        _CURRENT_TRACING_CONTEXT.clear()
-        _CURRENT_TRACING_CONTEXT = old_context
