@@ -3914,10 +3914,9 @@ else:
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
-    @unittest.skipIf(is_cuda_sm86, "OOMs on sm86 configuration")
     @skipIfRocm
     @onlyCUDA
-    @largeTensorTest('12GB', device='cpu')
+    @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -3927,7 +3926,8 @@ else:
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
         actual_gpu = torch.pdist(x.to(device), p=2)         # 5 GB on GPU
-        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU + 1.25GB for expected == actual
+        # Workaround for large memory overhead of self.assertTrue (see #84944)
+        self.assertTrue(torch.allclose(expected_cpu, actual_gpu.cpu()))
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
@@ -6534,25 +6534,12 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 warnings.resetwarnings()
                 f()
-                self.assertEqual(len(w), 1)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
                 warning = w[0].message
                 self.assertTrue(warning, DeprecationWarning)
                 self.assertTrue(re.search(
                     '^TypedStorage is deprecated',
                     str(warning)))
-
-        # Check that only one warning is raised from calling multiple
-        # TypedStorage functions if warnings are not reset between each
-        with warnings.catch_warnings(record=True) as w:
-            warnings.resetwarnings()
-            for f in funcs:
-                f()
-            self.assertEqual(len(w), 1)
-            warning = w[0].message
-            self.assertTrue(warning, DeprecationWarning)
-            self.assertTrue(re.search(
-                '^TypedStorage is deprecated',
-                str(warning)))
 
     def test_from_file(self):
         def assert_with_filename(filename):
