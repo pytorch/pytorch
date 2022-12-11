@@ -169,6 +169,7 @@ class GuardsContext:
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
 
+
 _CURRENT_TRACING_CONTEXT = None
 
 
