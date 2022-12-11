@@ -25,7 +25,7 @@ from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
-from torch._guards import Guard, GuardSource, TracingContext
+from torch._guards import Guard, tracing, TracingContext
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -175,14 +175,12 @@ class OutputGraph(fx.Tracer):
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
-        tracing_context: TracingContext,
         root_tx,
     ):
         super(OutputGraph, self).__init__()
-
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.tracing_context: TracingContext = tracing_context
+        self.tracing_context: TracingContext = TracingContext()
         self.guards: Set[Guard] = self.tracing_context.guards_context.dynamo_guards
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
@@ -547,7 +545,8 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        compiled_fn = self.call_user_compiler(gm)
+        with tracing(self.tracing_context):
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
