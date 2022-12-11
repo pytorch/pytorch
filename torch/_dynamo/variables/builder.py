@@ -21,7 +21,7 @@ from torch.fx.immutable_collections import immutable_list
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
-from ..guards import GuardBuilder, GuardSource
+from ..guards import GuardBuilder
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
@@ -99,6 +99,7 @@ from .torch import (
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
+from torch._guards import GuardSource
 
 class _missing:
     pass
