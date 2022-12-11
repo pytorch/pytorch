@@ -741,6 +741,7 @@ def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
     from ..symbolic_convert import InstructionTranslatorBase
+
     assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
@@ -777,7 +778,9 @@ def wrap_fx_proxy_cls(
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
                 with torch._C.DisableTorchFunction():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
