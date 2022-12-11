@@ -42,7 +42,7 @@ struct TORCH_API ExperimentalConfig {
       bool profiler_measure_per_kernel = false,
       bool verbose = false,
       std::vector<std::string> performance_events = {},
-      bool adjust_timestamps = true);
+      bool adjust_timestamps = false);
   ~ExperimentalConfig() = default;
   explicit operator bool() const;
 
@@ -54,6 +54,16 @@ struct TORCH_API ExperimentalConfig {
    * An empty list will disable performance event based profiling altogether.
    */
   std::vector<std::string> performance_events;
+  /*
+   * Controls whether or not timestamp adjustment occurs after profiling.
+   * The purpose of this is to adjust Vulkan event timelines to align with those
+   * of their parent CPU events.
+   * This sometimes requires increasing CPU event durations (to fully contain
+   * their child events) and delaying CPU event start times (to
+   * prevent overlaps), so this should not be used unless Vulkan events are
+   * being profiled and it is ok to use this modified timestamp/duration
+   * information instead of the the original information.
+   */
   bool adjust_timestamps;
 };
 
