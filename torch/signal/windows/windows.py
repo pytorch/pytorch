@@ -5,7 +5,6 @@ import torch
 from math import sqrt
 
 from torch import Tensor
-from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
 
 __all__ = [
@@ -35,7 +34,6 @@ window_common_args = merge_dicts(
     {
         "normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
                          ":attr:`M` is even and :attr:`sym` is `True`.",
-        "return": "Tensor: A 1-D tensor of size ``M`` containing the window."
     }
 )
 
@@ -73,8 +71,8 @@ def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layo
         raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
     if layout is not torch.strided:
         raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
-    if not is_float_dtype(dtype):
-        raise ValueError(f'{function_name} expects floating point dtypes, got: {dtype}')
+    if not (dtype in [torch.float32, torch.float64]):
+        raise ValueError(f'{function_name} expects float32 or float64 dtypes, got: {dtype}')
 
 
 @_add_docstr(
@@ -108,9 +106,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -191,9 +186,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric cosine window.
@@ -262,9 +254,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -417,9 +406,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric Hamming window.
@@ -466,9 +452,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -521,9 +504,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -578,9 +558,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -650,9 +627,6 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 Examples::
 
@@ -730,9 +704,6 @@ Keyword args:
     {device}
     {requires_grad}
 
-Returns:
-    {return}
-
 Examples::
 
     >>> # Generates a symmetric Hamming window with the general Hamming window.
@@ -767,21 +738,28 @@ def general_hamming(M,
     r"""
 Computes the minimum 4-term Blackman-Harris window according to Nuttall.
 
+.. math::
+    w_n = 1 - 0.3635819 \cos{(z)} + 0.4891775 \cos{(2z)} - 0.1365995 \cos{(3z)} + 0.0106411 \cos{(4z)}
+
+where
+
+.. math::
+    z = \frac{2 \pi j}{M}, j = 0 \cdots M - 1
+    
+    """,
+    """
+    
 {normalization}
 
 Arguments:
     {M}
 
 Keyword args:
-    alpha (float, optional): the window coefficient. Default: 0.54.
     {sym}
     {dtype}
     {layout}
     {device}
     {requires_grad}
-
-Returns:
-    {return}
 
 References::
 
