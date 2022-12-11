@@ -1,9 +1,11 @@
 #pragma once
 
+#include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <cuda.h>
 
 // Note [CHECK macro]
@@ -22,17 +24,17 @@ class C10_CUDA_API CUDAError : public c10::Error {
 };
 } // namespace c10
 
-#define C10_CUDA_CHECK(EXPR)                                               \
-  do {                                                                     \
-    const cudaError_t __err = EXPR;                                        \
-    if (C10_UNLIKELY(__err != cudaSuccess)) {                              \
-      c10::cuda::c10_cuda_check_implementation(                            \
-          __FILE__,                                                        \
-          __func__, /* Line number's data type is not well-defined between \
-                       compilers, so we perform an explicit cast */        \
-          static_cast<uint32_t>(__LINE__),                                 \
-          true);                                                           \
-    }                                                                      \
+#define C10_CUDA_CHECK(EXPR)                                             \
+  do {                                                                   \
+    /* We get & disarm the error inside of */                            \
+    /* `c10_cuda_check_implementation` */                                \
+    C10_UNUSED const cudaError_t __err = EXPR;                           \
+    c10::cuda::c10_cuda_check_implementation(                            \
+        __FILE__,                                                        \
+        __func__, /* Line number's data type is not well-defined between \
+                      compilers, so we perform an explicit cast */       \
+        static_cast<uint32_t>(__LINE__),                                 \
+        true);                                                           \
   } while (0)
 
 #define C10_CUDA_CHECK_WARN(EXPR)                              \
@@ -69,6 +71,21 @@ class C10_CUDA_API CUDAError : public c10::Error {
 // the launch happened correctly and provide an early, close-to-source
 // diagnostic if it didn't.
 #define C10_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())
+
+/// Launches a CUDA kernel appending to it all the information need to handle
+/// device-side assertion failures. Checks that the launch was successful.
+#define TORCH_DSA_KERNEL_LAUNCH(                                      \
+    kernel, blocks, threads, shared_mem, stream, ...)                 \
+  do {                                                                \
+    auto& launch_registry =                                           \
+        c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref();     \
+    kernel<<<blocks, threads, shared_mem, stream>>>(                  \
+        __VA_ARGS__,                                                  \
+        launch_registry.get_uvm_assertions_ptr_for_current_device(),  \
+        launch_registry.insert(                                       \
+            __FILE__, __FUNCTION__, __LINE__, #kernel, stream.id())); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
+  } while (0)
 
 namespace c10 {
 namespace cuda {

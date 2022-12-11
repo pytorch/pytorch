@@ -180,7 +180,7 @@ class Vectorized<float> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -256,29 +256,29 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
-     return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
+    return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
-     return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
+    return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
   }
   Vectorized<float> atan() const {
-     return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
+    return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
-     return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
+    return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
   Vectorized<float> copysign(const Vectorized<float> &sign) const {
     return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
   }
   Vectorized<float> lgamma() const {
-     return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
+    return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
   Vectorized<float> erf() const {
-     return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
+    return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
   }
 
   Vectorized<float> erfc() const {
-     return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
+    return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
   }
 
   Vectorized<float> erfinv() const {
@@ -301,133 +301,32 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE exp() const {
-    // implementation logic from avx_mathfun with some modifications from sleef
-    // Express e**x = e**g 2**n
-    ///   = e**g e**( n loge(2) )
-    ///   = e**( g + n loge(2) )
-    //
-    auto tmp_x = *this;
-    auto fx = (tmp_x * log2e_inv).round();
-
-    auto x = fx.madd(negln2f_hi, tmp_x);
-    x = fx.madd(negln2f_lo, x);
-    auto z = x * x;
-    auto y = x.madd(exp_p0, exp_p1);
-    y = y.madd(x, exp_p2);
-    y = y.madd(x, exp_p3);
-    y = y.madd(x, exp_p4);
-    y = y.madd(x, exp_p5);
-    y = y.madd(z, x) + one;
-
-    // vm_pow2n 2^n
-    vint32 imm0 = vec_signed(fx._vec0);
-    vint32 imm1 = vec_signed(fx._vec1);
-    // this pow2n logic is  from Sleef code
-    vint32 imm00 = imm0 >> 1; //>>1
-    vint32 imm01 = imm1 >> 1;
-    vint32 imm10 = imm0 - imm00;
-    vint32 imm11 = imm1 - imm01;
-    imm00 = (imm00 + v0x7f) << vu_23;
-    imm01 = (imm01 + v0x7f) << vu_23;
-    imm10 = (imm10 + v0x7f) << vu_23;
-    imm11 = (imm11 + v0x7f) << vu_23;
-    // treat imm as float vector without conversion
-
-    y._vec0 = (y._vec0 * (vfloat32)imm00) * (vfloat32)imm10;
-    y._vec1 = (y._vec1 * (vfloat32)imm01) * (vfloat32)imm11;
-    // boundary check
-    auto tmp = blendv(y, v_inf, (Vectorized<float>(exp_hi) <= tmp_x));
-    y = blendv(tmp, zero, (tmp_x < Vectorized<float>(exp_lo)));
-
-    return y;
+    return {Sleef_expf4_u10vsx(_vec0), Sleef_expf4_u10vsx(_vec1)};
   }
   Vectorized<float> expm1() const {
-    return exp() - one;
+    return {Sleef_expm1f4_u10vsx(_vec0), Sleef_expm1f4_u10vsx(_vec1)};
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {
     return {Sleef_logf4_u10vsx(_vec0), Sleef_logf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log10() const {
-     return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
+    return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log1p() const {
-     return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
+    return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log2() const {
-     return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
+    return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE cos() const {
-    // take the absolute value
-    auto x = abs();
-    // extract the sign bit (upper one)
-    auto sign_bit = (*this) & sign_mask;
-    // scale by 4/Pi
-    auto y = x * _4div_pi;
-    // store the integer part of y in mm0
-    // j=(j+1) & (~1) (see the cephes sources)
-    vint32 imm0 = (vec_signed(y._vec0) + vi_1) & vi_inv1;
-    vint32 imm1 = (vec_signed(y._vec1) + vi_1) & vi_inv1;
-    y._vec0 = vec_float(imm0);
-    y._vec1 = vec_float(imm1);
-
-    imm0 = imm0 - vi_2;
-    imm1 = imm1 - vi_2;
-    Vectorized<float> poly_mask;
-    // get the swap sign flag
-    vint32 tmp0 = vec_and(vec_nand(imm0, imm0), vi_4);
-    vint32 tmp1 = vec_and(vec_nand(imm1, imm1), vi_4);
-    sign_bit._vecb0 = (vbool32)vec_sl(tmp0, vu_29);
-    sign_bit._vecb1 = (vbool32)vec_sl(tmp1, vu_29);
-    // get the polynom selection mask
-    // there is one polynom for 0 <= x <= Pi / 4
-    // and another one for Pi / 4 < x <= Pi / 2
-    // Both branches will be computed.
-
-    poly_mask._vecb0 = (vbool32)vec_cmpeq((imm0 & vi_2), vi_0);
-    poly_mask._vecb1 = (vbool32)vec_cmpeq((imm1 & vi_2), vi_0);
-
-    // The magic pass: "Extended precision modular arithmetic"
-    //  x = ((x - y * DP1) - y * DP2) - y * DP3;
-    x = y.madd(minus_cephes_dp1, x);
-    x = y.madd(minus_cephes_dp2, x);
-    x = y.madd(minus_cephes_dp3, x);
-
-    // Evaluate the first polynom  (0 <= x <= Pi/4)
-    auto z = x * x;
-    y = z.madd(coscof_p0, coscof_p1);
-    y = y.madd(z, coscof_p2);
-    y = y * z * z;
-    y = y - z * half + one;
-
-    // Evaluate the second polynom  (Pi/4 <= x <= 0)
-    auto y_2 = z.madd(sincof_p0, sincof_p1);
-    y_2 = y_2.madd(z, sincof_p2);
-    y_2 = y_2 * z;
-    y_2 = y_2.madd(x, x);
-
-    // select the correct result from the two polynoms
-    y = blendv(y, y_2, poly_mask);
-    // update the sign
-    y = y ^ sign_bit;
-
-    return y;
+    return {Sleef_cosf4_u10vsx(_vec0), Sleef_cosf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE cosh() const {
-    // cosh = 1/2 * (e^x + e^-x)
-    auto x = abs();
-    auto e_x = x.exp();
-    auto ret = (e_x + Vectorized<float>(one) / e_x) * half;
-    // inf and nan checks
-#if 0
-                    ret = blendv(ret, v_inf, x >= vf_89);
-                    ret = blendv(ret, v_inf, ret.isnan());
-                    ret = blendv(ret, v_nan, this->isnan());
-#endif
-    return ret;
+    return {Sleef_coshf4_u10vsx(_vec0), Sleef_coshf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE floor() const {
     return {vec_floor(_vec0), vec_floor(_vec1)};
@@ -440,97 +339,16 @@ class Vectorized<float> {
     return {vec_round(_vec0), vec_round(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE sin() const {
-    // take the absolute value and xtract sign
-    auto x = abs();
-    auto sign_bit = (*this) & sign_mask;
-
-    // scale by 4/Pi
-    auto y = x * _4div_pi;
-    // store the integer part of y in mm0
-
-    // j=(j+1) & (~1) (see the cephes sources)
-    vint32 imm0 = (vec_signed(y._vec0) + vi_1) & vi_inv1;
-    vint32 imm1 = (vec_signed(y._vec1) + vi_1) & vi_inv1;
-    y._vec0 = vec_float(imm0);
-    y._vec1 = vec_float(imm1);
-    // get the swap sign flag
-    Vectorized<float> swap_sign_bit, poly_mask;
-    swap_sign_bit._vecb0 = (vbool32)vec_sl(imm0 & vi_4, vu_29);
-    swap_sign_bit._vecb1 = (vbool32)vec_sl(imm1 & vi_4, vu_29);
-    // get the polynom selection mask
-    // there is one polynom for 0 <= x <= Pi/4
-    // and another one for Pi/4<x<=Pi/2
-    // Both branches will be computed.
-
-    poly_mask._vecb0 = vec_cmpeq((imm0 & vi_2), vi_0);
-    poly_mask._vecb1 = vec_cmpeq((imm1 & vi_2), vi_0);
-    sign_bit = sign_bit ^ swap_sign_bit; // xor operation
-
-    // The magic pass: "Extended precision modular arithmetic"
-    //  x = ((x - y * DP1) - y * DP2) - y * DP3;
-    x = y.madd(minus_cephes_dp1, x);
-    x = y.madd(minus_cephes_dp2, x);
-    x = y.madd(minus_cephes_dp3, x);
-
-    // Evaluate the first polynom  (0 <= x <= Pi/4)
-    auto z = x * x;
-    y = z.madd(coscof_p0, coscof_p1);
-    y = y.madd(z, coscof_p2);
-    y = y * z * z;
-    y = y - z * half + one;
-
-    // Evaluate the second polynom  (Pi/4 <= x <= 0)
-    auto y2 = z.madd(sincof_p0, sincof_p1);
-    y2 = y2.madd(z, sincof_p2);
-    y2 = y2 * z;
-    y2 = y2.madd(x, x);
-    // select the correct result from the two polynoms
-    y = blendv(y, y2, poly_mask);
-    y = y ^ sign_bit;
-
-    return y;
+    return {Sleef_sinf4_u10vsx(_vec0), Sleef_sinf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE sinh() const {
-    auto temp_abs = abs();
-    // get exponent
-    auto ret = temp_abs.exp();
-    auto recp = Vectorized<float>(half) / ret;
-    auto v = ret * half - recp;
-    // extract the sign bit (upper one)
-    auto sign_bit = (*this) & sign_mask;
-    auto z = temp_abs * temp_abs;
-    auto y = z.madd(p0, p1);
-    y = y.madd(z, p2);
-    y = (y * z).madd(temp_abs, temp_abs);
-    // check and select
-    auto result = blendv(y, v, temp_abs > one);
-    return result | sign_bit;
+    return {Sleef_sinhf4_u10vsx(_vec0), Sleef_sinhf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tan() const {
-     return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
+    return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tanh() const {
-    auto x = *this;
-    auto vabs = abs();
-    // get exponent
-    auto exp2x = (vabs + vabs).exp();
-    auto vv = Vectorized<float>(one) - Vectorized<float>(two) / (exp2x + one);
-    // extract the sign bit (upper one)
-    auto sign_bit = (*this) & sign_mask;
-    auto z = vabs * vabs;
-    auto y = z.madd(tanh_p0, tanh_p1);
-    auto tmp = y.madd(z, tanh_p2);
-    y = z.madd(tmp, tanh_p3);
-    tmp = y.madd(z, tanh_p4);
-    y = tmp * z;
-    tmp = y.madd(x, x);
-    // add sign
-    vv = vv | sign_bit;
-    // check and select
-    auto sel_mask = vabs >= tanh_0p625;
-    auto max_mask = vabs > tanh_half_max;
-    auto max_ret = sign_bit ^ one;
-    return blendv(blendv(tmp, vv, sel_mask), max_ret, max_mask);
+    return {Sleef_tanhf4_u10vsx(_vec0), Sleef_tanhf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE trunc() const {
     return {vec_trunc(_vec0), vec_trunc(_vec1)};
@@ -555,15 +373,15 @@ class Vectorized<float> {
   }
 
   Vectorized<float> fmod(const Vectorized<float>& b) const {
-     return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
+    return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> hypot(const Vectorized<float>& b) const {
-     return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
+    return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> nextafter(const Vectorized<float>& b) const {
-     return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
+    return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> igamma(const Vectorized<float>& x) const {

@@ -93,6 +93,7 @@ class DispatchKey(Enum):
     Batched = auto()
     VmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
+    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
@@ -613,18 +614,19 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_s = e.pop("tags", "")
-        assert isinstance(tags_s, str)
+        tags_inp = e.pop("tags", [])
+        if isinstance(tags_inp, str):
+            tags_inp = [tags_inp]
+        assert isinstance(tags_inp, list)
+
         tags: Set[str] = set()
-        if len(tags_s) > 0:
+        for t in tags_inp:
             assert len(valid_tags) > 0
-            for t in tags_s.split(", "):
-                # TODO: verify that the tag is valid and has an entry in tags.yaml
-                if t in valid_tags:
-                    tags.add(t)
-                else:
-                    raise AssertionError(f"illegal tag {t}")
-        assert isinstance(tags, set)
+            # TODO: verify that the tag is valid and has an entry in tags.yaml
+            if t in valid_tags:
+                tags.add(t)
+            else:
+                raise AssertionError(f"illegal tag {t}")
 
         from torchgen.api import cpp
 
@@ -1718,8 +1720,8 @@ class Type:
             return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
-        except KeyError:
-            raise RuntimeError(f"unrecognized type {t}")
+        except KeyError as e:
+            raise RuntimeError(f"unrecognized type {t}") from e
 
     def __str__(self) -> str:
         raise NotImplementedError
