@@ -798,6 +798,18 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
 
+    def test_resize_from_zero(self):
+        def f(x, y):
+            x.resize_(y.size(0))
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
+    return None""")
+
+
     def test_unary(self):
         def f(x):
             assert x.shape[0] < 20
