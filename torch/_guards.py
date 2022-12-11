@@ -1,7 +1,14 @@
 import dataclasses
 import enum
 from typing import Callable, List, Optional
+import weakref
 
+"""
+torch._guards is the definitional source of truth for general purpose guard structures.
+
+An important thing to keep in mind here is the preservation of layering. There should be no dynamo notions,
+and no guard installation notions here.
+"""
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -25,7 +32,18 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
+"""
+Base class for a "GuardBuilder" role.
 
+The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
+confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+to torchdynamo's GuardBuilder.
+
+Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
+on GuardSource's select function. 
+
+There is value in keeping this GuardBuilderBase empty to keep layering clean.
+"""
 class GuardBuilderBase:
     pass
 
