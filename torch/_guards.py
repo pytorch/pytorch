@@ -148,7 +148,6 @@ class GuardsContext:
 
 _CURRENT_TRACING_CONTEXT = None
 
-
 class TracingContext:
     guards_context = GuardsContext()
 

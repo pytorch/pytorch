@@ -55,6 +55,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
+from torch._guards import Guard, GuardSource, TracingContext
 
 log = logging.getLogger(__name__)
 

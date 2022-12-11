@@ -45,6 +45,7 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
+from torch._guards import TracingContext, tracing
 
 log = logging.getLogger(__name__)
 
