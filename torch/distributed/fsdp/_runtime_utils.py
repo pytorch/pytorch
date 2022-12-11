@@ -651,7 +651,8 @@ def _post_backward_hook(
                     padding_numel = (
                         padded_unsharded_grad.numel() - unsharded_grad.numel()
                     )
-                    padded_unsharded_grad[-padding_numel:].zero_()
+                    if padding_numel > 0:
+                        padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
                     padded_unsharded_grad = unsharded_grad
                 state._communication_hook(
