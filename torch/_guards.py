@@ -177,26 +177,21 @@ class ShapeGuard:
 
 
 class GuardsContext:
-    dynamo_guards: Set[Guard] = set()
-    shape_guards: List[ShapeGuard] = []
-
-    def clear(self):
-        self.dynamo_guards.clear()
-        self.shape_guards.clear()
+    def __init__(self):
+        self.dynamo_guards: Set[Guard] = set()
+        self.shape_guards: List[ShapeGuard] = []
 
 
 _CURRENT_TRACING_CONTEXT = None
 
 
 class TracingContext:
-    guards_context = GuardsContext()
-
     @staticmethod
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
-    def clear(self):
-        self.guards_context.clear()
+    def __init__(self):
+        self.guards_context = GuardsContext()
 
 
 @contextmanager
@@ -207,5 +202,4 @@ def tracing(context: TracingContext):
     try:
         yield _CURRENT_TRACING_CONTEXT
     finally:
-        _CURRENT_TRACING_CONTEXT.clear()
         _CURRENT_TRACING_CONTEXT = old_context
