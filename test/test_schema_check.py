@@ -4,6 +4,7 @@ import os
 import sys
 import torch
 from torch.utils._pytree import tree_map
+import unittest
 
 from torch.testing._internal.common_utils import run_tests
 from torch.fx.operator_schemas import normalize_function
