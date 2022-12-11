@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/orchestration/vulkan.h>
 
 #include <algorithm>
 #include <functional>
@@ -365,14 +366,18 @@ void materialize_vulkan(
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   for (const auto& i : raw_events) {
-    int64_t duration_ns = 0;
+    const auto name_and_duration_ns =
+        torch::profiler::impl::vulkan::getShaderNameAndDurationNs(i.second);
 
     out.emplace_back(Result::create(
         /*start_time_ns_=*/time_converter(i.first),
         /*start_tid_=*/tid,
         /*kineto_info_=*/kineto_info,
         /*extra_fields_=*/
-        ExtraFields<EventType::Vulkan>{/*duration_ns_=*/duration_ns}));
+        ExtraFields<EventType::Vulkan>{
+            /*name_=*/std::get<0>(name_and_duration_ns),
+            /*duration_ns_=*/
+            static_cast<int64_t>(std::get<1>(name_and_duration_ns))}));
   }
 }
 
@@ -443,7 +448,7 @@ auto kinetoEventCorrelationID(
 
 std::string Result::name() const {
   return visit(c10::overloaded(
-      ATTRIBUTE(Vulkan, std::string("[vulkan]")),
+      ATTRIBUTE(Vulkan, std::string(e.name_)),
       ATTRIBUTE(Allocation, std::string("[memory]")),
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
