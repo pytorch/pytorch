@@ -20,8 +20,8 @@ class SmallBuffer {
       "SmallBuffer is intended for POD types");
 
   T storage_[N];
-  size_t size_;
-  T* data_;
+  size_t size_{};
+  T* data_{};
 
  public:
   SmallBuffer(size_t size) : size_(size) {
@@ -31,6 +31,26 @@ class SmallBuffer {
       data_ = &storage_[0];
     }
   }
+
+  SmallBuffer(const SmallBuffer&) = delete;
+  SmallBuffer& operator=(const SmallBuffer&) = delete;
+
+  // move constructor is needed in function return
+  SmallBuffer(SmallBuffer&& rhs) {
+    size_ = rhs.size_;
+    rhs.size_ = 0;
+    if (size_ > N) {
+      data_ = rhs.data_;
+      rhs.data_ = nullptr;
+    } else {
+      for (size_t i = 0; i < N; i++) {
+        storage_[i] = rhs.storage_[i];
+      }
+      data_ = &storage_[0];
+    }
+  }
+
+  SmallBuffer& operator=(SmallBuffer&&) = delete;
 
   ~SmallBuffer() {
     if (size_ > N) {
