@@ -333,7 +333,11 @@ def _make_node_magic(method, func):
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
         other_expr = self.shape_env.replace(other_expr)
-        out = func(expr, other_expr)
+        try:
+            out = func(expr, other_expr)
+        except Exception:
+            logging.warning(f"failed to eval {method}({expr}, {other_expr})")
+            raise
         out = sympy.expand(out)
         pytype: Type
         if method in always_float_magic_methods:
@@ -358,7 +362,11 @@ def _make_node_magic(method, func):
             return r.node
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        out = func(expr)
+        try:
+            out = func(expr)
+        except Exception:
+            logging.warning(f"failed to eval {method}({expr})")
+            raise
         out = sympy.expand(out)
         pytype: Type
         if method in always_int_magic_methods:
@@ -869,6 +877,8 @@ class ShapeEnv(object):
                 except NotImplementedError:
                     pass
             return
+        except RecursionError:
+            raise RuntimeError(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
