@@ -6,6 +6,7 @@ from torch._guards import Guard, GuardSource
 
 from . import utils
 from .bytecode_transformation import create_instruction
+from torch._guards import Guard, GuardSource
 from .utils import rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {

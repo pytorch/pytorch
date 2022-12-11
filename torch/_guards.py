@@ -1,8 +1,3 @@
-import dataclasses
-import enum
-from typing import Callable, List, Optional
-import weakref
-
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
 
@@ -32,6 +27,7 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
+<<<<<<< HEAD
 """
 Base class for a "GuardBuilder" role.
 
