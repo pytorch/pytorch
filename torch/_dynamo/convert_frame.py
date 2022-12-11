@@ -439,7 +439,6 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
-            output.tracing_context.guards_context.dynamo_guards,
             locals,
             globals,
             hooks.guard_fail_fn if hooks else None,
