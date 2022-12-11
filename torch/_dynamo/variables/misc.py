@@ -4,12 +4,11 @@ import types
 from typing import Dict, List
 
 import torch._C
-from torch._guards import Guard, GuardSource
 
 from .. import config, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import Guard, GuardBuilder, GuardSource
 from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
