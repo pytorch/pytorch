@@ -10,6 +10,7 @@ An important thing to keep in mind here is the preservation of layering. There s
 and no guard installation notions here.
 """
 
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -41,12 +42,15 @@ confusing, as its not a builder, but for the sake of avoiding a lot of renames a
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
-on GuardSource's select function. 
+on GuardSource's select function.
 
 There is value in keeping this GuardBuilderBase empty to keep layering clean.
 """
+
+
 class GuardBuilderBase:
     pass
+
 
 @dataclasses.dataclass
 class Guard:
@@ -168,6 +172,7 @@ class GuardsContext:
 
 
 _CURRENT_TRACING_CONTEXT = None
+
 
 class TracingContext:
     guards_context = GuardsContext()
