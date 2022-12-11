@@ -3,6 +3,7 @@ import enum
 from typing import Callable, List, Optional, Set
 import weakref
 from contextlib import contextmanager
+import sympy
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -164,12 +165,21 @@ class Guard:
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
+class ShapeGuard:
+    expr: sympy.Expr
+    stack: str
+
+    def __init__(self, expr, stack):
+        self.expr = expr
+        self.stack = stack
 
 class GuardsContext:
     dynamo_guards: Set[Guard] = set()
+    shape_guards: List[ShapeGuard] = []
 
     def clear(self):
         self.dynamo_guards.clear()
+        self.shape_guards.clear()
 
 
 _CURRENT_TRACING_CONTEXT = None
