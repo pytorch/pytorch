@@ -15,13 +15,11 @@ ExperimentalConfig::ExperimentalConfig(
     std::vector<std::string> profiler_metrics,
     bool profiler_measure_per_kernel,
     bool verbose,
-    std::vector<std::string> performance_events,
-    bool adjust_timestamps)
+    std::vector<std::string> performance_events)
     : profiler_metrics{profiler_metrics},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
-      performance_events(std::move(performance_events)),
-      adjust_timestamps{adjust_timestamps} {}
+      performance_events(std::move(performance_events)) {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();
