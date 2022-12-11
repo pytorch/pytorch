@@ -2078,7 +2078,9 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20)
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
                 write_csv()
