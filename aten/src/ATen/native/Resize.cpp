@@ -153,33 +153,11 @@ const Tensor& resize_as_(
   return result;
 }
 
-const Tensor& resize_(
-    const Tensor& self,
-    IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
-  auto* self_ = self.unsafeGetTensorImpl();
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
-  if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
-    TORCH_CHECK(
-        memory_format != MemoryFormat::Preserve,
-        "Unsupported memory format",
-        memory_format);
-    self_->empty_tensor_restride(memory_format);
-  }
-  return self;
-}
 
 void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   storage->set_nbytes(size_bytes);
 }
-
 
 static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_bytes) {
   // It does not make sense to try to resize a storage
@@ -199,51 +177,68 @@ static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_byt
   }
 }
 
-inline TensorImpl* resize_impl_meta_(
+static void _maybe_resize_storage(TensorImpl* self, int64_t new_size_bytes) {
+  maybe_resize_storage_cpu(self, new_size_bytes);
+}
+
+static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) {
+  maybe_resize_storage_meta(self, new_size_bytes);
+}
+
+template <typename T>
+TensorImpl* _resize_impl_(
     TensorImpl* self,
-    c10::SymIntArrayRef size,
-    at::OptionalSymIntArrayRef stride,
-    bool resize_storage = true) {
-  if (self->sym_sizes() == size && (!stride || self->sym_strides() == stride.value())) {
+    ArrayRef<T> size,
+    at::OptionalArrayRef<T> stride,
+    bool resize_storage) {
+  if (self->generic_sizes<T>() == size && (!stride || self->generic_strides<T>() == stride.value())) {
     return self;
   }
 
   const auto itemsize = self->dtype().itemsize();
-  const auto storage_offset = self->sym_storage_offset();
-  auto storage_size = c10::SymInt(1);
-  std::vector<SymInt> strides;
-  int64_t dim = size.size();
-  if (!stride.has_value()) {
-    strides.resize(dim);
-    // TODO: Move this into TensorImpl
-    // this is duped with empty_symint_meta
-    if (dim > 0) {
-      const auto last_idx = dim - 1;
-      strides.at(last_idx) = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides.at(i) = (strides.at(i+1) * size.at(i+1)).max(1);
-      }
-    }
-    stride = c10::make_optional<c10::SymIntArrayRef>(strides);
+  const auto storage_offset = self->generic_storage_offset<T>();
+  T storage_size = T(1);
+  if (stride) {
+    self->set_sizes_and_strides(size, *stride);
+    storage_size = at::detail::computeStorageNbytes(
+        size, *stride, itemsize, storage_offset);
+  } else {
+    self->generic_set_sizes_contiguous(size);
+    storage_size = at::detail::computeStorageNbytesContiguous(
+        size, itemsize, storage_offset);
   }
-  self->set_sizes_and_strides(size, *stride);
-  storage_size = at::detail::computeStorageNbytes(
-      size, *stride, itemsize, storage_offset);
+
   if (resize_storage) {
-    maybe_resize_storage_meta(self, storage_size);
+    _maybe_resize_storage(self, storage_size);
   }
 
   return self;
 }
 
-const Tensor& resize__symint(
-    const Tensor& self,
+TensorImpl* resize_impl_cpu_(
+    TensorImpl* self,
+    IntArrayRef size,
+    at::OptionalIntArrayRef stride,
+    bool resize_storage) {
+  return _resize_impl_(self, size, stride, resize_storage);
+}
+
+TensorImpl* resize_impl_meta_(
+    TensorImpl* self,
     c10::SymIntArrayRef size,
+    at::OptionalSymIntArrayRef stride,
+    bool resize_storage = true) {
+  return _resize_impl_(self, size, stride, resize_storage);
+}
+
+template <typename T>
+const Tensor& _resize_(
+    const Tensor& self,
+    ArrayRef<T> size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  TORCH_INTERNAL_ASSERT(!self.has_names())
   auto* self_ = self.unsafeGetTensorImpl();
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  resize_impl_meta_(self_, size, /*strides=*/c10::nullopt);
+  _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -251,10 +246,27 @@ const Tensor& resize__symint(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",
         memory_format);
-    // NB: This doesn't actually work with symbolic shapes
     self_->empty_tensor_restride(memory_format);
   }
   return self;
+}
+
+const Tensor& resize_(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  if (self.has_names()) {
+    return resize_named_tensor_(self, size, optional_memory_format);
+  }
+  return _resize_(self, size, optional_memory_format);
+}
+
+const Tensor& resize__symint(
+    const Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_INTERNAL_ASSERT(!self.has_names())
+  return _resize_(self, size, optional_memory_format);
 }
 
 } // namespace native
