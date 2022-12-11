@@ -569,12 +569,7 @@ def _post_backward_hook(
         # Only define `padded_unsharded_grad` for sharded strategies
         pre_allocated_grad = False
         if handle.uses_sharded_strategy:
-            if handle._uses_reduce_mixed_precision:
-                grad_dtype = handle._config.low_prec_reduce_dtype
-            elif handle._uses_param_mixed_precision:
-                grad_dtype = handle._config.low_prec_param_dtype
-            else:
-                grad_dtype = param.grad.dtype
+            grad_dtype = handle._config.reduce_dtype
             # Pre-allocate the padded unsharded gradient in the default stream
             # if the gradient needs padding
             with torch.cuda.stream(state._streams["default"]):
@@ -611,12 +606,12 @@ def _post_backward_hook(
                     )
                     or handle._uses_param_mixed_precision  # computed grad dtype differs
                 )
-                and param.grad.dtype != handle._config.low_prec_reduce_dtype
+                and param.grad.dtype != handle._config.reduce_dtype
             ):
                 # TODO: Use the low precision communication hook directly
                 # TODO: We can avoid the double copy (first to `reduce_dtype`,
                 # then to `padded_unsharded_grad`) in the padding case.
-                param.grad.data = param.grad.to(handle._config.low_prec_reduce_dtype)
+                param.grad.data = param.grad.to(handle._config.reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
