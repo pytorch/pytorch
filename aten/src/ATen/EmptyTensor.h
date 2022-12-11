@@ -22,8 +22,8 @@ TORCH_API size_t computeStorageNbytesContiguous(
     size_t storage_offset = 0);
 TORCH_API SymInt computeStorageNbytesContiguous(
     SymIntArrayRef sizes,
-    SymInt itemsize,
-    SymInt storage_offset = 0);
+    const SymInt& itemsize,
+    const SymInt& storage_offset = 0);
 TORCH_API size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
@@ -32,8 +32,8 @@ TORCH_API size_t computeStorageNbytes(
 TORCH_API SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
-    SymInt itemsize,
-    SymInt storage_offset = 0);
+    const SymInt& itemsize,
+    const SymInt& storage_offset = 0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
