@@ -1,6 +1,4 @@
 import collections
-import dataclasses
-import enum
 import logging
 import math
 import os
@@ -16,6 +14,8 @@ import numpy as np
 import sympy
 
 import torch
+
+from torch._guards import Guard, GuardSource
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -32,8 +32,6 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
-
-from torch._guards import Guard, GuardSource
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
