@@ -745,10 +745,10 @@ where
 
 .. math::
     z = \frac{2 \pi j}{M}, j = 0 \cdots M - 1
-    
+
     """,
     """
-    
+
 {normalization}
 
 Arguments:
