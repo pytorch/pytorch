@@ -25,13 +25,14 @@ from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
+from torch._guards import Guard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
-from .guards import Guard, GuardBuilder
+from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
