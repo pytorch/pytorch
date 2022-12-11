@@ -1,8 +1,8 @@
 import dataclasses
 import enum
-from typing import Callable, List, Optional, Set
 import weakref
 from contextlib import contextmanager
+from typing import Callable, List, Optional, Set
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
