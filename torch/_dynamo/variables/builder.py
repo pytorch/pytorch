@@ -15,8 +15,6 @@ import numpy as np
 from functorch.experimental.ops import PyOperator
 
 import torch
-
-from torch._guards import GuardSource
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -101,6 +99,7 @@ from .torch import (
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
+from torch._guards import GuardSource
 
 class _missing:
     pass

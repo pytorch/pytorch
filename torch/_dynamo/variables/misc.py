@@ -4,7 +4,6 @@ import types
 from typing import Dict, List
 
 import torch._C
-from torch._guards import Guard, GuardSource
 
 from .. import config, variables
 from ..bytecode_transformation import create_instruction
@@ -19,6 +18,7 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+from torch._guards import Guard, GuardSource
 
 
 class SuperVariable(VariableTracker):

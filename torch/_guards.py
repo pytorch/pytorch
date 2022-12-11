@@ -1,7 +1,6 @@
-import dataclasses
 import enum
-from typing import Callable, List, Optional
-
+from typing import List, Optional, Callable
+import dataclasses
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -24,7 +23,6 @@ class GuardSource(enum.Enum):
 
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
-
 
 @dataclasses.dataclass
 class Guard:
