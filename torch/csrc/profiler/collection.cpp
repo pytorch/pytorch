@@ -991,35 +991,6 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
 
   set_in_tree_building(sorted_events, false);
 }
-
-// Just and example
-void adjust_timestamps_dfs(std::shared_ptr<Result>& r) {
-  if (SOFT_ASSERT(r != nullptr)) {
-    for (auto& i : r->children_) {
-      adjust_timestamps_dfs(i);
-    }
-    r->visit(c10::overloaded(
-        [](ExtraFields<EventType::TorchOp>& i) {
-          // pass
-        },
-        [](ExtraFields<EventType::Vulkan>& i) {
-          // pass
-        },
-        [&](auto&) {
-          SOFT_ASSERT(
-              false, "unexpected event type in mobile profiler: ", r->name());
-        }));
-  }
-}
-
-void adjust_timestamps(std::vector<std::shared_ptr<Result>>& out) {
-  for (auto& i : out) {
-    // Only begin traversal for root nodes.
-    if (i->parent_.expired()) {
-      adjust_timestamps_dfs(i);
-    }
-  }
-}
 } // namespace
 
 std::pair<
@@ -1079,20 +1050,6 @@ RecordQueue::getRecords(
       out.push_back(i);
     }
     python_tracer_.reset();
-  }
-
-  if (config_.experimental_config.adjust_timestamps) {
-    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-      return a->start_time_ns_ < b->start_time_ns_;
-    });
-    build_tree(out);
-    adjust_timestamps(out);
-    for (auto& r : out) {
-      r->parent_.reset();
-      // Reset these so that second build_tree can happen
-      r->finished_ = false;
-      r->children_.clear();
-    }
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
