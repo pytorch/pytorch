@@ -1,7 +1,8 @@
-import enum
-from typing import List, Optional, Callable, Set
 import dataclasses
+import enum
 from contextlib import contextmanager
+from typing import Callable, List, Optional, Set
+
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -24,6 +25,7 @@ class GuardSource(enum.Enum):
 
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
+
 
 @dataclasses.dataclass
 class Guard:
@@ -136,6 +138,7 @@ class Guard:
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
+
 class GuardsContext:
     dynamo_guards: Set[Guard] = set()
 
@@ -144,6 +147,7 @@ class GuardsContext:
 
 
 _CURRENT_TRACING_CONTEXT = None
+
 
 class TracingContext:
     guards_context = GuardsContext()
@@ -166,4 +170,3 @@ def tracing(context: TracingContext):
     finally:
         _CURRENT_TRACING_CONTEXT.clear()
         _CURRENT_TRACING_CONTEXT = old_context
-

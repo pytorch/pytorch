@@ -25,6 +25,7 @@ from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
+from torch._guards import Guard, TracingContext
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -54,7 +55,6 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-from torch._guards import Guard, GuardSource, TracingContext
 
 log = logging.getLogger(__name__)
 
