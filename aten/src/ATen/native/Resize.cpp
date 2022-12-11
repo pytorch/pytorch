@@ -156,7 +156,7 @@ const Tensor& resize_as_(
 
 void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
-  storage->set_nbytes(size_bytes);
+  storage->set_nbytes(std::move(size_bytes));
 }
 
 static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_bytes) {
@@ -173,7 +173,7 @@ static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_byt
   if (!storage) {
     TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
   } else if (new_size_bytes > storage.nbytes()) {
-    resize_bytes_meta(storage.unsafeGetStorageImpl(), new_size_bytes);
+    resize_bytes_meta(storage.unsafeGetStorageImpl(), std::move(new_size_bytes));
   }
 }
 
@@ -182,7 +182,7 @@ static void _maybe_resize_storage(TensorImpl* self, int64_t new_size_bytes) {
 }
 
 static void _maybe_resize_storage(TensorImpl* self, c10::SymInt new_size_bytes) {
-  maybe_resize_storage_meta(self, new_size_bytes);
+  maybe_resize_storage_meta(self, std::move(new_size_bytes));
 }
 
 template <typename T>
@@ -209,7 +209,7 @@ TensorImpl* _resize_impl_(
   }
 
   if (resize_storage) {
-    _maybe_resize_storage(self, storage_size);
+    _maybe_resize_storage(self, std::move(storage_size));
   }
 
   return self;
