@@ -240,7 +240,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -258,7 +257,6 @@ class TestUtilityFuns(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
-        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -605,8 +603,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
+        self.assertEqual(weight, torch.tensor([2.0, 3.0, 4.0, 5.0, 6.0]))
 
     def test_constant_fold_sub(self):
         class Module(torch.nn.Module):
@@ -637,8 +634,7 @@ class TestUtilityFuns(_BaseTestCase):
         params = list(params_dict.values())
         self.assertEqual(len(params), 1)
         weight = params[0]
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
+        self.assertEqual(weight, torch.tensor([0.0, -1.0, -2.0, -3.0, -4.0]))
 
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):

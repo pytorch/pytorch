@@ -285,10 +285,6 @@ __all__ = [
     "zeros",
     "zeros_like",
     #
-    # Randomness References
-    #
-    "uniform",  # TODO: add OpInfo -- and testing for randomness?
-    #
     # Test-related functions
     #
     "allclose",
@@ -761,9 +757,14 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    if a.dtype is torch.bool:
-        msg = "neg is not supported on bool tensors."
-        raise RuntimeError(msg)
+    check(
+        a.dtype is not torch.bool,
+        lambda: (
+            "Negation, the `-` operator, on a bool tensor is not supported. "
+            "If you are trying to invert a mask, use the `~` or `logical_not()` "
+            "operator instead."
+        ),
+    )
 
 
 @_make_elementwise_unary_reference(
@@ -2328,11 +2329,14 @@ def mean(
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
+    orig_dtype = dtype
     if dtype is None:
         dtype = a.dtype
     # can't use out wrapper because of this argument
-    if out is not None and out.dtype != dtype:
-        raise RuntimeError("expected out dtype and dtype to match")
+    check(
+        out is None or out.dtype == dtype,
+        lambda: f"Expected out tensor to have dtype {dtype}, but got {out.dtype} instead",
+    )
     result = _reduction(
         a,
         prims.sum,
@@ -2342,8 +2346,14 @@ def mean(
         out=None,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE,
     )
-    if utils.is_integer_dtype(dtype):
-        raise RuntimeError("result type should be floating point or complex")
+    check(
+        utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
+        lambda: (
+            f"mean(): could not infer output dtype. "
+            f"{'Input' if orig_dtype is None else 'Optional'} dtype must be either "
+            f"a floating point or complex dtype. Got: {dtype}"
+        ),
+    )
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
@@ -2499,9 +2509,27 @@ def atleast_3d(
 
 
 def as_strided(
-    a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int = 0
+    a: TensorLikeType,
+    size: ShapeType,
+    stride: StrideType,
+    storage_offset: Optional[int] = None,
 ) -> TensorLikeType:
-    return prims.as_strided(a, size, stride, storage_offset)
+    storage_offset_int = (
+        storage_offset if storage_offset is not None else a.storage_offset()
+    )
+    return prims.as_strided(a, size, stride, storage_offset_int)
+
+
+@register_decomposition(torch.ops.aten.as_strided_scatter)
+def as_strided_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    size: ShapeType,
+    stride: StrideType,
+    storage_offset: Optional[int] = None,
+) -> TensorLikeType:
+    storage_offset_int = 0 if storage_offset is None else storage_offset
+    return prims.as_strided_scatter(input, src, size, stride, storage_offset_int)
 
 
 def broadcast_shapes(*shapes) -> ShapeType:
@@ -3371,7 +3399,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
         len(t.shape) > 0,
-        lambda: "dimension specified as 0 but tensor has no dimensions",
+        lambda: "Dimension specified as 0 but tensor has no dimensions",
         IndexError,
     )
     return tuple(
@@ -3621,12 +3649,12 @@ def vsplit(
         check(
             (split_size != 0 and a.shape[0] % split_size == 0),
             lambda: (
-                "torch.vsplit attempted to split along dimension 0 "
-                + ", but the size of the dimension "
-                + str(a.shape[0])
-                + " is not divisible by the split_size "
-                + str(split_size)
-                + "!"
+                f"torch.vsplit attempted to split along dimension 0"
+                f", but the size of the dimension "
+                f"{a.shape[0]}"
+                f" is not divisible by the split_size "
+                f"{split_size}"
+                f"!"
             ),
         )
         return tensor_split(a, split_size, 0)
@@ -3792,7 +3820,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
         )
     if isinstance(sections, IntLike) and (sections == 0 or a.shape[2] % sections != 0):
         raise RuntimeError(
-            "torch._refs.dsplit attempted to split along dimension 2, "
+            "torch.dsplit attempted to split along dimension 2, "
             + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
         )
     return tensor_split(a, sections, 2)
@@ -4446,12 +4474,14 @@ def movedim(
     if type(destination) is int:
         destination = (destination,)
 
+    # Converts to list to produce a compatible error message with core PyTorch,
+    # which prints sequences in square brackets.
     utils.check(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
-            "movedim: Invalid source or destination dims: source "
-            f"({source} dims) should contain the same number of dims as "
-            f"destination ({destination} dims)"
+            "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
+            f"({list(source)} dims) should contain the same number of dims as "
+            f"destination ({list(destination)} dims)"
         ),
     )
 
@@ -4462,13 +4492,14 @@ def movedim(
     sss = set(ss)
     dss = set(ds)
 
+    # See above on why this converts to list in error messages.
     utils.check(
         len(ss) == len(sss),
-        lambda: f"movedim: repeated dim in `source` {source}",
+        lambda: f"movedim: repeated dim in `source` ({list(source)})",  # type: ignore[arg-type]
     )
     utils.check(
         len(ds) == len(dss),
-        lambda: f"movedim: repeated dim in `destination` {destination}",
+        lambda: f"movedim: repeated dim in `destination` ({list(destination)})",  # type: ignore[arg-type]
     )
 
     m = dict(zip(ds, ss))
@@ -4637,7 +4668,6 @@ def randn(
 
     dtype = utils.dtype_or_default(dtype)
     device = utils.device_or_default(device)
-    layout = utils.layout_or_default(layout)
 
     return prims.normal(
         shape_,
@@ -4669,8 +4699,7 @@ def scalar_tensor(
 #
 
 
-@register_decomposition(torch.ops.aten.uniform)
-def uniform(
+def _uniform_helper(
     shape: ShapeType,
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
@@ -4688,7 +4717,7 @@ def uniform(
     assert isinstance(dtype, torch.dtype)
     device = utils.canonicalize_device(device)
 
-    return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
 
 
 @register_decomposition(

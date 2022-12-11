@@ -216,7 +216,7 @@ std::tuple<std::string, uint64_t> QueryPool::
 
   std::lock_guard<std::mutex> lock(mutex_);
 
-  const size_t entry_count = shader_logs_entry_count();
+  const size_t entry_count = shader_logs_entry_count_thread_unsafe();
   TORCH_CHECK(
       (query_index >= 0 && query_index < entry_count),
       "query_index of ",
@@ -239,8 +239,13 @@ std::tuple<std::string, uint64_t> QueryPool::
       entry.kernel_name, entry.execution_duration_ns);
 }
 
-size_t QueryPool::shader_logs_entry_count() {
+size_t QueryPool::shader_logs_entry_count_thread_unsafe() {
   return previous_shader_count_ + shader_log().size();
+}
+
+size_t QueryPool::shader_logs_entry_count() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return shader_logs_entry_count_thread_unsafe();
 }
 
 } // namespace api
