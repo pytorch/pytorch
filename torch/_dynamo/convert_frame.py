@@ -1,3 +1,4 @@
+import copy
 import functools
 import itertools
 import logging
@@ -9,6 +10,7 @@ from traceback import FrameSummary
 from typing import cast, Dict, List, Optional, Set
 
 import torch
+from torch._guards import tracing, TracingContext
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -371,6 +373,7 @@ def _compile(
 
     # from .utils import print_once;  print_once(code.co_filename)
     tracing_context = TracingContext()
+
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -459,7 +462,9 @@ def _compile(
                 log.info(guard_str)
 
             if hooks.guard_export_fn is not None:
-                hooks.guard_export_fn(output.guards)
+                # Note: We copy guards so they don't get lost when we call clear()
+                # on tracing_context exit.
+                hooks.guard_export_fn(copy.deepcopy(output.guards))
 
             return guarded_code
         except (
