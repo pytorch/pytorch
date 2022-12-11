@@ -49,7 +49,7 @@ def _stack_if_compiling(x):
         return x
 
 def _dispatch_sqrt(x):
-    if isinstance(x, torch.Tensor):
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
         return x.sqrt()
     else:
         return math.sqrt(x)
