@@ -13,7 +13,6 @@
 
 #include <c10/util/irange.h>
 
-#include <utility>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -2375,7 +2374,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   Tensor QR = at::empty({0}, input.options());
   Tensor tau = at::empty({0}, input.options());
   std::tie(QR, tau) = at::geqrf_outf(input, QR, tau);
-  return std::make_tuple(std::move(QR), std::move(tau));
+  return std::make_tuple(QR, tau);
 }
 
 /*
@@ -3840,7 +3839,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
   Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
-  return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
+  return std::make_tuple(solution, residuals, rank, singular_values);
 }
 
 DEFINE_DISPATCH(ldl_factor_stub);
@@ -4072,7 +4071,7 @@ Tensor& linalg_solve_triangular_out(
   // and X = B after the algortihm. We just anotate that A is conjugated later on
   // The solution will be written into out_f, so it'll be conjugated already
 
-  Tensor A_f = std::move(A_);  // The A that will go into fortran
+  Tensor A_f = A_;  // The A that will go into fortran
 
   bool A_is_conj = A_f.is_conj() != out_f.is_conj();
   bool A_is_neg = A_f.is_neg() != out_f.is_neg();
@@ -4189,6 +4188,6 @@ Tensor linalg_vander(
   // The row of ones
   shape.back() = 1LL;
   auto ones =  result.new_ones(shape);
-  return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
+  return at::cat({ones, result}, /*dim=*/ -1);
 }
 }}  // namespace at::native
