@@ -1,8 +1,9 @@
 import dataclasses
 import enum
-from typing import Callable, List, Optional, Set
 import weakref
 from contextlib import contextmanager
+from typing import Callable, List, Optional, Set
+
 import sympy
 
 """
@@ -165,6 +166,7 @@ class Guard:
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
+
 class ShapeGuard:
     expr: sympy.Expr
     stack: str
@@ -172,6 +174,7 @@ class ShapeGuard:
     def __init__(self, expr, stack):
         self.expr = expr
         self.stack = stack
+
 
 class GuardsContext:
     dynamo_guards: Set[Guard] = set()
