@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import weakref
 from typing import Callable, List, Optional
 
 """
