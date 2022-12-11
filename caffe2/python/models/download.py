@@ -69,10 +69,10 @@ def downloadFromURLToFile(url, filename, show_progress=True):
         print("")  # New line to fix for progress bar
     except HTTPError as e:
         raise Exception("Could not download model. [HTTP Error] {code}: {reason}."
-                        .format(code=e.code, reason=e.reason))
+                        .format(code=e.code, reason=e.reason)) from e
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
-                        .format(reason=e.reason))
+                        .format(reason=e.reason)) from e
 
 
 def getURLFromName(name, filename):
