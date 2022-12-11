@@ -43,6 +43,7 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
+from torch._guards import TracingContext, tracing
 
 log = logging.getLogger(__name__)
 
@@ -363,11 +364,13 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
+
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
+    tracing_context = TracingContext()
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -381,6 +384,7 @@ def _compile(
             one_graph,
             export,
             mutated_closure_cell_contents,
+            tracing_context,
         )
         tracer.run()
         output = tracer.output
@@ -392,81 +396,83 @@ def _compile(
         if config.dead_code_elimination:
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
-    try:
-        for attempt in itertools.count():
-            try:
-                out_code = transform_code_object(code, transform)
-                orig_code_map[out_code] = code
-                break
-            except exc.RestartAnalysis:
-                log.debug("Restarting analysis ...")
-                if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
-                log.debug(
-                    f"Skipping frame {code.co_name} \
-                    {code.co_filename} {code.co_firstlineno}"
+    with tracing(tracing_context):
+
+        try:
+            for attempt in itertools.count():
+                try:
+                    out_code = transform_code_object(code, transform)
+                    orig_code_map[out_code] = code
+                    break
+                except exc.RestartAnalysis:
+                    log.debug("Restarting analysis ...")
+                    if attempt > 100:
+                        unimplemented("100+ RestartAnalysis() calls")
+                except exc.SkipFrame:
+                    log.debug(
+                        f"Skipping frame {code.co_name} \
+                        {code.co_filename} {code.co_firstlineno}"
+                    )
+                    if one_graph:
+                        log.debug("No graph captured with one_graph=True")
+                    return None
+            output_codes.add(out_code)
+
+            if config.output_code:
+                log.info(
+                    format_bytecode(
+                        "ORIGINAL BYTECODE",
+                        code.co_name,
+                        code.co_filename,
+                        code.co_firstlineno,
+                        code,
+                    ),
                 )
-                if one_graph:
-                    log.debug("No graph captured with one_graph=True")
-                return None
-        output_codes.add(out_code)
+                log.info(
+                    format_bytecode(
+                        "MODIFIED BYTECODE",
+                        code.co_name,
+                        code.co_filename,
+                        code.co_firstlineno,
+                        out_code,
+                    ),
+                )
 
-        if config.output_code:
-            log.info(
-                format_bytecode(
-                    "ORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    code,
-                ),
-            )
-            log.info(
-                format_bytecode(
-                    "MODIFIED BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    out_code,
-                ),
+            assert output is not None
+            assert output.guards is not None
+            CleanupManager.instance[out_code] = output.cleanups
+            check_fn = CheckFunctionManager(
+                output,
+                output.guards,
+                locals,
+                globals,
+                hooks.guard_fail_fn if hooks else None,
             )
 
-        assert output is not None
-        assert output.guards is not None
-        CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(
-            output,
-            output.guards,
-            locals,
-            globals,
-            hooks.guard_fail_fn if hooks else None,
-        )
+            guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+            if config.output_code:
+                guard_str = "GUARDS:\n"
+                guard_str += "\n".join(
+                    [f" - {str(guard)}" for guard in sorted(output.guards)]
+                )
+                log.info(guard_str)
 
-        if config.output_code:
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
-            )
-            log.info(guard_str)
+            if hooks.guard_export_fn is not None:
+                hooks.guard_export_fn(output.guards)
 
-        if hooks.guard_export_fn is not None:
-            hooks.guard_export_fn(output.guards)
-
-        return guarded_code
-    except (
-        Unsupported,
-        TorchRuntimeError,
-        BackendCompilerFailed,
-        AssertionError,
-    ) as e:
-        exception_handler(e, code, frame)
-        raise
-    except Exception as e:
-        exception_handler(e, code, frame)
-        raise InternalTorchDynamoError() from e
+            return guarded_code
+        except (
+            Unsupported,
+            TorchRuntimeError,
+            BackendCompilerFailed,
+            AssertionError,
+        ) as e:
+            exception_handler(e, code, frame)
+            raise
+        except Exception as e:
+            exception_handler(e, code, frame)
+            raise InternalTorchDynamoError() from e
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

@@ -80,6 +80,7 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
+from torch._guards import TracingContext
 
 log = logging.getLogger(__name__)
 
@@ -1601,9 +1602,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         mutated_closure_cell_contents: Set[str],
+        tracing_context: TracingContext,
     ):
         super(InstructionTranslator, self).__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self),
+            output=OutputGraph(f_globals, code_options, compiler_fn, tracing_context, self),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,

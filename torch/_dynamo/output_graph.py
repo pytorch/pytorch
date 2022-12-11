@@ -54,7 +54,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-from torch._guards import Guard, GuardSource
+from torch._guards import Guard, GuardSource, TracingContext
 
 log = logging.getLogger(__name__)
 
@@ -175,13 +175,15 @@ class OutputGraph(fx.Tracer):
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
+        tracing_context: TracingContext,
         root_tx,
     ):
         super(OutputGraph, self).__init__()
 
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.guards: Set[Guard] = set()
+        self.tracing_context: TracingContext = tracing_context
+        self.guards: Set[Guard] = self.tracing_context.guards_context.dynamo_guards
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
