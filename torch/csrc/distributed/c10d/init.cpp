@@ -1555,15 +1555,13 @@ Arguments:
           .def(
               "_start_coalescing",
               &::c10d::ProcessGroup::startCoalescing,
+              py::arg("device_type"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_end_coalescing",
               &::c10d::ProcessGroup::endCoalescing,
+              py::arg("device_type"),
               py::arg("reqs"),
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_get_default_backend",
-              &::c10d::ProcessGroup::getDefaultBackend,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_set_backend",
@@ -1594,7 +1592,6 @@ Arguments:
       .value("NCCL", ::c10d::ProcessGroup::BackendType::NCCL)
       .value("UCC", ::c10d::ProcessGroup::BackendType::UCC)
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
-      .value("TCP", ::c10d::ProcessGroup::BackendType::TCP)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
 
@@ -2014,13 +2011,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
           module, "_ProcessGroupWrapper", backend)
           .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Backend>& pg,
-                          const c10::intrusive_ptr<::c10d::Backend>& gloo_pg) {
-                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
-                    pg, gloo_pg);
-              }),
-              py::arg("pg"),
-              py::arg("gloo_pg"),
+              py::init(
+                  [](const c10::intrusive_ptr<::c10d::Backend>& backend,
+                     const c10::intrusive_ptr<::c10d::Backend>& gloo_backend) {
+                    return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                        backend, gloo_backend);
+                  }),
+              py::arg("backend"),
+              py::arg("gloo_backend"),
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg);

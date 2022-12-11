@@ -24,8 +24,6 @@ ProcessGroup::BackendType strToBackendType(std::string backend) {
     return ProcessGroup::BackendType::UCC;
   } else if (backend == "mpi") {
     return ProcessGroup::BackendType::MPI;
-  } else if (backend == "tcp") {
-    return ProcessGroup::BackendType::TCP;
   } else {
     return ProcessGroup::BackendType::CUSTOM;
   }
@@ -43,8 +41,6 @@ std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
       return "ucc";
     case ProcessGroup::BackendType::MPI:
       return "mpi";
-    case ProcessGroup::BackendType::TCP:
-      return "tcp";
     case ProcessGroup::BackendType::CUSTOM:
       return "custom";
     default:
@@ -111,13 +107,13 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Get the backend type associated with the device
-  TORCH_CHECK(
-      deviceTypeToBackendType_.find(deviceType) !=
-          deviceTypeToBackendType_.end(),
-      "No backend type associated with device type ",
-      deviceType);
-  ProcessGroup::BackendType backendType =
-      deviceTypeToBackendType_.at(deviceType);
+  ProcessGroup::BackendType backendType;
+  try {
+    backendType = deviceTypeToBackendType_.at(deviceType);
+  } catch (const std::out_of_range& e) {
+    TORCH_CHECK(
+        false, "No backend type associated with device type ", deviceType);
+  }
 
   // Check if the backend has already been initialized
   if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {

@@ -176,7 +176,7 @@ class Backend(object):
 
     _plugins: Dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI, TCP]
+    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -1003,7 +1003,7 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
+            # backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
             backend_pg_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
@@ -1357,14 +1357,14 @@ class P2POp(object):
 
 
 @contextlib.contextmanager
-def _coalescing_manager(group, reqs):
+def _coalescing_manager(group, device, reqs):
     if group is None:
         group = _get_default_group()
-    group._start_coalescing()
+    group._start_coalescing(device)
     try:
         yield
     finally:
-        group._end_coalescing(reqs)
+        group._end_coalescing(device, reqs)
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -1409,8 +1409,9 @@ def batch_isend_irecv(p2p_op_list):
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
+    device = p2p_op_list[0].tensor.device
     reqs = []
-    with _coalescing_manager(group, reqs):
+    with _coalescing_manager(group, device, reqs):
         for p2p_op in p2p_op_list:
             op = p2p_op.op
             tensor = p2p_op.tensor
@@ -1961,7 +1962,7 @@ def _check_for_nccl_backend(group):
 
     return (
         is_nccl_available() and
-        pg.name() == Backend.NCCL
+        get_backend(pg) == Backend.NCCL
     )
 
 @exception_handler

@@ -7,39 +7,6 @@
 namespace c10d {
 namespace {
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t root_tensor,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  auto work = process_group->broadcast(
-      tensor_vec,
-      BroadcastOptions{
-          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(tensor_vec), work);
-}
-
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  auto work = process_group->allreduce(
-      tensor_vec,
-      AllreduceOptions{*reduce_op.get(), std::chrono::milliseconds(timeout)});
-
-  // Return input tensors as output tensors to make inplace allreduce look like
-  // a functional API, so that make_fx can correctly build the dependencies in
-  // the graph later.
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(tensor_vec), work);
-}
-
 c10::intrusive_ptr<Work> allreduce_coalesced_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -70,25 +37,6 @@ c10::intrusive_ptr<Work> reduce_(
           std::chrono::milliseconds(timeout)});
 }
 
-std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
-allgather_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    at::TensorList input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t timeout) {
-  auto input_tensors_vec = input_tensors.vec();
-  auto work = process_group->allgather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      input_tensors_vec,
-      AllgatherOptions{std::chrono::milliseconds(timeout)});
-
-  // Copy output tensors (not storage) so that this can be used in a functional
-  // manner
-  return std::
-      tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>(
-          output_tensors, work);
-}
-
 c10::intrusive_ptr<Work> _allgather_base_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -106,6 +54,24 @@ c10::intrusive_ptr<Work> allgather_coalesced_(
       input_list_vec);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
+    const at::TensorList& output_tensors,
+    const c10::List<at::TensorList>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto input_tensors_vec = toTensorVectorVector(input_tensors);
+  auto work = process_group->reduce_scatter(
+      output_tensors_vec,
+      input_tensors_vec,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors_vec, work);
+}
+
 c10::intrusive_ptr<Work> _reduce_scatter_base_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -117,6 +83,35 @@ c10::intrusive_ptr<Work> _reduce_scatter_base_(
       input_tensor,
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> gather_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const at::TensorList& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
+  return process_group->gather(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+      input_tensors_vec,
+      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
+}
+
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
+    const at::TensorList& output_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto work = process_group->scatter(
+      output_tensors_vec,
+      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(output_tensors_vec), work);
 }
 
 c10::intrusive_ptr<Work> alltoall_(
@@ -173,7 +168,7 @@ c10::intrusive_ptr<Work> send(
     int64_t dstRank,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getDefaultBackend()->send(
+  return process_group->send(
       tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
@@ -183,7 +178,7 @@ c10::intrusive_ptr<Work> recv_(
     int64_t srcRank,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getDefaultBackend()->recv(
+  return process_group->recv(
       tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
@@ -192,8 +187,7 @@ c10::intrusive_ptr<Work> recv_any_source_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getDefaultBackend()->recvAnysource(
-      tensor_vec, static_cast<int>(tag));
+  return process_group->recvAnysource(tensor_vec, static_cast<int>(tag));
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -209,18 +203,15 @@ TORCH_LIBRARY(c10d, m) {
   // instead of the CompositeImplicitAutograd key to enable
   // __torch_dispatch__.
   m.def(
-      "broadcast_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
+      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allreduce_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
+      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "allreduce_coalesced_",
       dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, allreduce_coalesced_));
   m.def(
-      "allgather_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
+      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
       "_allgather_base_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, _allgather_base_));
@@ -268,7 +259,9 @@ c10::intrusive_ptr<Work> broadcast(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const BroadcastOptions& opts) {
-  // TODO: handles the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup which is used in
+  // Reducer.cpp This can be removed once
+  // https://github.com/pytorch/pytorch/issues/90659 is resolved
   if (!process_group->hasBackends()) {
     auto tensor_vec = tensors.vec();
     return process_group->broadcast(tensor_vec, opts);
@@ -298,7 +291,9 @@ c10::intrusive_ptr<Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts) {
-  // TODO: handles the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup which is used in
+  // Reducer.cpp This can be removed once
+  // https://github.com/pytorch/pytorch/issues/90659 is resolved
   if (!process_group->hasBackends()) {
     auto tensor_vec = tensors.vec();
     return process_group->allreduce(tensor_vec, opts);
@@ -344,7 +339,9 @@ c10::intrusive_ptr<Work> allgather(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     at::TensorList input_tensors,
     const AllgatherOptions& opts) {
-  // TODO: this is needed to handle the case of using a PythonProcessGroup
+  // TODO: handles the case of using a PythonProcessGroup which is used in
+  // Reducer.cpp This can be removed once
+  // https://github.com/pytorch/pytorch/issues/90659 is resolved
   if (!process_group->hasBackends()) {
     auto input_tensors_vec = input_tensors.vec();
     return process_group->allgather(
@@ -571,7 +568,7 @@ void monitored_barrier(
 c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts) {
-  at::Tensor tensor;
+  static at::Tensor tensor;
   // TODO: if nccl was specified then use it
   if (process_group->getBackendType() ==
       c10d::ProcessGroup::BackendType::NCCL) {

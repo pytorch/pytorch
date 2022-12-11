@@ -70,8 +70,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     NCCL = 2,
     UCC = 3,
     MPI = 4,
-    TCP = 5,
-    CUSTOM = 6,
+    CUSTOM = 5,
   };
 
   // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
@@ -96,18 +95,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendType_;
   };
 
-  virtual void startCoalescing() {
+  virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl backends
     if (getBackendType() == BackendType::NCCL) {
-      getDefaultBackend()->startCoalescing();
+      getBackend(deviceType)->startCoalescing();
     }
   }
 
   virtual void endCoalescing(
+      c10::DeviceType deviceType,
       std::vector<c10::intrusive_ptr<Work>>& reqs) {
     // only nccl has implemented startCoalescing so only execute for nccl backends
     if (getBackendType() == BackendType::NCCL) {
-      getDefaultBackend()->endCoalescing(reqs);
+      getBackend(deviceType)->endCoalescing(reqs);
     }
   }
 
@@ -396,8 +396,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
  protected:
-  void createBackends();
-
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();

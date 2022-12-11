@@ -642,6 +642,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.gather(output_ts, tensors, opts)
 
         with self.assertRaisesRegex(
+            # throws error message from dispatcher
             RuntimeError, "There were no tensor arguments to this function"
         ):
             opts = c10d.GatherOptions()
@@ -776,6 +777,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.scatter(tensors, scatter_list, opts)
 
         with self.assertRaisesRegex(
+            # throws error message from dispatcher
             RuntimeError, "There were no tensor arguments to this function"
         ):
             opts = c10d.ScatterOptions()
@@ -2700,8 +2702,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
-        # test if the process group constructed with high priority stream
-        self.assertTrue(pg._get_default_backend().options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
         pg.allreduce(t).wait()
