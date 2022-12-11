@@ -8,7 +8,7 @@ Canonical Aten IR
 
 Canonical aten ops is the core subset of aten operators that can be used to compose other operators.
 Canonical aten IR is fully functional, and there is no `inplace` or `_out` variants in this opset.
-In contrast to Prims IR, canonical aten ops reuses the existing aten ops in "native_function.yaml",
+In contrast to Prims IR, canonical aten ops reuses the existing aten ops in "native_functions.yaml",
 and it doesn't further decompose ops into explicit type promotion and boardcasting ops.
 This opset is designed to serve as the functional IR to interface with backends.
 

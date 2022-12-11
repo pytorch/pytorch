@@ -10,6 +10,11 @@ ROOT = Path(__file__).parent.parent.parent.parent
 NATIVE_FUNCTION_YAML_PATH = ROOT / Path("aten/src/ATen/native/native_functions.yaml")
 TAGS_YAML_PATH = ROOT / Path("aten/src/ATen/native/tags.yaml")
 
+print(Path(__file__))
+print(ROOT)
+print(NATIVE_FUNCTION_YAML_PATH)
+print(TAGS_YAML_PATH)
+
 BUILD_DIR = "build/ir"
 ATEN_OPS_CSV_FILE = "aten_ops.csv"
 PRIMS_OPS_CSV_FILE = "prims_ops.csv"
