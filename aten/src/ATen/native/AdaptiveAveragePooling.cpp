@@ -115,7 +115,7 @@ namespace {
         "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_mkldnn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, c10::asIntArrayRefSlow(output_size));
+      return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
