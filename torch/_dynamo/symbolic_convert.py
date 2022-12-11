@@ -313,9 +313,7 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug(
-                    "break_graph_if_unsupported triggered compile", exc_info=True
-                )
+                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
                 user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
