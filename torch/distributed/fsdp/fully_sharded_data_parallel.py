@@ -518,32 +518,15 @@ class FullyShardedDataParallel(nn.Module):
 
         return ret
 
-    def _mixed_precision_enabled_for_params(self) -> bool:
-        """
-        Whether user explicitly enabled mixed precision for
-        parameters or not.
-        """
-        return self.mixed_precision.param_dtype is not None
-
     def _mixed_precision_enabled_for_buffers(self) -> bool:
         """
-        Whether user explicitly enabled mixed precision for
-        buffers or not.
+        Returns if the user explicitly enabled buffer mixed precision.
+
+        NOTE: Unlike parameters and gradient reduction, buffer mixed precision
+        is applied at the FSDP instance level, not the ``FlatParameter`` level,
+        which may be different for the composable code path.
         """
         return self.mixed_precision.buffer_dtype is not None
-
-    def _mixed_precision_enabled_for_reduce(self) -> bool:
-        """
-        Whether user explicitly enabled mixed precision for
-        gradient reduction or not.
-        """
-        return self.mixed_precision.reduce_dtype is not None
-
-    def _mixed_precision_keep_low_precision_grads(self) -> bool:
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.keep_low_precision_grads
-        )
 
     def _low_precision_hook_enabled(self) -> bool:
         """
