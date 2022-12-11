@@ -33,8 +33,6 @@ from .utils import (
     tuple_iterator_len,
 )
 
-from torch._guards import Guard, GuardSource
-
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id

@@ -19,7 +19,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from torch._guards import Guard, GuardSource
 
 
 class SuperVariable(VariableTracker):

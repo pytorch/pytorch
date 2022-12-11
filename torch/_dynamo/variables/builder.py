@@ -101,7 +101,6 @@ from .torch import (
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
-from torch._guards import GuardSource
 
 class _missing:
     pass
