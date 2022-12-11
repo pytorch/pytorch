@@ -29,6 +29,7 @@ if(ANDROID)
   list(APPEND Vulkan_INCLUDES ${VULKAN_WRAPPER_DIR})
   list(APPEND Vulkan_LIBS VulkanWrapper)
 
+else()
   find_package(Vulkan)
 
   if(NOT Vulkan_FOUND)
