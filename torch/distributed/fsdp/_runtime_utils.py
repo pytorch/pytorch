@@ -649,7 +649,8 @@ def _post_backward_hook(
                     # TODO: `clip_grad_norm_()` assumes padding is zeroed. We
                     # need to trim padding before computing local norms.
                     padding_numel = padded_unsharded_grad.numel() - unsharded_grad.numel()
-                    padded_unsharded_grad[-padding_numel:].zero_()
+                    if padding_numel > 0:
+                        padded_unsharded_grad[-padding_numel:].zero_()
                 else:  # does not need padding
                     padded_unsharded_grad = unsharded_grad
                 # TODO: Move this allocation to the default stream as well.
