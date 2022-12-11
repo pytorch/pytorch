@@ -2,6 +2,8 @@ import collections
 import dataclasses
 from typing import Any
 
+from torch._guards import Guard, GuardSource
+
 from . import utils
 from .bytecode_transformation import create_instruction
 from torch._guards import Guard, GuardSource
