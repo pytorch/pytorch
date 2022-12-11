@@ -20,6 +20,10 @@ TORCH_API size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize,
     size_t storage_offset = 0);
+TORCH_API SymInt computeStorageNbytesContiguous(
+    SymIntArrayRef sizes,
+    SymInt itemsize,
+    SymInt storage_offset = 0);
 TORCH_API size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
