@@ -11,7 +11,7 @@
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
 #define VK_KERNEL(name)                          \
-  ::at::native::vulkan::api::ShaderInfo {      \
+  ::at::native::vulkan::api::ShaderInfo {        \
     CONCAT_LITERALS(vulkan., name), name##_glsl, \
   }
 #else
