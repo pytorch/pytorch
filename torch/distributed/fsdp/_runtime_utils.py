@@ -307,9 +307,10 @@ def _pre_forward(
 
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
-    args, kwargs = _prepare_forward_inputs(
-        state.compute_device, input_dtype, *args, **kwargs
-    )
+    if state.mixed_precision.cast_forward_inputs:
+        args, kwargs = _prepare_forward_inputs(
+            state.compute_device, input_dtype, *args, **kwargs
+        )
     return args, kwargs
 
 @no_type_check
