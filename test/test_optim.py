@@ -9,7 +9,6 @@ from copy import deepcopy
 
 import torch
 import torch.optim as optim
-import torch._dynamo
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.optim import Adam, SGD, Optimizer

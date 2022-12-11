@@ -10,6 +10,7 @@ from typing import Callable, Dict
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
+from torch._utils import is_compiling
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -36,13 +37,13 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if torch._dynamo.is_compiling():
+    if not torch.jit.is_scripting() and is_compiling():
         return x
     else:
         return x.item()
 
 def _stack_if_compiling(x):
-    if torch._dynamo.is_compiling():
+    if not torch.jit.is_scripting() and is_compiling():
         return torch.stack(x)
     else:
         return x

@@ -246,15 +246,27 @@ def _single_tensor_nadam(params: List[Tensor],
 
         # update mu_product
         mu_product *= mu
-        mu_product_next = mu_product * mu * mu_next
 
         # decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(bias_correction2).sqrt()
-        denom = denom.add(eps)
-        param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
-        param.addcdiv_(exp_avg, denom, value=(-lr * mu_next) / (1. - mu_product_next))
+
+        if differentiable:
+            denom = denom.add(eps)
+            # Make autograd track the operations
+            # by updating the grad and exp_avg directly and not using the
+            # scalar "value" argument of addcdiv.
+            mu_product_next = mu_product * mu * mu_next
+            grad = grad * (-lr * (1. - mu) / (1. - mu_product))
+            exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
+            param.addcdiv_(grad, denom)
+            param.addcdiv_(exp_avg, denom)
+        else:
+            mu_product_next = _get_value(mu_product) * mu * mu_next
+            denom.add_(eps)
+            param.addcdiv_(grad, denom, value=(-lr * (1. - mu) / (1. - _get_value(mu_product))))
+            param.addcdiv_(exp_avg, denom, value=(-lr * mu_next) / (1. - mu_product_next))
 
 
 def _multi_tensor_nadam(params: List[Tensor],

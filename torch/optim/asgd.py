@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value
+from torch._utils import is_compiling
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
@@ -258,7 +259,7 @@ def _single_tensor_asgd(
         param.add_(grad, alpha=-eta_value)
 
         # averaging
-        if torch._dynamo.is_compiling() or mu.item() != 1:
+        if is_compiling() or mu.item() != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
@@ -318,14 +319,16 @@ def _multi_tensor_asgd(
 
     # averaging
     for i in range(len(axs)):
-        if torch._dynamo.is_compiling() or mus[i] != 1:  # avoid data dependent control if we are compiling
+        if is_compiling() or mus[i].item() != 1:
             axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
             axs[i].copy_(params[i])
 
     # update eta and mu
     for i in range(len(mus)):
-        new_eta = _to_tensor(lr / ((1 + lambd * lr * _get_value(state_steps[i])) ** alpha))
+        new_eta = _to_tensor(
+            lr / (1 + lambd * lr * _get_value(state_steps[i]) ** alpha)
+        )
         etas[i].copy_(new_eta)
-        new_mu = _to_tensor(1 / max(1, _get_value(state_steps[i] - t0)))
+        new_mu = _to_tensor(1 / max(1, _get_value(state_steps[i]) - t0))
         mus[i].copy_(new_mu)
