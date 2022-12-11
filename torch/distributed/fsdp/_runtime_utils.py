@@ -567,36 +567,41 @@ def _post_backward_hook(
         if not state._sync_gradients:
             return
 
-        # Only define `padded_unsharded_grad` and `new_sharded_grad` for
-        # sharded strategies
+        # Define `padded_unsharded_grad` for all strategies, and only define
+        # `new_sharded_grad` for sharded strategies
         pre_allocated_unsharded_grad = False
+        padded_unsharded_grad: Optional[torch.Tensor] = None
+        # Pre-allocate any gradient tensor that would otherwise need to be
+        # allocated in the post-backward stream. Allocation is required when
+        # the gradient needs padding or if it needs to be of a different dtype.
         if handle.uses_sharded_strategy:
-            grad_dtype = handle._config.reduce_dtype
-            # Pre-allocate the (padded) sharded gradient and the padded
-            # unsharded gradient if the gradient needs padding or if the
-            # gradient needs to be of a different dtype, both in the default
-            # stream
             with torch.cuda.stream(state._streams["default"]):
-                grad_kwargs = {"dtype": grad_dtype, "device": handle.device}
+                grad_kwargs = {
+                    "dtype": handle._config.reduce_dtype,
+                    "device": handle.device,
+                }
                 new_sharded_grad = torch.empty(
                     handle.flat_param._sharded_size, **grad_kwargs
                 )
-                padded_unsharded_grad: Optional[torch.Tensor] = (
-                    torch.empty(
+                if (
+                    handle.flat_param._padded_unsharded_size
+                    != handle.flat_param._unpadded_unsharded_size
+                    or (
+                        handle._config.reduce_dtype
+                        != handle._config.low_prec_param_dtype
+                    )
+                ):
+                    padded_unsharded_grad = torch.empty(
                         handle.flat_param._padded_unsharded_size,
                         **grad_kwargs,
                     )
-                    if (
-                        handle.flat_param._padded_unsharded_size
-                        != handle.flat_param._unpadded_unsharded_size
-                        or (
-                            handle._config.reduce_dtype
-                            != handle._config.low_prec_param_dtype
-                        )
-                    )
-                    else None
-                )
-            pre_allocated_unsharded_grad = padded_unsharded_grad is not None
+        elif handle._config.reduce_dtype != handle.flat_param.dtype:  # for `NO_SHARD`
+            padded_unsharded_grad = torch.empty(
+                handle.flat_param._unpadded_unsharded_size,
+                dtype=handle._config.reduce_dtype,
+                device=handle.device,
+            )
+        pre_allocated_unsharded_grad = padded_unsharded_grad is not None
         pre_allocated_sharded_grad = handle.uses_sharded_strategy
 
         # Wait for all ops in the current stream (e.g. gradient
@@ -620,17 +625,9 @@ def _post_backward_hook(
                 # async and would result in reducing the wrong gradient.
                 unsharded_grad = flat_param.grad.data
                 flat_param.grad = None
-                p_assert(
-                    len(unsharded_grad.size()) == 1,
-                    f"Expects gradient to be flattened but got {unsharded_grad.size()}",
-                )
                 numel_to_pad = (
-                    0
-                    if not handle.uses_sharded_strategy
-                    else (
-                        handle.flat_param._padded_unsharded_size.numel()
-                        - handle.flat_param._unpadded_unsharded_size.numel()
-                    )
+                    handle.flat_param._padded_unsharded_size.numel()
+                    - handle.flat_param._unpadded_unsharded_size.numel()
                 )
                 if pre_allocated_unsharded_grad:
                     p_assert(
@@ -640,9 +637,7 @@ def _post_backward_hook(
                         f"shape {padded_unsharded_grad.shape} and unpadded "
                         f"shape {unsharded_grad.shape}",
                     )
-                    # NOTE: If `unsharded_grad` is in full precision and
-                    # `padded_unsharded_grad` is in low precision, then the
-                    # `copy_()` includes the downcast.
+                    # NOTE: `copy_()` includes the typecast if dtypes differ.
                     padded_unsharded_grad[: unsharded_grad.numel()].copy_(
                         unsharded_grad
                     )
@@ -660,15 +655,11 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in (
-                    HandleShardingStrategy.HYBRID_SHARD,
-                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-                ):
+                if handle._config.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
                     )
-
                 # TODO: Move this allocation to the default stream as well.
                 _cast_grad_to_param_dtype(state, handle, new_sharded_grad, flat_param)
 
@@ -683,18 +674,25 @@ def _post_backward_hook(
                     flat_param._saved_grad_shard += new_sharded_grad
                 else:
                     flat_param._saved_grad_shard = new_sharded_grad
-                sharded_grad = flat_param._saved_grad_shard
+                grad_to_offload = flat_param._saved_grad_shard
             else:
+                flat_param_grad = flat_param.grad
+                if pre_allocated_unsharded_grad:
+                    # NOTE: `copy_()` includes the typecast if dtypes differ.
+                    padded_unsharded_grad.copy_(flat_param.grad)
+                    flat_param_grad = padded_unsharded_grad
                 state._communication_hook(
-                    state._communication_hook_state, flat_param.grad
+                    state._communication_hook_state, flat_param_grad
                 )
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
+                    # TODO: Move this allocation to the default stream as well.
                     _cast_grad_to_param_dtype(
-                        state, handle, flat_param.grad, flat_param
+                        state, handle, flat_param_grad, flat_param
                     )
-                sharded_grad = flat_param.grad.data
+                flat_param.grad.data = flat_param_grad
+                grad_to_offload = flat_param.grad
 
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
@@ -703,13 +701,13 @@ def _post_backward_hook(
                 # using `non_blocking=True` here.
                 non_blocking = handle.uses_sharded_strategy
                 flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    sharded_grad.detach(), non_blocking=non_blocking
+                    grad_to_offload.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
                 _no_dispatch_record_stream(
-                    sharded_grad.data, torch.cuda.current_stream()
+                    grad_to_offload.data, torch.cuda.current_stream()
                 )
 
             # Since the unsharded gradient is produced in the computation
