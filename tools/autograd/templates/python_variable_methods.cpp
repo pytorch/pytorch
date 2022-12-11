@@ -342,15 +342,6 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
   return self.item<int64_t>();
 }
 
-static bool dispatch_to_Bool(const Tensor & self) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
-  return self.item<bool>();
-}
-
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
