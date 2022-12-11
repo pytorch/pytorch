@@ -912,9 +912,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any(
-            tree_flatten_only(bool, tree_map_only(torch.Tensor, check, (args, kwargs)))
-        )
+        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
