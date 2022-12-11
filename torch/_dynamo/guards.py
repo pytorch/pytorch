@@ -15,7 +15,7 @@ import sympy
 
 import torch
 
-from torch._guards import Guard, GuardSource
+from torch._guards import Guard, GuardBuilderBase, GuardSource
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -73,7 +73,7 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
-class GuardBuilder:
+class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
