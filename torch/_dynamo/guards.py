@@ -15,7 +15,7 @@ import sympy
 
 import torch
 
-from torch._guards import Guard, GuardBuilderBase, GuardSource
+from torch._guards import DuplicateInputs, Guard, GuardBuilderBase, GuardSource
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -506,6 +506,27 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
+        graphargs = self.output_graph.graphargs
+
+        aotautograd_guards: List[
+            GuardEnvExpr
+        ] = self.output_graph.tracing_context.guards_context.aotautograd_guards
+        for guard in aotautograd_guards:
+            if isinstance(guard, DuplicateInputs):
+                pos_a = guard.input_pos_a
+                pos_b = guard.input_pos_b
+                assert pos_b < len(graphargs) and pos_a < len(
+                    graphargs
+                ), "Deduped args out of bounds"
+                assert graphargs[pos_a].is_tensor, "Deduped arg must be a tensor"
+                assert graphargs[pos_b].is_tensor, "Deduped arg must be a tensor"
+
+                code_part = f"{graphargs[pos_a].source.name()} is {graphargs[pos_b].source.name()}"
+                code_parts.append(code_part)
+                verbose_code_parts.append(code_part)
+            else:
+                raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
+
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from GraphArgs.  This must happen after
         # tensor checks.
@@ -513,7 +534,6 @@ class CheckFunctionManager:
         # TODO: What about grapharg pruning?  This could be problematic if we
         # guarded on a tensor that isn't actually used as an input in the end.
         if self.output_graph and self.output_graph.shape_env:
-            graphargs = self.output_graph.graphargs
             expr_as_str = self.output_graph.shape_env.codegen_guards(
                 [a.fake_tensor for a in graphargs if a.is_tensor],
                 [a.source.name() for a in graphargs if a.is_tensor],
