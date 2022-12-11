@@ -818,7 +818,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         forward_inputs: Dict[str, nn.Module] = {}
         float16 = MixedPrecision(param_dtype=torch.float16)
 
-        model = SaveForwardInputsModel(forward_inputs).cuda()
+        model = SaveForwardInputsModel(
+            forward_inputs, cast_forward_inputs=False,
+        ).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
