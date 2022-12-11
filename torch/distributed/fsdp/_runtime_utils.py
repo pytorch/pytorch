@@ -633,10 +633,6 @@ def _post_backward_hook(
                 # async and would result in reducing the wrong gradient.
                 unsharded_grad = flat_param.grad.data
                 flat_param.grad = None
-                numel_to_pad = (
-                    handle.flat_param._padded_unsharded_size.numel()
-                    - handle.flat_param._unpadded_unsharded_size.numel()
-                )
                 if pre_allocated_reduce_unsharded_grad:
                     # NOTE: `copy_()` includes the typecast if dtypes differ.
                     reduce_unsharded_grad[: unsharded_grad.numel()].copy_(
@@ -666,6 +662,8 @@ def _post_backward_hook(
                     # Copy from low precision to full precision
                     pre_optim_grad.copy_(reduce_sharded_grad)
                     reduce_sharded_grad.data = pre_optim_grad
+                    # TODO: See if we can avoid the double copy if
+                    # `keep_low_precision_grads=True`.
 
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient
