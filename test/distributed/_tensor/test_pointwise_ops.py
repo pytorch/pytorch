@@ -1,28 +1,28 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from typing import Sequence, Any, Dict, Callable, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 from unittest import skip
 
 import torch
+
+import torch.utils._pytree as pytree
 from torch import Tensor
+
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
+from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    with_comms,
     skip_unless_torch_gpu,
+    with_comms,
 )
-
-from torch.distributed._tensor import DeviceMesh, DTensor, distribute_tensor
-from torch.distributed._tensor.placement_types import (
-    Shard,
-    Replicate,
-    _Partial,
-    Placement,
-)
-from torch.distributed.distributed_c10d import ReduceOp
-
-import torch.utils._pytree as pytree
 
 
 def no_op():
@@ -185,9 +185,7 @@ class DistElementwiseOpsTest(DTensorTestBase):
         )
 
     @with_comms
-    @skip(
-        "testing RNG based ops is broken: https://github.com/pytorch/tau/issues/494"
-    )
+    @skip("testing RNG based ops is broken: https://github.com/pytorch/tau/issues/494")
     def test_dropout(self):
         device_mesh = self.build_device_mesh()
 
@@ -267,14 +265,10 @@ class DistElementwiseOpsTest(DTensorTestBase):
         dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
 
         other_tensor = torch.randn(*input_size, device=self.device_type)
-        other_dtensor = DTensor.from_local(
-            other_tensor, device_mesh, shard_spec
-        )
+        other_dtensor = DTensor.from_local(other_tensor, device_mesh, shard_spec)
 
         output_tensor = torch.randn(*input_size, device=self.device_type)
-        output_dtensor = DTensor.from_local(
-            output_tensor, device_mesh, shard_spec
-        )
+        output_dtensor = DTensor.from_local(output_tensor, device_mesh, shard_spec)
         dt = torch.mul(dtensor, other_dtensor, out=output_dtensor)
         expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
         self.assertEqual(input_tensor, dtensor.to_local())

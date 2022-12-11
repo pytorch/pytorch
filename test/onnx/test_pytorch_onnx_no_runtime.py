@@ -1068,6 +1068,28 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         ]
         self.assertEqual(len(all_aten_nodes), 0)
 
+    def test_cat_with_empty_tensor(self):
+        class NoopConcat(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat((torch.Tensor([]), x))
+
+        x = torch.randn(4, 5, 6)
+        # TODO: Parametrize this test for opset_version
+        for opset_version in {9, 11}:
+            f = io.BytesIO()
+            torch.onnx.export(NoopConcat(), (x,), f, opset_version=opset_version)
+            loaded_model = onnx.load_from_string(f.getvalue())
+            self.assertEqual(
+                len(loaded_model.graph.output[0].type.tensor_type.shape.dim), 3
+            )
+            for idx, dim in enumerate(x.shape):
+                self.assertEqual(
+                    loaded_model.graph.output[0]
+                    .type.tensor_type.shape.dim[idx]
+                    .dim_value,
+                    dim,
+                )
+
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
@@ -1129,6 +1151,32 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
         data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
+
+    @pytorch_test_common.skipIfNoCuda
+    def test_composed_layer_norm_small_eps_fp16_keep_double(self):
+        class Net(torch.nn.Module):
+            def __init__(self, C):
+                super().__init__()
+                self.layer_norm = torch.nn.LayerNorm(C, eps=1e-8)
+
+            def forward(self, x):
+                return self.layer_norm(x)
+
+        N, C = 8, 4
+        model = Net(C).cuda().half()
+        x = torch.randn(N, C).cuda().half()
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f, opset_version=14)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        const_node = [n for n in onnx_model.graph.node if n.op_type == "Constant"]
+        self.assertNotEqual(len(const_node), 0)
+        double_type_count = 0
+        for node in const_node:
+            for a in node.attribute:
+                # EPS constant should be in double type
+                if a.name == "value" and a.t.data_type == 11:
+                    double_type_count += 1
+        self.assertNotEqual(double_type_count, 0)
 
 
 if __name__ == "__main__":
