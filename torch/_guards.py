@@ -1,8 +1,10 @@
-import enum
-from typing import List, Optional, Callable, Set
 import dataclasses
+import enum
 from contextlib import contextmanager
+from typing import Callable, List, Optional, Set
+
 import sympy
+
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -25,6 +27,7 @@ class GuardSource(enum.Enum):
 
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
+
 
 @dataclasses.dataclass
 class Guard:
@@ -137,6 +140,7 @@ class Guard:
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
+
 class ShapeGuard:
     expr: sympy.Expr
     stack: str
@@ -145,16 +149,48 @@ class ShapeGuard:
         self.expr = expr
         self.stack = stack
 
+
+"""
+Parent structure for guard env expressions.
+A GuardEnvExpr can have any subtype.
+Note: All subtypes must be handled exhaustively in
+torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
+"""
+
+
+@dataclasses.dataclass
+class GuardEnvExpr:
+    pass
+
+
+"""
+A class representing a pair of duplicate inputs.
+input_pos_a and input_pos_b are input positions we have deduped.
+"""
+
+
+@dataclasses.dataclass
+class DuplicateInputs(GuardEnvExpr):
+    input_pos_a: int
+    input_pos_b: int
+
+    def __post_init__(self):
+        assert self.input_pos_a != self.input_pos_b
+
+
 class GuardsContext:
     dynamo_guards: Set[Guard] = set()
     shape_guards: List[ShapeGuard] = []
+    aotautograd_guards: List[GuardEnvExpr] = []
 
     def clear(self):
         self.dynamo_guards.clear()
         self.shape_guards.clear()
+        self.aotautograd_guards.clear()
 
 
 _CURRENT_TRACING_CONTEXT = None
+
 
 class TracingContext:
     guards_context = GuardsContext()
@@ -177,4 +213,3 @@ def tracing(context: TracingContext):
     finally:
         _CURRENT_TRACING_CONTEXT.clear()
         _CURRENT_TRACING_CONTEXT = old_context
-
