@@ -595,8 +595,7 @@ def _post_backward_hook(
                         handle.flat_param._padded_unsharded_size
                         != handle.flat_param._unpadded_unsharded_size
                         or (
-                            handle._uses_reduce_mixed_precision
-                            and handle._config.reduce_dtype
+                            handle._config.reduce_dtype
                             != handle._config.low_prec_param_dtype
                         )
                     )
