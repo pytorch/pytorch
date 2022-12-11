@@ -719,7 +719,7 @@ class ShapeEnv(object):
             try:
                 exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                logging.warning(f"failing guard allocated at {tb}")
+                logging.warning(f"Failing guard allocated at:\n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
