@@ -294,7 +294,9 @@ class RegisterDispatchKey:
     ) -> Union[NativeSignature, DispatcherSignature]:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
         return DispatcherSignature.from_schema(
-            f.func, prefix=f"wrapper_{self.backend_index.dispatch_key}_{f.func.name.overload_name}_", symint=self.symint
+            f.func,
+            prefix=f"wrapper_{self.backend_index.dispatch_key}_{f.func.name.overload_name}_",
+            symint=self.symint,
         )
 
     def gen_out_inplace_wrapper(
