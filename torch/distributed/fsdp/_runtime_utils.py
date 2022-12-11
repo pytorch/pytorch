@@ -585,10 +585,10 @@ def _post_backward_hook(
                     )
                     or handle._uses_param_mixed_precision  # computed grad dtype differs
                 )
-                and param.grad.dtype != handle._config.low_prec_reduce_dtype
+                and param.grad.dtype != handle._config.reduce_dtype
             ):
                 # TODO: Use the low precision communication hook directly
-                param.grad.data = param.grad.to(handle._config.low_prec_reduce_dtype)
+                param.grad.data = param.grad.to(handle._config.reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
