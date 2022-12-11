@@ -9,6 +9,7 @@ import re
 import sys
 import subprocess
 import yaml
+from collections import OrderedDict
 from torchgen.code_template import CodeTemplate
 from dataclasses import dataclass
 from typing import List
@@ -71,7 +72,7 @@ class VulkanShaderGenerator(object):
         self.ops_template_params = {}
 
     def add_params_yaml(self, parameters_yaml_file):  # type: ignore[no-untyped-def]
-        all_template_params = {}
+        all_template_params = OrderedDict()
         with open(parameters_yaml_file, "r") as f:
             contents = yaml.load(f, Loader=UniqueKeyLoader)
             for key in contents:
@@ -95,9 +96,9 @@ class VulkanShaderGenerator(object):
                 invalid_keys = param_vals_set - template_params_set
                 if (len(invalid_keys)) > 0:
                     raise KeyError(f"Invalid keys {invalid_keys} are found")
-                param_vals_copy = copy.deepcopy(param_vals)
-                for key in missing_keys:
-                    param_vals_copy[key] = op_params_default_vals[key]
+                param_vals_copy = copy.deepcopy(op_params_default_vals)
+                for key in param_vals:
+                    param_vals_copy[key] = param_vals[key]
                 self.ops_template_params[op].append(param_vals_copy)
 
     def generate(self, glsl_template_in, out_dir):  # type: ignore[no-untyped-def]
