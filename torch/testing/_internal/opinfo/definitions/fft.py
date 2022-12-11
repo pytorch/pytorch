@@ -1,4 +1,5 @@
 import unittest
+from functools import partial
 from typing import List
 
 import numpy as np
@@ -15,6 +16,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
+    ErrorInput,
     OpInfo,
     SampleInput,
     SpectralFuncInfo,
@@ -65,6 +67,26 @@ class SpectralFuncPythonRefInfo(SpectralFuncInfo):
         super().__init__(**ukwargs)
 
 
+def error_inputs_fft(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    # Zero-dimensional tensor has no dimension to take FFT of
+    yield ErrorInput(
+        SampleInput(make_arg()),
+        error_type=IndexError,
+        error_regex="Dimension specified as -1 but tensor has no dimensions",
+    )
+
+
+def error_inputs_fftn(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    # Specifying a dimension on a zero-dimensional tensor
+    yield ErrorInput(
+        SampleInput(make_arg(), dim=(0,)),
+        error_type=IndexError,
+        error_regex="Dimension specified as 0 but tensor has no dimensions",
+    )
+
+
 def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(
@@ -97,6 +119,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -121,6 +144,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -146,6 +170,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -171,6 +196,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -205,6 +231,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -245,6 +272,7 @@ op_db: List[OpInfo] = [
                 else (torch.half, torch.complex32)
             ),
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -280,6 +308,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -300,6 +329,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -322,6 +352,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,))
         ),
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -338,6 +369,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifft,
         ndimensional=SpectralFuncType.OneD,
+        error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -362,6 +394,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifft2,
         ndimensional=SpectralFuncType.TwoD,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -393,6 +426,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2c",
         ref=np.fft.ifftn,
         ndimensional=SpectralFuncType.ND,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -424,6 +458,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=np.fft.ihfft,
         ndimensional=SpectralFuncType.OneD,
+        error_inputs_func=error_inputs_fft,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -443,6 +478,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=scipy.fft.ihfftn if has_scipy_fft else None,
         ndimensional=SpectralFuncType.TwoD,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -474,6 +510,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_r2c",
         ref=scipy.fft.ihfftn if has_scipy_fft else None,
         ndimensional=SpectralFuncType.ND,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -504,6 +541,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfft,
         ndimensional=SpectralFuncType.OneD,
+        error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -529,6 +567,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfft2,
         ndimensional=SpectralFuncType.TwoD,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -561,6 +600,7 @@ op_db: List[OpInfo] = [
         decomp_aten_name="_fft_c2r",
         ref=np.fft.irfftn,
         ndimensional=SpectralFuncType.ND,
+        error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
