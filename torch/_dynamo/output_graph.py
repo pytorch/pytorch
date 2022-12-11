@@ -257,6 +257,7 @@ class OutputGraph(fx.Tracer):
             self.name_to_input,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
+        removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
             if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
@@ -265,6 +266,8 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
+                removed_nodes += 1
+        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -404,6 +407,8 @@ class OutputGraph(fx.Tracer):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+
+        log.debug(f"COMPILING GRAPH due to {reason}")
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -559,7 +564,7 @@ class OutputGraph(fx.Tracer):
                     else format_graph_tabular(gm.graph)
                 )
                 log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
+                    logging.INFO,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
