@@ -2070,14 +2070,23 @@ def run(runner, args, original_dir=None):
         for name in runner.iter_model_names(args):
             current_name = name
             placeholder_batch_size = 0
-            try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
-            except subprocess.SubprocessError:
-                print("ERROR")
+
+            def write_csv():
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
+
+            try:
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                )
+            except subprocess.TimeoutExpired:
+                print("TIMEOUT", file=sys.stderr)
+                write_csv()
+            except subprocess.SubprocessError:
+                print("ERROR", file=sys.stderr)
+                write_csv()
         print_summary(output_filename)
 
 
