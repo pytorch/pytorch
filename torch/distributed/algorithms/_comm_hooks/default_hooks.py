@@ -71,9 +71,10 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     further computation happens in full precision.
     """
     orig_grad_data = grad.data
-    grad.data = grad.data.to(state.parameter_type)
-    # Don't let this memory get reused until after the transfer.
-    orig_grad_data.record_stream(torch.cuda.current_stream())  # type: ignore[arg-type]
+    if orig_grad_data.dtype != state.parameter_type:
+        grad.data = grad.data.to(state.parameter_type)
+        # Don't let this memory get reused until after the transfer.
+        orig_grad_data.record_stream(torch.cuda.current_stream())  # type: ignore[arg-type]
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     r"""
@@ -116,9 +117,11 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
         output.div_(state.gradient_postdivide_factor)
 
 def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor):
-    grad.data = grad.data.to(prec)
+    if grad.dtype != prec:
+        grad.data = grad.data.to(prec)
     if output is not None:
-        output.data = output.data.to(prec)
+        if output.dtype != prec:
+            output.data = output.data.to(prec)
         reduce_scatter_hook(state, grad, output)
         _decompress(state, output)
     else:
