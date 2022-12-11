@@ -1,6 +1,7 @@
-import enum
-from typing import List, Optional, Callable
 import dataclasses
+import enum
+from typing import Callable, List, Optional
+
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -24,6 +25,11 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
+
+class GuardBuilderBase:
+    pass
+
+
 @dataclasses.dataclass
 class Guard:
     # The name of a Guard specifies what exactly it is the guard is guarding
@@ -43,7 +49,7 @@ class Guard:
     # GRAD_MODE and SYMBOL_MATCH.
     name: str
     source: GuardSource
-    create_fn: Callable[["GuardBuilder", "Guard"], None]
+    create_fn: Callable[[GuardBuilderBase, Guard], None]
     is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
@@ -103,7 +109,7 @@ class Guard:
             """
         return s
 
-    def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
+    def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
 
     def is_nn_module(self):

@@ -1,6 +1,4 @@
 import collections
-import dataclasses
-import enum
 import logging
 import math
 import os
@@ -16,6 +14,8 @@ import numpy as np
 import sympy
 
 import torch
+
+from torch._guards import Guard, GuardBuilderBase, GuardSource
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -32,8 +32,6 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
-
-from torch._guards import Guard, GuardSource
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -75,7 +73,7 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
-class GuardBuilder:
+class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
