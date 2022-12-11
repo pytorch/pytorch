@@ -77,6 +77,9 @@ class QueryPool final {
     return shader_logs_[shader_logs_.size() - 1];
   }
 
+  /** Total number of entries in all shader logs, but without locking mutex */
+  size_t shader_logs_entry_count_thread_unsafe();
+
  public:
   inline bool is_enabled() const {
     return VK_NULL_HANDLE != querypool_;

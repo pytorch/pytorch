@@ -50,6 +50,7 @@ def parse_args() -> Any:
     parser.add_argument("--pr-number", type=str, help="the pull request number")
     parser.add_argument("--tag", type=str, help="the associated tag if it exists")
     parser.add_argument("--event-name", type=str, help="name of the event that triggered the job (pull, schedule, etc)")
+    parser.add_argument("--schedule", type=str, help="cron schedule that triggered the job")
     return parser.parse_args()
 
 
@@ -188,7 +189,9 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-    if args.event_name == "schedule":
+    if args.event_name == "schedule" and args.schedule == '29 8 * * *':
+        # we don't want to run the mem leack check or disabled tests on normal
+        # periodically scheduled jobs, only the ones at this time
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
