@@ -571,12 +571,7 @@ def _post_backward_hook(
         # sharded strategies
         pre_allocated_unsharded_grad = False
         if handle.uses_sharded_strategy:
-            if handle._uses_reduce_mixed_precision:
-                grad_dtype = handle._config.low_prec_reduce_dtype
-            elif handle._uses_param_mixed_precision:
-                grad_dtype = handle._config.low_prec_param_dtype
-            else:
-                grad_dtype = param.grad.dtype
+            grad_dtype = handle._config.reduce_dtype
             # Pre-allocate the (padded) sharded gradient and the padded
             # unsharded gradient if the gradient needs padding or if the
             # gradient needs to be of a different dtype, both in the default
@@ -598,7 +593,7 @@ def _post_backward_hook(
                         != handle.flat_param._unpadded_unsharded_size
                         or (
                             handle._uses_reduce_mixed_precision
-                            and handle._config.low_prec_reduce_dtype
+                            and handle._config.reduce_dtype
                             != handle._config.low_prec_param_dtype
                         )
                     )
