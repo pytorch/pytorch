@@ -13,6 +13,7 @@ import collections
 import textwrap
 import logging
 from torch import SymInt, SymFloat
+from torch._guards import ShapeGuard, TracingContext
 
 try:
     import sympy  # type: ignore[import]
@@ -467,7 +468,7 @@ class ShapeGuardPrinter(StrPrinter):
 
 class ShapeEnv(object):
     def __init__(self):
-        self.guards = []
+        self.guards = TracingContext.get().guards_context.shape_guards
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
@@ -712,14 +713,14 @@ class ShapeEnv(object):
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
-        for g, tb in self.guards:
-            if self._maybe_evaluate_static(g) is not None:
+        for guard in self.guards:
+            if self._maybe_evaluate_static(guard.expr) is not None:
                 continue
-            g = self.simplify(g)
+            guard.expr = self.simplify(guard.expr)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(guard.expr))
             except Exception:
-                logging.warning(f"failing guard allocated at {tb}")
+                logging.warning(f"failing guard allocated at {guard.stack}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
@@ -740,7 +741,7 @@ class ShapeEnv(object):
         return eval(code, {}, dict(zip(arg_names, args)))
 
     def get_nontrivial_guards(self):
-        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard) is None]
 
     def format_guards(self, verbose=False):
         def format_tb(tb):
@@ -748,7 +749,7 @@ class ShapeEnv(object):
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
+        return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -896,9 +897,9 @@ class ShapeEnv(object):
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append((expr, stack))
+                self.guards.append(ShapeGuard(expr, stack))
             elif concrete_val is sympy.false:
-                self.guards.append((sympy.Not(expr), stack))
+                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
             else:
-                self.guards.append((sympy.Eq(expr, concrete_val), stack))
+                self.guards.append(ShapeGuard(sympy.Eq(expr, concrete_val), stack))
         return concrete_val
