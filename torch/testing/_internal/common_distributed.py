@@ -365,8 +365,9 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
 
 # https://github.com/pytorch/pytorch/issues/75665
 if TEST_WITH_ROCM:
@@ -882,7 +883,8 @@ def _run_test_with_mt_pg(self, timeout, world_size, callback):
         print(f"Rank {rank} raised:")
         for line in traceback.format_exception(*exc_info):
             sys.stdout.write(line)
-    self.assertEqual([], failed_ranks, "Some ranks failed")
+    if failed_ranks:
+        raise failed_ranks[0][1][1]  # re-throw the first exception
 
 
 def spawn_threads_and_init_comms(

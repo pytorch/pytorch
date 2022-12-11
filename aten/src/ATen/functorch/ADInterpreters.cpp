@@ -44,12 +44,17 @@ Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
+static Tensor base_lift(const Tensor& tensor, int64_t level) {
+  auto tensor_ = unwrapIfDead(tensor);
+  return materializeGradWrappers(tensor_, level);
+}
+
 Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 static void autogradBasedTransformProcess(
@@ -81,7 +86,8 @@ static void autogradBasedTransformSendToNext(
     TransformType transform_type,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
-    bool grad_special_case) {
+    bool grad_special_case,
+    std::shared_ptr<bool> life_handle) {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -110,7 +116,7 @@ static void autogradBasedTransformSendToNext(
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level, is_immutable);
+    return makeTensorWrapper(tensor, current_level, is_immutable, life_handle);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -209,7 +215,11 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
       op, stack, level(),
-      TransformType::Grad, prevGradMode(), nullopt, grad_special_case);
+      TransformType::Grad,
+      prevGradMode(),
+      nullopt,
+      grad_special_case,
+      base_->is_alive_ptr());
 }
 
 void JvpInterpreterPtr::processImpl(
@@ -224,7 +234,11 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
       op, stack, level(),
-      TransformType::Jvp, nullopt, prevFwdGradMode(), grad_special_case);
+      TransformType::Jvp,
+      nullopt,
+      prevFwdGradMode(),
+      grad_special_case,
+      base_->is_alive_ptr());
 }
 
 }} // namespace at::functorch

@@ -89,7 +89,17 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   std::shared_ptr<bool> is_alive_;
 };
 
+// There are two variants of makeTensorWrapper: one that accepts a life handle
+// and one that doesn't.
+// The one that doesn't tries to automatically get the life handle from the
+// interpreter on the DynamicLayerStack.
+// It needs to be used with caution: if the interpreter is not on the
+// DynamicLayerStack, then we won't be able to find the life handle.
+//
+// In practice this isn't a problem: when we're constructing TensorWrapper in
+// Python, the corresponding interpreter is on the stack.
 TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable=false);
+TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable, const std::shared_ptr<bool>& life_handle);
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
