@@ -590,8 +590,7 @@ def _post_backward_hook(
                         handle.flat_param._padded_unsharded_size
                         != handle.flat_param._unpadded_unsharded_size
                         or (
-                            handle._uses_reduce_mixed_precision
-                            and handle._config.reduce_dtype
+                            handle._config.reduce_dtype
                             != handle._config.low_prec_param_dtype
                         )
                     )
@@ -775,10 +774,7 @@ def _cast_grad_to_param_dtype(
     dtype cast happens in the hook instead.
     """
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-    if (
-        not _low_precision_hook_enabled(state)
-        and sharded_grad.dtype != param.dtype
-    ):
+    if not _low_precision_hook_enabled(state) and sharded_grad.dtype != param.dtype:
         low_prec_grad_data = sharded_grad.data
         sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)
         # Since for `NO_SHARD`, the gradient is produced in the computation
