@@ -596,11 +596,12 @@ def _post_backward_hook(
                         **grad_kwargs,
                     )
         elif handle._config.reduce_dtype != handle.flat_param.dtype:  # for `NO_SHARD`
-            padded_unsharded_grad = torch.empty(
-                handle.flat_param._unpadded_unsharded_size,
-                dtype=handle._config.reduce_dtype,
-                device=handle.device,
-            )
+            with torch.cuda.stream(state._streams["default"]):
+                padded_unsharded_grad = torch.empty(
+                    handle.flat_param._unpadded_unsharded_size,
+                    dtype=handle._config.reduce_dtype,
+                    device=handle.device,
+                )
         pre_allocated_unsharded_grad = padded_unsharded_grad is not None
         pre_allocated_sharded_grad = handle.uses_sharded_strategy
 
