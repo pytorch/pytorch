@@ -450,8 +450,7 @@ void pack_buffer_to_vtensor(
     packing::record_nchw_to_buffer_op(
         context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
   } else {
-    api::ShaderInfo compute_shader =
-        packing::get_nchw_to_image_shader(v_self);
+    api::ShaderInfo compute_shader = packing::get_nchw_to_image_shader(v_self);
     packing::record_nchw_to_image_op(
         context,
         compute_shader,
@@ -478,8 +477,7 @@ void pack_vtensor_to_staging(
     packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {
-    api::ShaderInfo compute_shader =
-        packing::get_image_to_nchw_shader(v_self);
+    api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
     packing::record_image_to_nchw_op(
         context,
         compute_shader,
