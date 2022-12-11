@@ -579,7 +579,7 @@ def _post_backward_hook(
         needs_pre_reduce_cast = reduce_dtype != handle._config.low_prec_param_dtype
         needs_pre_optim_copy = (
             not _low_precision_hook_enabled(state)  # done in the hook
-            and handle._orig_param_dtype != handle._config.reduce_dtype
+            and handle._orig_param_dtype != reduce_dtype
         )
         if handle.uses_sharded_strategy:
             with torch.cuda.stream(state._streams["default"]):
