@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from unittest.mock import patch
 
 import torch
+from torch._guards import TracingContext
 
 from . import (
     allowed_functions,
@@ -1601,9 +1602,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         mutated_closure_cell_contents: Set[str],
+        tracing_context: TracingContext,
     ):
         super(InstructionTranslator, self).__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, tracing_context, self
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,
