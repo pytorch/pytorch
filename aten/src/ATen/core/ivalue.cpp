@@ -1,17 +1,18 @@
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -492,11 +493,11 @@ std::ostream& printMaybeAnnotatedList(
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
-    printList(out, the_list.toListRef(), "[", "]", formatter);
+    printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
     out << ")";
     return out;
   } else {
-    return printList(out, the_list.toListRef(), "[", "]", formatter);
+    return printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
   }
 }
 
@@ -533,9 +534,9 @@ std::ostream& printMaybeAnnotatedDict(
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+    printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
   } else {
-    return printDict(out, the_dict.toGenericDict(), formatter);
+    return printDict(out, the_dict.toGenericDict(), std::move(formatter));
   }
   return out;
 }
@@ -873,7 +874,7 @@ IValue IValue::deepcopy(
       for (const auto& e : toTupleRef().elements()) {
         copied_tuple.push_back(e.deepcopy(memo));
       }
-      copy = IValue(ivalue::Tuple::create(copied_tuple));
+      copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
       break;
     case IValue::Tag::GenericList: {
@@ -1033,7 +1034,7 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
   } else {
     std::weak_ptr<torch::jit::CompilationUnit> weak_cu =
         cu_.getStrongRefOrThrow();
-    return WeakTypePtr(weak_cu, type_);
+    return WeakTypePtr(std::move(weak_cu), type_);
   }
 }
 

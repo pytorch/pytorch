@@ -551,70 +551,6 @@ class GuardBuilder:
         )
 
 
-from sympy.printing.str import StrPrinter
-
-
-@dataclasses.dataclass
-class TensorReference(object):
-    """
-    TensorReference objects are entirely optional. They are created to give us hints
-    into where the symbolic shape came from.
-
-    ref_id: The id of the tensor
-    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
-    idx: An index in the structure
-
-    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
-    TensorReference(ref_id=12345, kind="size", idx=2)
-    """
-
-    ref_id: Optional[int] = None
-    kind: Optional[str] = None
-    idx: Optional[int] = None
-    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
-    # But it is a Optional[Union["sympy.Expr", int]]
-    expr: Optional[object] = None  # Populated after association
-
-    def __hash__(self):
-        return hash((self.ref_id, self.kind, self.idx))
-
-
-class DynamoGuardPrinter(StrPrinter):
-    @staticmethod
-    def tensor_ref_as_str(tensor_ref, id_to_name_map):
-        if tensor_ref.kind in ("size", "stride"):
-            return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()[{tensor_ref.idx}]"
-        return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
-
-    def __init__(
-        self,
-        expr_to_tensor_ref: Dict[sympy.Symbol, Dict[TensorReference, None]],
-        id_to_name_map,
-        shape_env,
-        intermediary_symbols,
-    ):
-        super().__init__()
-        self.expr_to_tensor_ref = expr_to_tensor_ref
-        self.id_to_name_map = id_to_name_map
-        self.shape_env = shape_env
-        self.intermediary_symbols = intermediary_symbols
-
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.Symbol)
-        if expr == 0:
-            return "0"
-        if expr == 1:
-            return "1"
-        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
-        refs = self.expr_to_tensor_ref[expr]
-        if len(refs) == 0:
-            return super()._print_Symbol(expr)
-        tensor_ref = next(
-            iter(refs)
-        )  # Any is fine here, because we install equality guards later
-        return DynamoGuardPrinter.tensor_ref_as_str(tensor_ref, self.id_to_name_map)
-
-
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that consistutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -662,85 +598,6 @@ class CheckFunctionManager:
         )
         self._seen_ids.clear()
 
-    """
-    This is a complex bit of logic. The outline here is brief. For a line by line breakdown, see
-    the code comments below.
-
-    The role of this function is to take the current state of symbolic shape guards, tensor ids in the
-    CURRENT dynamo frame, and tensor names (dynamo's frame agnostic tensor reference mechanism, see TensorCheck and
-    guards.cpp for more info) - and produce executable python expressions for addition to our guarded code components
-    that make their way into check_fn.
-
-    We DO NOT create guards based on ids. The IDs act as a lookup for the following mapping:
-
-    dynamo: tensor_name <> tensor_id
-    shape_env: tensor_id <> shape_expr
-
-    This allows us to then create a tensor_name <> shape_expr association for the current frames guards.
-    """
-
-    def _parse_symbolic_shape_expressions(self, tensor_check_names, tensor_check_ids):
-        # Pre join output
-        finished_expressions: List[str] = []
-
-        # A mapping of tensor_ids to tensor names
-        id_to_name_map: Dict[int, str] = {}
-
-        # We should not have a shape env, or guards if we are not in config.dynamic shapes
-        # But check it anyway.
-        if not config.dynamic_shapes:
-            return None
-
-        expr_to_tensor_ref: Dict[sympy.Symbol, Dict[TensorReference, None]] = {}
-        guard_printer = DynamoGuardPrinter(
-            expr_to_tensor_ref,
-            id_to_name_map,
-            self.output_graph.shape_env,
-            self.output_graph.intermediary_symbols,
-        )
-
-        # tensor_check_names is the primary tensor association mechanism in dynamo.
-        # All other guards installations are driven off of it, so these ones will too.
-        for name in tensor_check_names:
-            tensor_id = tensor_check_ids[name]
-            id_to_name_map[tensor_id] = name
-
-            if tensor_id in self.output_graph.tensor_id_to_sym_shape_ref:
-                # If we made it here, this tensor_id is relevant to dynamo guard installation
-                # AND was found in the shape_env
-                tensor_ref_set = self.output_graph.tensor_id_to_sym_shape_ref[tensor_id]
-                for tensor_ref in tensor_ref_set:
-                    obj_expr = tensor_ref.expr
-                    if obj_expr not in expr_to_tensor_ref:
-                        expr_to_tensor_ref[obj_expr] = {}
-                    expr_to_tensor_ref[obj_expr][tensor_ref] = None
-
-        guard_expression = self.output_graph.shape_env.get_guard_expr()
-        expr_as_str = guard_printer.doprint(guard_expression)
-        # We may get into a state where symbolic shape keys (all should be found in replacements)
-        # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-        for key in self.output_graph.shape_env.var_to_val.keys():
-            assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-        finished_expressions.append(expr_as_str)
-
-        for expr in expr_to_tensor_ref.keys():
-            tensor_refs = expr_to_tensor_ref[expr].keys()
-            equality_candidates = [
-                DynamoGuardPrinter.tensor_ref_as_str(x, id_to_name_map)
-                for x in tensor_refs
-            ]
-
-            if len(equality_candidates) > 1:
-                equality_expr = " == ".join(equality_candidates)
-                finished_expressions.append(equality_expr)
-
-        # Redundant with code_parts, but allows us to wrap it with parens nicely.
-        if len(finished_expressions) == 0:
-            return None
-
-        expression = " and ".join(finished_expressions)
-        return f"({expression})"
-
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
@@ -769,9 +626,6 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
-            symbolic_shape_expression = self._parse_symbolic_shape_expressions(
-                tensor_check_names, tensor_check_ids
-            )
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -786,15 +640,29 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
-            if symbolic_shape_expression:
-                code_parts.append(symbolic_shape_expression)
-                verbose_code_parts.append(symbolic_shape_expression)
+
+        # Let's handle ShapeEnv guards.  To do this, we will resolve
+        # shape variables to sources from GraphArgs.  This must happen after
+        # tensor checks.
+        # NB: self.output_graph can be None in the debug_nops tests
+        # TODO: What about grapharg pruning?  This could be problematic if we
+        # guarded on a tensor that isn't actually used as an input in the end.
+        if self.output_graph and self.output_graph.shape_env:
+            graphargs = self.output_graph.graphargs
+            expr_as_str = self.output_graph.shape_env.codegen_guards(
+                [a.fake_tensor for a in graphargs if a.is_tensor],
+                [a.source.name() for a in graphargs if a.is_tensor],
+            )
+            if expr_as_str != "True":
+                code_parts.append(expr_as_str)
+                verbose_code_parts.append(expr_as_str)
+                # TODO: this is a hack
                 guards_out.add(
                     Guard(
                         name="symbolic_shape_expression",
                         source=GuardSource.SHAPE_ENV,
                         create_fn=GuardBuilder.SYMBOL_MATCH,
-                        code_list=symbolic_shape_expression,
+                        code_list=expr_as_str,
                     )
                 )
 
