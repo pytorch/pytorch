@@ -1,6 +1,6 @@
 import functools
 import warnings
-from typing import Any, Callable, cast, Iterable, List, no_type_check, Optional, Tuple
+from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -571,7 +571,7 @@ def _post_backward_hook(
         # sharded strategies
         pre_allocated_unsharded_grad = False
         if handle.uses_sharded_strategy:
-            grad_dtype = _get_grad_reduction_dtype(handle)
+            grad_dtype = handle._config.reduce_dtype
             # Pre-allocate the (padded) sharded gradient and the padded
             # unsharded gradient if the gradient needs padding or if the
             # gradient needs to be of a different dtype, both in the default
@@ -591,7 +591,7 @@ def _post_backward_hook(
                         != handle.flat_param._unpadded_unsharded_size
                         or (
                             handle._uses_reduce_mixed_precision
-                            and handle._config.low_prec_reduce_dtype
+                            and handle._config.reduce_dtype
                             != handle._config.low_prec_param_dtype
                         )
                     )
@@ -736,22 +736,6 @@ def _post_backward_hook(
                 # Delay using sharded gradient views until after the
                 # reduce-scatter instead of immediately after resharding
                 handle._use_sharded_grad_views()
-
-
-def _get_grad_reduction_dtype(handle: FlatParamHandle) -> torch.dtype:
-    """
-    Returns the dtype used for gradient reduction.
-
-    Precondition: ``handle.flat_param.grad is not None``.
-    """
-    if handle._uses_reduce_mixed_precision:
-        grad_dtype = cast(torch.dtype, handle._config.low_prec_reduce_dtype)
-    elif handle._uses_param_mixed_precision:
-        grad_dtype = cast(torch.dtype, handle._config.low_prec_param_dtype)
-    else:
-        assert handle.flat_param.grad is not None  # mypy
-        grad_dtype = handle.flat_param.grad.dtype
-    return grad_dtype
 
 
 @no_type_check
