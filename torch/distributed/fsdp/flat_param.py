@@ -326,8 +326,6 @@ class FlatParamHandle:
         mp_reduce_dtype (Optional[torch.dtype]): Gradient reduction mixed
             precision setting passed to the FSDP constructor.
         keep_low_prec_grads (bool): Whether to keep gradients in low precision.
-        config (HandleConfig): A config customizing the handle based on FSDP's
-            available features.
         use_orig_params (bool): If ``True``, then FSDP preserves the original
             parameter variables and returns them from ``named_parameters()``
             (e.g. to support different optimizer hyperparameters within one
