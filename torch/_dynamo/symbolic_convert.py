@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from unittest.mock import patch
 
 import torch
+from torch._guards import TracingContext
 
 from . import (
     allowed_functions,
