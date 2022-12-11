@@ -566,11 +566,11 @@ def _post_backward_hook(
         if not state._sync_gradients:
             return
 
+        reduce_dtype = handle._config.reduce_dtype
         needs_pre_optim_copy = (
             not _low_precision_hook_enabled(state)
-            and handle._config.low_prec_param_dtype != handle._config.reduce_dtype
+            and handle._orig_param_dtype != reduce_dtype
         )
-        reduce_dtype = handle._config.reduce_dtype
         # Define `padded_unsharded_grad` for all strategies, and only define
         # `new_sharded_grad` for sharded strategies
         pre_allocated_unsharded_grad = False
@@ -594,10 +594,11 @@ def _post_backward_hook(
                         **grad_kwargs,
                     )
         elif handle._config.reduce_dtype != handle.flat_param.dtype:  # for `NO_SHARD`
-            padded_unsharded_grad = torch.empty(
-                handle.flat_param._unpadded_unsharded_size,
-                **grad_kwargs,
-            )
+            with torch.cuda.stream(state._streams["default"]):
+                padded_unsharded_grad = torch.empty(
+                    handle.flat_param._unpadded_unsharded_size,
+                    **grad_kwargs,
+                )
         pre_allocated_unsharded_grad = padded_unsharded_grad is not None
         pre_allocated_sharded_grad = handle.uses_sharded_strategy
         # Define `pre_optim_grad` for all strategies
