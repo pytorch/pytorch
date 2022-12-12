@@ -4278,6 +4278,36 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         # check(fast_mode=True) # RuntimeError: Expected result Tensor to be of format CSR
         check(fast_mode=False)
 
+    def test_gradcheck_sparse_bsr_input(self):
+        def check(fast_mode):
+            def fn(sparse_bsr):
+                return torch.clone(sparse_bsr).to_dense()
+
+            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
+                      check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
+                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode)
+        # RuntimeError: "empty_sparse_compressed" expected sparse compressed (non-block) tensor layout but got SparseBsr
+        # check(fast_mode=True)
+        check(fast_mode=False)
+
+    def test_gradcheck_sparse_bsc_input(self):
+        def check(fast_mode):
+            def fn(sparse_bsc):
+                return torch.clone(sparse_bsc).to_dense()
+
+            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
+                      check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
+                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode)
+        # RuntimeError: "empty_sparse_compressed" expected sparse compressed (non-block) tensor layout but got SparseBsc
+        # check(fast_mode=True)
+        check(fast_mode=False)
+
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
             @staticmethod
