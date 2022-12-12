@@ -150,8 +150,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
   // Override it to instantiate your own data.
   virtual Value GetIrValueForTensor(
-    const at::Tensor& tensor,
-    const BackendDevice& device) const;
+      const at::Tensor& tensor,
+      const BackendDevice& device) const;
 
   Value CreateTensorNode(BackendDataPtr data, bool read_only) const;
 
