@@ -75,6 +75,7 @@ def compute_contiguity(shape, strides):
     are represented by False.
     """
     from nvfuser._C import compute_contiguity
+
     return compute_contiguity(shape, strides)
 
 

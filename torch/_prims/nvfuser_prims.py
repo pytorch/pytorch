@@ -285,7 +285,8 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    from nvfuser._C import DataType # type: ignore[import]
+    from nvfuser._C import DataType  # type: ignore[import]
+
     output_dtype = DataType.Null
     return fd.ops.sum(a, dims, keep_dims, output_dtype)
 
