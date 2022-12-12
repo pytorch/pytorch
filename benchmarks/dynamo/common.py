@@ -121,7 +121,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
     "convmixer_768_32",  # accuracy - Unable to repro on A100
     "hrnet_w18",  # accuracy - Unable to repro on A100
     "sebotnet33ts_256",  # accuracy - Unable to repro on A100
