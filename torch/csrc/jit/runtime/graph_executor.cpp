@@ -922,13 +922,12 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
   GRAPH_DEBUG(
-      "Before customPrePassses (beginning of runNondiffOptimization)\n",
-      *graph);
+      "Before customPrePasses (beginning of runNondiffOptimization)\n", *graph);
   // Run custom passes that different backends can register.
   for (const auto& passPair : getCustomPrePasses()) {
     passPair.first(graph);
   }
-  GRAPH_DEBUG("After customPrePassses\n", *graph);
+  GRAPH_DEBUG("After customPrePasses\n", *graph);
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
@@ -960,7 +959,7 @@ void runNondiffOptimization(
     passPair.first(graph);
   }
   GRAPH_DEBUG(
-      "After customPostPassses (end of runNondiffOptimization)\n", *graph);
+      "After customPostPasses (end of runNondiffOptimization)\n", *graph);
 }
 
 void runOptimization(

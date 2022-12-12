@@ -1,10 +1,11 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value
 from typing import List, Optional
 
-__all__ = ['Adagrad', 'adagrad']
+__all__ = ["Adagrad", "adagrad"]
+
 
 class Adagrad(Optimizer):
     r"""Implements Adagrad algorithm.
@@ -60,7 +61,7 @@ class Adagrad(Optimizer):
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
-        differentiable: bool = False
+        differentiable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -85,7 +86,7 @@ class Adagrad(Optimizer):
             initial_accumulator_value=initial_accumulator_value,
             foreach=foreach,
             maximize=maximize,
-            differentiable=differentiable
+            differentiable=differentiable,
         )
         super(Adagrad, self).__init__(params, defaults)
 
@@ -123,6 +124,20 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state["sum"].share_memory_()
 
+    def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
+        has_sparse_grad = False
+        for p in group["params"]:
+            if p.grad is not None:
+                if p.grad.is_sparse:
+                    has_sparse_grad = True
+                params_with_grad.append(p)
+                grads.append(p.grad)
+                state = self.state[p]
+                state_sums.append(state["sum"])
+                state_steps.append(state["step"])
+
+        return has_sparse_grad
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -143,16 +158,7 @@ class Adagrad(Optimizer):
             state_sums = []
             state_steps = []
 
-            has_sparse_grad = False
-            for p in group["params"]:
-                if p.grad is not None:
-                    if p.grad.is_sparse:
-                        has_sparse_grad = True
-                    params_with_grad.append(p)
-                    grads.append(p.grad)
-                    state = self.state[p]
-                    state_sums.append(state["sum"])
-                    state_steps.append(state["step"])
+            has_sparse_grad = self._init_group(group, params_with_grad, grads, state_sums, state_steps)
 
             adagrad(
                 params_with_grad,
@@ -166,7 +172,7 @@ class Adagrad(Optimizer):
                 has_sparse_grad=has_sparse_grad,
                 foreach=group["foreach"],
                 maximize=group["maximize"],
-                differentiable=group["differentiable"]
+                differentiable=group["differentiable"],
             )
 
         return loss
@@ -222,7 +228,7 @@ def adagrad(
         eps=eps,
         has_sparse_grad=has_sparse_grad,
         maximize=maximize,
-        differentiable=differentiable
+        differentiable=differentiable,
     )
 
 
@@ -245,13 +251,13 @@ def _single_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
-    differentiable: bool
+    differentiable: bool,
 ):
 
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
         grad = grad if not maximize else -grad
 
         if weight_decay != 0:
@@ -267,7 +273,6 @@ def _single_tensor_adagrad(
             grad = grad.coalesce()  # the update is non-linear so indices must be unique
             grad_indices = grad._indices()
             grad_values = grad._values()
-            size = grad.size()
 
             state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
             std = state_sum.sparse_mask(grad)
@@ -304,7 +309,7 @@ def _multi_tensor_adagrad(
     eps: float,
     has_sparse_grad: bool,
     maximize: bool,
-    differentiable: bool
+    differentiable: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"

@@ -38,13 +38,19 @@ void check_mkldnn_binary_fusion_inputs(
     const Tensor& other,
     const Tensor& weight,
     const Tensor& bias) {
-  TORCH_CHECK(
-      input.options().type_equal(weight.options()),
-      "Input type (",
-      input.toString(),
-      ") and weight type (",
-      weight.toString(),
-      ") should be the same");
+  if (!weight.is_mkldnn()) {
+    TORCH_CHECK(
+        input.options().type_equal(weight.options()),
+        "Input type (",
+        input.toString(),
+        ") and weight type (",
+        weight.toString(),
+        ") should be the same");
+  } else {
+    TORCH_CHECK(
+        input.scalar_type() == input.scalar_type(),
+        "mkldnn pointwise binary: input dtype and weight dtype should be the same");
+  }
   TORCH_CHECK(
       input.options().type_equal(other.options()),
       "Input type (",
@@ -61,11 +67,11 @@ void check_mkldnn_binary_fusion_inputs(
       ") should be the same");
   TORCH_CHECK(
       input.device().is_cpu(),
-      "mkldnn pointwise binary fusion: inputs' device should be CPU")
+      "mkldnn pointwise binary fusion: input's device should be CPU");
   TORCH_CHECK(
       input.scalar_type() == ScalarType::Float ||
           input.scalar_type() == ScalarType::BFloat16,
-      "mkldnn pointwise binary: inputs' dtypoe should be float or bfloat16")
+      "mkldnn pointwise binary: input's dtype should be float or bfloat16");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(
         mkldnn_bf16_device_check(),
@@ -132,6 +138,7 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
+      {"swish", ATTR_FUNC(swish)},
       {"hardswish", ATTR_FUNC(hardswish)},
       {"leaky_relu", attr_func_leaky_relu},
       {"hardtanh", attr_func_hardtanh},

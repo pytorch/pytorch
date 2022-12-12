@@ -7,7 +7,7 @@ from .. import config, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import namedtuple_fields
+from ..utils import namedtuple_fields, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -23,10 +23,23 @@ class BaseListVariable(VariableTracker):
             tuple: TupleVariable,
         }[obj]
 
-    def __init__(self, items: List[VariableTracker], **kwargs):
-        super(BaseListVariable, self).__init__(**kwargs)
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        recursively_contains=None,
+        regen_guards=True,
+        **kwargs,
+    ):
+        super(BaseListVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
+
+        # Sometimes, we know that we have passed in the guards from the items in the list
+        if regen_guards:
+            self.guards.update(VariableTracker.propagate(items)["guards"])
+
         self.items: List[VariableTracker] = items
 
     def _as_proxy(self):
@@ -89,41 +102,50 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, value, items=None, guards=None, **kwargs):
-        if items is None:
-            items = [variables.ConstantVariable(x, guards=guards) for x in value]
-        super().__init__(items, guards=guards, **kwargs)
-        self.value = value
+    def __init__(self, items, **kwargs):
+        items_to_map = items
+        start = variables.ConstantVariable(0)
+        stop = None
+        step = variables.ConstantVariable(1)
+
+        if len(items_to_map) == 1:
+            (stop,) = items_to_map
+        elif len(items_to_map) == 2:
+            start, stop = items_to_map
+        elif len(items_to_map) == 3:
+            start, stop, step = items_to_map
+        else:
+            raise AssertionError()
+
+        assert stop is not None
+        super().__init__([start, stop, step], **kwargs)
 
     def python_type(self):
         return range
 
     def as_python_constant(self):
-        return self.value
+        return range(*[x.as_python_constant() for x in self.items])
+
+    def as_proxy(self):
+        return self.python_type()(*self._as_proxy())
+
+    def unpack_var_sequence(self, tx):
+        return [
+            variables.ConstantVariable(x).add_options(self)
+            for x in self.as_python_constant()
+        ]
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        range_fn = codegen.create_load_global("range", add=True)
-        if self.value.step == 1:
-            if self.value.start == 0:
-                return [
-                    range_fn,
-                    codegen.create_load_const(self.value.stop),
-                    create_instruction("CALL_FUNCTION", 1),
-                ]
-            return [
-                range_fn,
-                codegen.create_load_const(self.value.start),
-                codegen.create_load_const(self.value.stop),
-                create_instruction("CALL_FUNCTION", 2),
-            ]
-        return [
-            range_fn,
-            codegen.create_load_const(self.value.start),
-            codegen.create_load_const(self.value.stop),
-            codegen.create_load_const(self.value.step),
-            create_instruction("CALL_FUNCTION", 3),
-        ]
+        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.foreach(self.items)
+        return [create_instruction("CALL_FUNCTION", 3)]
+
+    def var_getattr(self, tx, name):
+        fields = ["start", "stop", "step"]
+        if name not in fields:
+            unimplemented(f"range.{name}")
+        return self.items[fields.index(name)].add_options(self)
 
 
 class ListVariable(BaseListVariable):
@@ -145,9 +167,17 @@ class ListVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
+            new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
+            if arg.mutable_local is not None:
+                new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(self.items + [arg], **options),
+                ListVariable(
+                    self.items + [arg],
+                    recursively_contains=new_rec_contains,
+                    regen_guards=False,
+                    **options,
+                ),
             )
             return ConstantVariable(None)
         elif (
@@ -162,6 +192,7 @@ class ListVariable(BaseListVariable):
                 self,
                 ListVariable(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
+                    regen_guards=False,
                     **options,
                 ),
             )
@@ -172,7 +203,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -180,14 +211,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, **options),
+                ListVariable(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], **options),
+                ListVariable([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -202,7 +233,7 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = list(value.items)
             else:
                 items[key.as_python_constant()] = value
-            result = ListVariable(items, **options)
+            result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -308,6 +339,57 @@ class SizeVariable(TupleVariable):
         ]
         return build_torch_size
 
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "__getitem__":
+            assert not kwargs and len(args) == 1
+            if config.dynamic_shapes:
+                out = self.get_item_dyn(tx, args[0])
+            else:
+                out = self.getitem_const(args[0])
+            return out
+        return super(SizeVariable, self).call_method(tx, name, args, kwargs)
+
+    def get_item_dyn(self, tx, arg: VariableTracker):
+        from .tensor import DynamicShapeVariable
+
+        index = arg.as_python_constant()
+        if isinstance(index, slice):
+
+            def _dynamo_get_item_lambda(target, index):
+                return torch.Size.__getitem__(target, index)
+
+            parent_proxy = self.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                _dynamo_get_item_lambda,
+                *proxy_args_kwargs([self, arg], {}),
+            )
+            items = self.items[index]
+
+            def _unpack_into_example(item):
+                if isinstance(item, DynamicShapeVariable):
+                    return item.dyn_shape
+                return item.as_python_constant()
+
+            # Mirror the indexing into example_value for downstream correctness
+            proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
+                index
+            ]
+            return SizeVariable(items, proxy=proxy).add_options(arg, self)
+        else:
+            assert isinstance(index, int)
+            return self.items[index].add_options(arg, self)
+
 
 class ShapeVariable(TupleVariable):
     """
@@ -325,6 +407,9 @@ class NamedTupleVariable(TupleVariable):
 
     def python_type(self):
         return self.tuple_cls
+
+    def as_python_constant(self):
+        return self.python_type()(*[x.as_python_constant() for x in self.items])
 
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
@@ -349,13 +434,20 @@ class NamedTupleVariable(TupleVariable):
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
+        from .tensor import DynamicShapeVariable
+
+        if any([isinstance(x, DynamicShapeVariable) for x in items]):
+            unimplemented("Dynamic slicing not supported")
+
+        items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
-        if len(items) == 1:
-            (stop,) = items
-        elif len(items) == 2:
-            start, stop = items
-        elif len(items) == 3:
-            start, stop, step = items
+
+        if len(items_to_map) == 1:
+            (stop,) = items_to_map
+        elif len(items_to_map) == 2:
+            start, stop = items_to_map
+        elif len(items_to_map) == 3:
+            start, stop, step = items_to_map
         else:
             raise AssertionError()
 
@@ -366,7 +458,7 @@ class SliceVariable(BaseListVariable):
         # more complete support for breaking on data dependent operators.
         if not config.capture_scalar_outputs:
             for limit in (start, stop, step):
-                if isinstance(limit, variables.TensorVariable):
+                if isinstance(limit, (variables.TensorVariable, DynamicShapeVariable)):
                     unimplemented("Dynamic slicing not supported")
 
         super().__init__([start, stop, step], **kwargs)
@@ -392,8 +484,10 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
-    def __init__(self, items, index: int = 0, **kwargs):
-        super(ListIteratorVariable, self).__init__(**kwargs)
+    def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
+        super(ListIteratorVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
@@ -410,6 +504,7 @@ class ListIteratorVariable(VariableTracker):
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
+            recursively_contains=self.recursively_contains,
             **VariableTracker.propagate([self]),
         )
 
