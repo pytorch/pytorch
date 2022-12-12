@@ -58,9 +58,9 @@ class TestTensorOps(ShardedTensorTestBase):
         )
         st = sharded_tensor.rand(spec, (12, 5))
         ones_st = sharded_tensor.ones(spec, (12, 5))
-        self.assertNotEqual(ones_st, st, rtol=0, atol=0, exact_device=True)
+        self.assertFalse(torch.equal(ones_st, st))
         st.copy_(ones_st)
-        self.assertEqual(st, ones_st, rtol=0, atol=0, exact_device=True)
+        self.assertTrue(torch.equal(st, ones_st))
 
         # no grad inplace_copy should work between two with different requires_grad
         st_with_grad = sharded_tensor.rand(spec, (12, 5), requires_grad=True)
