@@ -781,6 +781,9 @@ def wrap_fx_proxy_cls(
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
                         example_value
                     )
+            if type(example_value) == torch.Tensor:
+                # If the type is definitively not a subclass, cloning it is fine.
+                example_value = _clone_input(example_value)
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
