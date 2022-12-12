@@ -33,7 +33,6 @@ import io
 import itertools
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -275,28 +274,19 @@ def parse_args():
         default=None,
         help="number of threads to use for eager and inductor.",
     )
-    numactl_group = parser.add_argument_group("Numactl Parameters")
-    numactl_group.add_argument(
-        "--single_socket",
+    launcher_group = parser.add_argument_group("launcher Parameters")
+    launcher_group.add_argument(
+        "--enable_launcher",
         action="store_true",
         default=False,
-        help="By default use socket 0",
+        help="Use torch.backends.xeon.run_cpu to get the peak performance on Intel(R) Xeon(R) Scalable Processors.",
     )
-    numactl_group.add_argument(
-        "--single_core",
-        action="store_true",
-        default=False,
-        help="By default use core 0",
-    )
-    numactl_group.add_argument(
-        "--physcpubind",
-        "-C",
+    launcher_group.add_argument(
+        "--launcher_args",
         type=str,
-        default=None,
-        help="Only execute process on given cpus. If not provided, all the cores of socket 0 will be used.",
-    )
-    numactl_group.add_argument(
-        "--membind", "-m", type=int, default=0, help="Only allocate memory from nodes."
+        default="",
+        help="Provide the args of torch.backends.xeon.run_cpu. "
+        "To look up what optional arguments this launcher offers: python -m torch.backends.xeon.run_cpu --help",
     )
     args = parser.parse_args()
     return args
@@ -333,37 +323,6 @@ def generate_csv_name(args, dtype, suite, device, compiler, testing):
 
 
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
-    def is_numactl_available():
-        numactl_available = False
-        cmd = ["numactl", "-C", "0", "-m", "0", "ls"]
-        r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL)
-        if r.returncode == 0:
-            numactl_available = True
-        return numactl_available
-
-    def get_numactl_cmd():
-        numactl = ""
-        if device == "cpu" and platform.system() == "Linux" and is_numactl_available():
-            cores = int(
-                subprocess.getstatusoutput("lscpu | grep Core | awk '{print $4}'")[
-                    1
-                ].strip()
-            )
-            if args.single_socket:
-                args.physcpubind = "0-{}".format(cores - 1)
-                args.membind = 0
-            elif args.single_core:
-                args.physcpubind = "0"
-                args.membind = 0
-            if args.physcpubind is None:
-                args.physcpubind = "0-{}".format(cores - 1)
-            if args.membind is None:
-                args.membind = 0
-            numactl = "numactl -C {} --membind={}".format(
-                args.physcpubind, args.membind
-            )
-        return numactl
-
     mode = get_mode(args)
     suites_str = "_".join(suites)
     devices_str = "_".join(devices)
@@ -390,10 +349,11 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 for compiler in compilers:
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
-                    cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    numactl = get_numactl_cmd()
-                    cmd = f"{numactl} {cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-
+                    launcher_cmd = "python"
+                    if args.enable_launcher:
+                        launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.launcher_args}"
+                    cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
+                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
 
@@ -765,26 +725,20 @@ class ParsePerformanceLogs(Parser):
         str_io.write("~~~\n")
         return str_io.getvalue()
 
-    def generate_executive_summary(self, mode):
+    def generate_executive_summary(self):
         machine = "A100 GPUs"
         if "cpu" in self.devices:
             get_machine_cmd = "lscpu| grep 'Model name' | awk -F':' '{print $2}'"
             machine = subprocess.getstatusoutput(get_machine_cmd)[1].strip()
-        perf_des = "forward pass"
-        acc_des = "forward pass outputs"
-        if mode == "training":
-            perf_des += " and backward pass"
-            acc_des += " and gradients"
         description = (
             "We evaluate different backends "
             "across three benchmark suites - torchbench, huggingface and timm. We run "
             "these experiments on "
             + machine
-            + ". Each experiment runs one iteration of "
-            + perf_des
-            + ". For accuracy, we check the numerical correctness of "
-            + acc_des
-            + " by comparing with native pytorch. We measure speedup "
+            + ". Each experiment runs one iteration of forward pass "
+            "and backward pass for training and forward pass only for inference. "
+            "For accuracy, we check the numerical correctness of forward pass outputs and gradients "
+            "by comparing with native pytorch. We measure speedup "
             "by normalizing against the performance of native pytorch. We report mean "
             "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
             "Caveats\n"
@@ -904,8 +858,8 @@ class ParsePerformanceLogs(Parser):
         comment = generate_dropdown_comment(title, body)
         return comment
 
-    def gen_summary_files(self, mode):
-        self.generate_executive_summary(mode)
+    def gen_summary_files(self):
+        self.generate_executive_summary()
         for suite in self.suites:
             self.plot_graph(
                 self.untouched_parsed_frames[suite]["speedup"],
@@ -942,10 +896,7 @@ def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_
     parser = parser_class(
         suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
     )
-    mode = "training"
-    if args.inference:
-        mode = "inference"
-    parser.gen_summary_files(mode)
+    parser.gen_summary_files()
     return
 
 
