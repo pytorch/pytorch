@@ -4,11 +4,12 @@ import types
 from typing import Dict, List
 
 import torch._C
+from torch._guards import Guard, GuardSource
 
 from .. import config, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..guards import Guard, GuardBuilder, GuardSource
+from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
@@ -571,7 +572,6 @@ class GetAttrVariable(VariableTracker):
                             "call_function",
                             original_torch_or_getattr_variable.value,
                             *proxy_args_kwargs(new_args, new_kwargs),
-                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -582,7 +582,6 @@ class GetAttrVariable(VariableTracker):
                             "call_method",
                             original_torch_or_getattr_variable.name,
                             *proxy_args_kwargs(new_args, new_kwargs),
-                            current_tx=tx,
                         ),
                         **options,
                     )
