@@ -54,24 +54,6 @@ c10::intrusive_ptr<Work> allgather_coalesced_(
       input_list_vec);
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
-    const at::TensorList& output_tensors,
-    const c10::List<at::TensorList>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto input_tensors_vec = toTensorVectorVector(input_tensors);
-  auto work = process_group->reduce_scatter(
-      output_tensors_vec,
-      input_tensors_vec,
-      ReduceScatterOptions{
-          *reduce_op.get(), std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors_vec, work);
-}
-
 c10::intrusive_ptr<Work> _reduce_scatter_base_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -83,72 +65,6 @@ c10::intrusive_ptr<Work> _reduce_scatter_base_(
       input_tensor,
       ReduceScatterOptions{
           *reduce_op.get(), std::chrono::milliseconds(timeout)});
-}
-
-c10::intrusive_ptr<Work> gather_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const at::TensorList& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      input_tensors_vec,
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
-}
-
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
-    const at::TensorList& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto work = process_group->scatter(
-      output_tensors_vec,
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(output_tensors_vec), work);
-}
-
-c10::intrusive_ptr<Work> alltoall_(
-    at::TensorList output_tensors,
-    at::TensorList input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
-      AllToAllOptions{std::chrono::milliseconds(timeout)});
-}
-
-c10::intrusive_ptr<Work> alltoall_base_(
-    at::Tensor& output,
-    at::Tensor& input,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
-    int64_t timeout) {
-  return process_group->alltoall_base(
-      output,
-      input,
-      output_split_sizes,
-      input_split_sizes,
-      AllToAllOptions{std::chrono::milliseconds(timeout)});
-}
-
-c10::intrusive_ptr<Work> barrier(
-    at::Tensor /* unused */,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<int64_t>& device_ids,
-    int64_t timeout) {
-  return process_group->barrier(
-      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
 void monitored_barrier_(
@@ -233,14 +149,11 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "alltoall_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
+      "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "alltoall_base_",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_base_));
+      "alltoall_base_(Tensor output, Tensor input, __torch__.torch.classes.c10d.ProcessGroup process_group, int[] output_split_sizes, int[] input_split_sizes, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "barrier",
-      dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
+      "barrier(Tensor tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int[] device_ids, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "monitored_barrier_",
       dispatch(
@@ -397,14 +310,14 @@ c10::intrusive_ptr<Work> allgather_coalesced(
 c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const at::TensorList& output_tensors,
-    const c10::List<at::TensorList>& input_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts) {
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("c10d::reduce_scatter_", "")
           .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
               const at::TensorList&,
-              const c10::List<at::TensorList>&,
+              const std::vector<std::vector<at::Tensor>>&,
               const c10::intrusive_ptr<::c10d::ProcessGroup>&,
               const c10::intrusive_ptr<::c10d::ReduceOp>&,
               int64_t)>();

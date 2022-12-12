@@ -1394,12 +1394,10 @@ Arguments:
               "reduce_scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  std::vector<at::Tensor>& output_tensors,
-                 std::vector<std::vector<at::Tensor>>& input_tensors,
+                 const std::vector<std::vector<at::Tensor>>& input_tensors,
                  const ::c10d::ReduceScatterOptions& opts) {
-                auto input_tensor_lists = ::c10d::toTensorLists(input_tensors);
-
                 return ::c10d::ops::reduce_scatter(
-                    self, output_tensors, input_tensor_lists, opts);
+                    self, output_tensors, input_tensors, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
@@ -1413,7 +1411,7 @@ Arguments:
                  std::vector<at::Tensor>& input,
                  ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
-                c10::List<at::TensorList> inputs = {input};
+                std::vector<std::vector<at::Tensor>> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
                 return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
@@ -1554,12 +1552,19 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_start_coalescing",
-              &::c10d::ProcessGroup::startCoalescing,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device) {
+                self->startCoalescing(device.type());
+              },
               py::arg("device_type"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_end_coalescing",
-              &::c10d::ProcessGroup::endCoalescing,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device,
+                 std::vector<c10::intrusive_ptr<::c10d::Work>>& reqs) {
+                self->endCoalescing(device.type(), reqs);
+              },
               py::arg("device_type"),
               py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>())

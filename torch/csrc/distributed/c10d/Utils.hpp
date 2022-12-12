@@ -60,27 +60,6 @@ inline std::string toString(const c10::Layout& layout) {
   return ss.str();
 }
 
-// convert from std::vector<std::vector<at::Tensor>> to c10::List<at::TensorList>
-inline c10::List<at::TensorList> toTensorLists(const std::vector<std::vector<at::Tensor>>& tensorLists) {
-  c10::List<at::TensorList> tensorListsList;
-  tensorListsList.reserve(tensorLists.size());
-  for (const auto& tensorList : tensorLists) {
-    tensorListsList.emplace_back(tensorList);
-  }
-  return tensorListsList;
-}
-
-// Convert from c10::List<at::TensorList> to std::vector<std::vector<at::Tensor>>
-inline std::vector<std::vector<at::Tensor>> toTensorVectorVector(
-    const c10::List<at::TensorList>& input) {
-  std::vector<std::vector<at::Tensor>> output;
-  output.reserve(input.size());
-  for (const auto& tensorList : input) {
-    output.emplace_back(tensorList.get().toTensorVector());
-  }
-  return output;
-}
-
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {

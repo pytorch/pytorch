@@ -47,7 +47,7 @@ TORCH_API c10::intrusive_ptr<Work> allgather_coalesced(
 TORCH_API c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const at::TensorList& output_tensors,
-    const c10::List<at::TensorList>& input_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts = {});
 
 TORCH_API c10::intrusive_ptr<Work> _reduce_scatter_base(

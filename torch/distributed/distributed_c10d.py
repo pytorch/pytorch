@@ -1003,7 +1003,7 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            # backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
+            backend_pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
             backend_pg_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
@@ -3626,7 +3626,7 @@ def new_subgroups(
         group_size = torch.cuda.device_count()
     world_size = get_world_size()
     if world_size < group_size:
-        raise ValueError("The arg 'group_size' must not exceed the world size")
+        raise ValueError(f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})")
     if world_size % group_size != 0:
         raise ValueError("The world size must be divisible by 'group_size'")
 
