@@ -4,11 +4,13 @@ from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
+import math
 
 from typing import Callable, Dict
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
+from torch._utils import is_compiling
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -21,6 +23,7 @@ class _RequiredParameter(object):
 
 required = _RequiredParameter()
 
+
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         prev_grad = torch.is_grad_enabled()
@@ -32,6 +35,24 @@ def _use_grad_for_differentiable(func):
         return ret
     return _use_grad
 
+def _get_value(x):
+    # item is significantly faster than a cpu tensor in eager mode
+    if not torch.jit.is_scripting() and is_compiling():
+        return x
+    else:
+        return x.item()
+
+def _stack_if_compiling(x):
+    if not torch.jit.is_scripting() and is_compiling():
+        return torch.stack(x)
+    else:
+        return x
+
+def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscript type inference
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
+        return x.sqrt()
+    else:
+        return math.sqrt(x)
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
