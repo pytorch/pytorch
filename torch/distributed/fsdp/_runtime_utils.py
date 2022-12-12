@@ -569,7 +569,6 @@ def _post_backward_hook(
         # Pre-allocate any gradient tensor that would otherwise need to be
         # allocated in the post-backward stream. Allocation is required when
         # the gradient needs padding or if it needs to be of a different dtype,
-
         # possibly before and/or after reduction. We always define each tensor
         # but have `None` indicate no pre-allocation.
         reduce_unsharded_grad: Optional[torch.Tensor] = None
@@ -661,10 +660,10 @@ def _post_backward_hook(
                     reduce_unsharded_grad,
                     reduce_sharded_grad,
                 )
-                if handle._config.sharding_strategy in {
+                if handle._config.sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
                     HandleShardingStrategy._HYBRID_SHARD_ZERO2,
-                }:
+                ):
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=reduce_sharded_grad,
