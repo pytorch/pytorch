@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
+from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS, default_hooks
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
@@ -34,7 +34,6 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
-
 
 @no_type_check
 def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
@@ -68,7 +67,6 @@ def _validate_hybrid_shard_setup(fsdp_root: _FSDPState, fsdp_module: nn.Module):
             raise ValueError(
                 f"For {fsdp_root.sharding_strategy}, inter-node process groups do not match"
             )
-
 
 @no_type_check
 def _lazy_init(
@@ -363,6 +361,7 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
 
+
     free_unsharded_flat_params = [
         not state._is_root
         and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
@@ -573,15 +572,22 @@ def _post_backward_hook(
         state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
         with torch.cuda.stream(state._streams["post_backward"]):
-            autograd_computed_grad = param.grad.data
+            unsharded_grad_data = param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
             if (
-                not _low_precision_hook_enabled(state)
+                (
+                    (
+                        handle._uses_reduce_mixed_precision
+                        and not _low_precision_hook_enabled(state)
+                    )
+                    or handle._uses_param_mixed_precision  # computed grad dtype differs
+                )
                 and param.grad.dtype != handle._config.reduce_dtype
             ):
+                # TODO: Use the low precision communication hook directly
                 param.grad.data = param.grad.to(handle._config.reduce_dtype)
 
             if handle.uses_sharded_strategy:
@@ -592,6 +598,10 @@ def _post_backward_hook(
                 # async and would result in reducing the wrong gradient.
                 unsharded_grad = param.grad.data
                 param.grad = None
+                p_assert(
+                    len(unsharded_grad.size()) == 1,
+                    f"Expects gradient to be flattened but got {unsharded_grad.size()}",
+                )
                 chunks = list(unsharded_grad.chunk(state.world_size))
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
@@ -607,12 +617,17 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                if handle._config.sharding_strategy in (
+                    HandleShardingStrategy.HYBRID_SHARD,
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2
+                ):
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
                     )
-                _cast_grad_to_param_dtype(state, new_sharded_grad, param)
+
+                _cast_grad_to_param_dtype(state, handle, new_sharded_grad, param)
+
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient
                 # reductions may happen in arbitrary order
@@ -622,14 +637,14 @@ def _post_backward_hook(
                     param._saved_grad_shard += new_sharded_grad
                 else:
                     param._saved_grad_shard = new_sharded_grad
-                grad_to_offload = param._saved_grad_shard
+                sharded_grad = param._saved_grad_shard
             else:
                 state._communication_hook(state._communication_hook_state, param.grad)
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
-                    _cast_grad_to_param_dtype(state, param.grad, param)
-                grad_to_offload = param.grad.data
+                    _cast_grad_to_param_dtype(state, handle, param.grad, param)
+                sharded_grad = param.grad.data
 
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
@@ -638,21 +653,20 @@ def _post_backward_hook(
                 # using `non_blocking=True` here.
                 non_blocking = handle.uses_sharded_strategy
                 param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    grad_to_offload.detach(), non_blocking=non_blocking
+                    sharded_grad.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
-                # Since the gradient being offloaded may have been produced in
-                # the computation stream and is being consumed here in the
-                # post-backward stream, inform the caching allocator
+                # Since the sharded gradient is produced in the post-backward
+                # stream and consumed later in the computation stream, inform
+                # the caching allocator
                 _no_dispatch_record_stream(
-                    grad_to_offload.data,
-                    state._streams["post_backward"],
+                    sharded_grad.data, torch.cuda.current_stream()
                 )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
             _no_dispatch_record_stream(
-                autograd_computed_grad, state._streams["post_backward"]
+                unsharded_grad_data, state._streams["post_backward"]
             )
 
             if handle._use_orig_params:
@@ -686,6 +700,7 @@ def _should_free_in_backward(
 @no_type_check
 def _cast_grad_to_param_dtype(
     state: _FSDPState,
+    handle: FlatParamHandle,
     sharded_grad: torch.Tensor,
     param: FlatParameter,
 ):
@@ -700,7 +715,10 @@ def _cast_grad_to_param_dtype(
     dtype cast happens in the hook instead.
     """
     _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-    if not _low_precision_hook_enabled(state) and sharded_grad.dtype != param.dtype:
+    if (
+        not _low_precision_hook_enabled(state)
+        and sharded_grad.dtype != param.dtype
+    ):
         low_prec_grad_data = sharded_grad.data
         sharded_grad.data = sharded_grad.data.to(dtype=param.dtype)
         # Since for `NO_SHARD`, the gradient is produced in the computation

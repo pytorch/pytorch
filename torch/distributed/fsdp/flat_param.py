@@ -113,9 +113,9 @@ class HandleShardingStrategy(Enum):
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
     offload_params: bool
-    fwd_bwd_param_dtype: torch.dtype
-    reduce_dtype: torch.dtype
-    keep_low_precision_grads: bool
+    low_prec_param_dtype: Optional[torch.dtype]
+    reduce_dtype: Optional[torch.dtype]
+    keep_low_prec_grads: bool
 
 
 class FlatParameter(nn.Parameter):
@@ -325,7 +325,7 @@ class FlatParamHandle:
             setting passed to the FSDP constructor.
         mp_reduce_dtype (Optional[torch.dtype]): Gradient reduction mixed
             precision setting passed to the FSDP constructor.
-        keep_low_precision_grads (bool): Whether to keep gradients in low precision.
+        keep_low_prec_grads (bool): Whether to keep gradients in low precision.
         use_orig_params (bool): If ``True``, then FSDP preserves the original
             parameter variables and returns them from ``named_parameters()``
             (e.g. to support different optimizer hyperparameters within one
@@ -351,7 +351,7 @@ class FlatParamHandle:
         offload_params: bool,
         mp_param_dtype: Optional[torch.dtype],
         mp_reduce_dtype: Optional[torch.dtype],
-        keep_low_precision_grads: bool,
+        keep_low_prec_grads: bool,
         process_group: dist.ProcessGroup,
         use_orig_params: bool,
     ):
@@ -367,12 +367,12 @@ class FlatParamHandle:
         self._init_flat_param(params, module, use_orig_params)
         self._orig_param_dtype = self.flat_param.dtype
         self._use_unsharded_views(as_params=False)
-        self._config = self._init_config(
+        self._config = self._sanitize_config(
             sharding_strategy,
             offload_params,
             mp_param_dtype,
             mp_reduce_dtype,
-            keep_low_precision_grads,
+            keep_low_prec_grads,
         )
 
     def _init_flat_param(
@@ -513,13 +513,13 @@ class FlatParamHandle:
         flat_param = FlatParameter(flat_param_data, requires_grad=requires_grad)
         return flat_param
 
-    def _init_config(
+    def _sanitize_config(
         self,
         sharding_strategy: HandleShardingStrategy,
         offload_params: bool,
         mp_param_dtype: Optional[torch.dtype],
         mp_reduce_dtype: Optional[torch.dtype],
-        keep_low_precision_grads: bool,
+        keep_low_prec_grads: bool,
     ) -> HandleConfig:
         """
         Precondition: ``self.flat_param`` is set via :meth:`_init_flat_param`.
@@ -536,22 +536,22 @@ class FlatParamHandle:
         low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
         if low_prec_param_dtype_specified and not low_prec_reduce_dtype_specified:
             # Special case: infer gradient reduction mixed precision
-            fwd_bwd_param_dtype = mp_param_dtype
-            reduce_dtype = fwd_bwd_param_dtype
+            low_prec_param_dtype = mp_param_dtype
+            low_prec_reduce_dtype = low_prec_param_dtype
         else:
-            fwd_bwd_param_dtype = mp_param_dtype or self._orig_param_dtype
-            reduce_dtype = mp_reduce_dtype or self._orig_param_dtype
-        assert fwd_bwd_param_dtype is not None
-        assert reduce_dtype is not None
+            low_prec_param_dtype = mp_param_dtype or self._orig_param_dtype
+            low_prec_reduce_dtype = mp_reduce_dtype or self._orig_param_dtype
+        assert low_prec_param_dtype is not None
+        assert low_prec_reduce_dtype is not None
         # TODO (awgu): Get rid of `HandleConfig` and store the attributes
         # directly on the `FlatParamHandle` now that we are processing it
         # instead of just taking what is passed in.
         return HandleConfig(
             sharding_strategy,
             offload_params,
-            fwd_bwd_param_dtype,
-            reduce_dtype,
-            keep_low_precision_grads,
+            low_prec_param_dtype,
+            low_prec_reduce_dtype,
+            keep_low_prec_grads,
         )
 
     ###################################
@@ -815,14 +815,14 @@ class FlatParamHandle:
             flat_param._mp_shard = torch.zeros_like(
                 flat_param._local_shard,
                 device=self.device,
-                dtype=self._config.fwd_bwd_param_dtype,
+                dtype=self._config.low_prec_param_dtype,
             )
             _free_storage(flat_param._mp_shard)
         if self.uses_sharded_strategy:
             # We maintain a padded unsharded tensor that serves as the
             # all-gather destination and owns the original parameter storages.
             unsharded_param_dtype = (
-                self._config.fwd_bwd_param_dtype
+                self._config.low_prec_param_dtype
                 if self._uses_param_mixed_precision
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
@@ -957,8 +957,8 @@ class FlatParamHandle:
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
             p_assert(
-                unsharded_flat_param.dtype != self._config.fwd_bwd_param_dtype,
-                f"Expects full precision but got {self._config.fwd_bwd_param_dtype}",
+                unsharded_flat_param.dtype != self._config.low_prec_param_dtype,
+                f"Expects full precision but got {self._config.low_prec_param_dtype}",
             )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
@@ -1145,7 +1145,7 @@ class FlatParamHandle:
                 # the post-backward callback.
                 local_shard_dtype = flat_param._local_shard.dtype  # type: ignore[attr-defined]
                 if (
-                    self._config.keep_low_precision_grads
+                    self._config.keep_low_prec_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
                     sharded_grad.data = sharded_grad.to(local_shard_dtype)
@@ -1166,11 +1166,11 @@ class FlatParamHandle:
         """
 
         def cast_grad_to_param_dtype_if_needed(flat_param):
-            if self._config.keep_low_precision_grads:
+            if self._config.keep_low_prec_grads:
                 assert flat_param.grad is not None  # mypy
-                if flat_param.grad.dtype != self._config.fwd_bwd_param_dtype:
+                if flat_param.grad.dtype != self._config.low_prec_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(
-                        self._config.fwd_bwd_param_dtype
+                        self._config.low_prec_param_dtype
                     )
                     if self._use_orig_params:
                         self._use_sharded_grad_views()
@@ -1992,7 +1992,7 @@ class FlatParamHandle:
 
     @property
     def _uses_param_mixed_precision(self) -> bool:
-        return self._config.fwd_bwd_param_dtype != self._orig_param_dtype
+        return self._config.low_prec_param_dtype != self._orig_param_dtype
 
     @property
     def _uses_reduce_mixed_precision(self) -> bool:
@@ -2000,7 +2000,7 @@ class FlatParamHandle:
 
     @property
     def _keep_low_precision_grads(self) -> bool:
-        return self._config.keep_low_precision_grads
+        return self._config.keep_low_prec_grads
 
     @property
     def _force_full_precision(self) -> bool:
