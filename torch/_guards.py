@@ -2,6 +2,7 @@ import dataclasses
 import enum
 import weakref
 from typing import Callable, List, NamedTuple, Optional
+import logging
 
 # TODO(voz): Stolen pattern, not sure why this is the case,
 # but mypy complains.
