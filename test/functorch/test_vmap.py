@@ -3301,6 +3301,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
+        xfail('as_strided', 'partial_views'),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3316,6 +3317,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        xfail('as_strided', 'partial_views'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
@@ -3925,10 +3927,12 @@ class TestVmapOperatorsOpInfo(TestCase):
             escaped = x
             return x ** 2
 
-        x = torch.randn(3)
+        x = torch.randn([3, 3, 3, 3, 3])
         vmap(f)(x)
 
         common_message = r"your tensor may have escaped from inside a function being vmapped.*{0}.*"
+
+        # Note: These are not a complete set of tests for all possible functions calling 'vmap_check_escaped'
 
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing")):
             escaped.sin()
@@ -3938,6 +3942,20 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_inplace_plumbing")):
             escaped.mul_(1)
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("binary_cross_entropy_plumbing")):
+            torch.nn.functional.binary_cross_entropy(escaped, torch.zeros([3, 3, 3, 3]))
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_existing_bdim_all_batch_rule")):
+            torch.nn.functional.adaptive_max_pool2d(escaped, output_size=(1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_reduction_batch_rule")):
+            escaped.argmin()
+
+        a = torch.zeros([4, 4, 4, 4])
+        b = torch.zeros([4, 4, 4, 4], dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, common_message.format("boxed_all_tensors_have_optional_bdim")):
+            torch.ops.aten.adaptive_max_pool2d_backward(escaped, a, b)
 
         vmap(f)(torch.tensor([[0, 0], [0, 0]], dtype=torch.int))
         with self.assertRaisesRegex(RuntimeError, common_message.format("gen_vmap_plumbing_no_returns")):
