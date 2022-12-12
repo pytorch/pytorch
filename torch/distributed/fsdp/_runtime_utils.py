@@ -576,7 +576,7 @@ def _post_backward_hook(
         pre_optim_grad: Optional[torch.Tensor] = None
         reduce_dtype = handle._config.reduce_dtype
         reduce_grad_kwargs = {"dtype": reduce_dtype, "device": handle.device}
-        needs_pre_reduce_cast = reduce_dtype != handle._config.low_precision_param_dtype
+        needs_pre_reduce_cast = reduce_dtype != handle._config.fwd_bwd_param_dtype
         needs_pre_optim_copy = (
             not _low_precision_hook_enabled(
                 state
