@@ -19,7 +19,7 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from torch._C_nvfuser import (  # type: ignore[import]
+    from nvfuser._C import (  # type: ignore[import]
         DataType,
         Fusion,
         FusionDefinition,
@@ -74,7 +74,7 @@ def compute_contiguity(shape, strides):
     Contiguous dimensions are represented by True, strided dimensions
     are represented by False.
     """
-    return torch._C_nvfuser.compute_contiguity(shape, strides)
+    return nvfuser._C.compute_contiguity(shape, strides)
 
 
 def to_nvfuser_template_args(args):

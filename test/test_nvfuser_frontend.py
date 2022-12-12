@@ -9,9 +9,9 @@ from torch.testing._internal.jit_utils import RUN_CUDA
 import torch._refs as refs
 import torch._prims as prims
 
-# Will only create the _nvfuser module if CUDA is available
+# Will only create the nvfuser module if CUDA is available
 try:
-    from torch._C_nvfuser import Fusion, FusionCache, FusionDefinition, DataType
+    from nvfuser._C import Fusion, FusionCache, FusionDefinition, DataType
 except ImportError:
     pass
 

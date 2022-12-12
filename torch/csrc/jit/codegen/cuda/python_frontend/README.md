@@ -8,7 +8,7 @@ This frontend allows for a user to describe the set of operations for nvFuser to
 
 ```python
 import torch
-from torch._C_nvfuser import Fusion, FusionDefinition, DataType
+from nvfuser._C import Fusion, FusionDefinition, DataType
 
 fs = Fusion()
 with FusionDefinition(fs) as fd :
@@ -104,7 +104,7 @@ output = fd.ops.foo(arg1, ... )
 ```
 You can see a supported list of operations with the following query:
 ```python
-python -c "from torch._C_nvfuser import FusionDefinition; help(FusionDefinition.Operators)"
+python -c "from nvfuser._C import FusionDefinition; help(FusionDefinition.Operators)"
 ```
 #### Notating Outputs
 
@@ -119,7 +119,7 @@ add_output(output: Scalar)
 # Debug Information
 **Query a list of supported operations:**
 ```python
-python -c "from torch._C_nvfuser import FusionDefinition; help(FusionDefinition.Operators)"
+python -c "from nvfuser._C import FusionDefinition; help(FusionDefinition.Operators)"
 ```
 **View the fusion definitions that are executed by setting an environment variable:**
 ```python

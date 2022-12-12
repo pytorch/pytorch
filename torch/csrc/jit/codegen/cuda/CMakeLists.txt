@@ -161,43 +161,57 @@ install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_IN
 # --- build nvfuser_python library
 
 if(BUILD_PYTHON)
-  set(NVFUSER_PYTHON "${PROJECT_NAME}_python")
+  set(NVFUSER "${PROJECT_NAME}")
   #find_package(pybind11 REQUIRED)
 
-  set(NVFUSER_PYTHON_SRCS)
-  list(APPEND NVFUSER_PYTHON_SRCS
+  set(NVFUSER_SRCS)
+  list(APPEND NVFUSER_SRCS
       ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
-      ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_register.cpp
+      ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_extension.cpp
   )
 
-  add_library(${NVFUSER_PYTHON} SHARED ${NVFUSER_PYTHON_SRCS})
+  add_library(${NVFUSER} MODULE ${NVFUSER_SRCS})
   if(NOT USE_ROCM)
-    target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+    target_compile_options(${NVFUSER} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
     # NB: This must be target_compile_definitions, not target_compile_options,
     # as the latter is not respected by nvcc
-    target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
-    target_link_libraries(${NVFUSER_PYTHON} PRIVATE torch::nvtoolsext)
+    target_compile_definitions(${NVFUSER} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+    target_link_libraries(${NVFUSER} PRIVATE torch::nvtoolsext)
   else()
-    target_compile_options(${NVFUSER_PYTHON} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
-    target_compile_definitions(${NVFUSER_PYTHON} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+    target_compile_options(${NVFUSER} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
+    target_compile_definitions(${NVFUSER} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
     target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE
       USE_ROCM
       __HIP_PLATFORM_HCC__
       )
   endif()
 
-  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch torch_python ${TORCHLIB_FLAVOR} pybind::pybind11)
-  if(NOT MSVC)
-    target_compile_options(${NVFUSER_PYTHON} PRIVATE -Wno-unused-variable)
-  endif()
-  target_include_directories(${NVFUSER_PYTHON}
+  target_link_libraries(${NVFUSER} PRIVATE ${NVFUSER_CODEGEN})
+  target_link_libraries(${NVFUSER} PRIVATE torch torch_python ${TORCHLIB_FLAVOR})
+  target_link_libraries(${NVFUSER} PRIVATE pybind::pybind11)
+  target_include_directories(${NVFUSER}
                          PRIVATE ${TORCH_ROOT})
-  target_compile_options(${NVFUSER_PYTHON} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+  target_compile_definitions(${NVFUSER} PRIVATE EXTENSION_NAME=_C)
+  target_compile_options(${NVFUSER} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+
+  # avoid using Python3_add_library, copied from functorch
+  set_target_properties(${NVFUSER} PROPERTIES PREFIX "" DEBUG_POSTFIX "") 
+  if(NOT MSVC)
+    target_compile_options(${NVFUSER} PRIVATE -Wno-unused-variable)
+    set_target_properties(${NVFUSER} PROPERTIES SUFFIX ".so")
+  else()
+    set_target_properties(${NVFUSER} PROPERTIES SUFFIX ".pyd")
+  endif()
+
+  set_target_properties(${NVFUSER} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+        ${CMAKE_BINARY_DIR}/nvfuser)
+  set_target_properties(${NVFUSER} PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../torch/lib")
+
   if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     message(STATUS "somehow this is happening")
-    set_target_properties(${NVFUSER_PYTHON} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+    set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
-  install(TARGETS ${NVFUSER_PYTHON} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION "${TORCH_ROOT}/nvfuser")
 endif()
 
 # --- generate runtime files

@@ -636,6 +636,22 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
 
+        # Copy nvfuser extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "nvfuser._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
         setuptools.command.build_ext.build_ext.build_extensions(self)
 
 
@@ -891,6 +907,8 @@ def configure_extension_build():
         excludes.extend(['caffe2', 'caffe2.*'])
     if not cmake_cache_vars['BUILD_FUNCTORCH']:
         excludes.extend(['functorch', 'functorch.*'])
+    if not cmake_cache_vars['BUILD_NVFUSER']:
+        excludes.extend(['nvfuser', 'nvfuser.*'])
     packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
@@ -910,19 +928,6 @@ def configure_extension_build():
                              extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
     extensions.append(C_flatbuffer)
-
-    if cmake_cache_vars['BUILD_NVFUSER']:
-        extensions.append(
-            Extension(
-                "torch._C_nvfuser",
-                libraries=['nvfuser_python'],
-                sources=["torch/csrc/jit/codegen/cuda/python_frontend/python_bindings_stub.c"],
-                language='c',
-                extra_compile_args=main_compile_args + extra_compile_args,
-                include_dirs=[],
-                library_dirs=library_dirs,
-                extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib')),
-        )
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
@@ -948,6 +953,12 @@ def configure_extension_build():
         extensions.append(
             Extension(
                 name=str('functorch._C'),
+                sources=[]),
+        )
+    if cmake_cache_vars['BUILD_NVFUSER']:
+        extensions.append(
+            Extension(
+                name=str('nvfuser._C'),
                 sources=[]),
         )
 

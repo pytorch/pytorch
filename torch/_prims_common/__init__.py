@@ -8,7 +8,7 @@ import weakref
 import torch
 
 try:
-    from torch._C_nvfuser import DataType  # type: ignore[import]
+    from nvfuser._C import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,
