@@ -16,10 +16,19 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_graph_observer,
 )
-from torch.autograd import ProfilerActivity, kineto_available
+from torch.autograd import kineto_available, ProfilerActivity
+from torch.profiler import _memory_profiler
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionGraphObserver",
+]
+
 
 def supported_activities():
     """
@@ -208,6 +217,15 @@ class _KinetoProfile(object):
             "world_size": dist.get_world_size()
         }
 
+    def _memory_profile(self) -> _memory_profiler.MemoryProfile:
+        required = ("record_shapes", "profile_memory", "with_stack")
+        missing = [f"{i}=True" for i in required if not getattr(self, i)]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required for memory profiling.")
+
+        assert self.profiler is not None and self.profiler.kineto_results is not None
+        return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
+
 
 class ProfilerAction(Enum):
     """
@@ -274,8 +292,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         if not os.path.isdir(dir_name):
             try:
                 os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                raise RuntimeError("Can't create directory: " + dir_name)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
