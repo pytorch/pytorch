@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 
 import torch
 from torch._ops import OpOverload
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -205,7 +206,14 @@ class FakeTensorConverter(object):
         self.tensor_memo[th] = v
 
     def from_real_tensor(
-        self, fake_mode, t, make_constant=False, shape_env=None, ignore_subclass=False
+        self,
+        fake_mode,
+        t,
+        make_constant=False,
+        shape_env=None,
+        ignore_subclass=False,
+        *,
+        sname=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -238,6 +246,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
+            sname=sname,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -273,6 +282,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
+        sname=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -280,6 +290,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
+            sname=sname,
         )
 
 
@@ -365,6 +376,20 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
+def local_scalar_dense(fake_mode, func, arg):
+    if fake_mode.shape_env is None:
+        # Without symints/symfloats, cannot handle this
+        raise DataDependentOutputException(func)
+    if is_float_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symfloat()
+    elif is_integer_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symint()
+    else:
+        raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+# NB: this must be ordered after local_scalar_dense
 @register_op_impl(
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
@@ -1001,13 +1026,23 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, static_shapes=False, ignore_subclass=False):
+    def from_tensor(
+        self,
+        tensor,
+        static_shapes=False,
+        ignore_subclass=False,
+        sname: Optional[str] = None,
+    ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass
+                self, tensor, ignore_subclass=ignore_subclass, sname=sname
             )
         return self.fake_tensor_converter(
-            self, tensor, shape_env=self.shape_env, ignore_subclass=ignore_subclass
+            self,
+            tensor,
+            shape_env=self.shape_env,
+            ignore_subclass=ignore_subclass,
+            sname=sname,
         )
 
 
