@@ -1,6 +1,7 @@
 import collections
 import warnings
 from typing import (
+    Any,
     Callable,
     Dict,
     Generator,
@@ -59,12 +60,24 @@ except ImportError:
 
 PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 FSDP_SYNCED = "_fsdp_synced"
+# Specification of process groups for hybrid sharding strategies.
+HybridShardProcessGroupType = Tuple[dist.ProcessGroup, dist.ProcessGroup]
+# Overall specification of process group.
+ProcessGroupType = Optional[Union[dist.ProcessGroup, HybridShardProcessGroupType]]
+
 
 # TODO (awgu): Refactor this later
 SHARDING_STRATEGY_MAP = {
     ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
     ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
     ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
+    ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
+    ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+}
+
+HYBRID_SHARDING_STRATEGIES = {
+    ShardingStrategy.HYBRID_SHARD,
+    ShardingStrategy._HYBRID_SHARD_ZERO2,
 }
 
 
@@ -75,13 +88,131 @@ SHARDING_STRATEGY_MAP = {
 @no_type_check
 def _init_process_group_state(
     state: _FSDPState,
-    process_group: Optional[dist.ProcessGroup],
+    process_group: ProcessGroupType,
+    sharding_strategy: ShardingStrategy,
+    policy: Optional[_FSDPPolicy],
 ) -> _FSDPState:
-    state.process_group = process_group or _get_default_group()
+    if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+        if process_group is None and policy is None:
+            # Raise an error here, since this is manual wrapping with no process group
+            # passed in, there is no way to ensure all wrapped FSDP instances use the same
+            # process groups.
+            raise ValueError(
+                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+            )
+        else:
+            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+            assert state.process_group is not None, "Expected to populate state.process_group for hybrid shard"
+            assert state._inter_node_pg is not None, "Expected to populate state._inter_node_pg for hybrid shard"
+            assert state._inter_node_state is not None, "Expected to populate state._inter_node_state for hybrid shad."
+    else:
+        state.process_group = process_group if process_group is not None else _get_default_group()
+
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
+
     return state
 
+@no_type_check
+def _init_process_group_state_for_hybrid_shard(state: _FSDPState, process_group) -> _FSDPState:
+    if process_group is None:
+        default_group = _get_default_group()
+        intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(default_group)
+        # we shard across intra-node
+        state.process_group = intra_node_group
+        # save _inter_node_pg to allreduce across.
+        state._inter_node_pg = inter_node_group
+    else:
+        # Check type and assign state.process_group and state._inter_node_pg.
+        if _is_valid_hybrid_shard_pg_type(process_group):
+            # Assuming that user passed in as intra node group and inter node group
+            # as documented.
+            state.process_group, state._inter_node_pg = process_group
+        else:
+            raise ValueError(
+                "Expected process_group to be passed in as either None or "
+                f"Tuple[dist.ProcessGroup, dist.ProcessGroup] but got {type(process_group)}"
+            )
+    # Create state for allreduce
+    state._inter_node_state = _get_default_comm_hook_state(
+        process_group=state._inter_node_pg,
+    )
+    return state
+
+@no_type_check
+def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
+    return (
+        isinstance(process_group, tuple)
+        and len(process_group) == 2
+        and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
+    )
+
+@no_type_check
+def _init_intra_node_process_group() -> dist.ProcessGroup:
+    """
+    Returns a process group across the current node.
+    For example, given each row is a distinct node:
+    0 1 2 3 4 5 6 7 8
+    9 10 11 12 13 14 15
+    This API would return an intra-node subgroup across
+    [0, 7] or [8, 15] depending on the process's rank.
+    For example, rank 3 would get [0, 7].
+    """
+    intra_node_subgroup, _ = dist.new_subgroups()
+    return intra_node_subgroup
+
+@no_type_check
+def _init_inter_node_process_group(
+    global_process_group: dist.ProcessGroup
+) -> dist.ProcessGroup:
+    """
+    Returns an inter-node process group where each contained rank has
+    the same local rank. For example, given each column is a distinct node:
+    0 1 2 3 4 5 6 7 8
+    9 10 11 12 13 14 15
+    This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
+    depending on the process's rank. For example, rank 1 would get {1, 9}, rank 5
+    would get {5, 13}.
+    """
+    # the inter-node pg that is returned
+    inter_node_pg = None
+    sharding_backend = dist.get_backend(global_process_group)
+    world_size = dist.get_world_size(global_process_group)
+    # Assuming fully homogeneous setup
+    num_devices = torch.cuda.device_count()
+    num_nodes = world_size // num_devices
+    my_local_rank = dist.get_rank(global_process_group) % num_devices
+    for local_rank in range(num_devices):
+        ranks_for_inter_group = [
+            local_rank + (i * num_devices) for i in range(num_nodes)
+        ]
+        # every rank always needs to call dist.new_group
+        grp = dist.new_group(
+            ranks=ranks_for_inter_group, backend=sharding_backend
+        )
+        if local_rank == my_local_rank:
+            print(f"{local_rank} created process group for {ranks_for_inter_group}")
+            inter_node_pg = grp
+
+    assert inter_node_pg is not None, f"{my_local_rank} expected to assign inter-node pg, but did not"
+    return inter_node_pg
+
+def _init_intra_and_inter_node_groups(
+    global_process_group: dist.ProcessGroup,
+) -> Tuple[dist.ProcessGroup, dist.ProcessGroup]:
+    """
+    Initializes intra and inter-node process groups and returns the ones corresponding
+    to this process's rank.
+    This function can be used to initialize process groups for ``HYBRID_SHARD`` or
+    ``_HYBRID_SHARD_ZERO2`` in FSDP.
+    This function assumes each node has an equal number of CUDA-enabled devices.
+    Returns:
+        Tuple[dist.ProcessGroup, dist.ProcessGroup]: Intra and inter-node process group.
+    """
+    return (
+        _init_intra_node_process_group(),
+        _init_inter_node_process_group(global_process_group),
+    )
 
 @no_type_check
 def _init_ignored_module_states(
@@ -135,6 +266,12 @@ def _init_core_state(
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
     if state.world_size == 1:
+        if sharding_strategy != ShardingStrategy.NO_SHARD:
+            warnings.warn(
+                "FSDP is switching to use `NO_SHARD` instead of "
+                f"{sharding_strategy or ShardingStrategy.FULL_SHARD} since "
+                "the world size is 1."
+            )
         sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
@@ -145,6 +282,8 @@ def _init_core_state(
     state._is_root = None
     _streams: Dict[str, torch.cuda.Stream] = {}
     state._streams = _streams
+    _stream_to_name: Dict[torch.cuda.Stream, str] = {}
+    state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = _ExecOrderData(
@@ -152,10 +291,19 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    # Mapping from module to every `FlatParamHandle` that the module consumes,
+    # where there is an entry for every (sub)module
     _module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
     state._module_to_handles = _module_to_handles
+    # Same as `_module_to_handle` but filtered to only include keys that are
+    # "communication modules", which are responsible for the unshard/reshard
+    # for their `FlatParamHandle`s
+    _comm_module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._comm_module_to_handles = _comm_module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -175,10 +323,6 @@ def _init_runtime_state(
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
     state._sync_gradients = True
     state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
     state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
@@ -255,7 +399,7 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             root_module, managed_params, state.process_group
         )
-    _init_param_handle_from_params(state, managed_params, root_module)
+    _init_param_handle_from_params(state, managed_params, root_module, root_module)
     return state
 
 
@@ -312,7 +456,7 @@ def _init_param_handles_from_module(
             _sync_module_states(params, buffers, state.process_group)
         # Pass `root_module` to have internal FQN metadata prefix starting from
         # it instead of `submodule`
-        _init_param_handle_from_params(state, params, root_module)
+        _init_param_handle_from_params(state, params, root_module, submodule)
     # Reverse to preserve top-down order like `_fsdp_handles()`
     state._handles.reverse()
     return state
@@ -323,6 +467,7 @@ def _init_param_handle_from_params(
     state: _FSDPState,
     params: List[nn.Parameter],
     root_module: nn.Module,
+    comm_module: nn.Module,
 ):
     if len(params) == 0:
         return
@@ -336,6 +481,7 @@ def _init_param_handle_from_params(
     handle = FlatParamHandle(
         params,
         root_module,
+        comm_module,
         state.compute_device,
         handle_config,
         state.process_group,
@@ -348,6 +494,12 @@ def _init_param_handle_from_params(
     state._handles.append(handle)
     for module in handle.flat_param._modules:
         state._module_to_handles[module].append(handle)
+    state._comm_module_to_handles[handle._comm_module].append(handle)
+    num_comm_module_handles = len(state._comm_module_to_handles[handle._comm_module])
+    assert num_comm_module_handles == 1, (
+        "The current design assumes a module manages at most one "
+        f"`FlatParamHandle` but got {num_comm_module_handles}"
+    )
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
@@ -368,8 +520,8 @@ def _get_ignored_modules(
     msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
     try:
         ignored_root_modules = set(_ignored_modules)
-    except TypeError:
-        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}")
+    except TypeError as e:
+        raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}") from e
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
