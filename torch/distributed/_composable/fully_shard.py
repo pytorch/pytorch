@@ -14,11 +14,18 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
 )
+from torch.distributed.fsdp._state_dict_utils import (
+    _post_load_state_dict_hook,
+    _pre_state_dict_hook,
+    _post_state_dict_hook,
+    _pre_load_state_dict_hook,
+)
 from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
     _register_root_pre_forward_hook,
 )
+from torch.distributed.fsdp._common_utils import _all_handles
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -77,15 +84,55 @@ def fully_shard(
         sync_module_states,
     )
     state = _init_state_dict_state(state)
-    for submodule in module.modules():
-        if submodule not in state._ignored_modules:
-            # Register post and pre hooks for save and load.
-#            submodule.register_state_
-#    self._register_state_dict_hook(_post_state_dict_hook)
-#        self._register_load_state_dict_pre_hook(
-#            _pre_load_state_dict_hook, with_module=True
-#        )
-#        self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
+
+    # def _composable_pre_state_dict_hook(
+    #     fsdp_state,
+    #     module,
+    #     *args, **kwargs
+    # ):
+    #     return _pre_state_dict_hook(fsdp_state, *args, **kwargs)
+
+    # def _composable_post_state_dict_hook(
+    #     fsdp_state,
+    #     module,
+    #     prefix,
+    #     *args
+    # ):
+    #     return _post_state_dict_hook(fsdp_state, prefix, *args)
+    #     pass
+
+    # def _composable_load_state_dict_pre_hook(
+    #     fsdp_state,
+    #     module,
+    #     prefix,
+    #     *args
+    # ):
+    #     return _pre_load_state_dict_hook(fsdp_state, prefix, *args)
+
+    # def _composable_load_state_dict_post_hook(
+    #     fsdp_state,
+    #     module,
+    #     *args
+    # ):
+    #     return _post_load_state_dict_hook(fsdp_state, *args)
+
+    from functools import partial
+
+    comm_modules = set()
+    for handle in _all_handles(state):
+        comm_modules.add(handle._comm_module)
+
+    for submodule in comm_modules:
+        print(f"submodule is {submodule}")
+        fsdp_state = state
+        submodule.register_state_dict_pre_hook(partial(_pre_state_dict_hook, fsdp_state))
+        submodule._register_state_dict_hook(partial(_post_state_dict_hook, fsdp_state))
+        submodule._register_load_state_dict_pre_hook(
+            partial(_pre_load_state_dict_hook, fsdp_state), with_module=True
+        )
+        submodule.register_load_state_dict_post_hook(
+            partial(_post_load_state_dict_hook, fsdp_state)
+        )
     modules = list(module.modules())
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)

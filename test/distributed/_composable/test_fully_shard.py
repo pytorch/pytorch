@@ -237,6 +237,27 @@ class TestFSDPRuntime(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_composable_state_dict(self):
+        torch.cuda.set_device(self.rank)
+        local_model = CompositeParamModel(device=torch.cuda.current_device())
+        composable = copy.deepcopy(local_model)
+        fsdp_wrapped_model = FSDP(
+            copy.deepcopy(local_model),
+            auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+            use_orig_params=True,
+        )
+        fully_shard(
+            composable,
+            policy=ModuleWrapPolicy({UnitModule})
+        )
+        sd_fsdp = fsdp_wrapped_model.state_dict()
+        sd_local = local_model.state_dict()
+        sd = composable.state_dict()
+        for (k1, v1), (k2, v2) in zip(sd.items(), sd_local.items()):
+            self.assertEqual(k1, k2)
+            self.assertEqual(v1, v2)
+
+    @skip_if_lt_x_gpu(2)
     def test_training(self):
         """Tests training (forward, backward, optimizer)."""
         device = torch.device("cuda")

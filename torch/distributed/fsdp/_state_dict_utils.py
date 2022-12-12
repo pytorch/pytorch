@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -609,6 +609,7 @@ def _sharded_pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -620,7 +621,6 @@ def _post_state_dict_hook(
     what postprocessing will be done.
     """
     # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -634,6 +634,7 @@ def _post_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     *args,
     **kwargs,
@@ -643,7 +644,6 @@ def _pre_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    fsdp_state: _FSDPState = module
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
@@ -656,6 +656,7 @@ def _pre_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
+    fsdp_state: Optional[_FSDPState],
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -666,8 +667,6 @@ def _pre_load_state_dict_hook(
     is called. ``fsdp_state._state_dict_type`` is used to decide what preprocessing
     will be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -684,9 +683,7 @@ def _pre_load_state_dict_hook(
 
 @no_type_check
 @torch.no_grad()
-def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+def _post_load_state_dict_hook(fsdp_state: Optional[_FSDPState], module: nn.Module, *args: Any) -> None:
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,

@@ -420,6 +420,7 @@ def _init_param_handles_from_module(
         state._ignored_modules,
         state._ignored_params,
     )
+    print(f"submodule {submodule_to_states}")
     _check_single_device_module(root_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following bottom-up

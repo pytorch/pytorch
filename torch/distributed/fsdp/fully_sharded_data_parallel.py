@@ -409,12 +409,13 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
-        self.register_state_dict_pre_hook(_pre_state_dict_hook)
-        self._register_state_dict_hook(_post_state_dict_hook)
+        from functools import partial
+        self.register_state_dict_pre_hook(partial(_pre_state_dict_hook, self))
+        self._register_state_dict_hook(partial(_post_state_dict_hook, self))
         self._register_load_state_dict_pre_hook(
-            _pre_load_state_dict_hook, with_module=True
+            partial(_pre_load_state_dict_hook, self), with_module=True
         )
-        self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
+        self.register_load_state_dict_post_hook(partial(_post_load_state_dict_hook, self))
 
     @property
     def module(self) -> nn.Module:
