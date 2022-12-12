@@ -1968,9 +1968,6 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return str(self.shape)
 
-    def cpp_wrapper_codegen_reference(self):
-        return self.codegen_reference()
-
 
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
