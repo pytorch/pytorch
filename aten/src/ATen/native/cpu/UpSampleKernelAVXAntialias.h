@@ -57,14 +57,13 @@ void pack_rgb(
   }
 }
 
+template <class F>
 int precompute_coeffs( // TODO: This is redundant with
                        // `compute_indices_weights_aa()`
     int inSize,
     int outSize,
     int** boundsp,
-    double** kkp,
-    aa_filter_fn_t filter,
-    int interp_size) {
+    double** kkp) {
   double support, scale, filterscale;
   double center, ww, ss;
   int xx, x, ksize, xmin, xmax;
@@ -77,7 +76,7 @@ int precompute_coeffs( // TODO: This is redundant with
     filterscale = 1.0;
   }
   /* determine support size (length of resampling filter) */
-  support = filterscale * interp_size / 2.;
+  support = filterscale * F::interp_size / 2.;
 
   /* maximum number of coeffs */
   ksize = (int)ceil(support) * 2 + 1;
@@ -124,7 +123,7 @@ int precompute_coeffs( // TODO: This is redundant with
     xmax -= xmin;
     k = &kk[xx * ksize];
     for (x = 0; x < xmax; x++) {
-      double w = filter((x + xmin - center + 0.5) * ss);
+      double w = F::aa_filter((x + xmin - center + 0.5) * ss);
       k[x] = w;
       ww += w;
     }
@@ -217,18 +216,28 @@ void ImagingResampleHorizontal_8bpc(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
-    int* bounds,
-    double* prekk,
+    // int* bounds,
+    // double* prekk,
+    std::vector<at::Tensor> horiz_indices_weights,
+    unsigned int horiz_weights_precision,
     int xout,
     int yout,
     int xin) {
   int yy;
   int16_t* kk;
-  int coefs_precision;
+  int coefs_precision = (int)horiz_weights_precision;
 
-  // use the same buffer for normalized coefficients
-  kk = (int16_t*)prekk;
-  coefs_precision = normalize_coeffs_8bpc(xout, ksize, prekk);
+  kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
+
+  std::vector<int> bounds_vec(2 * xout, 0);
+  int* bounds = bounds_vec.data();
+
+  int64_t* idx_ptr_xmin = horiz_indices_weights[0].data_ptr<int64_t>();
+  int64_t* idx_ptr_size = horiz_indices_weights[1].data_ptr<int64_t>();
+  for (int i = 0; i < xout; i++) {
+    bounds[2 * i + 0] = idx_ptr_xmin[i];
+    bounds[2 * i + 1] = idx_ptr_size[i];
+  }
 
   yy = 0;
   for (; yy < yout - 3; yy += 4) {
@@ -292,16 +301,18 @@ void ImagingResampleVertical_8bpc(
 
 // TODO: Cleanup error checks (as in comments)
 // TODO: probably use pytorch's allocator instead of malloc
+template <typename scale_type, class F>
 uint32_t* ImagingResampleInner(
     uint32_t* unpacked_input_p,
     int xin,
     int yin,
     int xout,
     int yout,
-    aa_filter_fn_t filter,
-    int interp_size) {
+    bool align_corners,
+    const scale_type& scales) {
   int need_horizontal, need_vertical;
-  int ksize_horiz, ksize_vert;
+  //   int ksize_horiz, ksize_vert;
+  int ksize_vert;
   int *bounds_horiz, *bounds_vert;
   double *kk_horiz, *kk_vert;
   uint32_t* unpacked_output_p = NULL;
@@ -309,11 +320,23 @@ uint32_t* ImagingResampleInner(
 
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
+  unsigned int horiz_weights_precision = 0;
 
   /* two-pass resize, horizontal pass */
   if (need_horizontal) {
-    ksize_horiz = precompute_coeffs(
-        xin, xout, &bounds_horiz, &kk_horiz, filter, interp_size);
+    // ksize_horiz = precompute_coeffs<F>(xin, xout, &bounds_horiz, &kk_horiz);
+    int interp_dim = 2;
+    auto [horiz_indices_weights, ksize_horiz] =
+        F::compute_indices_int16_weights_aa(
+            /*input_size=*/xin,
+            /*output_size=*/xout,
+            /*stride=*/1,
+            /*ndims=*/4,
+            /*reshape_dim=*/interp_dim,
+            /*align_corners=*/align_corners,
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*weights_precision&=*/horiz_weights_precision);
+
     // if (!ksize_horiz) {
     //     return NULL;
     // }
@@ -328,8 +351,10 @@ uint32_t* ImagingResampleInner(
         unpacked_output_temp_p,
         unpacked_input_p,
         ksize_horiz,
-        bounds_horiz,
-        kk_horiz,
+        // bounds_horiz,
+        // kk_horiz,
+        horiz_indices_weights,
+        horiz_weights_precision,
         xout,
         yin,
         xin);
@@ -346,8 +371,7 @@ uint32_t* ImagingResampleInner(
 
   /* vertical pass */
   if (need_vertical) {
-    ksize_vert = precompute_coeffs(
-        yin, yout, &bounds_vert, &kk_vert, filter, interp_size);
+    ksize_vert = precompute_coeffs<F>(yin, yout, &bounds_vert, &kk_vert);
     // if (!ksize_vert) {
     //     free(bounds_horiz);
     //     free(kk_horiz);
@@ -385,11 +409,12 @@ uint32_t* ImagingResampleInner(
   return unpacked_output_p;
 }
 
+template <typename scale_type, class F>
 void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& input,
     const at::Tensor& output,
-    aa_filter_fn_t filter,
-    int interp_size) {
+    bool align_corners,
+    const scale_type& scales) {
   auto batch_size = input.size(0);
   auto xin = input.size(3);
   auto yin = input.size(2);
@@ -406,8 +431,8 @@ void upsample_avx_bilinear_or_bicubic(
         input[i],
         input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-    uint32_t* unpacked_output_p = ImagingResampleInner(
-        unpacked_input_p, xin, yin, xout, yout, filter, interp_size);
+    uint32_t* unpacked_output_p = ImagingResampleInner<scale_type, F>(
+        unpacked_input_p, xin, yin, xout, yout, align_corners, scales);
 
     pack_rgb(
         (const uint8_t*)unpacked_output_p,

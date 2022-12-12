@@ -1022,7 +1022,7 @@ struct HelperInterpLinear : public HelperInterpBase {
     return indices_weights;
   }
 
-  static inline std::vector<Tensor> compute_indices_int16_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int> compute_indices_int16_weights_aa(
     int64_t input_size,
     int64_t output_size,
     int64_t stride,
@@ -1126,7 +1126,7 @@ struct HelperInterpLinear : public HelperInterpBase {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
     }
-    return indices_weights;
+    return {indices_weights, interp_size};
   }
 };
 
@@ -1239,7 +1239,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     return indices_weights;
   }
 
-  static inline std::vector<Tensor> compute_indices_int16_weights_aa(
+  static inline std::tuple<std::vector<Tensor>, int> compute_indices_int16_weights_aa(
     int64_t input_size,
     int64_t output_size,
     int64_t stride,
@@ -1343,7 +1343,7 @@ struct HelperInterpCubic : public HelperInterpBase {
           data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
       }
     }
-    return indices_weights;
+    return {indices_weights, interp_size};
   }
 
 };
@@ -1512,9 +1512,10 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
 
   std::vector<Tensor> indices_weights;
   unsigned int weights_precision = 0;
+  int unused;
 
   if (input_scalar_type == at::kByte) {
-    indices_weights =
+    std::tie(indices_weights, unused) =
       F::compute_indices_int16_weights_aa(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
@@ -1751,7 +1752,7 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
   // TODO: add more assumptions as needed
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
     input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
-    upsample_avx_bilinear_or_bicubic(input, output, &F::aa_filter, F::interp_size);
+    upsample_avx_bilinear_or_bicubic<scale_t, F>(input, output, align_corners, {scales_h, scales_w});
   } else {
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
         output, input, align_corners, {scales_h, scales_w});
