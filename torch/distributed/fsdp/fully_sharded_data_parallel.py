@@ -22,7 +22,6 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -32,9 +31,9 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
-    HandleTrainingState,
     TrainingState,
 )
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
     _get_default_comm_hook,
@@ -46,6 +45,8 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
+    HYBRID_SHARDING_STRATEGIES,
+    ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _lazy_init,
@@ -53,9 +54,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _post_forward_reshard,
     _pre_forward,
     _pre_forward_unshard,
-    _reshard,
     _root_pre_forward,
-    _should_free_in_backward,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -84,6 +83,7 @@ from ._optim_utils import (
 )
 from ._state_dict_utils import (
     _post_load_state_dict_hook,
+    _pre_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
@@ -95,6 +95,7 @@ from ._unshard_param_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
+from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -188,8 +189,12 @@ class FullyShardedDataParallel(nn.Module):
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
-        process_group (Optional[ProcessGroup]):
-            This is the process group used for collective communications.
+        process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
+            This is the process group used for collective communications and
+            the one over which the model is sharded. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD`` users can
+            pass in a tuple of process groups representing the groups to shard and replicate across,
+            respectively.
         sharding_strategy (Optional[ShardingStrategy]):
             This configures the sharding strategy used by FSDP, which may trade
             off memory saving and communication overhead. See
@@ -313,10 +318,10 @@ class FullyShardedDataParallel(nn.Module):
     def __init__(
         self,
         module: nn.Module,
-        process_group: Optional[ProcessGroup] = None,
+        process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -331,38 +336,15 @@ class FullyShardedDataParallel(nn.Module):
         super().__init__()
         _init_ignored_module_states(self, module, ignored_modules)
 
-        # Add module annotations for Dynamo support
-        for submodule in module.modules():
-            if submodule not in self._ignored_modules:
-                """[note: Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+        # Add module annotations for Dynamo support (see function for details)
+        _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
 
-                Dynamo doesn't get to see this instance (FullyShardedDataParallel) during tracing, since
-                it skips tracing all the torch.distributed.fsdp code.
-                 - Why? Running the FSDP code eagerly avoids lots of issues trying to trace complex hooks, and also
-                   gets us graph-breaks on FSDP module boundaries which we want anyway for comm ops.
-                 - However, we _also_ want dynamo to treat the wrapped module inside FSDP 'unspecially' (*),
-                   and we need a way to indicate to dynamo which modules are wrapped by FSDP.
-
-                (*) UnspecializedNNModules in dynamo are traced-through without any assumptions, and with thorough
-                guards.  NNModules otherwise are 'specialized', meaning there is less overhead due to assuming
-                their code is well-behaved.
-
-                One particular issue with specialized NNModules for FSDP is that the
-                views created for orig_params are captured into the compiled graph on the first iteration, and while
-                they are always going to point to the correct flatparameter and give correct results, their order
-                of creation influences the order of backward execution, preventing overlap of comm and computation
-                during backward.  We need to _use_ the new parameter views created on each forward iteration, in
-                order for backward to interleave hooks with compute per layer.  UnspecializedNNModule lets us achieve
-                this by capturing the module code more 'functionally' and passing parameters in as inputs each time.
-                """
-                submodule._is_fsdp_managed_module = True
-
-                # Dynamo only supports FSDP with use_orig_params=True.
-                # This is hacky, but I could not think of another way to add an assertion to dynamo
-                # for this, since Dynamo skips all the FSDP code frames and thus can't inspect the
-                # FSDP module directly
-                submodule._fsdp_use_orig_params = use_orig_params
-
+        # Initializes self.process_group, along with rank and world size. This will
+        # also set another attribute, _inter_node_pg, to control the process group
+        # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
+        # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
+        # the same process group state as the root FSDP module.
+        _init_process_group_state(self, process_group, sharding_strategy, auto_wrap_policy)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -385,9 +367,14 @@ class FullyShardedDataParallel(nn.Module):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
             }
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                # Share root process groups with children to maintain
+                # the invariant that all FSDP modules will have the same
+                # process groups.
+                fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
+
             _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
 
-        _init_process_group_state(self, process_group)
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
         _init_core_state(
@@ -422,6 +409,7 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
+        self.register_state_dict_pre_hook(_pre_state_dict_hook)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True
@@ -701,10 +689,6 @@ class FullyShardedDataParallel(nn.Module):
                     module, prev_state_dict_type, prev_state_dict_config
                 )
 
-    def state_dict(self, *args, **kwargs):
-        _lazy_init(self, self)
-        return super().state_dict(*args, **kwargs)
-
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Runs the forward pass for the wrapped module, inserting FSDP-specific
@@ -713,12 +697,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
+            _root_pre_forward(self, self, unused)
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
-            _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, unused
+            args, kwargs = _pre_forward(
+                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
                 p_assert(
@@ -966,135 +950,6 @@ class FullyShardedDataParallel(nn.Module):
                 param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
 
-    @torch.no_grad()
-    def _wait_for_post_backward(self) -> None:
-        """Wait for post-backward to finish. Only called on root instance."""
-        assert self._is_root, "_wait_for_post_backward can only be called on root."
-        # Root's training state might be backward_pre or backward_post depending on
-        # if root parameter's post backward hook was called. The post-backward hook
-        # may not have been called if gradient was not computed for this param/FSDP
-        # module.
-
-        if self._sync_gradients:
-            torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
-            if self.cpu_offload.offload_params:
-                # We need to wait for the non-blocking GPU ->
-                # CPU grad transfers to finish. We need to do this for GPU -> CPU
-                # copies because when grad is on CPU, it won't wait for any CUDA
-                # stream to finish GPU -> CPU copies unless we explicitly block the
-                # host-side with synchronize().
-                torch.cuda.current_stream().synchronize()
-        self._exec_order_data.next_iter()
-
-        # A backward pass is done, clean up below.
-        def _catch_all_reshard(fsdp_module: FullyShardedDataParallel) -> None:
-            """
-            Reshards full parameters that may have not been resharded in
-            post_backward_hook. This can happen when an FSDP module's output
-            is used in forward so its pre-backward fires unsharding the param,
-            but post-backward does not fire since the output was not ultimately
-            used in loss computation so FSDP parameter did not get a gradient.
-            """
-            # Note that we wrap resharding logic in a try-catch as a defensive
-            # approach, as if an error is thrown, we are in the backwards pass,
-            # and autograd would not print out much useful info about the actual
-            # error hit.
-            try:
-                free_unsharded_flat_params: List[bool] = []
-                handles_to_reshard: List[FlatParamHandle] = []
-                for handle in fsdp_module._handles:
-                    # TODO: This already-resharded check is brittle:
-                    # https://github.com/pytorch/pytorch/issues/83956
-                    already_resharded = (
-                        handle.flat_param.data_ptr()
-                        == handle.flat_param._local_shard.data_ptr()
-                    )
-                    if already_resharded:
-                        continue
-                    free_unsharded_flat_params.append(
-                        _should_free_in_backward(fsdp_module, handle)
-                    )
-                    handles_to_reshard.append(handle)
-                _reshard(self, handles_to_reshard, free_unsharded_flat_params)
-            except Exception as e:
-                p_assert(
-                    False,
-                    f"Got exception while resharding module {fsdp_module}: {str(e)}",
-                    raise_assertion_error=False,
-                )
-                raise e
-
-        def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
-            """Helper used below on all fsdp modules."""
-            for handle in fsdp_module._handles:
-                p = handle.flat_param
-                if p.requires_grad:
-                    if hasattr(p, "_post_backward_hook_state"):
-                        p_assert(
-                            len(p._post_backward_hook_state) == 2,  # type: ignore[attr-defined]
-                            "p._post_backward_hook_state fields are not valid.",
-                        )
-                        p._post_backward_hook_state[1].remove()  # type: ignore[attr-defined]
-                        delattr(p, "_post_backward_hook_state")
-                    if not self._sync_gradients:
-                        # Preserve the gradient accumulation state if not
-                        # synchronizing gradients: `p.grad` remains the
-                        # unsharded gradient accumulated from prior `no_sync()`
-                        # iterations, and `p._saved_grad_shard` remains the
-                        # sharded gradient from the last synchronized iteration
-                        continue
-                    handle.prepare_gradient_for_optim()
-                    p_assert(
-                        hasattr(p, "_post_backward_called"),
-                        "Expected flag _post_backward_called to be set on param.",
-                    )
-                    # Reset _post_backward_called in preparation for the next iteration.
-                    p._post_backward_called = False
-
-        # Update root and nested FSDP's hooks and flags.
-        for m in self.fsdp_modules(self):  # includes self
-            _catch_all_reshard(m)
-            _finalize_params(m)
-            m._ran_pre_backward_hook.clear()
-            m.training_state = TrainingState.IDLE
-            for handle in m._handles:
-                handle._training_state = HandleTrainingState.IDLE
-            m._handles_prefetched.clear()
-            if m._is_root:
-                # reset this flag for cases like "one forward pass + multiple backward passes"
-                self._post_backward_callback_queued = False
-
-        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
-            self._param_exec_order_policy_second_iter_init()
-
-    def _param_exec_order_policy_second_iter_init(self) -> None:
-        self._param_exec_order_prep_stage = False
-        # Let the parameters in self._fsdp_params_exec_order ordered based on
-        # the execution order in the forward pass.
-        self._fsdp_params_exec_order.reverse()
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                assert hasattr(
-                    m, "_param_exec_order_policy"
-                ), "Non-root FSDP modules should also have _param_exec_order_policy attribute"
-                assert hasattr(
-                    m, "_param_exec_order_prep_stage"
-                ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
-                m._param_exec_order_prep_stage = False
-        # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
-        # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
-        # and will be used to schedule the parameters (rebuild_full_params and reshard).
-        # TODO (linjianma): Remove all internal FSDP wraps from the root FSDP module.
-        # TODO (linjianma): Based on self._fsdp_params_exec_order, get the information
-        # needed to patch the forward() function of each key in the fsdp_wrap_map. The rules are as follows:
-        # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
-        # will be used in the forward, and reshard all parameters that are currently full and will not be
-        # used in the next forward()
-        # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
-        # all parameters that will be used next.
-        # TODO (linjianma): Patch the forward of each model in the keys
-        # of fsdp_wrap_map based on the information above.
-
     def _assert_state(self, state: Union[TrainingState, List[TrainingState]]) -> None:
         """Assert we are in the given state."""
         # Since assert can be turned off and this error checking
@@ -1171,12 +1026,21 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-        .. note:: This is analogous to ``torch.nn.utils.clip_grad_norm_`` but
-            handles the partitioning and multiple devices per rank under the
-            hood. The default torch util is not applicable here, because each
-            rank only has a partial view of all the grads in the model, so
-            calling it for FSDP models would lead to different scaling being
-            applied per subset of model parameters.
+        .. note:: If every FSDP instance uses ``NO_SHARD``, meaning that no
+            gradients are sharded across ranks, then you may directly use
+            :func:`torch.nn.utils.clip_grad_norm_`.
+
+        .. note:: If at least some FSDP instance uses a sharded strategy (i.e.
+            one other than ``NO_SHARD``), then you should use this method
+            instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
+            handles the fact that gradients are sharded across ranks.
+
+        .. note:: The total norm returned will have the "largest" dtype across
+            all parameters/gradients as defined by PyTorch's type promotion
+            semantics. For example, if *all* parameters/gradients use a low
+            precision dtype, then the returned norm's dtype will be that low
+            precision dtype, but if there exists at least one parameter/
+            gradient using FP32, then the returned norm's dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
@@ -1225,6 +1089,7 @@ class FullyShardedDataParallel(nn.Module):
                 nonsharded_params.add(param)
                 if param.grad is not None:
                     grads.append(param.grad)
+        # Compute local norms (forced to be in FP32)
         local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
             self.compute_device
         )
@@ -1253,8 +1118,14 @@ class FullyShardedDataParallel(nn.Module):
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device))
-        return total_norm
+            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+        # Use the "largest" dtype by type promotion semantics to use the same
+        # dtype as if we did not force local norm computation to be in FP32
+        total_norm_dtype = functools.reduce(
+            lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
+            [grad.dtype for grad in grads],
+        )
+        return total_norm.to(total_norm_dtype)
 
     @staticmethod
     def _warn_optim_input(optim_input):
@@ -1856,7 +1727,9 @@ def _get_grad_norm(
 ) -> torch.Tensor:
     """
     Returns the gradient norm of parameters ``param`` s, where the gradients
-    are viewed as a single vector.
+    are viewed as a single vector. The returned norm is in FP32 even if
+    parameters/gradients are in a low precision. This is because the downstream
+    use of this return value is a reduction across ranks.
     """
     params_with_grad = [param for param in params if param.grad is not None]
     if len(params_with_grad) == 0:
@@ -1879,7 +1752,6 @@ def _get_grad_norm(
         norm_type,
         dtype=torch.float32,
     )
-    grad_norm = grad_norm.to(grads[0].dtype)
     return grad_norm
 
 
