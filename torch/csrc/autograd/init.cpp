@@ -677,8 +677,8 @@ static PyObject* push_on_torch_dispatch_stack(
   HANDLE_TH_ERRORS
   if (arg != Py_None) {
     Py_INCREF(arg);
-    torch::torch_dispatch_mode::push_onto_dispatch_stack(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+    c10::impl::TorchDispatchModeTLS::push_onto_stack(
+        std::make_shared<torch::ConcreteModePyObjTrampoline>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -688,7 +688,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = torch::torch_dispatch_mode::pop_dispatch_stack();
+  const auto& mode = c10::impl::TorchDispatchModeTLS::pop_stack();
   auto* r = mode->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
