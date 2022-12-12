@@ -1937,6 +1937,11 @@ def meta__scaled_dot_product_efficient_backward(
         == value._storage().data_ptr()
     )
 
+    grad_out = grad_out.transpose(1,2)
+    query = query.transpose(1,2)
+    key = key.transpose(1,2)
+    value = value.transpose(1,2)
+
     B = query.size(0)
     M = query.size(1)
     N = key.size(1)
@@ -1957,7 +1962,7 @@ def meta__scaled_dot_product_efficient_backward(
             torch.zeros_like(value) if grad_kv_needs_init else torch.empty_like(value)
         )
 
-    return grad_q, grad_k, grad_v
+    return grad_q.transpose(1,2), grad_k.transpose(1,2), grad_v.transpose(1,2)
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
