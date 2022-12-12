@@ -30,6 +30,11 @@ size_t PThreadPool::get_thread_count() const {
 }
 
 void PThreadPool::set_thread_count(const size_t thread_count) {
+  // No need to do anything if the count is same
+  if (thread_count == get_thread_count()) {
+    return;
+  }
+
   std::lock_guard<std::mutex> lock{mutex_};
 
   // As it stands, pthreadpool is an entirely data parallel framework with no
