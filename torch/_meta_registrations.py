@@ -1917,7 +1917,24 @@ def _thnn_fused_lstm_cell_meta(
 
 
 @register_meta(aten._cudnn_rnn.default)
-def _cudnn_rnn(input, weight, weight_stride0, weight_buf, hx, cx, mode, hidden_size, proj_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state):
+def _cudnn_rnn(
+    input,
+    weight,
+    weight_stride0,
+    weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
 
     is_input_packed = len(batch_sizes) != 0
     if is_input_packed:
@@ -1934,8 +1951,11 @@ def _cudnn_rnn(input, weight, weight_stride0, weight_buf, hx, cx, mode, hidden_s
     if is_input_packed:
         out_shape = [batch_sizes_sum, out_size * num_directions]
     else:
-        out_shape = ([mini_batch, seq_length, out_size * num_directions] if batch_first
-                     else [seq_length, mini_batch, out_size * num_directions])
+        out_shape = (
+            [mini_batch, seq_length, out_size * num_directions]
+            if batch_first
+            else [seq_length, mini_batch, out_size * num_directions]
+        )
     output = input.new_empty(out_shape)
 
     cell_shape = [num_layers * num_directions, mini_batch, hidden_size]
@@ -2033,7 +2053,9 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     if grad_hy is None and grad_cy is None:
         return None, None, None
     checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
-    grad_gates = torch.empty_like(workspace, memory_format=legacy_contiguous_memory_format)
+    grad_gates = torch.empty_like(
+        workspace, memory_format=legacy_contiguous_memory_format
+    )
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
