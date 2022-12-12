@@ -179,9 +179,7 @@ uint32_t* ImagingResampleInner(
     bool align_corners,
     const scale_type& scales) {
   int need_horizontal, need_vertical;
-  //   int ksize_horiz, ksize_vert;
-  //   int *bounds_horiz, *bounds_vert;
-  //   double *kk_horiz, *kk_vert;
+
   uint32_t* unpacked_output_p = nullptr;
   uint32_t* unpacked_output_temp_p = nullptr;
 
@@ -189,9 +187,8 @@ uint32_t* ImagingResampleInner(
   need_vertical = yout != yin;
 
   if (need_horizontal) {
-    int interp_dim = 2;
-    unsigned int horiz_weights_precision = 0;
-    auto [horiz_indices_weights, ksize_horiz] =
+    int interp_dim = 3;
+    auto [horiz_indices_weights, ksize_horiz, horiz_weights_precision] =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/xin,
             /*output_size=*/xout,
@@ -199,8 +196,7 @@ uint32_t* ImagingResampleInner(
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2],
-            /*weights_precision&=*/horiz_weights_precision);
+            /*opt_scale=*/scales[interp_dim - 2]);
 
     unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
     ImagingResampleHorizontal_8bpc(
@@ -216,9 +212,8 @@ uint32_t* ImagingResampleInner(
   }
 
   if (need_vertical) {
-    int interp_dim = 3;
-    unsigned int vert_weights_precision = 0;
-    auto [vert_indices_weights, ksize_vert] =
+    int interp_dim = 2;
+    auto [vert_indices_weights, ksize_vert, vert_weights_precision] =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/yin,
             /*output_size=*/yout,
@@ -226,8 +221,7 @@ uint32_t* ImagingResampleInner(
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2],
-            /*weights_precision&=*/vert_weights_precision);
+            /*opt_scale=*/scales[interp_dim - 2]);
 
     unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
     ImagingResampleVertical_8bpc(
@@ -467,7 +461,7 @@ void ImagingResampleHorizontalConvolution8u(
           -1,15, -1,11, -1,14, -1,10, -1,13, -1,9, -1,12, -1,8,
           -1,7, -1,3, -1,6, -1,2, -1,5, -1,1, -1,4, -1,0));
         mmk = _mm256_shuffle_epi8(ksource, _mm256_set_epi8(
-          7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 
+          7,6, 5,4, 7,6, 5,4, 7,6, 5,4, 7,6, 5,4,
           3,2, 1,0, 3,2, 1,0, 3,2, 1,0, 3,2, 1,0));
         sss256 = _mm256_add_epi32(sss256, _mm256_madd_epi16(pix, mmk));
         // clang-format on
