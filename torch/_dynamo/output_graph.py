@@ -186,6 +186,14 @@ class OutputGraph(fx.Tracer):
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.guards: Set[Guard] = self.tracing_context.guards_context.dynamo_guards
+        # Although we prune unused graphargs before sending graphs to
+        # compilers, we may have legitimately triggered shape guards
+        # on "unused" inputs that we must keep track of.  So after
+        # remove_unused_graphargs is called, orig_graphargs and
+        # graphargs no longer alias; orig_graphargs is the original
+        # graphargs, and graphargs is the pruned list.  Guard creation
+        # should use original graphargs.
+        self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
@@ -277,6 +285,7 @@ class OutputGraph(fx.Tracer):
             self.name_to_input,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
+        removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
             if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
@@ -285,6 +294,8 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
+                removed_nodes += 1
+        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -424,6 +435,8 @@ class OutputGraph(fx.Tracer):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+
+        log.debug(f"COMPILING GRAPH due to {reason}")
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -580,7 +593,7 @@ class OutputGraph(fx.Tracer):
                     else format_graph_tabular(gm.graph)
                 )
                 log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
+                    logging.INFO,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
@@ -686,12 +699,14 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
+        # NB: self.orig_graphargs is the original graphargs
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
