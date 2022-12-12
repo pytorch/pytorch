@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from typing import Callable, List, Sequence, Tuple
+from typing import Callable, List, Sequence, Tuple, Union
 
-from torchgen.api.types import Binding, CType, NamedCType
+from mypy_extensions import DefaultNamedArg, NamedArg
 
+from torchgen.api.types import Binding, CType, NamedCType, SpecialArgName
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -42,7 +43,15 @@ class Unboxing:
     }
     """
 
-    argument_type_gen: Callable[[Type, bool, str, bool], NamedCType]
+    argument_type_gen: Callable[
+        [
+            Type,
+            NamedArg(bool, "mutable"),
+            NamedArg(Union[str, SpecialArgName], "binds"),
+            DefaultNamedArg(bool, "remove_non_owning_ref_types"),
+        ],
+        NamedCType,
+    ]
 
     # Convert all the arguments in a NativeFunction to C++ code
     def convert_arguments(
@@ -77,7 +86,7 @@ class Unboxing:
         :param mutable: boolean for whether this argument type is mutable
         :return: unboxed result
         """
-        ctype = self.argument_type_gen(t=t, mutable=mutable, binds=arg_name).type
+        ctype = self.argument_type_gen(t, mutable=mutable, binds=arg_name).type
 
         if isinstance(t, BaseType):
             out_name = f"{arg_name}_base"

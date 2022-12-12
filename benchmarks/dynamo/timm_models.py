@@ -67,7 +67,7 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set()
+REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 
 SKIP = {
     # Unusual training setup
@@ -258,8 +258,6 @@ class TimmRunnner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.init_optimizer(device, model.parameters())
-
         self.validate_model(model, example_inputs)
 
         return device, model_name, model, example_inputs, batch_size
@@ -312,7 +310,7 @@ class TimmRunnner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):
