@@ -297,7 +297,6 @@ def gen_nn_functional(fm: FileManager) -> None:
         "logsigmoid",
         "softplus",
         "softshrink",
-        "one_hot",
     ]
     import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
     # TODO make these types more precise
