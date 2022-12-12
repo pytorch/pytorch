@@ -14,9 +14,6 @@ static __m128i inline mm_cvtepu8_epi32(void* ptr) {
   return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
 }
 
-typedef double (*aa_filter_fn_t)(
-    double x); // TODO: use aa_filter_fn_t from UpSampleKernel.cpp file instead?
-
 void unpack_rgb(
     uint8_t* unpacked, // OUT
     const at::Tensor& packed_tensor, // IN
@@ -57,130 +54,6 @@ void pack_rgb(
   }
 }
 
-template <class F>
-int precompute_coeffs( // TODO: This is redundant with
-                       // `compute_indices_weights_aa()`
-    int inSize,
-    int outSize,
-    int** boundsp,
-    double** kkp) {
-  double support, scale, filterscale;
-  double center, ww, ss;
-  int xx, x, ksize, xmin, xmax;
-  int* bounds;
-  double *kk, *k;
-
-  /* prepare for horizontal stretch */
-  filterscale = scale = (double)inSize / outSize;
-  if (filterscale < 1.0) {
-    filterscale = 1.0;
-  }
-  /* determine support size (length of resampling filter) */
-  support = filterscale * F::interp_size / 2.;
-
-  /* maximum number of coeffs */
-  ksize = (int)ceil(support) * 2 + 1;
-
-  // check for overflow
-  if (outSize > INT_MAX / (ksize * (int)sizeof(double))) {
-    // ImagingError_MemoryError();
-    AT_ERROR("BLOP");
-    return 0;
-  }
-
-  /* coefficient buffer */
-  /* malloc check ok, overflow checked above */
-  kk = (double*)malloc(outSize * ksize * sizeof(double));
-  if (!kk) {
-    // ImagingError_MemoryError();
-    AT_ERROR("BLIP");
-    return 0;
-  }
-
-  /* malloc check ok, ksize*sizeof(double) > 2*sizeof(int) */
-  bounds = (int*)malloc(outSize * 2 * sizeof(int));
-  if (!bounds) {
-    free(kk);
-    // ImagingError_MemoryError();
-    AT_ERROR("BLOOP");
-    return 0;
-  }
-
-  for (xx = 0; xx < outSize; xx++) {
-    center = (xx + 0.5) * scale;
-    ww = 0.0;
-    ss = 1.0 / filterscale;
-    // Round the value
-    xmin = (int)(center - support + 0.5);
-    if (xmin < 0) {
-      xmin = 0;
-    }
-    // Round the value
-    xmax = (int)(center + support + 0.5);
-    if (xmax > inSize) {
-      xmax = inSize;
-    }
-    xmax -= xmin;
-    k = &kk[xx * ksize];
-    for (x = 0; x < xmax; x++) {
-      double w = F::aa_filter((x + xmin - center + 0.5) * ss);
-      k[x] = w;
-      ww += w;
-    }
-    for (x = 0; x < xmax; x++) {
-      if (ww != 0.0) {
-        k[x] /= ww;
-      }
-    }
-    // Remaining values should stay empty if they are used despite of xmax.
-    for (; x < ksize; x++) {
-      k[x] = 0;
-    }
-    bounds[xx * 2 + 0] = xmin;
-    bounds[xx * 2 + 1] = xmax;
-  }
-  *boundsp = bounds;
-  *kkp = kk;
-  return ksize;
-}
-
-#define PRECISION_BITS (32 - 8 - 2)
-#define MAX_COEFS_PRECISION (16 - 1)
-
-int normalize_coeffs_8bpc(int outSize, int ksize, double* prekk) {
-  int x;
-  int16_t* kk;
-  int coefs_precision;
-  double maxkk;
-
-  // use the same buffer for normalized coefficients
-  kk = (int16_t*)prekk;
-
-  maxkk = prekk[0];
-  for (x = 0; x < outSize * ksize; x++) {
-    if (maxkk < prekk[x]) {
-      maxkk = prekk[x];
-    }
-  }
-
-  for (coefs_precision = 0; coefs_precision < PRECISION_BITS;
-       coefs_precision += 1) {
-    int next_value = (int)(0.5 + maxkk * (1 << (coefs_precision + 1)));
-    // The next value will be outside of the range, so just stop
-    if (next_value >= (1 << MAX_COEFS_PRECISION))
-      break;
-  }
-
-  for (x = 0; x < outSize * ksize; x++) {
-    if (prekk[x] < 0) {
-      kk[x] = (int)(-0.5 + prekk[x] * (1 << coefs_precision));
-    } else {
-      kk[x] = (int)(0.5 + prekk[x] * (1 << coefs_precision));
-    }
-  }
-  return coefs_precision;
-}
-
 void ImagingResampleHorizontalConvolution8u4x(
     uint32_t* lineOut0,
     uint32_t* lineOut1,
@@ -216,18 +89,14 @@ void ImagingResampleHorizontal_8bpc(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
-    // int* bounds,
-    // double* prekk,
     std::vector<at::Tensor> horiz_indices_weights,
     unsigned int horiz_weights_precision,
     int xout,
     int yout,
     int xin) {
   int yy;
-  int16_t* kk;
-  int coefs_precision = (int)horiz_weights_precision;
 
-  kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
+  int16_t* kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
 
   std::vector<int> bounds_vec(2 * xout, 0);
   int* bounds = bounds_vec.data();
@@ -254,7 +123,7 @@ void ImagingResampleHorizontal_8bpc(
         bounds,
         kk,
         ksize,
-        coefs_precision);
+        (int)horiz_weights_precision);
   }
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
@@ -264,7 +133,7 @@ void ImagingResampleHorizontal_8bpc(
         bounds,
         kk,
         ksize,
-        coefs_precision);
+        (int)horiz_weights_precision);
   }
 }
 
@@ -272,29 +141,28 @@ void ImagingResampleVertical_8bpc(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
-    int* bounds,
-    double* prekk,
+    std::vector<at::Tensor> vert_indices_weights,
+    unsigned int vert_weights_precision,
     int xout,
     int yout) {
   int ymin, ymax;
-  int16_t *k, *kk;
-  int coefs_precision;
+  int16_t* k = nullptr;
+  int16_t* kk = (int16_t*)(vert_indices_weights[3].data_ptr<double>());
 
-  // use the same buffer for normalized coefficients
-  kk = (int16_t*)prekk;
-  coefs_precision = normalize_coeffs_8bpc(yout, ksize, prekk);
-
+  int64_t* idx_ptr_xmin = vert_indices_weights[0].data_ptr<int64_t>();
+  int64_t* idx_ptr_size = vert_indices_weights[1].data_ptr<int64_t>();
   for (const auto yy : c10::irange(yout)) {
     k = &kk[yy * ksize];
-    ymin = bounds[yy * 2 + 0];
-    ymax = bounds[yy * 2 + 1];
+
+    ymin = idx_ptr_xmin[yy];
+    ymax = idx_ptr_size[yy];
     ImagingResampleVerticalConvolution8u(
         unpacked_output_p + yy * xout,
         unpacked_input_p,
         ymin,
         ymax,
         k,
-        coefs_precision,
+        (int)vert_weights_precision,
         xout);
   }
 }
@@ -312,20 +180,17 @@ uint32_t* ImagingResampleInner(
     const scale_type& scales) {
   int need_horizontal, need_vertical;
   //   int ksize_horiz, ksize_vert;
-  int ksize_vert;
-  int *bounds_horiz, *bounds_vert;
-  double *kk_horiz, *kk_vert;
-  uint32_t* unpacked_output_p = NULL;
-  uint32_t* unpacked_output_temp_p = NULL;
+  //   int *bounds_horiz, *bounds_vert;
+  //   double *kk_horiz, *kk_vert;
+  uint32_t* unpacked_output_p = nullptr;
+  uint32_t* unpacked_output_temp_p = nullptr;
 
   need_horizontal = xout != xin;
   need_vertical = yout != yin;
-  unsigned int horiz_weights_precision = 0;
 
-  /* two-pass resize, horizontal pass */
   if (need_horizontal) {
-    // ksize_horiz = precompute_coeffs<F>(xin, xout, &bounds_horiz, &kk_horiz);
     int interp_dim = 2;
+    unsigned int horiz_weights_precision = 0;
     auto [horiz_indices_weights, ksize_horiz] =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/xin,
@@ -337,68 +202,43 @@ uint32_t* ImagingResampleInner(
             /*opt_scale=*/scales[interp_dim - 2],
             /*weights_precision&=*/horiz_weights_precision);
 
-    // if (!ksize_horiz) {
-    //     return NULL;
-    // }
-
-    // imTemp = ImagingNewDirty(imIn->mode, xout, ybox_last - ybox_first);
-    // if (imTemp) {
-    //     ResampleHorizontal(
-    //         imTemp, imIn, ybox_first, ksize_horiz, bounds_horiz, kk_horiz);
-    // }
     unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
     ImagingResampleHorizontal_8bpc(
         unpacked_output_temp_p,
         unpacked_input_p,
         ksize_horiz,
-        // bounds_horiz,
-        // kk_horiz,
         horiz_indices_weights,
         horiz_weights_precision,
         xout,
         yin,
         xin);
-    free(bounds_horiz);
-    free(kk_horiz);
-    // if (!imTemp) {
-    //     free(bounds_vert);
-    //     free(kk_vert);
-    //     return NULL;
-    // }
-    // imOut = imIn = imTemp;
     unpacked_output_p = unpacked_input_p = unpacked_output_temp_p;
   }
 
-  /* vertical pass */
   if (need_vertical) {
-    ksize_vert = precompute_coeffs<F>(yin, yout, &bounds_vert, &kk_vert);
-    // if (!ksize_vert) {
-    //     free(bounds_horiz);
-    //     free(kk_horiz);
-    //     return NULL;
-    // }
+    int interp_dim = 3;
+    unsigned int vert_weights_precision = 0;
+    auto [vert_indices_weights, ksize_vert] =
+        F::compute_indices_int16_weights_aa(
+            /*input_size=*/yin,
+            /*output_size=*/yout,
+            /*stride=*/1,
+            /*ndims=*/4,
+            /*reshape_dim=*/interp_dim,
+            /*align_corners=*/align_corners,
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*weights_precision&=*/vert_weights_precision);
 
-    // imOut = ImagingNewDirty(imIn->mode, imIn->xsize, ysize);
     unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
-    // if (imOut) {
     ImagingResampleVertical_8bpc(
         unpacked_output_p,
         unpacked_input_p,
         ksize_vert,
-        bounds_vert,
-        kk_vert,
+        vert_indices_weights,
+        vert_weights_precision,
         xout,
         yout);
-    // }
-    // /* it's safe to call ImagingDelete with empty value
-    //    if previous step was not performed. */
-    // ImagingDelete(imTemp);
     free(unpacked_output_temp_p);
-    free(bounds_vert);
-    free(kk_vert);
-    // if (!imOut) {
-    //     return NULL;
-    // }
   }
 
   // /* none of the previous steps are performed, copying */
