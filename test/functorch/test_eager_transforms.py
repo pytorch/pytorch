@@ -1087,6 +1087,131 @@ class TestAutogradFunction(TestCase):
         grad(h, argnums=(0, 1))(x, grad_y)
 
 
+class TestAutogradFunctionVmapAPI(TestCase):
+    @_set_autograd_function_extension_enabled()
+    def test_no_vmap_staticmethod(self, device):
+        class NumpyCube(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
+            vmap(NumpyCube.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_info_object(self, device):
+        batch_size = 10
+
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(info.batch_size, batch_size)
+                return input, in_dims[0]
+
+        x = torch.randn(batch_size, 3, device=device)
+        vmap(Id.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_in_dims_single_input(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                self.assertEqual(in_dims, (1,))
+                return input, in_dims[0]
+
+        B = 10
+        x = torch.randn(3, B, device=device)
+        vmap(Id.apply, in_dims=1)(x)
+        vmap(Id.apply, in_dims=(1,))(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_in_dims_multiple_inputs(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                pass
+
+            @staticmethod
+            def setup_context(ctx, outputs, x, y):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, x, y):
+                self.assertEqual(in_dims, (0, [0, 0]))
+                self.assertTrue(isinstance(in_dims, tuple))
+                self.assertTrue(isinstance(in_dims[1], list))
+                return (x, y), in_dims
+
+        x = torch.randn(2, device=device)
+        vmap(Id.apply)(x, [x, x])
+
+    @_set_autograd_function_extension_enabled()
+    def test_skips_empty_layer(self, device):
+        class Id(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                pass
+
+            @staticmethod
+            def vmap(info, in_dims, input):
+                raise RuntimeError("expected to not be called")
+
+        def f(x):
+            y = torch.tensor(1.)
+            y = Id.apply(y)
+            return x * 1
+
+        x = torch.randn(2, 3)
+        vmap(f)(x)
+
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -3847,6 +3972,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestAutogradFunction,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestAutogradFunctionVmapAPI,
     globals(),
     only_for=only_for,
 )
