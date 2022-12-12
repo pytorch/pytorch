@@ -277,10 +277,13 @@ def prelu_backward(
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    out = weight_grad_collector.sum_to_size(cur_weight.shape)
+    if len(self.shape) == 0:
+        out = weight_grad_collector.view(cur_weight.shape)
+    else:
+        out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
-    return (input_grad, out)
+    return (input_grad.view_as(self), out)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
