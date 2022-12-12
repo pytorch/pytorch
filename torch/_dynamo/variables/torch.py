@@ -161,6 +161,8 @@ class TorchVariable(VariableTracker):
         if self.value in (
             torch._assert,
             torch.device,
+            torch.distributed.is_available,
+            torch.distributed.is_initialized,
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
