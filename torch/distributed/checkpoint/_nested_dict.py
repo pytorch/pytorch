@@ -5,7 +5,7 @@ from torch.distributed.checkpoint.metadata import (
     STATE_DICT_TYPE,
 )
 
-from .traverse import (
+from ._traverse import (
     traverse_state_dict,
     set_element,
     OBJ_PATH,

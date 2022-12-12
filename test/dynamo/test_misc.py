@@ -2995,6 +2995,80 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_is_compiling(self):
+        def f():
+            if torch._dynamo.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+        self.assertEqual(opt_f(), torch.ones(2, 2))
+
+    def test_guard_failure_fn(self):
+        def fn(x, y, k):
+            x = x + 1
+            y = y + 1
+            return x * y * k
+
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([1.0, 1.0])
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        x2 = torch.tensor([0.5, 0.5, 1.0])
+        y2 = torch.tensor([0.5, 0.5, 0.5])
+
+        opt_fn(x, y, 3)
+        opt_fn(x2, y2, 5)
+
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0], "k == 3")
+
+    def test_guard_failure_fn2(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x * y
+
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([1.0, 1.0])
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        x2 = torch.tensor([0.5, 0.5, 1.0])
+        y2 = torch.tensor([0.5, 0.5, 0.5])
+
+        opt_fn(x, y)
+        opt_fn(x2, y2)
+
+        if torch._dynamo.config.dynamic_shapes:
+            self.assertTrue(guard_failure is None)
+        else:
+            self.assertTrue(guard_failure is not None)
+            self.assertEqual(
+                guard_failure[0],
+                "tensor 'x' size mismatch at index 0. expected 2, actual 3",
+            )
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

@@ -4189,6 +4189,7 @@ new_module_tests = [
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
         check_batched_grad=False,
+        check_gradgrad=False,
     ),
     dict(
         module_name='TransformerEncoderLayer',
