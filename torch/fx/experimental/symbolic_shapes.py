@@ -13,6 +13,7 @@ import collections
 import textwrap
 import logging
 from torch import SymInt, SymFloat
+from torch._guards import ShapeGuard
 
 try:
     import sympy  # type: ignore[import]
@@ -333,7 +334,11 @@ def _make_node_magic(method, func):
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
         other_expr = self.shape_env.replace(other_expr)
-        out = func(expr, other_expr)
+        try:
+            out = func(expr, other_expr)
+        except Exception:
+            logging.warning(f"failed to eval {method}({expr}, {other_expr})")
+            raise
         out = sympy.expand(out)
         pytype: Type
         if method in always_float_magic_methods:
@@ -358,7 +363,11 @@ def _make_node_magic(method, func):
             return r.node
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        out = func(expr)
+        try:
+            out = func(expr)
+        except Exception:
+            logging.warning(f"failed to eval {method}({expr})")
+            raise
         out = sympy.expand(out)
         pytype: Type
         if method in always_int_magic_methods:
@@ -467,7 +476,7 @@ class ShapeGuardPrinter(StrPrinter):
 
 class ShapeEnv(object):
     def __init__(self):
-        self.guards = []
+        self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
@@ -719,7 +728,7 @@ class ShapeEnv(object):
             try:
                 exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                logging.warning(f"failing guard allocated at {tb}")
+                logging.warning(f"Failing guard allocated at:\n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
@@ -869,6 +878,8 @@ class ShapeEnv(object):
                 except NotImplementedError:
                     pass
             return
+        except RecursionError:
+            raise RuntimeError(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
@@ -896,9 +907,9 @@ class ShapeEnv(object):
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append((expr, stack))
+                self.guards.append(ShapeGuard(expr, stack))
             elif concrete_val is sympy.false:
-                self.guards.append((sympy.Not(expr), stack))
+                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
             else:
-                self.guards.append((sympy.Eq(expr, concrete_val), stack))
+                self.guards.append(ShapeGuard(sympy.Eq(expr, concrete_val), stack))
         return concrete_val
