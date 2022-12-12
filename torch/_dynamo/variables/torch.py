@@ -781,8 +781,8 @@ class TorchPyOperator(VariableTracker):
                 unimplemented(true_cmp.diff(false_cmp))
 
             # Add guards
-            tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
-            tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
+            tx.output.guards |= false_guards
+            tx.output.guards |= true_guards
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)
