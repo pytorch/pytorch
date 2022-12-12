@@ -1717,6 +1717,18 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
+    def test_chunk_jacrev(self, device):
+        x = torch.randn(10, 2, device=device)
+        y = torch.randn(1, 2, device=device)
+
+        def f(x, y):
+            return (x.sin(), x + y), (x + 2, x.sum())
+
+        for chunk_size in [1, 2, 3, 4, 7, 10]:
+            expected = functorch.jacrev(f, argnums=(0, 1))(x, y)
+            actual = functorch.jacrev(f, argnums=(0, 1), chunk_size=chunk_size)(x, y)
+            self.assertEqual(actual, expected)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
