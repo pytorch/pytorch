@@ -950,7 +950,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             @wraps(fn)
             def wrapper(*args, **kwargs):
                 if TEST_WITH_TORCHDYNAMO:
-                    raise unittest.SkipTest(msg)
+                    unittest.expectedFailure(copy_func(fn))
                 else:
                     fn(*args, **kwargs)
             return wrapper
