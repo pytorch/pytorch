@@ -572,6 +572,81 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     return r;
 }
 
+//make the two tensors have the same dimension
+void broadcast_dimensions_sparse_cpu(const SparseTensor newsrc,const SparseTensor& src,const SparseTensor& other,int max_dim ){
+  auto commonDtype = promoteTypes(other.scalar_type(), src.scalar_type());
+  c10::IntArrayRef b =src.sizes();
+  Tensor src_values = src._values().to(commonDtype);
+  Tensor src_indices= src._indices();
+  int n= max_dim-src.sparse_dim();
+  int64_t s_nnz = src._nnz();
+  Tensor new_indices=at::empty({max_dim, s_nnz}, src._indices().options());
+  for (int lignes=0; lignes<n; lignes++){
+    for (int col=0; col<new_indices[lignes].size(0); col++ ){
+      new_indices[lignes][col]=0;
+    }
+  }
+  for (int lignes=n; lignes<max_dim; lignes++){
+    for (int col=0; col<new_indices[lignes].size(0); col++ ){
+      new_indices[lignes][col]=src_indices[lignes-n][col];
+    }
+  }
+  long int new_sizes[max_dim];
+  for (int singdim=0; singdim<n; singdim++){
+    new_sizes[singdim]=1;
+  }
+  for (int dim=n; dim<max_dim; dim++){
+    new_sizes[dim]=b[dim-n];
+  }
+  
+  c10::IntArrayRef arrayref_newsizes= c10::ArrayRef<long int>(new_sizes,max_dim);
+  newsrc.sparse_resize_(arrayref_newsizes,max_dim,src.dense_dim());
+  alias_into_sparse(newsrc, new_indices, src_values);
+}
+
+//make the two tensors have the same size (broadcasting rules)
+void broadcast_sparse_cpu(const SparseTensor& t, const SparseTensor& other, std::vector<int64_t> expandedSizes, int64_t max_nnz){
+  c10::IntArrayRef a =t.sizes();
+  auto commonDtype = promoteTypes(t.scalar_type(), other.scalar_type());
+  Tensor t_values = t._values().to(commonDtype);
+  Tensor t_indices= t._indices();
+  if(t.sizes()!= expandedSizes){
+  
+  for (int dim=1; dim<=a.size(); dim++){
+    if(a[dim-1]<expandedSizes[dim-1]){
+      Tensor seq_indices[expandedSizes[dim-1]];
+      Tensor seq_values[expandedSizes[dim-1]];
+      
+      seq_indices[0]=t_indices;
+      seq_values[0]=t_values;
+    
+      for(int i=1; i<expandedSizes[dim-1];i++){
+        Tensor new_indices=at::empty({t.sparse_dim(), max_nnz}, t._indices().options());
+        new_indices.resize_as_(t_indices);
+        new_indices.copy_(t._indices());
+        
+        for(int k=0; k<(new_indices[dim-1]).size(0); k++){
+          new_indices[dim-1][k]=i;
+        }
+        
+        seq_indices[i]=new_indices;
+        seq_values[i]=t_values;
+        
+      }
+      TensorList arrayref_indices= c10::ArrayRef<Tensor>(seq_indices,expandedSizes[dim-1]);
+      TensorList arrayref_values= c10::ArrayRef<Tensor>(seq_values,expandedSizes[dim-1]);
+        
+      t_indices=at::cat(arrayref_indices, 1);
+      t_values=at::cat(arrayref_values, 0).to(t.scalar_type());
+      
+      
+      t.sparse_resize_(expandedSizes,t.sparse_dim(),t.dense_dim());
+      alias_into_sparse(t, t_indices, t_values);
+    }
+  }
+}
+}
+
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
 
 SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r) {
@@ -584,27 +659,70 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
-  TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", t.sizes(), " != ", src.sizes());
+  
 
-  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+
+//initialisation
+c10::IntArrayRef a =t.sizes();
+c10::IntArrayRef b =src.sizes();
+int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
+std::vector<int64_t> expandedSizes = at::infer_size(a,b);
+
+
+auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+Tensor t_values = t._values().to(commonDtype);
+Tensor t_indices= t._indices();
+Tensor src_values = src._values().to(commonDtype);
+Tensor src_indices= src._indices();
+
+// broadcasting: make the two tensors have the same dimension
+int max_dim= std::max(src.sparse_dim(), t.sparse_dim());
+const SparseTensor newsrc=at::empty({0}, src.options());
+const SparseTensor newt=at::empty({0}, t.options());
+if (src.sparse_dim()<max_dim){
+
+  broadcast_dimensions_sparse_cpu(newsrc, src,t, max_dim);
+  
+
+}else{
+  newsrc.sparse_resize_(src.sizes(),max_dim,src.dense_dim());
+  alias_into_sparse(newsrc, src_indices, src_values);
+}
+if (t.sparse_dim()<max_dim){
+  broadcast_dimensions_sparse_cpu(newt, t,src, max_dim);
+  
+
+}else{
+  newt.sparse_resize_(t.sizes(),max_dim,t.dense_dim());
+  alias_into_sparse(newt, t_indices, t_values);
+}
+  
+
+
+// broadcasting: make the two tensors have the same size
+
+broadcast_sparse_cpu(newsrc,newt,expandedSizes,max_nnz);
+broadcast_sparse_cpu(newt,newsrc,expandedSizes,max_nnz);
+  
 
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
-  if (src._nnz() == 0) {
-    return copy_sparse_to_sparse_(r, t);
+  if (newsrc._nnz() == 0) {
+    return copy_sparse_to_sparse_(r, newt);
   }
-  if (t._nnz() == 0) {
-    return mul_out_sparse_scalar(r, src, value);
+  if (newt._nnz() == 0) {
+    return mul_out_sparse_scalar(r, newsrc, value);
   }
+  TORCH_CHECK(newt.sizes().equals(newsrc.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", newt.sizes(), " != ", newsrc.sizes());
 
-  TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
+  TORCH_CHECK(is_same_density(newt, newsrc), "add: expected 'self' and 'other' to have same density, but 'self' has ", newt.sparse_dim(), " sparse dimensions while 'other' has ", newsrc.sparse_dim(), " sparse dimensions");
 
-  r.resize_as_(src);
+  r.resize_as_(newsrc);
 
-  if (src._values().is_contiguous() && t._values().is_contiguous()) {
-    return add_out_sparse_contiguous(r, t, src, value, commonDtype);
+  if (src._values().is_contiguous() && newt._values().is_contiguous()) {
+    return add_out_sparse_contiguous(r, newt, newsrc, value, commonDtype);
   } else {
-    return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
+    return add_out_sparse_non_contiguous(r, newt, newsrc, value, commonDtype);
   }
 }
 
