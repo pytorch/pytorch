@@ -913,7 +913,6 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
@@ -957,6 +956,7 @@ class TestOperators(TestCase):
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
         decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS)),
+        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
