@@ -6,14 +6,9 @@ from collections import OrderedDict
 from torchgen.gen import parse_native_yaml
 import torch._prims as prims
 
-ROOT = Path(__file__).parent.parent.parent.parent
+ROOT = Path(__file__).absolute().parent.parent.parent.parent
 NATIVE_FUNCTION_YAML_PATH = ROOT / Path("aten/src/ATen/native/native_functions.yaml")
 TAGS_YAML_PATH = ROOT / Path("aten/src/ATen/native/tags.yaml")
-
-print(Path(__file__))
-print(ROOT)
-print(NATIVE_FUNCTION_YAML_PATH)
-print(TAGS_YAML_PATH)
 
 BUILD_DIR = "build/ir"
 ATEN_OPS_CSV_FILE = "aten_ops.csv"
