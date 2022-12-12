@@ -1408,7 +1408,10 @@ def parse_args(args=None):
         help="Whether to randomize the input values. Dimensions will be kept the same.",
     )
     parser.add_argument(
-        "--threads", "-t", type=int, help="number of threads to use for eager"
+        "--threads",
+        "-t",
+        type=int,
+        help="number of threads to use for eager and inductor",
     )
     parser.add_argument(
         "--nopython", action="store_true", help="Turn graph breaks into errors"

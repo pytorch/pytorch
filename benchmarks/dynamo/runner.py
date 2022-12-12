@@ -273,15 +273,27 @@ def parse_args():
         "-t",
         type=int,
         default=None,
-        help="number of threads to use for eager",
+        help="number of threads to use for eager and inductor.",
     )
     numactl_group = parser.add_argument_group("Numactl Parameters")
+    numactl_group.add_argument(
+        "--single_socket",
+        action="store_true",
+        default=False,
+        help="By default use socket 0",
+    )
+    numactl_group.add_argument(
+        "--single_core",
+        action="store_true",
+        default=False,
+        help="By default use core 0",
+    )
     numactl_group.add_argument(
         "--physcpubind",
         "-C",
         type=str,
         default=None,
-        help="Only execute process on cpus.",
+        help="Only execute process on given cpus. If not provided, all the cores of socket 0 will be used.",
     )
     numactl_group.add_argument(
         "--membind", "-m", type=int, default=0, help="Only allocate memory from nodes."
@@ -337,6 +349,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     1
                 ].strip()
             )
+            if args.single_socket:
+                args.physcpubind = "0-{}".format(cores - 1)
+                args.membind = 0
+            elif args.single_core:
+                args.physcpubind = "0"
+                args.membind = 0
             if args.physcpubind is None:
                 args.physcpubind = "0-{}".format(cores - 1)
             if args.membind is None:
@@ -747,41 +765,34 @@ class ParsePerformanceLogs(Parser):
         str_io.write("~~~\n")
         return str_io.getvalue()
 
-    def generate_executive_summary(self):
-        if "cuda" in self.devices:
-            description = (
-                "We evaluate different backends "
-                "across three benchmark suites - torchbench, huggingface and timm. We run "
-                "these experiments on A100 GPUs. Each experiment runs one iteration of forward "
-                "and backward pass. For accuracy, we check the numerical correctness of forward "
-                "pass outputs and gradients by comparing with native pytorch. We measure speedup "
-                "by normalizing against the performance of native pytorch. We report mean "
-                "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
-                "Caveats\n"
-                "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
-                "reduce peak memory footprint.\n"
-                "2) Experiments do not cover dynamic shapes.\n"
-                "3) Experimental setup does not have optimizer.\n\n"
-            )
-        else:
+    def generate_executive_summary(self, mode):
+        machine = "A100 GPUs"
+        if "cpu" in self.devices:
             get_machine_cmd = "lscpu| grep 'Model name' | awk -F':' '{print $2}'"
             machine = subprocess.getstatusoutput(get_machine_cmd)[1].strip()
-            description = (
-                "We evaluate different backends "
-                "across three benchmark suites - torchbench, huggingface and timm. We run "
-                "these experiments on "
-                + machine
-                + ". Each experiment runs one iteration of forward "
-                "pass. For accuracy, we check the numerical correctness of forward "
-                "pass outputs by comparing with native pytorch. We measure speedup "
-                "by normalizing against the performance of native pytorch. We report mean "
-                "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
-                "Caveats\n"
-                "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
-                "reduce peak memory footprint.\n"
-                "2) Experiments do not cover dynamic shapes.\n"
-                "3) Experimental setup does not have optimizer.\n\n"
-            )
+        perf_des = "forward pass"
+        acc_des = "forward pass outputs"
+        if mode == "training":
+            perf_des += " and backward pass"
+            acc_des += " and gradients"
+        description = (
+            "We evaluate different backends "
+            "across three benchmark suites - torchbench, huggingface and timm. We run "
+            "these experiments on "
+            + machine
+            + ". Each experiment runs one iteration of "
+            + perf_des
+            + ". For accuracy, we check the numerical correctness of "
+            + acc_des
+            + " by comparing with native pytorch. We measure speedup "
+            "by normalizing against the performance of native pytorch. We report mean "
+            "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
+            "Caveats\n"
+            "1) Batch size has been reduced to workaround OOM errors. Work is in progress to "
+            "reduce peak memory footprint.\n"
+            "2) Experiments do not cover dynamic shapes.\n"
+            "3) Experimental setup does not have optimizer.\n\n"
+        )
         comment = generate_dropdown_comment("", description)
         str_io = io.StringIO()
         str_io.write("\n")
@@ -893,8 +904,8 @@ class ParsePerformanceLogs(Parser):
         comment = generate_dropdown_comment(title, body)
         return comment
 
-    def gen_summary_files(self):
-        self.generate_executive_summary()
+    def gen_summary_files(self, mode):
+        self.generate_executive_summary(mode)
         for suite in self.suites:
             self.plot_graph(
                 self.untouched_parsed_frames[suite]["speedup"],
@@ -931,7 +942,10 @@ def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_
     parser = parser_class(
         suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
     )
-    parser.gen_summary_files()
+    mode = "training"
+    if args.inference:
+        mode = "inference"
+    parser.gen_summary_files(mode)
     return
 
 
