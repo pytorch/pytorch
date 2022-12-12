@@ -339,8 +339,8 @@ class ModuleList(Module):
 
         lines = []
         main_str = self._get_name() + '('
-        for r, b in zip(repeats, repeated_blocks):
-            local_repr = f"{r} x {b}"
+        for n, b in zip(repeats, repeated_blocks):
+            local_repr = f"{n} x {b}"
             local_repr = _addindent(local_repr, 2)
             lines.append(local_repr)
 
