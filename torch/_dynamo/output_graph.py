@@ -181,7 +181,6 @@ class OutputGraph(fx.Tracer):
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         self.tracing_context: TracingContext = TracingContext()
-        self.guards: Set[Guard] = self.tracing_context.guards_context.dynamo_guards
         # Although we prune unused graphargs before sending graphs to
         # compilers, we may have legitimately triggered shape guards
         # on "unused" inputs that we must keep track of.  So after
@@ -231,6 +230,10 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
+    @property
+    def guards(self) -> Set[Guard]:
+        return self.tracing_context.guards_context.dynamo_guards
+
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -268,8 +271,8 @@ class OutputGraph(fx.Tracer):
             # and do save() to snapshot the current state and increment the generation count, or restore()
             # to go back to a prior generation. The application of state onto existing structures
             # should be a detail of registrants with the system, and the system should be vaguely ignorant of
-            # how dependent objects are restored. 
-            # 
+            # how dependent objects are restored.
+            #
             # Ex: OutputGraph would register values with the checkpointing system, and when the system calls
             # restore(), it would do the equivalent of this fn. TracingContext would get hit at the same exact time
             # with restore(), and so would also restore the guards, allowing dynamo to just make sure the relationship
