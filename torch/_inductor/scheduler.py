@@ -16,7 +16,14 @@ import torch
 from . import config, dependencies, ir, metrics
 from .dependencies import canonicalization_prefix, MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils, has_triton, sympy_symbol
+from .utils import (
+    cache_on_self,
+    cmp,
+    dynamo_utils,
+    has_triton,
+    sympy_subs,
+    sympy_symbol,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -921,7 +928,7 @@ class Scheduler:
                 for d1, d2 in zip(dep1_permutation, dep2_permutation)
             },
         )
-        if dep1.index != dep2_reindex:
+        if dep1.index != dep2_reindexed:
             return None
 
         # Permute node2 to iteration in the same order as node1
@@ -1317,6 +1324,9 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 

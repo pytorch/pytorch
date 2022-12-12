@@ -360,7 +360,7 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.create_symbol(val)
+        return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
