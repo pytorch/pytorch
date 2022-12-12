@@ -1866,17 +1866,37 @@ def meta__scaled_dot_product_flash(
     return_softmax: bool = False,
     is_causal: bool = False,
 ):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(2)
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    Nnz_q = batch_size * max_seqlen_batch_q
+
+    output = torch.empty(
+        (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
+    )
+    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+        1, 2
+    )
+
     logsumexp = torch.empty(
-        (query.size(0), query.size(1), query.size(2)),
+        (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
         device=query.device,
     )
     softmax = torch.empty(
-        (query.size(0), query.size(1), query.size(2), key.size(2)),
+        (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_batch_k),
         dtype=query.dtype,
         device=query.device,
     )
-    return torch.empty_like(query), logsumexp, softmax
+    return ouput, logsumexp, softmax
 
 
 @register_meta(
@@ -1930,17 +1950,16 @@ def meta__scaled_dot_product_efficient_backward(
     logsumexp: Tensor,
     is_causal: bool = False,
 ):
-    # There has to be a better way than this....
     is_alias = (
         query._storage().data_ptr()
         == key._storage().data_ptr()
         == value._storage().data_ptr()
     )
 
-    grad_out = grad_out.transpose(1,2)
-    query = query.transpose(1,2)
-    key = key.transpose(1,2)
-    value = value.transpose(1,2)
+    grad_out = grad_out.transpose(1, 2)
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
 
     B = query.size(0)
     M = query.size(1)
@@ -1948,21 +1967,25 @@ def meta__scaled_dot_product_efficient_backward(
     nH = query.size(2)
     K = query.size(3)
 
-    if is_alias:
+    grad_kv_needs_init = is_causal and N > M
+    if (
+        (not grad_kv_needs_init)
+        and M == N
+        and query.size(3) == value.size(3)
+        and is_alias
+    ):
         chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
         grad_q = chunk.select(2, 0)
         grad_k = chunk.select(2, 1)
         grad_v = chunk.select(2, 2)
     else:
-        grad_kv_needs_init = is_causal and N > M
-
         grad_q = torch.empty_like(query)
         grad_k = torch.zeros_like(key) if grad_kv_needs_init else torch.empty_like(key)
         grad_v = (
             torch.zeros_like(value) if grad_kv_needs_init else torch.empty_like(value)
         )
 
-    return grad_q.transpose(1,2), grad_k.transpose(1,2), grad_v.transpose(1,2)
+    return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
