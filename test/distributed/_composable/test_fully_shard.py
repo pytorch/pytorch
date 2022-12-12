@@ -253,6 +253,11 @@ class TestFSDPRuntime(FSDPTest):
         sd_fsdp = fsdp_wrapped_model.state_dict()
         sd_local = local_model.state_dict()
         sd = composable.state_dict()
+        # sd = {k: v.clone() for }
+        for k1, k2 in zip(sd.keys(), sd_local.keys()):
+            self.assertEqual(k1, k2)
+
+        print(f"RV: keys passed: {list(sd.keys())}")
         for (k1, v1), (k2, v2) in zip(sd.items(), sd_local.items()):
             self.assertEqual(k1, k2)
             self.assertEqual(v1, v2)

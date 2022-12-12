@@ -76,6 +76,8 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Given a module and returns if this module has parameters sharded by FSDP."""
+    # if _is_composable(state):
+    #     return module_param_handles = state._comm_module_to_handles[module]
     return len(_module_handles(state, module)) > 0
 
 

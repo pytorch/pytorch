@@ -16,6 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import (
+    _is_composable,
     _all_handles,
     _FSDPState,
     _has_fsdp_params,
@@ -165,8 +166,17 @@ def _common_unshard_post_state_dict_hook(
     hook.
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
+    # module_param_handles = state._comm_module_to_handles[module]
     # Return early for trivial cases
-    if not state_dict or not _has_fsdp_params(fsdp_state, module):
+    if not state_dict or (
+        # TODO: get rid of _is_composable hack. _has_fsdp_params(fsdp_state, module) seems to return False
+        # for composable codepath.
+        (not _is_composable(fsdp_state) and not _has_fsdp_params(fsdp_state, module))
+        or (_is_composable(fsdp_state) and not len(fsdp_state._comm_module_to_handles[module]) > 0)
+    ):
+    # if not state_dict or not _has_fsdp_params(fsdp_state, module):
+        # print(" --- RETURNING EARLY ---")
+        raise ValueError(f" {dist.get_rank()} returnin early! {(not state_dict) is True} {_has_fsdp_params(fsdp_state, module)}")
         _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
@@ -304,6 +314,7 @@ def _full_post_state_dict_hook(
         ):
             try:
                 state_dict[fqn] = state_dict[fqn].clone().detach()
+                print(f"RV: cloned {fqn}")
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
             except BaseException as e:
                 warnings.warn(
@@ -313,6 +324,8 @@ def _full_post_state_dict_hook(
                     "parameter is managed by FSDP. Please check clone "
                     f"implementation of {fqn}. Error: {str(e)}"
                 )
+        else:
+            print(f"RV: not cloning")
 
     return _common_unshard_post_state_dict_hook(
         module, fsdp_state, state_dict, prefix, param_hook

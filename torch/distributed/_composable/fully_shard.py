@@ -123,7 +123,7 @@ def fully_shard(
         comm_modules.add(handle._comm_module)
 
     for submodule in comm_modules:
-        print(f"submodule is {submodule}")
+        #print(f"submodule is {submodule}")
         fsdp_state = state
         submodule.register_state_dict_pre_hook(partial(_pre_state_dict_hook, fsdp_state))
         submodule._register_state_dict_hook(partial(_post_state_dict_hook, fsdp_state))

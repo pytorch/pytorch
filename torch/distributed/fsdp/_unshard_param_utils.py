@@ -9,6 +9,7 @@ from torch.distributed.fsdp._common_utils import (
     _has_fsdp_params,
     _module_handles,
     HandleTrainingState,
+    _is_composable,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
@@ -77,9 +78,22 @@ def _deregister_flat_param(state: _FSDPState, module: nn.Module) -> None:
     attribute but dynamically change whether it is visible to ``nn.Module``
     methods.
     """
-    if _has_fsdp_params(state, module):
-        # TODO: figure out the case for the composable APIs.
-        cast(nn.Module, module.module)._parameters.pop(FLAT_PARAM, None)
+    if _is_composable(state):
+        print(f"RV: composable path deregister")
+        if len(state._comm_module_to_handles[module]) > 0:
+            cast(nn.Module, module.module)._parameters.pop(FLAT_PARAM, None)
+        # return 3
+    else:
+        if _has_fsdp_params(state, module):
+            # TODO: figure out the case for the composable APIs.
+            cast(nn.Module, module.module)._parameters.pop(FLAT_PARAM, None)
+
+
+def _get_module_handles_based_on_composable(state, module):
+    if not _is_composable(state):
+        return _module_handles(state, module)
+    else:
+        return state._comm_module_to_handles[module]
 
 
 def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
@@ -91,10 +105,15 @@ def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
     ``FLAT_PARAM`` to always be an attribute but dynamically change whether
     it is visible to ``nn.Module`` methods.
     """
-    handles = _module_handles(state, module)
-    if _has_fsdp_params(state, module):
-        # TODO: figure out the case for the composable APIs.
-        cast(nn.Module, module.module)._parameters[FLAT_PARAM] = handles[0].flat_param
+    handles = _get_module_handles_based_on_composable(state, module)
+    if _is_composable(state):
+        print(f"RV: composable path register")
+        if len(state._comm_module_to_handles[module]) > 0:
+            cast(nn.Module, module.module)._parameters[FLAT_PARAM] = handles[0].flat_param
+    else:
+        if _has_fsdp_params(state, module):
+            # TODO: figure out the case for the composable APIs.
+            cast(nn.Module, module.module)._parameters[FLAT_PARAM] = handles[0].flat_param
 
 
 @contextlib.contextmanager
@@ -107,7 +126,7 @@ def _unflatten_as_params(state: _FSDPState, module: nn.Module) -> Generator:
     the original parameters as ``Tensor`` views into the flattened
     parameter.
     """
-    handles = _module_handles(state, module)
+    handles = _get_module_handles_based_on_composable(state, module)
     if not handles:
         yield
     else:
@@ -154,12 +173,10 @@ def _unshard_params(
 
     torch.cuda.synchronize()
     # If handles are shared by other module(s), the handle may be already unsharded.
-    handles = [
-        handle
-        for handle in _module_handles(state, module)
-        if handle._training_state != HandleTrainingState.SUMMON_FULL_PARAMS
-    ]
+    handles = _get_module_handles_based_on_composable(state, module)
+    handles = [handle for handle in handles if handle._training_state != HandleTrainingState.SUMMON_FULL_PARAMS]
     if not handles:
+        print(f"RV: NO HANDLES")
         yield
         return
 
@@ -220,7 +237,7 @@ def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
     """
     Deregisters the original parameters; registers the ``FlatParameter``.
     """
-    handles = _module_handles(state, module)
+    handles = _get_module_handles_based_on_composable(state, module)
     p_assert(
         len(handles) <= 1,
         "Expects <=1 handle per FSDP instance; needs to be refactored "
@@ -242,7 +259,7 @@ def _register_orig_params(state: _FSDPState, module: nn.Module) -> None:
     """
     Deregisters the ``FlatParameter``; registers the original parameters.
     """
-    handles = _module_handles(state, module)
+    handles = _get_module_handles_based_on_composable(state, module)
     if not handles:
         return
     handle = handles[0]
