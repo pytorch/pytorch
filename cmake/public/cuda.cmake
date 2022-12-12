@@ -212,12 +212,6 @@ else()
         CUDA::cudart)
 endif()
 
-# nvToolsExt
-add_library(torch::nvtoolsext INTERFACE IMPORTED)
-set_property(
-    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvToolsExt)
-
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)

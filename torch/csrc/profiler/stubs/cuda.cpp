@@ -1,6 +1,6 @@
 #include <sstream>
 
-#include <nvToolsExt.h>
+#include <nvtx3/nvToolsExt.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
