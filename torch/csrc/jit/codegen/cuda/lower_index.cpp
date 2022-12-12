@@ -104,6 +104,8 @@ void IndexLowering::handle(const RNGOp* rop) {
 
   // TensorIndex for philox subsequence and component.
   auto philox_index = Index::getLinearLogicalIndex(out_tv, for_loops_);
+  philox_index = GpuLower::current()->commonScalarMap().hoistScalar(
+      philox_index, for_loops_);
 
   // TensorIndex for writing rand_like output.
   const auto out = lowerDstIndex(out_tv);
