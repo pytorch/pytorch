@@ -14,6 +14,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
+from torch.testing._internal.autograd_function_db import autograd_function_db
 from collections import namedtuple
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
@@ -351,7 +352,7 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db + additional_op_db
+    all_opinfos = op_db + additional_op_db + autograd_function_db
     for decorate_meta in to_skip:
         matching_opinfos = [o for o in all_opinfos
                             if o.name == decorate_meta.op_name and
