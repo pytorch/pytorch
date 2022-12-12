@@ -6,6 +6,15 @@ import torch.nn.quantized._reference as nnqr
 from ._common_operator_config_utils import (
     _get_conv_configs,
     _get_linear_configs,
+    _get_binary_op_configs,
+    _get_bn_configs,
+    _get_cat_config,
+    _get_default_op_configs,
+    _get_embedding_op_configs,
+    _get_fixed_qparams_op_configs,
+    _get_ln_configs,
+    _get_rnn_op_configs,
+    _get_share_qparams_op_configs,
 )
 from .backend_config import (
     BackendPatternConfig,
@@ -30,7 +39,12 @@ onednn_weighted_op_int8_dtype_config = DTypeConfig(
     bias_dtype=torch.float,
 )
 
-onednn_default_dynamic_int8_dtype_config = DTypeConfig(
+onednn_op_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
+)
+
+onednn_dynamic_int8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.float,
     weight_dtype=torch.qint8,
@@ -38,11 +52,18 @@ onednn_default_dynamic_int8_dtype_config = DTypeConfig(
     is_dynamic=True,
 )
 
-conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
-linear_dtype_configs = [
-    onednn_weighted_op_int8_dtype_config,
-    onednn_default_dynamic_int8_dtype_config,
-]
+onednn_weight_only_qint8_dtype_config = DTypeConfig(
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.qint8,
+)
+
+onednn_input_output_only_quint8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
+    weight_dtype=torch.float,
+    bias_dtype=torch.float,
+)
 
 # ===================
 # |  FUSER METHODS  |
@@ -83,6 +104,7 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
 # |  CONFIGS FOR CONV  |
 # ======================
 
+conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
 conv_configs = _get_conv_configs(conv_dtype_configs)
 
 
@@ -90,6 +112,10 @@ conv_configs = _get_conv_configs(conv_dtype_configs)
 # |  CONFIGS FOR LINEAR  |
 # ========================
 
+linear_dtype_configs = [
+    onednn_weighted_op_int8_dtype_config,
+    onednn_dynamic_int8_dtype_config,
+]
 observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
 linear_configs = _get_linear_configs(linear_dtype_configs)
 
@@ -146,6 +172,18 @@ _add_eltwise_fusion_configs(linear_configs, nn.Linear, F.linear,
                             _reverse_sequential_wrapper2(nni.LinearTanh),
                             nni.LinearTanh, observation_type, nnqr.Linear)
 
+# ===========================
+# |  CONFIGS FOR OTHER OPS  |
+# ===========================
+
+binary_op_dtype_configs = [onednn_op_quint8_dtype_config]
+default_op_dtype_configs = [onednn_op_quint8_dtype_config]
+fixed_qparams_op_dtype_configs = [onednn_op_quint8_dtype_config]
+share_qparams_op_dtype_configs = [onednn_op_quint8_dtype_config]
+rnn_op_dtype_configs = [onednn_dynamic_int8_dtype_config]
+embedding_op_dtype_configs = [onednn_weight_only_qint8_dtype_config]
+layer_norm_op_dtype_configs = [onednn_input_output_only_quint8_dtype_config]
+
 # =====================
 # |  BACKEND CONFIGS  |
 # =====================
@@ -156,7 +194,16 @@ def get_onednn_backend_config() -> BackendConfig:
     """
     return BackendConfig("onednn") \
         .set_backend_pattern_configs(conv_configs) \
-        .set_backend_pattern_configs(linear_configs)
+        .set_backend_pattern_configs(linear_configs) \
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_ln_configs(layer_norm_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
 
 __all__ = [
     "get_onednn_backend_config",

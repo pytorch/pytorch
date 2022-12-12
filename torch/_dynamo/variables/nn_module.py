@@ -164,7 +164,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = str(type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -204,7 +204,6 @@ class NNModuleVariable(VariableTracker):
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     **options,
                 )
@@ -469,7 +468,6 @@ class NNModuleVariable(VariableTracker):
                     name,
                     args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -506,8 +504,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
+        except AttributeError as e:
+            raise NotImplementedError from e
 
         if fn in (
             torch.nn.ModuleList.__iter__,
