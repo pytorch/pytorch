@@ -1689,7 +1689,7 @@ def resolve_name(f):
 
     Arguments
     ---------
-    f : Callable
+    callable : Callable
         Function to resolve the name of.
 
     Returns

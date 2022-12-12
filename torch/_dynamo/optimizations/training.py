@@ -70,14 +70,11 @@ def aot_autograd(**kwargs):
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
 
-        from torch._inductor.debug import enable_aot_logging
-
         try:
             # NB: NOT cloned!
-            with enable_aot_logging():
-                cg = aot_module_simplified(gm, example_inputs, **kwargs)
-                counters["aot_autograd"]["ok"] += 1
-                return eval_frame.disable(cg)
+            cg = aot_module_simplified(gm, example_inputs, **kwargs)
+            counters["aot_autograd"]["ok"] += 1
+            return eval_frame.disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise

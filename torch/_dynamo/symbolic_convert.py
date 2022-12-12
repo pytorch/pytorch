@@ -253,7 +253,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 raise exc.SkipFrame(msg)
 
             self.push(value)
-            log.debug("generic_jump triggered compile")
             self.output.compile_subgraph(
                 self,
                 reason=GraphCompileReason(
@@ -312,9 +311,6 @@ def break_graph_if_unsupported(*, push):
 
                 if not self.should_compile_partial_graph():
                     raise
-
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
@@ -506,7 +502,6 @@ class InstructionTranslatorBase(object):
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
                 raise
-            log.debug("step triggered compile", exc_info=True)
         except Exception as exc:
             real_stack = getattr(exc, "real_stack", [])
             real_stack.append(self.frame_summary())
@@ -518,11 +513,7 @@ class InstructionTranslatorBase(object):
         assert self.checkpoint is not None
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)
-        self.output.compile_subgraph(
-            self,
-            partial_convert=True,
-            reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
-        )
+        self.output.compile_subgraph(self, partial_convert=True)
         self.output.add_output_instructions(
             [create_instruction("JUMP_ABSOLUTE", target=continue_inst)]
             + self.instructions
@@ -1053,7 +1044,6 @@ class InstructionTranslatorBase(object):
         except Unsupported as e:
             if not self.should_compile_partial_graph():
                 raise
-            log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
             self.restore_graphstate(prior)
@@ -1744,11 +1734,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame()
         self.instruction_pointer = None
-        _step_logger()(
-            logging.INFO,
-            f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
-        )
-        log.debug("RETURN_VALUE triggered compile")
+        _step_logger()(logging.INFO, f"torchdynamo done tracing {self.f_code.co_name}")
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 

@@ -25,7 +25,7 @@ TODO:
 Lots of missing collectives.
 Collectives validation.
 Make timeout robust by making collectives respect the test deadline.
-Make tests robust by making collectives interruptible.
+Make tests robuts by making collectives interruptible.
 We need some synchronization around cleanup to ensure that timedout ranks don't cause spurious failures.
 
 """
@@ -129,7 +129,7 @@ class Broadcast:
 
 
 class Collective:
-    def __init__(self, world_size, collective, pg):
+    def __init__(self, world_size, collective):
         self._world_size = world_size
         self._collective = collective
 
@@ -139,8 +139,6 @@ class Collective:
         self._data = [None] * world_size
         self._count = 0
         self._done = False
-
-        self._pg = pg
 
     def join(self, rank, data):
         with self._start_cond:
@@ -153,21 +151,14 @@ class Collective:
                     self._start_cond.notify()
 
             if rank == 0:
-                self._start_cond.wait_for(
-                    lambda: self._count == self._world_size or self._pg._terminate.is_set()
-                )
-                # SystemExit is not a subclass of Exception but BaseException
-                # and can be distinguished from normal exception raised from program errors
-                # so that we can hide it from the exception queue
-                if self._pg._terminate.is_set():
-                    sys.exit("Test termination event occurs.")
+                while self._count < self._world_size:
+                    self._start_cond.wait()
 
         with self._done_cond:
             # wait for rank 0 to finish
             if rank > 0:
-                self._done_cond.wait_for(lambda: self._done or self._pg._terminate.is_set())
-                if self._pg._terminate.is_set():
-                    sys.exit("Test termination event occurs.")
+                while not self._done:
+                    self._done_cond.wait()
             else:
                 # copy data around
                 self._collective.work(self._data)
@@ -184,8 +175,6 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     _coll_lock = threading.Lock()
     _cur_coll = None
-
-    _terminate = threading.Event()
 
     @classmethod
     def _register(cls, pg):
@@ -205,7 +194,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
                     f"world not ready, only {cls._count} PG's registered but world has {world_size} ranks"
                 )
             if cls._cur_coll is None:
-                cls._cur_coll = Collective(world_size, collective, cls)
+                cls._cur_coll = Collective(world_size, collective)
             return cls._cur_coll
 
     @classmethod
@@ -214,21 +203,6 @@ class ProcessLocalGroup(dist.ProcessGroup):
         with cls._coll_lock:
             if cls._cur_coll == collective:
                 cls._cur_coll = None
-
-    @classmethod
-    def exception_handle(cls, exc):
-        cls._terminate.set()
-        coll = cls._cur_coll
-        if coll:
-            with coll._start_cond:
-                coll._start_cond.notify()
-            with coll._done_cond:
-                coll._done_cond.notify_all()
-
-    @classmethod
-    def reset(cls):
-        cls._cur_coll = None
-        cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
@@ -357,17 +331,14 @@ def run_with_threaded_pg(world_size, timeout, callback):
 
     def worker(rank):
         if not world_is_valid():
-            raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
+            raise TimeoutError("Invalid world")
         dist.init_process_group(
             backend="threaded", rank=rank, world_size=world_size, store=global_store
         )
         try:
             callback()
-        # reason why we don't use BaseException is we want to
-        # ignore SystemExit excpetion caused by _terminate event
-        except Exception as ex:
+        except BaseException as ex:
             exception_queue.put((rank, sys.exc_info()))
-            world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
         finally:
             if world_is_valid():
                 dist.destroy_process_group()
@@ -395,7 +366,6 @@ def run_with_threaded_pg(world_size, timeout, callback):
                         ),
                     )
                 )
-        ProcessLocalGroup.reset()
         failed_ranks = []
         while not exception_queue.empty():
             failure = exception_queue.get()
