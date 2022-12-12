@@ -1900,6 +1900,51 @@ def meta__scaled_dot_product_efficient(
     return torch.empty_like(query), logsum_exp
 
 
+@register_meta(
+    [
+        aten._scaled_dot_product_efficient_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_efficient_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    is_causal: bool = False,
+):
+    pass
+    # There has to be a better way than this....
+    is_alias = (
+        query._storage().data_ptr()
+        == key._storage().data_ptr()
+        == value._storage().data_ptr()
+    )
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    nH = query.size(2)
+    K = query.size(3)
+
+    if is_alias:
+        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
+        grad_q = chunk.select(2, 0)
+        grad_k = chunk.select(2, 1)
+        grad_v = chunk.select(2, 2)
+    else:
+        grad_kv_needs_init = is_causal and N > M
+
+        grad_q = torch.empty_like(query)
+        grad_k = torch.zeros_like(key) if grad_kv_needs_init else torch.empty_like(key)
+        grad_v = (
+            torch.zeros_like(value) if grad_kv_needs_init else torch.empty_like(value)
+        )
+
+    return grad_q, grad_k, grad_v
+
+
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
 def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
