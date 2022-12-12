@@ -316,9 +316,13 @@ class TorchVariable(VariableTracker):
             #   (b) cudnn is available
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
-            assert len(args) == 1 or "tensor" in kwargs, "Expect 1 input to cudnn.is_acceptable"
+            assert (
+                len(args) == 1 or "tensor" in kwargs
+            ), "Expect 1 input to cudnn.is_acceptable"
             tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
-            assert isinstance(tensor_variable, TensorVariable), "Expect input to cudnn.is_acceptable to be a tensor"
+            assert (
+                isinstance(tensor_variable, TensorVariable)
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
             tensor_inp = torch.tensor(0, dtype=tensor_variable.dtype, device=tensor_variable.device)
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
