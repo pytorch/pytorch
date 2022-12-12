@@ -370,64 +370,12 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-@register_lowering(aten._to_copy)
-def _to_copy(
-    x,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=None,
-    non_blocking=False,
-    memory_format=None,
-):
-    assert not layout or layout == torch.strided, "TODO"
-    assert not pin_memory, "TODO"
-    assert not memory_format, "TODO"
-    if device:
-        device = decode_device(device)
-    if device is not None and device != x.get_device():
-        if dtype is not None and device.type == "cpu":
-            # CPU can do fewer type conversions
-            x = to_dtype(x, decode_dtype(dtype))
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, decode_dtype(dtype))
-    return x
-
-
-@register_lowering(aten.to)
-def to(
-    x,
-    device_or_dtype=None,
-    non_blocking=False,
-    copy=False,
-    memory_format=None,
-    device=None,
-    dtype=None,
-    layout=None,
-):
-    assert not memory_format, "TODO"
-    assert layout in (None, torch.strided)
-    if isinstance(device_or_dtype, torch.dtype):
-        return to_dtype(x, device_or_dtype)
-    elif isinstance(device_or_dtype, torch.device):
-        return to_device(x, device_or_dtype)
-    else:
-        assert device_or_dtype is None, device_or_dtype
-
-    if device is not None:
-        x = to_device(x, device)
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    return x
 
 
 def ops_wrapper(name):
@@ -1600,9 +1548,9 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 def as_tensor(data, dtype=None, device=None):
     if isinstance(data, TensorBox):
         if dtype is not None:
-            data = to(data, dtype)
+            data = to_dtype(data, dtype)
         if device is not None:
-            data = to(data, device)
+            data = to_device(data, device)
         return data
     return tensor(data, dtype=dtype, device=device)
 
@@ -1826,19 +1774,26 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     )
 
 
-def check_and_broadcast_indices(indices):
+def check_and_broadcast_indices(indices, device):
     assert all(
         i.get_dtype() in (torch.int64, torch.int32, torch.bool, torch.uint8)
         for i in indices
         if i is not None
     ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
-    assert all(
-        [i.get_dtype() in (torch.int32, torch.int64) for i in indices if i is not None]
-    ), "bool indices are not supported yet"
+    if any(
+        i.get_dtype() in (torch.bool, torch.uint8) for i in indices if i is not None
+    ):
+        raise NotImplementedError("Fallback for bool indices")
+
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
     assert len(valid_idxs) > 0, "requires at least 1 non-None index"
     new_indices = [None] * len(indices)
     for i, x in zip(valid_idxs, broadcast_tensors(*[indices[i] for i in valid_idxs])):
+        # Eager allows indices to be CPU tensor when running on CUDA
+        # FIXME: Calling to_device(x, device) should work but
+        # test_advancedindex_mixed_cpu_devices still fails
+        if x.get_device() != device:
+            raise NotImplementedError("Fallback when indices is on a different device")
         new_indices[i] = x
         output_dim = len(x.get_size())
     start_offset = 0
@@ -1849,9 +1804,10 @@ def check_and_broadcast_indices(indices):
     while tmp and tmp[0] is None:
         tmp.pop(0)
         start_offset += 1
-    assert all((i is not None) for i in tmp)
-    end_offset = output_dim + start_offset
+    if any((i is None) for i in tmp):
+        raise NotImplementedError("Fallback when None is in the middle of indices")
 
+    end_offset = output_dim + start_offset
     return new_indices, start_offset, end_offset
 
 
@@ -1859,10 +1815,18 @@ def check_and_broadcast_indices(indices):
 def index(x, indices):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    try:
+        indices, start_offset, end_offset = check_and_broadcast_indices(
+            indices, x.get_device()
+        )
+    except NotImplementedError:
+        x.realize()
+        return fallback_handler(aten.index)(x, indices)
+
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
     # no guards on output size, all the guards are set in broadcast_tensors
+
     output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
@@ -1943,7 +1907,12 @@ def index_put_(self, indices, values, accumulate=False):
         return self
 
     values = to_dtype(values, self.get_dtype())
-    indices, start_offset, end_offset = check_and_broadcast_indices(indices)
+    try:
+        indices, start_offset, end_offset = check_and_broadcast_indices(
+            indices, self.get_device()
+        )
+    except NotImplementedError:
+        return index_put_fallback(self, indices, values, accumulate)
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
 
@@ -3292,7 +3261,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
 
 
 @register_lowering([aten.var, prims.var])
-def var_(x, axis, correction=1, keepdim=False):
+def var_(x, axis=None, correction=1, keepdim=False):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     diffs = square(sub(x, mean(x, axis, keepdim=True)))
@@ -3307,7 +3276,7 @@ def var_(x, axis, correction=1, keepdim=False):
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
+def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     if correction is None:
         correction = int(unbiased)
     return [
@@ -3317,7 +3286,7 @@ def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
 
 
 @register_lowering(aten.std)
-def std(x, axis, correction=1, keepdim=False):
+def std(x, axis=None, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
 
 
@@ -3679,3 +3648,9 @@ def op_floordiv(a, b):
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
+
+
+@register_lowering(aten._test_inductor_realize)
+def _realize(x):
+    x.realize()
+    return clone(x)
