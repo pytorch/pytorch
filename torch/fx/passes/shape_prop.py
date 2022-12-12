@@ -140,10 +140,11 @@ class ShapeProp(torch.fx.Interpreter):
                 # call_module and get_attr.
                 self.module = self.fake_module
             try:
-                result = super().run_node(n)
-                if self.fake_module is not None and isinstance(result, torch.Tensor) and not isinstance(
-                        result, torch._subclasses.FakeTensor):
-                    result = self.fake_mode.from_tensor(result)
+                if self.fake_mode is not None:
+                    with self.fake_mode:
+                        result = super().run_node(n)
+                else:
+                    result = super().run_node(n)
             finally:
                 self.module = self.real_module
         except Exception:
