@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -529,6 +528,23 @@ class EnumValues(torch.nn.ModuleDict):
         return torch.cat(features, 1)
 
 
+class AccessByKeys(torch.nn.ModuleDict):
+    def __init__(
+        self,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for k in self.keys():
+            new_features = self[k](features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
 class CallForwardDirectly(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -692,6 +708,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
+    test_access_by_keys = make_test(AccessByKeys())
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
@@ -763,9 +780,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m3 = deepcopy(m1)
         self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
-    # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
-    # due to custom subclass (TensorProxy)
-    @unittest.expectedFailure
     def test_simple_torch_function(self):
         def foo(x):
             # function call, twice to test wrapping
