@@ -2191,13 +2191,13 @@ class TestJvp(TestCase):
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with fwAD._enable_fwd_grad(False):
+        with fwAD._set_fwd_grad_enabled(False):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
-            with fwAD._enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
@@ -2210,13 +2210,13 @@ class TestJvp(TestCase):
 
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
-            with fwAD._enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with fwAD._enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             _, y = jvp(f, (x,), (t,))
 
         self.assertEqual(y, 2 * x)

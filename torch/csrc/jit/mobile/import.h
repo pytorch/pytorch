@@ -107,18 +107,5 @@ TORCH_API std::set<std::string> _export_operator_list(
 
 } // namespace mobile
 
-extern mobile::Module (*load_flatbuffer_bytes)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>,
-    ExtraFilesMap*);
-
-extern mobile::Module (*load_flatbuffer_bytes_no_object)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>);
-
-extern uint64_t (*get_flatbuffer_bytecode_version)(char* flatbuffer_content);
-
 } // namespace jit
 } // namespace torch
