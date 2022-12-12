@@ -21,6 +21,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
@@ -3068,6 +3069,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 guard_failure[0],
                 "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
+
+    def test_restore_graphstate(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x * y
+
+        _, guards = torch._dynamo.export(
+            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
+        )
+        # Dummy ctor
+        graph = OutputGraph(
+            f_globals={}, code_options={}, compiler_fn=None, root_tx=None
+        )
+        # Contrived property so as not to have it be None
+        graph.nn_modules = {}
+        # Contrived generation timestamp
+        graph.timestamp = 4
+        # Contrived guards
+        graph.tracing_context.guards_context.dynamo_guards = guards
+
+        # Save the state
+        state = graph.copy_graphstate()
+        # Saving increments the generation
+        self.assertEqual(graph.timestamp, 5)
+
+        # Assure that the saved state is valid
+        self.assertEqual(state.timestamp, 4)
+        self.assertEqual(state.guards, guards)
+
+        # Ensure that the guards reflect the expected state
+        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
+        self.assertEqual(graph.guards, guards)
+
+        # Mess around with the state
+        graph.tracing_context.guards_context.dynamo_guards = set()
+        self.assertEqual(graph.guards, set())
+
+        # Restore the state
+        graph.restore_graphstate(state)
+
+        # Make sure it restored correctly
+        self.assertEqual(graph.timestamp, 4)
+        self.assertEqual(graph.guards, guards)
+        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
 
 
 class CustomFunc1(torch.autograd.Function):
