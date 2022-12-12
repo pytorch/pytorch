@@ -434,8 +434,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
         self.attr, self.scalars, self.algorithm = (
             unary_modules_map[unary.__class__](unary) if unary else ("none", [], "")
         )
-
-        packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
+        packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
             self.weight.to_mkldnn(),
             self.padding,
             self.stride,
