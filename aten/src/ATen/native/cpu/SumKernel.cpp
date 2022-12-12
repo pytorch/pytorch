@@ -552,18 +552,16 @@ void cascade_sum(TensorIterator &iter) {
           char* ptrs[3] = { data[0], data[0], data[1] };
           // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
           int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-          c10::guts::if_constexpr<ignore_nan>(
-            [&](auto) {
+          if constexpr (ignore_nan) {
               basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) {
                 auto a_notnan = at::_isnan(a) ? scalar_t(0) : a;
                 auto b_notnan = at::_isnan(b) ? scalar_t(0) : b;
                 return a_notnan + b_notnan;
               });
-            },
-            [&](auto) {
+          } else {
               basic_loop(ptrs, inner_strides, 0, size0,
                          [](scalar_t a, scalar_t b) { return a + b; });
-            });
+          }
         });
         return;
       }
