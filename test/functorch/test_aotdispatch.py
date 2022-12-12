@@ -1647,8 +1647,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         res[0].sum().backward()
 
         self.assertExpectedInline(shape_env.format_guards(), """\
- - Eq(s3, 20)
- - Eq(s9, 30)""")
+ - Eq(s1, 20)
+ - Eq(s2, 30)""")
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
@@ -1694,7 +1694,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
-    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+    def _test_aot_module_simplified_fake_tensor_gm_raises(self, debug):
         class MockModule(torch.nn.Module):
             def __init__(self, y):
                 super().__init__()
@@ -1723,15 +1723,31 @@ class TestAOTModuleSimplified(AOTTestCase):
         graph = tracer.trace(MockModule(fake_y))
         mod_fake = torch.fx.GraphModule(tracer.root, graph)
 
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
-            """Unexpected fake buffer y"""
-        )
+        if debug:
+            inner_message = "FAKE TENSOR CREATION TRACEBACK:"
+        else:
+            inner_message = "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
+
+        message = f"""Unexpected fake buffer y {inner_message}"""
+
+        with self.assertRaisesRegex(
+            AssertionError, message
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
+
         # Counterfactual to ensure that the raise is only due to real vs fake
         # Run the same exact thing except with a real buffer.
         graph = tracer.trace(MockModule(real_y))
         mod_real = torch.fx.GraphModule(tracer.root, graph)
         aot_module_simplified(MockModule(real_y), (real_x,), nop)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", True)
+    def test_aot_module_simplified_fake_tensor_gm_raises_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=True)
+
+    @patch("torch._subclasses.fake_tensor.FakeTensorConfig.debug", False)
+    def test_aot_module_simplified_fake_tensor_gm_raises_no_debug_enabled(self):
+        self._test_aot_module_simplified_fake_tensor_gm_raises(debug=False)
 
     def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
         class MockModule(torch.nn.Module):
@@ -1752,10 +1768,11 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: aot_module_simplified(mod_fake, (real_x,), nop),
+        with self.assertRaisesRegex(
+            AssertionError,
             """Unexpected fake param linear.weight"""
-        )
+        ):
+            aot_module_simplified(mod_fake, (real_x,), nop)
 
 
 # entries in here don't work and need to be fixed.
@@ -1776,6 +1793,7 @@ aot_autograd_failures = {
     xfail('scatter_reduce', 'prod'),
 
     skip('as_strided_scatter'),
+    skip('as_strided', 'partial_views'),  # flaky
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
@@ -1979,7 +1997,9 @@ symbolic_aot_autograd_failures = {
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('std', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('std_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
@@ -1994,7 +2014,9 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }

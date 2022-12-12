@@ -30,7 +30,6 @@ class ConcaterMapDataPipe(MapDataPipe):
         [0, 1, 2, 0, 1, 2]
     """
     datapipes: Tuple[MapDataPipe]
-    length: int
 
     def __init__(self, *datapipes: MapDataPipe):
         if len(datapipes) == 0:
@@ -40,7 +39,6 @@ class ConcaterMapDataPipe(MapDataPipe):
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
-        self.length = -1
 
     def __getitem__(self, index) -> T_co:
         offset = 0
@@ -52,9 +50,7 @@ class ConcaterMapDataPipe(MapDataPipe):
         raise IndexError("Index {} is out of range.".format(index))
 
     def __len__(self) -> int:
-        if self.length == -1:
-            self.length = sum(len(dp) for dp in self.datapipes)
-        return self.length
+        return sum(len(dp) for dp in self.datapipes)
 
 
 @functional_datapipe('zip')
@@ -76,7 +72,6 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         [(0, 10), (1, 11), (2, 12)]
     """
     datapipes: Tuple[MapDataPipe[T_co], ...]
-    length: int
 
     def __init__(self, *datapipes: MapDataPipe[T_co]) -> None:
         if len(datapipes) == 0:
@@ -86,18 +81,15 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
-        self.length = -1
 
     def __getitem__(self, index) -> Tuple[T_co, ...]:
         res = []
         for dp in self.datapipes:
             try:
                 res.append(dp[index])
-            except IndexError:
-                raise IndexError(f"Index {index} is out of range for one of the input MapDataPipes {dp}.")
+            except IndexError as e:
+                raise IndexError(f"Index {index} is out of range for one of the input MapDataPipes {dp}.") from e
         return tuple(res)
 
     def __len__(self) -> int:
-        if self.length == -1:
-            self.length = min(len(dp) for dp in self.datapipes)
-        return self.length
+        return min(len(dp) for dp in self.datapipes)
