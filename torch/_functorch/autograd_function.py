@@ -13,7 +13,7 @@ from torch._functorch.vmap import (
     _broadcast_to_and_flatten,
     _create_batched_inputs,
 )
-from torch.autograd.forward_ad import _enable_fwd_grad
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import NamedTuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
@@ -97,10 +97,10 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
                 torch.Tensor,
                 lambda x: _unwrap_for_grad(x, level),
                 operands)
-            # Both enable_grad() and _enable_fwd_grad() are necessary no matter
+            # Both enable_grad() and _set_fwd_grad_enabled() are necessary no matter
             # the transform. _SingleLevelFunction will turn off both fwd and bwd
             # gradient computation and we need to turn it back on here.
-            with torch.enable_grad(), _enable_fwd_grad(), maybe_interpreter.lower():
+            with torch.enable_grad(), _set_fwd_grad_enabled(True), maybe_interpreter.lower():
                 output = custom_function_call(autograd_function, *unwrapped_operands)
 
             return pytree.tree_map_only(
