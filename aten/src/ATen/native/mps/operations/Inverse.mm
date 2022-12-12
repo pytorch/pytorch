@@ -11,10 +11,12 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 {
     TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
     if (!is_macos_13_or_newer()) {
-      TORCH_WARN_ONCE("torch.linalg_inv_ex.inverse is supported by MPS on MacOS 13+, please upgrade");
-      auto cpu_info = at::empty({0}, A.options().dtype(kInt));
-      auto cpu_result = result.to("cpu");
+      TORCH_WARN_ONCE("torch.linalg_inv_ex.inverse is supported by MPS on MacOS 13+, please upgrade. Falling back to CPU.");
+      auto cpu_info = at::empty({0}, kInt, c10::nullopt, kCPU, c10::nullopt, c10::nullopt);
+      auto cpu_result = result.clone().to("cpu");
       at::linalg_inv_ex_out(cpu_result, cpu_info, A.to("cpu"));
+      info.copy_(cpu_info);
+      result.copy_(cpu_result);
       return;
     }
 
