@@ -34,8 +34,8 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_WITH_TORCHINDUCTOR, \
-    download_file, get_function_arglist, load_tests, skipIfMps, skipIfTorchInductor, \
+    TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
+    download_file, get_function_arglist, load_tests, skipIfMps,\
     TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS
@@ -7353,20 +7353,19 @@ class UnpoolingNet(nn.Module):
     def forward(self, input):
         return self.unpool(*self.pool(input))
 
-if not TEST_WITH_TORCHINDUCTOR:
-    add_test(NewModuleTest(
-        constructor=lambda: UnpoolingNet(
-            nn.MaxPool1d(2, return_indices=True),
-            nn.MaxUnpool1d(2)),
-        input_size=(1, 1, 4),
-        fullname='MaxUnpool1d_net',))
-    add_test(NewModuleTest(
-        constructor=lambda: UnpoolingNet(
-            nn.MaxPool2d(2, return_indices=True),
-            nn.MaxUnpool2d(2)),
-        input_size=(1, 1, 2, 4),
-        fullname='MaxUnpool2d_net',))
 
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 1, 4),
+    fullname='MaxUnpool1d_net',))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 1, 2, 4),
+    fullname='MaxUnpool2d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),
@@ -7375,22 +7374,20 @@ add_test(NewModuleTest(
     fullname='MaxUnpool3d_net',
     check_gradgrad=False,))
 
-if not TEST_WITH_TORCHINDUCTOR:
-    add_test(NewModuleTest(
-        constructor=lambda: UnpoolingNet(
-            nn.MaxPool1d(2, return_indices=True),
-            nn.MaxUnpool1d(2)),
-        input_size=(1, 4),
-        reference_fn=single_batch_reference_fn,
-        fullname='MaxUnpool1d_net_no_batch_dim',))
-
-    add_test(NewModuleTest(
-        constructor=lambda: UnpoolingNet(
-            nn.MaxPool2d(2, return_indices=True),
-            nn.MaxUnpool2d(2)),
-        input_size=(1, 2, 4),
-        reference_fn=single_batch_reference_fn,
-        fullname='MaxUnpool2d_net_no_batch_dim',))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool1d_net_no_batch_dim',))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 2, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool2d_net_no_batch_dim',))
 
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
@@ -7406,13 +7403,12 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
         t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
-if not TEST_WITH_TORCHINDUCTOR:
-    add_test(NewModuleTest(
-        constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
-        input_size=(4, 16),
-        fullname='AdaptiveLogSoftmax',
-        with_tf32=True,
-        tf32_precision=0.005))
+add_test(NewModuleTest(
+    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+    input_size=(4, 16),
+    fullname='AdaptiveLogSoftmax',
+    with_tf32=True,
+    tf32_precision=0.005))
 
 
 # The following are helpers for TestNN.test_affine_*
@@ -8080,7 +8076,6 @@ class TestNNDeviceType(NNTestCase):
         out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
         self.assertEqual(out_ref, out)
 
-    @skipIfTorchInductor("FIXME")
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -8092,7 +8087,6 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input, device)
 
-    @skipIfTorchInductor("FIXME")
     def test_InstanceNorm2d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -8105,7 +8099,6 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)
 
-    @skipIfTorchInductor("FIXME")
     def test_InstanceNorm3d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -8258,7 +8251,6 @@ class TestNNDeviceType(NNTestCase):
         helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d)
 
     @onlyNativeDeviceTypes
-    @skipIfTorchInductor("FIXME")
     def test_GroupNorm_numeric(self, device):
         def group_norm_ref(X, gamma, beta, groups, channels, eps):
             batch_size = X.size()[0]
@@ -8432,7 +8424,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
     @onlyNativeDeviceTypes
-    @skipIfTorchInductor("FIXME")
     def test_Bilinear_empty(self, device):
         mod = torch.nn.Bilinear(20, 30, 40).to(device)
         inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
@@ -8588,7 +8579,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
-    @skipIfTorchInductor("FIXME")
     def test_MarginLoss_empty(self, device, dtype):
         for mod, x, y in [
                 (torch.nn.MultiMarginLoss().to(device),
@@ -9811,7 +9801,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @tf32_on_and_off(0.005)
-    @skipIfTorchInductor("FIXME")
     def test_grid_sample_large(self, device):
         def issue_35202():
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
@@ -9860,7 +9849,6 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
-    @skipIfTorchInductor("FIXME")
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -9906,7 +9894,6 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
-    @skipIfTorchInductor("FIXME")
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -10078,7 +10065,6 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipMeta  # LSTM cell reuses output which was resized
     @dtypes(torch.double)
-    @skipIfTorchInductor("FIXME")
     def test_LSTM_grad_and_gradgrad(self, device, dtype):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
@@ -10088,7 +10074,6 @@ class TestNNDeviceType(NNTestCase):
 
     @skipMeta  # GRU cell reuses output which was resized
     @dtypes(torch.double)
-    @skipIfTorchInductor("FIXME")
     def test_GRU_grad_and_gradgrad(self, device, dtype):
         hsize = 4
         inp = torch.rand(1, 3, hsize, device=device, dtype=dtype, requires_grad=True)
@@ -10223,7 +10208,6 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
-    @skipIfTorchInductor("FIXME")
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
         input_length = 40
         vocab_size = 3
@@ -10403,7 +10387,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
 
-    @skipIfTorchInductor("FIXME")
     def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype
         module = nn.BatchNorm1d(3).to(device, module_dtype)
@@ -11265,7 +11248,6 @@ class TestNNDeviceType(NNTestCase):
                                     r'lambda must be greater or equal to 0, but found to be -1\.'):
             m(input)
 
-    @skipIfTorchInductor("FIXME")
     def test_fold(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
@@ -11304,7 +11286,6 @@ class TestNNDeviceType(NNTestCase):
 
     # Check that clip_grad_norm_ raises an error if the total norm of the
     # parameters' gradients is non-finite
-    @skipIfTorchInductor("FIXME")
     def test_clip_grad_norm_error_if_nonfinite(self, device):
         norms_pos = [0.1, 1, 2, 3.5, inf]
         norms_neg = [-0.1, -1, -2, -3.5]
@@ -11438,7 +11419,6 @@ class TestNNDeviceType(NNTestCase):
 
     # Merge into OpInfo?
     @onlyNativeDeviceTypes
-    @skipIfTorchInductor("FIXME")
     def test_elu_inplace_with_neg_alpha(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.elu_(a.clone(), alpha=-2)
