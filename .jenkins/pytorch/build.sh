@@ -49,8 +49,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   fi
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* ]]; then
-  echo "Caffe2 build is ON"
+if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
   export BUILD_CAFFE2=ON
 fi
 

@@ -662,7 +662,6 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));
@@ -678,7 +677,6 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
       TORCH_FN(QLinearDynamicInt8<false>::run));

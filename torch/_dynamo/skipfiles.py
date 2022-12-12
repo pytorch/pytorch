@@ -31,7 +31,6 @@ import weakref
 
 import torch
 
-
 try:
     import torch._prims
 
@@ -48,7 +47,7 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import config, external_utils
+from . import config
 
 """
 A note on skipfiles:
@@ -118,11 +117,9 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
-
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
-    external_utils.__file__,  # This is a dynamo file (!)
 }
 
 

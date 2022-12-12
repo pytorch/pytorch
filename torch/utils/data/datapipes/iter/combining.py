@@ -39,6 +39,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
     datapipes: Tuple[IterDataPipe]
+    length: Optional[int]
 
     def __init__(self, *datapipes: IterDataPipe):
         if len(datapipes) == 0:
@@ -46,6 +47,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `IterDataPipe`")
         self.datapipes = datapipes  # type: ignore[assignment]
+        self.length = None
 
     def __iter__(self) -> Iterator:
         for dp in self.datapipes:
@@ -53,10 +55,15 @@ class ConcaterIterDataPipe(IterDataPipe):
                 yield data
 
     def __len__(self) -> int:
+        if self.length is not None:
+            if self.length == -1:
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            return sum(len(dp) for dp in self.datapipes)
+            self.length = sum(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            self.length = -1
+        return len(self)
 
 
 @functional_datapipe('fork')
@@ -512,6 +519,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
+        self.length: Optional[int] = None
         self.buffer: List = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
@@ -529,10 +537,15 @@ class MultiplexerIterDataPipe(IterDataPipe):
             self.buffer.clear()
 
     def __len__(self):
+        if self.length is not None:
+            if self.length == -1:
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            return min(len(dp) for dp in self.datapipes) * len(self.datapipes)
+            self.length = min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            self.length = -1
+        return len(self)
 
     def reset(self) -> None:
         self.buffer = []
@@ -540,6 +553,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
     def __getstate__(self):
         state = (
             self.datapipes,
+            self.length,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
@@ -550,6 +564,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
     def __setstate__(self, state):
         (
             self.datapipes,
+            self.length,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         ) = state
@@ -576,6 +591,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
     datapipes: Tuple[IterDataPipe]
+    length: Optional[int]
 
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
@@ -583,6 +599,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
                             "for `ZipIterDataPipe`.")
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
+        self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
@@ -590,7 +607,12 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
             yield data
 
     def __len__(self) -> int:
+        if self.length is not None:
+            if self.length == -1:
+                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            return min(len(dp) for dp in self.datapipes)
+            self.length = min(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            self.length = -1
+        return len(self)

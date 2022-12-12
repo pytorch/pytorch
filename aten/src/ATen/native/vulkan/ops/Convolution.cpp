@@ -619,9 +619,7 @@ bool weight_valid(const Tensor& weight, const bool quantized) {
       weight.device().type() != c10::DeviceType::Vulkan) {
     return false;
   }
-  if (quantized &&
-      (weight.scalar_type() != c10::kQUInt8 &&
-       weight.scalar_type() != c10::kQInt8)) {
+  if (quantized && weight.scalar_type() != c10::kQUInt8) {
     return false;
   }
 

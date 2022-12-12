@@ -73,10 +73,10 @@ def replicate(
     module: nn.Module,  # NOTE: contract now supports single module only
     **kwargs,
 ) -> nn.Module:
-    r"""Replicates a module
+    r"""Replicates module(s)
 
     Args:
-        module (torch.nn.Module): module to replicate
+        modules (torch.nn.Module): modules to replicate
 
     Example::
         >>> module = nn.Linear(3, 3)
