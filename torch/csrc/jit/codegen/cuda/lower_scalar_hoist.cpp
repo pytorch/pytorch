@@ -12,10 +12,28 @@ namespace cuda {
 
 namespace {
 
+// Get the position of the innermost non-trivial loop
+int64_t getInnermostNonTrivialLoop(const std::vector<kir::ForLoop*>& loops) {
+  int64_t position = -1;
+  for (auto i : c10::irange(loops.size())) {
+    if (!loops.at(i)->isTrivial()) {
+      position = i;
+    }
+  }
+  return position;
+}
+
 // Find the outer-most loop nest that contains all the dependencies of `value`.
 int64_t findOutermostPosWithSatisfiedDependency(
     Val* value,
     const std::vector<kir::ForLoop*>& loops) {
+  // We don't recursively look into tensor indexing to find its dependency.
+  // Instead, we always assume tensors to have dependency on all loop variables
+  // and prefer to put it at the innermost loop.
+  if (value->isOneOf<TensorView, kir::TensorIndex>()) {
+    return getInnermostNonTrivialLoop(loops);
+  }
+
   auto def = value->definition();
 
   // If `value` is not computed from other values, then it must either be a loop
@@ -64,17 +82,6 @@ kir::ForLoop* getLoopAtPos(
   return loops.at(position);
 }
 
-// Get the position of the innermost non-trivial loop
-int64_t getInnermostNonTrivialLoop(const std::vector<kir::ForLoop*>& loops) {
-  int64_t position = -1;
-  for (auto i : c10::irange(loops.size())) {
-    if (!loops.at(i)->isTrivial()) {
-      position = i;
-    }
-  }
-  return position;
-}
-
 // Check if in the definition of from, there is a subexpression equivalent to
 // reference. If found, then return this subexpression.
 Val* findRefAsSubexprOf(Val* from, Val* reference, bool exact) {
@@ -104,6 +111,7 @@ Val* findRefAsSubexprOf(Val* from, Val* reference, bool exact) {
 std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
     Val* value,
     const std::vector<kir::ForLoop*>& loops,
+    std::vector<Val*>& seen_subexprs,
     int64_t parent_pos,
     bool is_given) {
   if (value->isA<TensorView>() || value->isA<kir::TensorIndex>()) {
@@ -126,9 +134,15 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
   auto my_loop = getLoopAtPos(loops, my_pos);
 
   // Check if `value` is already computed. If yes, just reuse it and return.
-  auto existing_subexpr = reuseScalarIfAlreadyComputed(value, my_loop);
-  if (existing_subexpr != nullptr) {
+  if (auto existing_subexpr = reuseScalarIfAlreadyComputed(value, my_loop)) {
     return {existing_subexpr, false};
+  }
+  for (auto existing_subexpr : seen_subexprs) {
+    if (value->sameAs(existing_subexpr)) {
+      common_scalar_map_[my_loop].emplace_back(existing_subexpr);
+      hoisted_or_reused_.emplace(existing_subexpr);
+      return {existing_subexpr, false};
+    }
   }
 
   // Recursively hoist all the producers of `value`
@@ -136,7 +150,7 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
   bool has_tensor_dependency = false;
   std::vector<Val*> inputs;
   for (auto input : def->inputs()) {
-    auto hoist = hoistScalarImpl(input, loops, my_pos);
+    auto hoist = hoistScalarImpl(input, loops, seen_subexprs, my_pos);
     inputs.emplace_back(hoist.first);
     if (hoist.second) {
       has_tensor_dependency = true;
@@ -168,6 +182,7 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
       hoisted_or_reused_.emplace(value);
     }
   }
+  seen_subexprs.emplace_back(value);
   return {value, has_tensor_dependency};
 }
 
@@ -177,7 +192,13 @@ Val* CommonScalarMap::hoistScalar(
   if (isOptionDisabled(DisableOption::IndexHoist)) {
     return value;
   }
-  return hoistScalarImpl(value, loops, getInnermostNonTrivialLoop(loops), true)
+  std::vector<Val*> seen_subexprs;
+  return hoistScalarImpl(
+             value,
+             loops,
+             seen_subexprs,
+             getInnermostNonTrivialLoop(loops),
+             true)
       .first;
 }
 

@@ -9040,13 +9040,21 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
   int64_t i143;
   i143 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  int64_t i94;
+  i94 = T0.size[2] * T0.size[3];
   int64_t i95;
-  i95 = T0.size[1] * (T0.size[2] * T0.size[3]);
+  i95 = T0.size[1] * i94;
+  int64_t i150;
+  i150 = T0.size[2] * T0.size[1];
+  int64_t i145;
+  i145 = i143 % i95;
+  int64_t i147;
+  i147 = i145 % i94;
   if ((i143 < (T0.size[0] * i95))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
-       = T2[(((((i143 / i95) * ((T0.size[2] * T0.size[1]) * T0.size[3])) + ((((i143 % i95) % (T0.size[2] * T0.size[3])) % T0.size[3]) * (T0.size[2] * T0.size[1]))) + (((i143 % i95) / (T0.size[2] * T0.size[3])) * T0.size[2])) + (((i143 % i95) % (T0.size[2] * T0.size[3])) / T0.size[3]))];
+       = T2[(((((i143 / i95) * (i150 * T0.size[3])) + ((i147 % T0.size[3]) * i150)) + ((i145 / i94) * T0.size[2])) + (i147 / T0.size[3]))];
     __half T8[1];
     T8[0] = 0;
     T8[0]

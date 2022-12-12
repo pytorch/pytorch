@@ -464,7 +464,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else if (ns->definition() == nullptr) {
       code_ << ns->name();
     } else {
-      code_ << genInline(ns->definition());
+      const bool has_alloc = alloc_map_.find(ns) != alloc_map_.end();
+      if (!has_alloc) {
+        code_ << genInline(ns->definition());
+      } else {
+        code_ << ns->name();
+      }
     }
   }
 

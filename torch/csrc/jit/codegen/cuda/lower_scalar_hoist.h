@@ -59,6 +59,14 @@ class TORCH_CUDA_CU_API CommonScalarMap {
   std::pair<Val*, bool> hoistScalarImpl(
       Val* value,
       const std::vector<kir::ForLoop*>& loops,
+      std::vector<Val*>&
+          seen_subexprs, // Stores the subexpressions that has already been seen
+                         // during the recursion. This is used to detect
+                         // self-reuse. For example, if I have
+                         // i3 = i1 * i2 + i1 * i2
+                         // when visiting the second i1 * i2, I will have the
+                         // first i1 * i2 in this vector, so that we know we can
+                         // reuse that i1 * i2.
       int64_t position, // if `value` is given to `hoistScalar` (i.e., is_give
                         // == true), then this is the position of the outer-most
                         // loop nest that contains all the dependencies of

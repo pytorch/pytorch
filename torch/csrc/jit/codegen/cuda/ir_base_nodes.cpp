@@ -117,12 +117,13 @@ const std::vector<Expr*>& Val::uses() const {
 // for index expressions.
 void Val::resolveIndexDtype() {
   TORCH_INTERNAL_ASSERT(
-      vtype_ == ValType::TensorView || vtype_ == ValType::Scalar,
+      vtype_ == ValType::TensorView || vtype_ == ValType::Scalar ||
+          vtype_ == ValType::NamedScalar,
       "Resolving index type is currently only supported on tensor view or scalar values. "
       "Value type: ",
       vtype_);
   TORCH_INTERNAL_ASSERT(
-      dtype_ == DataType::Index || dtype_ == DataType::Int,
+      isIntegralType(dtype_),
       "Can only resolve index type if a Val has an Index or Int DataType. ",
       "Data type: ",
       dtype_);
