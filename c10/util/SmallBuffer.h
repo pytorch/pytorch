@@ -36,8 +36,7 @@ class SmallBuffer {
   SmallBuffer& operator=(const SmallBuffer&) = delete;
 
   // move constructor is needed in function return
-  SmallBuffer(SmallBuffer&& rhs) {
-    size_ = rhs.size_;
+  SmallBuffer(SmallBuffer&& rhs) : size_{rhs.size_} {
     rhs.size_ = 0;
     if (size_ > N) {
       data_ = rhs.data_;
