@@ -283,16 +283,15 @@ inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
     unsigned int weights_precision) {
   char* dst = data[0];
   char* src = data[1];
+
   // index stride is constant for the given dimension
   const int64_t ids_stride = *(int64_t*)&data[2 + 2][0];
   const int64_t ids_size = *(int64_t*)&data[2 + 1][0];
+  const int64_t ids_min = *(int64_t*)&data[2 + 0][0];
 
   int64_t i = 0;
 
   for (; i<n; i++) {
-
-    const int64_t ids_min = *(int64_t*)&data[2 + 0][0];
-    const int64_t ids_size = *(int64_t*)&data[2 + 1][0];
 
     char* src_min = src + i * strides[1] + ids_min;
 
@@ -733,8 +732,8 @@ struct HelperInterpBase {
     }
   }
 
-  template <typename scalar_t, typename aa_filter_fn_t>
-  static inline std::vector<Tensor> _compute_indices_weights_aa(
+  template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
+  static inline std::tuple<std::vector<Tensor>, int> _compute_indices_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, scalar_t scale,
     int interp_size, aa_filter_fn_t aa_filter_fn
@@ -794,9 +793,9 @@ struct HelperInterpBase {
       idx_ptr_xmin[i] = xmin * stride;
       idx_ptr_size[i] = xmax;
       idx_ptr_stride[i] = stride;
-      wt_idx_ptr[i] = i * interp_size * sizeof(scalar_t);
+      wt_idx_ptr[i] = i * interp_size * weight_index_stride;
     }
-    return output;
+    return {output, interp_size};
   }
 
   template <typename aa_filter_fn_t>
@@ -806,75 +805,21 @@ struct HelperInterpBase {
     int interp_size, aa_filter_fn_t aa_filter_fn
   ) {
 
-    std::vector<Tensor> indices_weights;
-
     double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
-    double support =
-        (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-    interp_size = (int)ceil(support) * 2 + 1;
-
-    auto new_shape = std::vector<int64_t>(ndims, 1);
-    new_shape[reshape_dim] = output_size;
-
-    // Bounds approach as in PIL: xmin/xmax
-    indices_weights.emplace_back(
-        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
-    indices_weights.emplace_back(
-        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
-    indices_weights.emplace_back(
-        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
-
-    {
-      // Weights
-      new_shape[reshape_dim] = output_size * interp_size;
-      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<double>()));
-      auto strides = wts.strides().vec();
-      strides[reshape_dim] = 0;
-      new_shape[reshape_dim] = output_size;
-      wts = wts.as_strided(new_shape, strides);
-      indices_weights.emplace_back(wts);
-      // Weights indices
-      indices_weights.emplace_back(
-          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
-    }
-
-    int64_t* idx_ptr_xmin = indices_weights[0].data_ptr<int64_t>();
-    int64_t* idx_ptr_size = indices_weights[1].data_ptr<int64_t>();
-    int64_t* idx_ptr_stride = indices_weights[2].data_ptr<int64_t>();
-    double * wt_ptr = indices_weights[3].data_ptr<double>();
-    int64_t* wt_idx_ptr = indices_weights[4].data_ptr<int64_t>();
-
-    int64_t xmin, xmax;
-
-    for (const auto i : c10::irange(output_size)) {
-      HelperInterpBase::_compute_weights_aa(
-          i,
-          input_size,
-          scale,
-          support,
-          wt_ptr + i * interp_size,
-          interp_size,
-          aa_filter_fn,
-          xmin,
-          xmax);
-
-      idx_ptr_xmin[i] = xmin * stride;
-      idx_ptr_size[i] = xmax;
-      idx_ptr_stride[i] = stride;
-      // weight indices will be directly for rescaled weights as short
-      wt_idx_ptr[i] = i * interp_size * sizeof(short);
-    }
+    std::vector<Tensor> indices_weights;
+    std::tie(indices_weights, interp_size) = HelperInterpBase::_compute_indices_weights_aa<double, aa_filter_fn_t, sizeof(short)>(
+        input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn);
 
     // Rescale float weights to int16 and compute weights precision
-    auto weights_f32 = indices_weights[3];
-    double * data_f32 = weights_f32.data_ptr<double>();
-    int64_t weights_f32_size = output_size * interp_size;
-    // can't use weights_f32.max() here as tensor is restrided
-    double w_max = data_f32[0];
-    for (const auto i : c10::irange(weights_f32_size)) {
-        double v = data_f32[i];
+    auto weights_f64 = indices_weights[3];
+    double * data_f64 = weights_f64.data_ptr<double>();
+    int64_t weights_f64_size = output_size * interp_size;
+    // can't use weights_f64.max() here as tensor is restrided
+    double w_max = data_f64[0];
+    for (const auto i : c10::irange(weights_f64_size)) {
+        double v = data_f64[i];
         if (w_max < v) {
             w_max = v;
         }
@@ -889,9 +834,9 @@ struct HelperInterpBase {
     }
 
     // rescale float values to int16, we use the same buffer as PIL-SIMD
-    short * data_i16 = (short *) data_f32;
-    for (const auto i : c10::irange(weights_f32_size)) {
-      double v = data_f32[i];
+    short * data_i16 = (short *) data_f64;
+    for (const auto i : c10::irange(weights_f64_size)) {
+      double v = data_f64[i];
       if (v < 0) {
           data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
       } else {
@@ -1112,8 +1057,9 @@ struct HelperInterpLinear : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpLinear::interp_size;
+        int unused;
 
-        indices_weights = HelperInterpLinear::_compute_indices_weights_aa<scalar_t>(
+        std::tie(indices_weights, unused) = HelperInterpLinear::_compute_indices_weights_aa<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1239,8 +1185,9 @@ struct HelperInterpCubic : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpCubic::interp_size;
+        int unused;
 
-        indices_weights = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
+        std::tie(indices_weights, unused) = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
             input_size,
             output_size,
             stride,
