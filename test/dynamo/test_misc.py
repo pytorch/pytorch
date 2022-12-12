@@ -2992,12 +2992,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return x + 1
             return x
 
-        with self.assertRaisesRegex(AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"):
+        with self.assertRaisesRegex(
+            AssertionError, "Expect input to cudnn.is_acceptable to be a tensor"
+        ):
             x1 = torch.rand(4).cuda()
             opt_fn1 = torch._dynamo.optimize("eager", nopython=True)(fn1)
             res1 = opt_fn1(x1)
 
-        with self.assertRaisesRegex(AssertionError, "Expect 1 input to cudnn.is_acceptable"):
+        with self.assertRaisesRegex(
+            AssertionError, "Expect 1 input to cudnn.is_acceptable"
+        ):
             x2 = torch.rand(4).cuda()
             opt_fn2 = torch._dynamo.optimize("eager", nopython=True)(fn2)
             res = opt_fn2(x2)

@@ -320,10 +320,12 @@ class TorchVariable(VariableTracker):
                 len(args) == 1 or "tensor" in kwargs
             ), "Expect 1 input to cudnn.is_acceptable"
             tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
-            assert (
-                isinstance(tensor_variable, TensorVariable)
+            assert isinstance(
+                tensor_variable, TensorVariable
             ), "Expect input to cudnn.is_acceptable to be a tensor"
-            tensor_inp = torch.tensor(0, dtype=tensor_variable.dtype, device=tensor_variable.device)
+            tensor_inp = torch.tensor(
+                0, dtype=tensor_variable.dtype, device=tensor_variable.device
+            )
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
