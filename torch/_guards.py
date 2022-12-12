@@ -3,7 +3,12 @@ import enum
 import weakref
 from typing import Callable, List, NamedTuple, Optional
 
-import sympy
+# TODO(voz): Stolen pattern, not sure why this is the case,
+# but mypy complains.
+try:
+    import sympy  # type: ignore[import]
+except ImportError:
+    logging.warning(f"No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
