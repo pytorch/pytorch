@@ -665,7 +665,10 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                if handle._config.sharding_strategy in {
+                    HandleShardingStrategy.HYBRID_SHARD,
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+                }:
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
@@ -700,8 +703,10 @@ def _post_backward_hook(
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads and needs_pre_optim_copy:
-                    pre_optim_grad.copy_(flat_param.grad)
+                    pre_optim_grad.copy_(flat_param_grad)
                     flat_param.grad.data = pre_optim_grad
+                else:
+                    flat_param.grad.data = flat_param_grad
                 grad_to_offload = flat_param.grad
 
             if handle._config.offload_params:
