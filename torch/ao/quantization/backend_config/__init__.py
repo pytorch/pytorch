@@ -17,6 +17,7 @@ __all__ = [
     "BackendConfig",
     "BackendPatternConfig",
     "DTypeConfig",
+    "DTypeWithConstraints",
     "ObservationType",
     "get_onednn_backend_config",
 ]
