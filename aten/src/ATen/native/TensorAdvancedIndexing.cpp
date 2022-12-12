@@ -135,7 +135,6 @@
 
 #include <algorithm>
 #include <numeric>
-#include <utility>
 #include <vector>
 
 namespace at {
@@ -459,7 +458,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
     }
   }
 
-  auto info = at::native::make_info(self, std::move(indices));
+  auto info = at::native::make_info(self, indices);
   build_index_op(*this, info, result);
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))

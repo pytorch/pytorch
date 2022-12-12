@@ -27,7 +27,6 @@
 #endif
 
 #include <algorithm>
-#include <utility>
 #include <vector>
 
 namespace at {
@@ -117,7 +116,7 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   }
   auto t0 = self.narrow(dim, start, size-start);
   auto t1 = self.narrow(dim, 0, start);
-  return at::cat({std::move(t0), std::move(t1)}, dim);
+  return at::cat({t0, t1}, dim);
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {

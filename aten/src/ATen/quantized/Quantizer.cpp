@@ -15,7 +15,6 @@
 
 #include <cmath>
 #include <typeinfo>
-#include <utility>
 
 namespace at {
 
@@ -378,7 +377,7 @@ Tensor from_blob_quantized_per_tensor_affine(
       data,
       sizes,
       strides,
-      std::move(deleter),
+      deleter,
       scale,
       zeroPoint,
       options);

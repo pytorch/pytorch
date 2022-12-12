@@ -24,10 +24,12 @@ def forward_helper(func, expanded_args, expanded_kwargs):
 
     Args:
         func: The function to be called
+        ctx: The context from the autograd.Function object. Will be used to save
+          computed state from the forward pass
         expanded_args: Arguments to be passed to :attr:`func`. Will include arguments
           that need to be unpacked because they are ExpandedWeights
-        expanded_kwargs: Keyword arguments to be passed to :attr:`func`.
-          Similar to :attr:`expanded_args`.
+        num_true_outs: The number of outputs seen by the user since some functions
+          return auxillary data that is only used in the backward pass
     '''
     unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
     return func(*unexpanded_args, **unexpanded_kwargs)

@@ -109,6 +109,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
     datapipe: IterDataPipe
     batch_size: int
     drop_last: bool
+    length: Optional[int]
 
     def __init__(self,
                  datapipe: IterDataPipe,
@@ -121,6 +122,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.length = None
         self.wrapper_class = wrapper_class
 
     def __iter__(self) -> Iterator[DataChunk]:
@@ -135,13 +137,15 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                 yield self.wrapper_class(batch)
 
     def __len__(self) -> int:
+        if self.length is not None:
+            return self.length
         if isinstance(self.datapipe, Sized):
             if self.drop_last:
-                return len(self.datapipe) // self.batch_size
+                self.length = len(self.datapipe) // self.batch_size
             else:
-                return (len(self.datapipe) + self.batch_size - 1) // self.batch_size
-        else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+                self.length = (len(self.datapipe) + self.batch_size - 1) // self.batch_size
+            return self.length
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
 @functional_datapipe('unbatch')
