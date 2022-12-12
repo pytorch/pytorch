@@ -158,7 +158,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             fn.__name__,
             tuple(
                 [
-                    wrap(arg, source=source)
+                    wrap(val=arg, source=source)
                     for arg, source in zip(defaults, defaults_item_sources)
                 ]
             ),
@@ -166,12 +166,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_source = AttrSource(self.source, "__kwdefaults__")
-            kwdefaults_sources = [
-                GetItemSource(kwdefaults_source, k) for k in fn.__kwdefaults__
-            ]
+            kwdefaults_sources = {
+                k: GetItemSource(kwdefaults_source, k) for k in fn.__kwdefaults__
+            }
             fake_func.__kwdefaults__ = {
-                # TODO update this too
-                k: wrap(v)
+                k: wrap(val=v, source=kwdefaults_sources[k])
                 for k, v in fn.__kwdefaults__.items()
             }
 
@@ -336,6 +335,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     return tx.output.register_attr_or_module(
         res,
         name,
+        source=None,  # constant!
         **options,
     )
 

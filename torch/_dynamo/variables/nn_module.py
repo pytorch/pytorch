@@ -212,11 +212,14 @@ class NNModuleVariable(VariableTracker):
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
+                class_source = AttrSource(self.source, "__class__")
                 if is_lazy:
                     fn = mod.__class__.__call__
+                    fn_source = AttrSource(class_source, "__call__")
                 else:
                     fn = mod.__class__.forward
-
+                    fn_source = AttrSource(class_source, "forward")
+                options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
                     [self] + args,
@@ -346,6 +349,12 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "keys":
+            assert not (args or kwargs)
+            result = []
+            for name in module.keys():
+                result.append(ConstantVariable(name, **options))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
