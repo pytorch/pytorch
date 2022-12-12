@@ -764,8 +764,11 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward
             )
 
-        # disable profile hook
+        excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
+            if opt in excluded_opts:
+                disable(opt.step)
+
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )
