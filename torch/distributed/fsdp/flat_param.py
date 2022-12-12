@@ -105,6 +105,8 @@ class HandleShardingStrategy(Enum):
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
+    HYBRID_SHARD = auto()
+    _HYBRID_SHARD_ZERO2 = auto()
 
 
 @dataclass
@@ -304,9 +306,15 @@ class FlatParamHandle:
         params (Sequence[nn.Parameter]): The parameters to use for the
             flattened parameter.
         module (nn.Module): A module that is the root of the subtree containing
-            all parameters in ``params``; for non-recursive wrapping, this must
-            be the top-level module, while for recursive wrapping, this may not
-            necessarily be the top-level module.
+            all parameters in ``params``. For the non-module-wrapper code path,
+            this should be the local FSDP root module, while for the
+            module-wrapper code path, this may not necessarily be the local
+            FSDP root module (i.e. when there is nested wrapping).
+        comm_module (nn.Module): The module responsible for the unshard/reshard
+            pair for this handle. For the non-module-wrapper code path, this
+            is what would have been ``module`` in the module-wrapper equivalent
+            wrapping, which may not be the local FSDP root module. For the
+            module-wrapper code path, this is always the same as ``module``.
         device (torch.device): The compute and communication device, which
             should be a non-CPU device. We refer to it as the compute device.
         config (HandleConfig): A config customizing the handle based on FSDP's
@@ -317,6 +325,10 @@ class FlatParamHandle:
             :class:`FlatParameter`). If ``False``, then FSDP reconstructs the
             parameter every iteration and returns the :class:`FlatParameter` s
             from ``named_parameters()``.
+
+    NOTE: We enforce that there is a single "communication module" that is
+    responsible for the unshard/reshard pair for this handle. This invariant
+    holds for both the module-wrapper and non-module-wrapper code paths.
     """
 
     ##################
@@ -326,6 +338,7 @@ class FlatParamHandle:
         self,
         params: Sequence[nn.Parameter],
         module: nn.Module,
+        comm_module: nn.Module,
         device: torch.device,
         config: HandleConfig,
         process_group: dist.ProcessGroup,
@@ -340,6 +353,7 @@ class FlatParamHandle:
         self._use_orig_params = use_orig_params
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
+        self._comm_module = comm_module
         self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
 
@@ -1093,11 +1107,12 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
-                # This cast is meaningful when `param_dtype` is a low precision
-                # dtype.
-                flat_param.grad.data = flat_param.grad.to(
-                    self._config.low_prec_param_dtype
-                )
+                if flat_param.grad.dtype != self._config.low_prec_param_dtype:
+                    flat_param.grad.data = flat_param.grad.to(
+                        self._config.low_prec_param_dtype
+                    )
+                    if self._use_orig_params:
+                        self._use_sharded_grad_views()
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1518,9 +1533,20 @@ class FlatParamHandle:
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
                 if param.requires_grad and not flat_param._is_grad_none[i]:
-                    param.grad = grad[offset : offset + numel_in_shard].reshape(
-                        param.shape
-                    )
+                    if self._keep_low_precision_grads:
+                        # NOTE: This is a hack using `.data` to side step the
+                        # check that parameter/gradient dtypes match. Here,
+                        # `param` has full precision; `grad` has low precision.
+                        if param.grad is None:
+                            # `.grad` must have the same shape as `param`
+                            param.grad = torch.empty_like(param)
+                        param.grad.data = grad[
+                            offset : offset + numel_in_shard
+                        ].reshape(param.shape)
+                    else:
+                        param.grad = grad[offset : offset + numel_in_shard].reshape(
+                            param.shape
+                        )
                 else:
                     param.grad = None
                 offset += numel_in_shard
