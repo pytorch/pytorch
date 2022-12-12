@@ -138,6 +138,10 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   return c10::fromIntArrayRefKnownNonNegative(sizes_custom());
 }
 
+c10::SymInt LTCTensorImpl::sym_numel_custom() const {
+  return numel_custom();
+}
+
 void LTCTensorImpl::setup_size_properties() {
   size_t generation = tensor_->generation();
   if (generation != generation_) {
