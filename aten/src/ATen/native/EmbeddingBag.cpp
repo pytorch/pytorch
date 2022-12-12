@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstring>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -1329,11 +1330,11 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
 
   if (sparse) {
     return at::_embedding_bag_sparse_backward_symint(
-        grad, indices, offsets, offset2bag_, bag_size_, num_weights,
+        grad, indices, offsets, offset2bag_, bag_size_, std::move(num_weights),
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   } else {
     return at::_embedding_bag_dense_backward_symint(
-        grad, indices, offset2bag_, bag_size_, max_indices_, num_weights,
+        grad, indices, offset2bag_, bag_size_, max_indices_, std::move(num_weights),
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   }
 }
@@ -1645,7 +1646,7 @@ Tensor _embedding_bag_sparse_backward(
     const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
     bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
     int64_t padding_idx) {
-    return at::native::_embedding_bag_sparse_backward_symint(grad_, indices, offsets, offset2bag, bag_size_, num_weights,
+    return at::native::_embedding_bag_sparse_backward_symint(grad_, indices, offsets, offset2bag, bag_size_, std::move(num_weights),
         scale_grad_by_freq, mode, per_sample_weights_opt, padding_idx);
 }
 
@@ -1673,7 +1674,7 @@ Tensor _embedding_bag_sparse_backward_symint(
     AT_ASSERT(mode == MODE_SUM);
     index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
-  return native::embedding_backward_symint(index_grad, indices, num_weights, padding_idx,
+  return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
 }
 }
