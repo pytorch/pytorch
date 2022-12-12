@@ -358,7 +358,7 @@ class TestTorchDeviceType(TestCase):
             s0.tolist()
 
         with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(RuntimeError, r'Device not recognized'):
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0._write_file(f, True, True, s0.element_size())
 
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
@@ -2697,14 +2697,16 @@ else:
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     def _test_large_cum_fn_helper(self, x, fn):
-        x_cpu = x.cpu().float()
-        expected = fn(x_cpu)
+        expected = fn(x.cpu().float())
         actual = fn(x).cpu().float()
-        self.assertEqual(expected, actual.cpu().float())
+        # Avoid self.assertEqual to save memory.
+        torch.testing.assert_close(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
+    @largeTensorTest('25GB', device='cpu')
+    @largeTensorTest('4GB', device='cuda')
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -2715,6 +2717,8 @@ else:
 
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
+    @largeTensorTest('25GB', device='cpu')
+    @largeTensorTest('4GB', device='cuda')
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -3914,10 +3918,9 @@ else:
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
-    @unittest.skipIf(is_cuda_sm86, "OOMs on sm86 configuration")
     @skipIfRocm
     @onlyCUDA
-    @largeTensorTest('12GB', device='cpu')
+    @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -3926,8 +3929,9 @@ else:
         x = torch.randn(50000, 1, dtype=torch.float32)      # 50k * 4 bytes = 200 KB
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
-        actual_gpu = torch.pdist(x.to(device), p=2)         # 5 GB on GPU
-        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU + 1.25GB for expected == actual
+        actual_cpu = torch.pdist(x.to(device), p=2).cpu()         # 5 GB on GPU + 5GB on CPU
+        # Workaround for large memory overhead of self.assertTrue (see #84944)
+        self.assertTrue(torch.allclose(expected_cpu, actual_cpu))  # ~20GB in allclose
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
@@ -6534,25 +6538,12 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 warnings.resetwarnings()
                 f()
-                self.assertEqual(len(w), 1)
+                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
                 warning = w[0].message
                 self.assertTrue(warning, DeprecationWarning)
                 self.assertTrue(re.search(
                     '^TypedStorage is deprecated',
                     str(warning)))
-
-        # Check that only one warning is raised from calling multiple
-        # TypedStorage functions if warnings are not reset between each
-        with warnings.catch_warnings(record=True) as w:
-            warnings.resetwarnings()
-            for f in funcs:
-                f()
-            self.assertEqual(len(w), 1)
-            warning = w[0].message
-            self.assertTrue(warning, DeprecationWarning)
-            self.assertTrue(re.search(
-                '^TypedStorage is deprecated',
-                str(warning)))
 
     def test_from_file(self):
         def assert_with_filename(filename):

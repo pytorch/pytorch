@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import os
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -8,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 
 import torch
 from torch._ops import OpOverload
+from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -203,7 +205,16 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, make_constant=False, shape_env=None):
+    def from_real_tensor(
+        self,
+        fake_mode,
+        t,
+        make_constant=False,
+        shape_env=None,
+        ignore_subclass=False,
+        *,
+        sname=None,
+    ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -230,7 +241,13 @@ class FakeTensorConverter(object):
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
+        out = self.meta_converter(
+            t,
+            shape_env=shape_env,
+            callback=mk_fake_tensor,
+            ignore_subclass=ignore_subclass,
+            sname=sname,
+        )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
@@ -257,8 +274,24 @@ class FakeTensorConverter(object):
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
     # You must have created the FakeTensorMode with allow_meta == True
-    def __call__(self, fake_mode, t, *, make_constant=False, shape_env=None):
-        return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
+    def __call__(
+        self,
+        fake_mode,
+        t,
+        *,
+        make_constant=False,
+        shape_env=None,
+        ignore_subclass=False,
+        sname=None,
+    ):
+        return self.from_real_tensor(
+            fake_mode,
+            t,
+            make_constant,
+            shape_env=shape_env,
+            ignore_subclass=ignore_subclass,
+            sname=sname,
+        )
 
 
 op_implementations = []
@@ -334,21 +367,6 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
     return constructors(fake_mode, func, *args, **kwargs)
 
 
-# _to_copy fails when run with FakeTensors to cuda device
-# TODO: debug
-@register_op_impl(aten._to_copy.default)
-def to_copy(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    input_device = new_kwargs.pop("device", None)
-    out_device = input_device if input_device else new_kwargs["input"].device
-    with in_kernel_invocation_manager(fake_mode):
-        input = new_kwargs.pop("input").to("meta")
-        return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
-
-
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
@@ -358,6 +376,20 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
+def local_scalar_dense(fake_mode, func, arg):
+    if fake_mode.shape_env is None:
+        # Without symints/symfloats, cannot handle this
+        raise DataDependentOutputException(func)
+    if is_float_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symfloat()
+    elif is_integer_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symint()
+    else:
+        raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+# NB: this must be ordered after local_scalar_dense
 @register_op_impl(
     lambda func: torch.Tag.data_dependent_output in func.tags  # type: ignore[attr-defined]
 )
@@ -494,6 +526,10 @@ def in_kernel_invocation_manager(fake_mode):
         del guard
 
 
+class FakeTensorConfig:
+    debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
+
+
 class FakeTensor(torch.Tensor):
     """
     Meta tensors give you the ability to run PyTorch code without having to
@@ -553,6 +589,10 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
+        if FakeTensorConfig.debug:
+            import traceback
+
+            self._debug_trace = traceback.extract_stack()
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -986,10 +1026,24 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, static_shapes=False):
+    def from_tensor(
+        self,
+        tensor,
+        static_shapes=False,
+        ignore_subclass=False,
+        sname: Optional[str] = None,
+    ):
         if static_shapes:
-            return self.fake_tensor_converter(self, tensor)
-        return self.fake_tensor_converter(self, tensor, shape_env=self.shape_env)
+            return self.fake_tensor_converter(
+                self, tensor, ignore_subclass=ignore_subclass, sname=sname
+            )
+        return self.fake_tensor_converter(
+            self,
+            tensor,
+            shape_env=self.shape_env,
+            ignore_subclass=ignore_subclass,
+            sname=sname,
+        )
 
 
 # NB: returns fake tensors

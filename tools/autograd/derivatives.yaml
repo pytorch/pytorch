@@ -1514,12 +1514,12 @@
   self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 
-- name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
   # pointwise (variance) + sum + sqrt
   result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
-- name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
   result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
   # linear
@@ -1662,7 +1662,7 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
-- name: to_sparse(Tensor self) -> Tensor
+- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
   self: grad.to_dense()
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
@@ -1723,12 +1723,12 @@
   self: grad.squeeze(dim)
   result: auto_linear
 
-- name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
   # pointwise + sum
   result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
-- name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
   result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
   # linear
@@ -2743,6 +2743,10 @@
       self: grad.reshape_as(self)
     AutogradCUDA:
       self: grad.reshape_as(self) + 1
+
+- name: _test_inductor_realize(Tensor self) -> Tensor
+  self: grad
+  result: auto_linear
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
