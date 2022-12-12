@@ -13,7 +13,7 @@ import collections
 import textwrap
 import logging
 from torch import SymInt, SymFloat
-from torch._guards import ShapeGuard, TracingContext
+from torch._guards import ShapeGuard
 
 try:
     import sympy  # type: ignore[import]
@@ -713,14 +713,14 @@ class ShapeEnv(object):
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
-        for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr) is not None:
+        for expr, stack in self.guards:
+            if self._maybe_evaluate_static(expr) is not None:
                 continue
-            guard.expr = self.simplify(guard.expr)
+            expr = self.simplify(expr)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(guard.expr))
+                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(expr))
             except Exception:
-                logging.warning(f"failing guard allocated at {guard.stack}")
+                logging.warning(f"failing guard allocated at {stack}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1

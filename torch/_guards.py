@@ -3,6 +3,7 @@ import enum
 import weakref
 from contextlib import contextmanager
 from typing import Callable, List, NamedTuple, Optional, Set
+
 import sympy
 
 """
@@ -171,19 +172,9 @@ class Guard:
         self.obj_weakref = obj_weakref
 
 
-class ShapeGuard:
-    expr: sympy.Expr
-    stack: str
-
-    def __init__(self, expr, stack):
-        self.expr = expr
-        self.stack = stack
-
-
 class GuardsContext:
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
-        self.shape_guards: List[ShapeGuard] = []
 
 
 _CURRENT_TRACING_CONTEXT = None
@@ -194,8 +185,9 @@ class TracingContext:
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
-    def __init__(self):
+    def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.fake_mode = fake_mode
 
 
 @contextmanager

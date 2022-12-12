@@ -512,11 +512,17 @@ class CheckFunctionManager:
         # NB: self.output_graph can be None in the debug_nops tests
         # TODO: What about grapharg pruning?  This could be problematic if we
         # guarded on a tensor that isn't actually used as an input in the end.
-        if self.output_graph and self.output_graph.shape_env:
+        if (
+            self.output_graph
+            and self.output_graph.tracing_context.fake_mode
+            and self.output_graph.tracing_context.fake_mode.shape_env
+        ):
             graphargs = self.output_graph.graphargs
-            expr_as_str = self.output_graph.shape_env.codegen_guards(
-                [a.fake_tensor for a in graphargs if a.is_tensor],
-                [a.source.name() for a in graphargs if a.is_tensor],
+            expr_as_str = (
+                self.output_graph.tracing_context.fake_mode.shape_env.codegen_guards(
+                    [a.fake_tensor for a in graphargs if a.is_tensor],
+                    [a.source.name() for a in graphargs if a.is_tensor],
+                )
             )
             if expr_as_str != "True":
                 code_parts.append(expr_as_str)

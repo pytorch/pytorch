@@ -180,7 +180,11 @@ class OutputGraph(fx.Tracer):
         super(OutputGraph, self).__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        self.tracing_context: TracingContext = TracingContext()
+        fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=ShapeEnv(),
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.guards: Set[Guard] = self.tracing_context.guards_context.dynamo_guards
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
@@ -206,7 +210,6 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map: Dict[
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
@@ -260,8 +263,8 @@ class OutputGraph(fx.Tracer):
             # and do save() to snapshot the current state and increment the generation count, or restore()
             # to go back to a prior generation. The application of state onto existing structures
             # should be a detail of registrants with the system, and the system should be vaguely ignorant of
-            # how dependent objects are restored. 
-            # 
+            # how dependent objects are restored.
+            #
             # Ex: OutputGraph would register values with the checkpointing system, and when the system calls
             # restore(), it would do the equivalent of this fn. TracingContext would get hit at the same exact time
             # with restore(), and so would also restore the guards, allowing dynamo to just make sure the relationship
