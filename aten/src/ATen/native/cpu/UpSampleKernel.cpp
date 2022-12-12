@@ -803,7 +803,7 @@ struct HelperInterpBase {
   static inline std::tuple<std::vector<Tensor>, int, unsigned int> _compute_indices_int16_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn
+    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias
   ) {
 
     std::vector<Tensor> indices_weights;
@@ -811,9 +811,13 @@ struct HelperInterpBase {
     double scale = area_pixel_compute_scale<double>(
         input_size, output_size, align_corners, opt_scale);
 
-    double support =
-        (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-    interp_size = (int)ceil(support) * 2 + 1;
+    double support;
+    if (antialias) {
+        support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
+        interp_size = (int)ceil(support) * 2 + 1;
+    } else {
+        support = interp_size * 0.5;
+    }
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
@@ -1134,14 +1138,15 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t ndims,
     int64_t reshape_dim,
     bool align_corners,
-    const c10::optional<double> opt_scale
+    const c10::optional<double> opt_scale,
+    bool antialias
   ) {
 
     auto interp_size = HelperInterpLinear::interp_size;
     auto fn = HelperInterpLinear::aa_filter<double>;
     return HelperInterpLinear::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
-        align_corners, opt_scale, interp_size, fn);
+        align_corners, opt_scale, interp_size, fn, antialias);
   }
 };
 
@@ -1261,14 +1266,15 @@ struct HelperInterpCubic : public HelperInterpBase {
     int64_t ndims,
     int64_t reshape_dim,
     bool align_corners,
-    const c10::optional<double> opt_scale
+    const c10::optional<double> opt_scale,
+    bool antialias
   ) {
 
     auto interp_size = HelperInterpCubic::interp_size;
     auto fn = HelperInterpCubic::aa_filter<double>;
     return HelperInterpCubic::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
-        align_corners, opt_scale, interp_size, fn);
+        align_corners, opt_scale, interp_size, fn, antialias);
   }
 
 };
@@ -1412,7 +1418,8 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const Tensor& input,
     int interp_dim,
     bool align_corners,
-    const scale_type& scales) {
+    const scale_type& scales,
+    bool antialias) {
 
   // input can be NCHW, NCL or NCKHW
   auto shape = input.sizes().vec();
@@ -1444,9 +1451,11 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
       F::compute_indices_int16_weights_aa(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
-        input.dim(), interp_dim, align_corners, scales[interp_dim - 2]);
+        input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
+        antialias);
     TORCH_INTERNAL_ASSERT(weights_precision > 0);
   } else {
+    TORCH_INTERNAL_ASSERT(antialias);
     indices_weights =
       F::compute_indices_weights_aa(
         input_scalar_type, input.size(interp_dim), oshape[interp_dim],
@@ -1477,7 +1486,8 @@ void separable_upsample_generic_Nd_kernel_impl(
     const Tensor& output,
     const Tensor& input,
     bool align_corners,
-    const scale_type& scales) {
+    const scale_type& scales,
+    bool antialias) {
 
   auto output_shape = output.sizes();
   auto input_shape = input.sizes();
@@ -1512,7 +1522,7 @@ void separable_upsample_generic_Nd_kernel_impl(
         scale_t,
         F,
         true>(
-        temp_output, temp_input, interp_dim, align_corners, scales);
+        temp_output, temp_input, interp_dim, align_corners, scales, antialias);
     temp_input = temp_output;
   }
 
@@ -1534,7 +1544,7 @@ void separable_upsample_generic_Nd_kernel_impl(
           scale_t,
           F,
           false>(
-          temp_output, temp_input, interp_dim, align_corners, scales);
+          temp_output, temp_input, interp_dim, align_corners, scales, antialias);
       temp_input = temp_output;
     }
   }
@@ -1643,7 +1653,8 @@ void upsample_linear1d_kernel_impl(
     output, input, align_corners, {scales_w});
 }
 
-void upsample_bilinear2d_kernel_impl(
+
+void upsample_bilinear2d_kernel_impl_float(
     const Tensor& output,
     const Tensor& input,
     bool align_corners,
@@ -1665,8 +1676,43 @@ void upsample_bilinear2d_kernel_impl(
   }
 }
 
+void upsample_bilinear2d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+
+        // std::cout << "LOLOL " << std::endl;
+  if (input.dtype() == at::kByte){
+    #ifdef CPU_CAPABILITY_AVX2
+      if ((input[0][0][0][0].item<uint8_t>() == 1) && input.size(1) <= 4) {
+        // std::cout << "AAAA " << std::endl;
+        input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
+        upsample_avx_bilinear_or_bicubic<scale_t, HelperInterpLinear>(input,
+          output, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      } else {
+        // std::cout << "BBBB" << std::endl;
+        separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+          output, input, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      }
+    #else  // CPU_CAPABILITY_AVX2
+        // std::cout << "CCCCC " << std::endl;
+      separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+        output, input, align_corners, {scales_h, scales_w},
+        /*antialias=*/false);
+    #endif  // CPU_CAPABILITY_AVX2  
+  } 
+  else {
+        // std::cout << "DDDD " << std::endl;
+    upsample_bilinear2d_kernel_impl_float(output, input, align_corners, scales_h, scales_w);
+  }
+}
+
 template <class F>
-void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
+void maybe_dispatch_to_avx_for_bilinear_or_bicubic_aa(
     const Tensor& output,
     const Tensor& input,
     bool align_corners,
@@ -1677,16 +1723,19 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic(
   // TODO: add more assumptions as needed
   if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
     input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
-    upsample_avx_bilinear_or_bicubic<scale_t, F>(input, output, align_corners, {scales_h, scales_w});
+    upsample_avx_bilinear_or_bicubic<scale_t, F>(
+      input, output, align_corners, {scales_h, scales_w},
+      /*antialias=*/true);
   } else {
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
-        output, input, align_corners, {scales_h, scales_w});
+        output, input, align_corners, {scales_h, scales_w},
+        /*antialias=*/true);
   }
 #else // CPU_CAPABILITY_AVX2
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, F>(
-      output, input, align_corners, {scales_h, scales_w});
+      output, input, align_corners, {scales_h, scales_w},
+      /*antialias=*/true);
 #endif // CPU_CAPABILITY_AVX2
-
 }
 
 void upsample_bilinear2d_aa_kernel_impl(
@@ -1695,7 +1744,7 @@ void upsample_bilinear2d_aa_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-    maybe_dispatch_to_avx_for_bilinear_or_bicubic<HelperInterpLinear>(
+    maybe_dispatch_to_avx_for_bilinear_or_bicubic_aa<HelperInterpLinear>(
         output, input, align_corners, scales_h, scales_w
     );
 }
@@ -1723,8 +1772,33 @@ void upsample_bicubic2d_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
-    output, input, align_corners, {scales_h, scales_w});
+        // std::cout << "LOLOL " << std::endl;
+  if (input.dtype() == at::kByte){
+    #ifdef CPU_CAPABILITY_AVX2
+      if ((input[0][0][0][0].item<uint8_t>() == 1) && input.size(1) <= 4) {
+        // std::cout << "AAAA " << std::endl;
+        input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
+        upsample_avx_bilinear_or_bicubic<scale_t, HelperInterpCubic>(input,
+          output, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      } else {
+        // std::cout << "BBBB" << std::endl;
+        separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+          output, input, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      }
+    #else  // CPU_CAPABILITY_AVX2
+        // std::cout << "CCCCC " << std::endl;
+      separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+        output, input, align_corners, {scales_h, scales_w},
+        /*antialias=*/false);
+    #endif  // CPU_CAPABILITY_AVX2  
+  } 
+  else {
+        // std::cout << "DDDD " << std::endl;
+    upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+      output, input, align_corners, {scales_h, scales_w});
+  }
 }
 
 void upsample_bicubic2d_aa_kernel_impl(
@@ -1734,7 +1808,7 @@ void upsample_bicubic2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-    maybe_dispatch_to_avx_for_bilinear_or_bicubic<HelperInterpCubic>(
+    maybe_dispatch_to_avx_for_bilinear_or_bicubic_aa<HelperInterpCubic>(
         output, input, align_corners, scales_h, scales_w
     );
 }
