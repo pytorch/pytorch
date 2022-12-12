@@ -66,7 +66,7 @@ TEST(ModuleAPITest, MethodRunAsync) {
     mtx.lock();
     ++counter;
     mtx.unlock();
-    at::launch(move(f));
+    at::launch(std::move(f));
   };
 
   auto method = m.get_method("forward");
@@ -254,10 +254,10 @@ TEST(ModuleAPITest, DeepCopyString) {
   m.setattr(attr1, str);
   auto copied = m.deepcopy();
   auto original_str = str;
-  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+  ASSERT_EQ(copied.attr(attr1).toStringRef(), original_str);
   // check string mutation is not reflected in the copied module
   str += "str";
-  ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
+  ASSERT_EQ(copied.attr(attr1).toStringRef(), original_str);
 }
 
 TEST(ModuleAPITest, DeepCopyEnum) {

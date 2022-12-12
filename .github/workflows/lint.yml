@@ -14,19 +14,25 @@ jobs:
   lintrunner:
     runs-on: linux.20_04.16x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
 
-      - name: Install lintrunner
-        run: pip install lintrunner==0.9.*
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -64,11 +70,6 @@ jobs:
     name: quick-checks
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -79,9 +80,18 @@ jobs:
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
       - name: Install requirements
         id: requirements
-        run: pip3 install -r requirements.txt --user
+        run: pip install -r requirements.txt --user
       - name: Ensure no non-breaking spaces
         if: always()
         run: |
@@ -107,28 +117,51 @@ jobs:
           set -eux
           python torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
 
+  pr-sanity-checks:
+    name: pr-sanity-checks
+    runs-on: linux.20_04.4x
+    # Only run this on pull requests
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: -1
+      - name: PR size check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bash .github/scripts/pr-sanity-check.sh
+
   workflow-checks:
     name: workflow-checks
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
           fetch-depth: 1
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install requirements
         id: requirements
         run: |
-          pip3 install -r requirements.txt --user
+          pip install -r requirements.txt --user
       - name: Install Jinja2
         run: |
-          pip3 install Jinja2==3.0.1 --user
+          pip install Jinja2==3.0.1 --user
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -158,14 +191,15 @@ jobs:
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
     steps:
-      - name: Setup Node
-        uses: actions/setup-node@v2
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
           fetch-depth: 1
+      # This is not a node project so there is no package-lock.json to cache
+      - name: Setup Node
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -197,29 +231,36 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.20_04.4x
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+            **/requirements-flake8.txt
+            **/.circleci/docker/requirements-ci.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
         run: |
           set -eux
-          python3 -mpip install -r requirements.txt
-          python3 -mpip install boto3==1.16.34
-          pip3 install typing-extensions==3.10 --user
-          pip3 install -r requirements-flake8.txt --user
-          python3 -mpip install rockset==0.8.10 --user
-          python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.960 --user
+          pip install -r requirements.txt
+          pip install boto3==1.19.12
+          pip install typing-extensions==3.10 --user
+          pip install -r requirements-flake8.txt --user
+          pip install rockset==0.8.10 --user
+          pip install -r requirements.txt --user
+          pip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
@@ -234,18 +275,6 @@ jobs:
       matrix:
         test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python 3.5
-        if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.5
-          architecture: x64
-      - name: Setup Python 3.8
-        if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
@@ -253,9 +282,30 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.5'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
+          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
       - name: Run collect_env.py

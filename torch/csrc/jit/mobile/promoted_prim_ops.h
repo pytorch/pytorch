@@ -21,6 +21,16 @@ void size(Stack& stack);
 
 void sym_size(Stack& stack);
 
+void sym_size_int(Stack& stack);
+
+void sym_stride_int(Stack& stack);
+
+void sym_numel(Stack& stack);
+
+void sym_storage_offset(Stack& stack);
+
+void sym_stride(Stack& stack);
+
 void device(Stack& stack);
 
 void dtype(Stack& stack);

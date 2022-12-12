@@ -13,40 +13,51 @@ Updated operators:
 """
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
+
+import functools
 
 import torch
 from torch.onnx import symbolic_helper
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype, jit_utils, registration
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=14)
 
 
+@_onnx_symbolic("aten::hardswish")
 @symbolic_helper.parse_args("v")
-def hardswish(g, self):
+@_beartype.beartype
+def hardswish(g: jit_utils.GraphContext, self):
     return g.op("HardSwish", self)
 
 
-@symbolic_helper.parse_args("v", "i")
-def tril(g, self, diagonal, out=None):
-    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
-    return g.op("Trilu", self, k, upper_i=0)
+@_onnx_symbolic("aten::tril")
+@_beartype.beartype
+def tril(g: jit_utils.GraphContext, self, diagonal, out=None):
+    return g.op("Trilu", self, diagonal, upper_i=0)
 
 
-@symbolic_helper.parse_args("v", "i")
-def triu(g, self, diagonal, out=None):
-    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
-    return g.op("Trilu", self, k, upper_i=1)
+@_onnx_symbolic("aten::triu")
+@_beartype.beartype
+def triu(g: jit_utils.GraphContext, self, diagonal, out=None):
+    return g.op("Trilu", self, diagonal, upper_i=1)
 
 
+@_onnx_symbolic("aten::reshape")
 @symbolic_helper.parse_args("v", "v")
-def reshape(g, self, shape):
+@_beartype.beartype
+def reshape(g: jit_utils.GraphContext, self, shape):
     # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
     #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
     return symbolic_helper._reshape_helper(g, self, shape, allowzero=0)
 
 
+@_onnx_symbolic("aten::batch_norm")
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
+@_beartype.beartype
 def batch_norm(
-    g,
+    g: jit_utils.GraphContext,
     input,
     weight,
     bias,
@@ -71,6 +82,7 @@ def batch_norm(
             15,
             "All input tensors must have the same `dtype`."
             " Turn off Autocast or export using opset version 15.",
+            input,
         )
 
     symbolic_helper.check_training_mode(training, "batch_norm")
@@ -98,17 +110,11 @@ def batch_norm(
         return res
 
 
-class Quantized:
-    """
-    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
-    """
+@_onnx_symbolic("quantized::hardswish")
+@_beartype.beartype
+def quantized_hardswish(g: jit_utils.GraphContext, x, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-    domain = "quantized"
+    output = hardswish(g, x)
 
-    @staticmethod
-    def hardswish(g, x, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
-
-        output = hardswish(g, x)
-
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)

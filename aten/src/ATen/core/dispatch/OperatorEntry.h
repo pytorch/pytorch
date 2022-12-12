@@ -6,6 +6,7 @@
 #include <c10/util/either.h>
 #include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/PyHandleCache.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
@@ -163,14 +164,10 @@ public:
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   inline void assertSignatureIsCorrect() {
-    assertSignatureIsCorrect(CppSignature::make<FuncType>());
+    assertSignatureIsCorrect(CppSignature::make<FuncType>(), fn_has_symint<FuncType>::value);
   }
 
-  void assertSignatureIsCorrect(const CppSignature call_signature) {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
-      reportSignatureError(call_signature);
-    }
-  }
+  void assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const;
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
@@ -206,8 +203,19 @@ public:
   bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
+  // Retrieves the kernel entry at a particular key.  Symmetric with
+  // hasKernelForDispatchKey.  To get the AnnotatedKernel, see
+  // getKernelForDispatchKey (private)
+  const KernelFunction& kernelForDispatchKey(DispatchKey k) const;
+  // Returns true if the "computed table" has an entry for a particular key.
+  bool hasComputedKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
+
+  template <typename F>
+  PyObject* getPythonOp(PyInterpreter* self_interpreter, F slow_accessor) const {
+    return py_cache_.ptr_or(self_interpreter, slow_accessor);
+  }
 
 private:
 
@@ -218,6 +226,8 @@ private:
   #endif
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
+  // Pointer to the torch.ops.ns.op.overload object for speed
+  c10::PyHandleCache py_cache_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
@@ -274,11 +284,12 @@ private:
     c10::optional<DispatchKey> dispatch_key;
   };
   c10::optional<CppSignatureWithDebug> cpp_signature_;
+  c10::optional<CppSignatureWithDebug> sym_cpp_signature_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
-  [[noreturn]] void reportSignatureError(CppSignature call_signature) const;
+  [[noreturn]] void reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key

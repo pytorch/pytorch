@@ -216,8 +216,6 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   @autoreleasepool {
 
     MPSShape* grad_shape = mps::getMPSShape(grad);
-    int num_grad_dims = [grad_shape count];
-
     NSString* ns_shape_key = [[grad_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     string key = "softmax_backward_mps_out:" + getMPSTypeString(output.scalar_type()) + ":"

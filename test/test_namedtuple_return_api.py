@@ -13,8 +13,8 @@ from collections import namedtuple
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
+    'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig',
+    'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
     'linalg_svd', '_linalg_svd', 'linalg_slogdet', '_linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
@@ -34,26 +34,26 @@ class TestNamedTupleAPI(TestCase):
     def test_native_functions_yaml(self):
         operators_found = set()
         regex = re.compile(r"^(\w*)(\(|\.)")
-        file = open(aten_native_yaml, 'r')
-        for f in yaml.safe_load(file.read()):
-            f = f['func']
-            ret = f.split('->')[1].strip()
-            name = regex.findall(f)[0][0]
-            if name in all_operators_with_namedtuple_return:
-                operators_found.add(name)
-                continue
-            if '_backward' in name or name.endswith('_forward'):
-                continue
-            if not ret.startswith('('):
-                continue
-            if ret == '()':
-                continue
-            ret = ret[1:-1].split(',')
-            for r in ret:
-                r = r.strip()
-                self.assertEqual(len(r.split()), 1,
-                                 'only allowlisted operators are allowed to have named return type, got ' + name)
-        file.close()
+        with open(aten_native_yaml, 'r') as file:
+            for f in yaml.safe_load(file.read()):
+                f = f['func']
+                ret = f.split('->')[1].strip()
+                name = regex.findall(f)[0][0]
+                if name in all_operators_with_namedtuple_return:
+                    operators_found.add(name)
+                    continue
+                if '_backward' in name or name.endswith('_forward'):
+                    continue
+                if not ret.startswith('('):
+                    continue
+                if ret == '()':
+                    continue
+                ret = ret[1:-1].split(',')
+                for r in ret:
+                    r = r.strip()
+                    self.assertEqual(len(r.split()), 1, 'only allowlisted '
+                                     'operators are allowed to have named '
+                                     'return type, got ' + name)
         self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
         Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
         could not be found. Do you forget to update test_namedtuple_return_api.py after renaming some
@@ -77,9 +77,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_linalg_slogdet'], input=(), names=('sign', 'logabsdet', 'LU', 'pivots'), hasout=True),
             op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
-            op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
+            op(operators=['symeig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
-            op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),

@@ -2,7 +2,7 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional
+from typing import Optional, Tuple
 
 import unittest
 from test_jit import JitTestCase
@@ -797,7 +797,7 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone())
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone())
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
@@ -812,12 +812,134 @@ class TestJitTraceAutocast(JitTestCase):
                 y = traced_model(x.clone().to(memory_format=torch.channels_last))
             with torch.cpu.amp.autocast(), torch.no_grad():
                 y2 = model(x.clone().to(memory_format=torch.channels_last))
-            torch.testing.assert_allclose(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
+            torch.testing.assert_close(y.double(), y2.double(), rtol=1e-03, atol=1e-03)
         for i in range(self.models.__len__()):
             if self.inputs[i].size().__len__() == 5:
                 # NHWC 3D case not support yet
                 continue
             test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
+
+    def test_cat_promote(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], 0)
+        with torch.jit.fuser("none"):
+            # In this testcase, we will check whether cat has done the promotion in AMP with mixed dtype inputs.
+            # To avoid the fusion group from TE, we will disable the fuser here.
+            for jit_freeze_or_not in [False, True]:
+                test_model = TestModel().eval()
+                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16), torch.no_grad():
+                    a = torch.rand(24, 128, 128)
+                    b = torch.rand(24, 128, 128, dtype=torch.bfloat16)
+                    c = test_model(a, b)
+                    traced = torch.jit.trace(test_model, (a, b))
+                if jit_freeze_or_not:
+                    traced = torch.jit.freeze(traced)
+                for _ in range(3):
+                    c2 = traced(a, b)
+                self.assertTrue(c.dtype, torch.float32)
+                self.assertTrue(c2.dtype, torch.float32)
+                traced_graph = traced.graph_for(a, b)
+                self.assertTrue(any(n.kind() == "aten::to" for n in traced_graph.nodes()))
+
+    def test_script_autocast_cpu(self):
+        def fn(x):
+            if torch.is_autocast_cpu_enabled():
+                return x.relu()
+            else:
+                return x.sin()
+
+        fn_s = torch.jit.script(fn)
+
+        x = torch.rand((4, 4)) - 0.5
+        with torch.cpu.amp.autocast():
+            self.assertEqual(fn_s(x), fn(x))
+
+        with torch.cpu.amp.autocast(enabled=True):
+            self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_script_autocast_cuda(self):
+        def fn(x):
+            if torch.is_autocast_enabled():
+                return x.relu()
+            else:
+                return x.sin()
+
+        fn_s = torch.jit.script(fn)
+
+        x = torch.rand((4, 4)) - 0.5
+        with torch.cpu.amp.autocast():
+            self.assertEqual(fn_s(x), fn(x))
+
+        with torch.cuda.amp.autocast(enabled=True):
+            self.assertEqual(fn_s(x), fn(x))
+
+        self.assertTrue(any(["is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+
+
+    def test_scripted_aliasing(self):
+        # torch.is_autocast_enabled should not be able to move inside of the autocast context.
+        def fn(x):
+            if torch.is_autocast_enabled():
+                y = True
+            else:
+                y = False
+            with torch.cuda.amp.autocast(enabled=True):
+                z = x.relu()
+            return y, z
+
+        fn_s = torch.jit.script(fn)
+        graph = fn_s.graph
+
+        aliasdb = graph.alias_db()
+
+        is_enabled_nodes = graph.findAllNodes("aten::is_autocast_enabled")
+        enter_nodes = graph.findAllNodes("prim::Enter")
+
+        self.assertEqual(len(is_enabled_nodes), 1)
+        self.assertEqual(len(enter_nodes), 1)
+
+        self.assertFalse(aliasdb.move_after_topologically_valid(is_enabled_nodes[0], enter_nodes[0]))
+
+
+    def test_script_autocast_enable_and_check(self):
+        def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
+            b1 = torch.is_autocast_cpu_enabled()
+            v1 = torch.mm(x, y)
+            with torch.cpu.amp.autocast(enabled=True):
+                b2 = torch.is_autocast_cpu_enabled()
+                v2 = torch.mm(x, y)
+                with torch.cpu.amp.autocast(enabled=False):
+                    b3 = torch.is_autocast_cpu_enabled()
+                    v3 = torch.mm(x, y)
+            return (v1, b1, v2, b2, v3, b3)
+
+        # bx = is_autocast_cpu_enabled() result should be False iff (vx = mm(x, y)).dtype is float
+        def check_fn_results(arr):
+            [v1, b1, v2, b2, v3, b3] = arr
+            self.assertTrue((v1.dtype == torch.float) != b1)
+            self.assertTrue((v2.dtype == torch.float) != b2)
+            self.assertTrue((v3.dtype == torch.float) != b3)
+
+        x = torch.rand((2, 2), dtype=torch.float)
+        y = torch.rand((2, 2), dtype=torch.float)
+
+        fn_s = torch.jit.script(fn)
+
+        with torch.cpu.amp.autocast(enabled=False):
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
+
+        with torch.cpu.amp.autocast(enabled=True):
+            check_fn_results(fn(x, y))
+            check_fn_results(fn_s(x, y))
+
 
 if __name__ == "__main__":
     run_tests()

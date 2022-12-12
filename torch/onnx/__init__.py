@@ -1,5 +1,4 @@
 """ONNX exporter."""
-import warnings
 
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -10,7 +9,8 @@ from torch._C._onnx import (
     TrainingMode,
 )
 
-from . import (
+from . import (  # usort:skip. Keep the order instead of sorting lexicographically
+    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -24,10 +24,13 @@ from . import (
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
-    symbolic_registry,
+    symbolic_opset17,
     utils,
 )
+
+# TODO(After 1.13 release): Remove the deprecated SymbolicContext
 from ._exporter_states import ExportTypes, SymbolicContext
+from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
 from .utils import (
     _optimize_graph,
@@ -44,7 +47,6 @@ from .utils import (
 __all__ = [
     # Modules
     "symbolic_helper",
-    "symbolic_registry",
     "utils",
     "errors",
     # All opsets
@@ -59,13 +61,13 @@ __all__ = [
     "symbolic_opset14",
     "symbolic_opset15",
     "symbolic_opset16",
+    "symbolic_opset17",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
     "TrainingMode",
     "TensorProtoDataType",
-    # Classes
-    "SymbolicContext",
+    "JitScalarType",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -75,32 +77,29 @@ __all__ = [
     "unregister_custom_op_symbolic",
     "disable_log",
     "enable_log",
-    "is_onnx_log_enabled",
-    "log",
-    "set_log_stream",
     # Errors
     "CheckerError",  # Backwards compatibility
 ]
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
-SymbolicContext.__module__ = "torch.onnx"
+JitScalarType.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
 
 
+@_deprecation.deprecated(
+    since="1.12.0", removed_in="1.14", instructions="use `torch.onnx.export` instead"
+)
 def _export(*args, **kwargs):
-    warnings.warn(
-        "`torch.onnx._export` is deprecated. Please use `torch.onnx.export` instead.",
-        DeprecationWarning,
-    )
     return utils._export(*args, **kwargs)
 
 
-def is_onnx_log_enabled() -> bool:
-    r"""Returns True iff ONNX logging is turned on."""
-    return _C._jit_is_onnx_log_enabled()
+# TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
+
+# Returns True iff ONNX logging is turned on.
+is_onnx_log_enabled = _C._jit_is_onnx_log_enabled
 
 
 def enable_log() -> None:
@@ -113,21 +112,19 @@ def disable_log() -> None:
     _C._jit_set_onnx_log_enabled(False)
 
 
-def set_log_stream(stream_name: str = "stdout") -> None:
-    r"""Sets output stream for ONNX logging.
+"""Sets output stream for ONNX logging.
 
-    Args:
-        stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
-            as ``stream_name``.
-    """
-    _C._jit_set_onnx_log_output_stream(stream_name)
+Args:
+    stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
+        as ``stream_name``.
+"""
+set_log_stream = _C._jit_set_onnx_log_output_stream
 
 
-def log(*args) -> None:
-    r"""A simple logging facility for ONNX exporter.
+"""A simple logging facility for ONNX exporter.
 
-    Args:
-        args: Arguments are converted to string, concatenated together with a newline
-            character appended to the end, and flushed to output stream.
-    """
-    _C._jit_onnx_log(*args)
+Args:
+    args: Arguments are converted to string, concatenated together with a newline
+        character appended to the end, and flushed to output stream.
+"""
+log = _C._jit_onnx_log

@@ -1,14 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <torch/library.h>
-#include <ATen/cpu/vec/vec.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/relu_native.h>
+#endif
+
+#include <algorithm>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -23,10 +37,10 @@ namespace {
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine,
-      "Only per tensor quantization is suported in Add.");
+      "Only per tensor quantization is supported in Add.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
-      "Both inputs to Add must have the same quantization shceme.");
+      "Both inputs to Add must have the same quantization scheme.");
   TORCH_CHECK(
       qa.scalar_type() == qb.scalar_type(),
       "Add operands should have same data type.");
@@ -428,7 +442,7 @@ Tensor qadd_scalar_out(Tensor qa, const Scalar& b, Tensor out) {
 // all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
-  return qadd_scalar(qa, b.item());
+  return qadd_scalar(std::move(qa), b.item());
 }
 
 // `torch.jit.trace` will trace Scalar as Tensor
@@ -436,7 +450,7 @@ Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
 // all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
-  return qadd_scalar_out(qa, b.item(), out);
+  return qadd_scalar_out(std::move(qa), b.item(), std::move(out));
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
@@ -470,7 +484,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }  // namespace
 
 Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
-  return qadd<false>(qa, qb, scale, zero_point);
+  return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 
 }}  // namespace at::native

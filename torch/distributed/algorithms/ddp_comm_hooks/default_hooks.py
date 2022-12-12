@@ -3,6 +3,7 @@ from typing import Any, Callable
 import torch
 import torch.distributed as dist
 
+__all__ = ["allreduce_hook", "fp16_compress_hook", "bf16_compress_hook", "fp16_compress_wrapper", "bf16_compress_wrapper"]
 
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
@@ -33,6 +34,7 @@ def allreduce_hook(
     unaffecting DDP behavior.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     return _allreduce_fut(process_group, bucket.buffer())
@@ -49,6 +51,7 @@ def fp16_compress_hook(
     tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -84,6 +87,7 @@ def bf16_compress_hook(
     tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, bf16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -116,6 +120,7 @@ def fp16_compress_wrapper(
     Therefore, ``fp16_compress_hook`` is equivalent to ``fp16_compress_wrapper(allreduce_hook)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
     """
@@ -153,6 +158,7 @@ def bf16_compress_wrapper(
     Therefore, ``bf16_compress_hook`` is equivalent to ``bf16_compress_wrapper(allreduce_hook)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, bf16_compress_wrapper(powerSGD_hook))
     """

@@ -1,8 +1,9 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/TensorOperators.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>

@@ -17,6 +17,7 @@ from torch.ao.quantization.fx._equalize import (
     default_equalization_qconfig,
     fused_module_supports_equalization,
     nn_module_supports_equalization,
+    custom_module_supports_equalization,
     node_supports_equalization,
     is_equalization_observer,
     get_op_node_and_weight_eq_obs,
@@ -32,5 +33,6 @@ from torch.ao.quantization.fx._equalize import (
     convert_eq_obs,
     _convert_equalization_ref,
     get_layer_sqnr_dict,
-    get_equalization_qconfig_dict
+    get_equalization_qconfig_dict,
+    CUSTOM_MODULE_SUPP_LIST,
 )

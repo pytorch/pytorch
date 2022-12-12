@@ -30,7 +30,7 @@ static inline MPSNNReduceUnary* kernelForReducedDim(int dim) {
 
 Tensor wrapper_mean_dim(
     const Tensor& input,
-    IntArrayRef dims,
+    OptionalIntArrayRef opt_dims,
     bool keepdim,
     c10::optional<ScalarType> dtype) {
   if (@available(iOS 11.3, *)) {
@@ -39,18 +39,21 @@ Tensor wrapper_mean_dim(
     TORCH_CHECK(imageSize.size() == 4);
     // TODO: [T87340633] Support reducing the batch dimension
     TORCH_CHECK(imageSize[0] == 1);
-    auto mask = make_dim_mask(dims, input.dim());
+    auto mask = make_dim_mask(opt_dims, input.dim());
     MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
     MPSImage* Y = nil;
-    for (int dim : dims) {
-      imageSize[dim] = 1;
-      MPSNNReduceUnary* kernel = kernelForReducedDim(dim);
-      if (kernel) {
-        Y = createTemporaryImage(commandBuffer, imageSize);
-        [kernel encodeToCommandBuffer:commandBuffer.buffer
-                          sourceImage:X
-                     destinationImage:Y];
-        X = Y;
+    if (opt_dims.has_value()) {
+      auto dims = opt_dims.value();
+      for (int dim : dims) {
+        imageSize[dim] = 1;
+        MPSNNReduceUnary* kernel = kernelForReducedDim(dim);
+        if (kernel) {
+          Y = createTemporaryImage(commandBuffer, imageSize);
+          [kernel encodeToCommandBuffer:commandBuffer.buffer
+                            sourceImage:X
+                       destinationImage:Y];
+          X = Y;
+        }
       }
     }
     MetalTensorImplStorage mt{imageSize};

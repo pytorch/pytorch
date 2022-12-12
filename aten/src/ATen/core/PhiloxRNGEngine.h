@@ -71,48 +71,49 @@ public:
   C10_HOST_DEVICE inline explicit philox_engine(uint64_t seed = 67280421310721,
                                  uint64_t subsequence = 0,
                                  uint64_t offset = 0) {
-    key[0] = static_cast<uint32_t>(seed);
-    key[1] = static_cast<uint32_t>(seed >> 32);
-    counter = detail::UINT4(0);
-    counter[2] = static_cast<uint32_t>(subsequence);
-    counter[3] = static_cast<uint32_t>(subsequence >> 32);
-    STATE = 0;
+
+    reset_state(seed, subsequence);
     incr_n(offset);
   }
 
+  C10_HOST_DEVICE inline void reset_state(uint64_t seed = 67280421310721,
+                                 uint64_t subsequence = 0) {
+    key_[0] = static_cast<uint32_t>(seed);
+    key_[1] = static_cast<uint32_t>(seed >> 32);
+    counter_ = detail::UINT4(0);
+    counter_[2] = static_cast<uint32_t>(subsequence);
+    counter_[3] = static_cast<uint32_t>(subsequence >> 32);
+    STATE = 0;
+  }
+
   /**
-   * Produces a unique 32-bit pseudo random number on every invocation
+   * Produces a unique 32-bit pseudo random number on every invocation. Bookeeps state to avoid waste.
    */
-  C10_HOST_DEVICE inline uint32_t operator()() {
+  C10_HOST_DEVICE inline uint32_t operator()(int32_t n_rounds = 10) { // 10 here to preserve back-compat behavior
     if(STATE == 0) {
-      detail::UINT4 counter_ = counter;
-      detail::UINT2 key_ = key;
-
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-
-      output = single_round(counter_, key_);
+      detail::UINT4 counter = counter_;
+      detail::UINT2 key = key_;
+      output_ = rand(counter, key, n_rounds);
       incr();
     }
-    uint32_t ret = output[STATE];
+    uint32_t ret = output_[STATE];
     STATE = (STATE + 1) & 3;
     return ret;
+  }
+
+  inline float randn(uint32_t n_rounds) {
+    #ifdef __CUDA_ARCH__
+    AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
+    #endif
+    reset_state(); // Reset state for randn - a little wasteful, but easier to ensure correctness.
+    detail::UINT4 counter = counter_;
+    detail::UINT2 key = key_;
+    detail::UINT4 i = rand(counter, key, n_rounds);
+    detail::FLOAT2 prenorm;
+    prenorm[0] = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
+    prenorm[1] = 1 - uint32_to_uniform_float(i[1]);
+    detail::FLOAT2 ret = normalize_pair_uniform(prenorm);
+    return ret[0];
   }
 
   /**
@@ -121,16 +122,16 @@ public:
   C10_HOST_DEVICE inline void incr_n(uint64_t n) {
     uint32_t nlo = static_cast<uint32_t>(n);
     uint32_t nhi = static_cast<uint32_t>(n >> 32);
-    counter[0] += nlo;
+    counter_[0] += nlo;
     // if overflow in x has occurred, carry over to nhi
-    if (counter[0] < nlo) {
+    if (counter_[0] < nlo) {
       nhi++;
       // if overflow in nhi has occurred during carry over,
       // propagate that overflow to y and exit to increment z
       // otherwise return
-      counter[1] += nhi;
+      counter_[1] += nhi;
       if(nhi != 0) {
-        if (nhi <= counter[1]) {
+        if (nhi <= counter_[1]) {
           return;
         }
       }
@@ -138,34 +139,34 @@ public:
       // if overflow in y has occurred during addition,
       // exit to increment z
       // otherwise return
-      counter[1] += nhi;
-      if (nhi <= counter[1]) {
+      counter_[1] += nhi;
+      if (nhi <= counter_[1]) {
         return;
       }
     }
-    if (++counter[2])
+    if (++counter_[2])
       return;
-    ++counter[3];
+    ++counter_[3];
   }
 
   /**
    * Function that Skips one 128 bit number in a subsequence
    */
   C10_HOST_DEVICE inline void incr() {
-    if (++counter[0])
+    if (++counter_[0])
       return;
-    if (++counter[1])
+    if (++counter_[1])
       return;
-    if (++counter[2]) {
+    if (++counter_[2]) {
       return;
     }
-    ++counter[3];
+    ++counter_[3];
   }
 
 private:
-  detail::UINT4 counter;
-  detail::UINT4 output;
-  detail::UINT2 key;
+  detail::UINT4 counter_;
+  detail::UINT4 output_;
+  detail::UINT2 key_;
   uint32_t STATE;
 
   C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
@@ -192,12 +193,45 @@ private:
     ret[3] = lo0;
     return ret;
   }
+
+  C10_HOST_DEVICE constexpr float uint32_to_uniform_float(uint32_t value) {
+      // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
+      constexpr float scale = 4.6566127342e-10;
+      return static_cast<float>(value & 0x7FFFFFFF) * scale;
+  }
+
+
+
+  C10_HOST_DEVICE inline detail::UINT4 rand(detail::UINT4& counter, detail::UINT2& key, uint32_t n_rounds) {
+    for (uint32_t round = 0; round < (n_rounds - 1); round++) {
+        counter = single_round(counter, key);
+        key[0] += (kPhilox10A); key[1] += (kPhilox10B);
+      }
+    return single_round(counter, key);
+  }
+
+  inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
+    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
+    float u1 = in[0];
+
+    constexpr float two_pi = 2.0 * M_PI;
+
+    float mag = std::sqrt(-2.0 * std::log(u1));
+
+    detail::FLOAT2 ret;
+
+    ret[0] = mag * std::cos(two_pi);
+    ret[1] = mag * std::sin(two_pi);
+    return ret;
+  }
+
+
   static const uint32_t kPhilox10A = 0x9E3779B9;
   static const uint32_t kPhilox10B = 0xBB67AE85;
   static const uint32_t kPhiloxSA = 0xD2511F53;
   static const uint32_t kPhiloxSB = 0xCD9E8D57;
 };
 
-typedef philox_engine Philox4_32_10;
+typedef philox_engine Philox4_32;
 
 } // namespace at

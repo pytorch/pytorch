@@ -26,6 +26,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -457,14 +458,6 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   }
 }
 
-template <typename scalar_t>
-__inline__ __device__
-static scalar_t warpReduceSum(scalar_t val) {
-  for (int offset = C10_WARP_SIZE/2; offset > 0; offset /= 2)
-    val += WARP_SHFL_DOWN(val, offset);
-  return val;
-}
-
 template <typename scalar_t, typename index_t>
 __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const scalar_t* grad, int64_t grad_stride0, int64_t grad_stride1,
@@ -495,7 +488,7 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
             weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
       }
     }
-    result = warpReduceSum<accscalar_t>(result);
+    result = cuda_utils::WarpReduceSum<accscalar_t>(result);
     if (thread_in_warp == 0) {
       output[sample_idx] = result;
     }

@@ -1,6 +1,6 @@
 include MANIFEST.in
 include CMakeLists.txt
-include CITATION
+include CITATION.cff
 include LICENSE
 include NOTICE
 include .gitmodules
@@ -26,5 +26,6 @@ recursive-include benchmarks *.*
 recursive-include scripts *.*
 recursive-include mypy_plugins *.*
 recursive-include modules *.*
+recursive-include functorch *.*
 prune */__pycache__
 global-exclude *.o *.so *.dylib *.a .git *.pyc *.swp

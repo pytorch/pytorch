@@ -48,7 +48,7 @@ def gen_variable_factories(
         "variable_factories.h",
         lambda: {
             "generated_comment": "@"
-            + f"generated from {fm.template_dir}/variable_factories.h",
+            + f"generated from {fm.template_dir_for_comments()}/variable_factories.h",
             "ops_headers": [
                 f"#include <ATen/ops/{fn.root_name}.h>" for fn in factory_functions
             ],
@@ -76,31 +76,39 @@ def process_function(f: NativeFunction) -> Optional[str]:
     if Variant.function not in f.variants or not is_factory:
         return None
 
-    sig = CppSignatureGroup.from_native_function(f, method=False).signature
-    formals: List[str] = []
-    exprs: List[str] = []
-    requires_grad = "false"
-    for arg in sig.arguments():
-        qualified_type = fully_qualified_type(arg.type)
-        if arg.default:
-            formals.append(f"{qualified_type} {arg.name} = {arg.default}")
-        else:
-            formals.append(f"{qualified_type} {arg.name}")
+    cpp_sigs = CppSignatureGroup.from_native_function(f, method=False)
+    sigs = [cpp_sigs.signature]
+    if cpp_sigs.symint_signature is not None:
+        sigs.append(cpp_sigs.symint_signature)
+    r = ""
+    for sig in sigs:
+        formals: List[str] = []
+        exprs: List[str] = []
+        requires_grad = "false"
+        for arg in sig.arguments():
+            qualified_type = fully_qualified_type(arg.type)
+            if arg.default:
+                formals.append(f"{qualified_type} {arg.name} = {arg.default}")
+            else:
+                formals.append(f"{qualified_type} {arg.name}")
 
-        if isinstance(arg.argument, TensorOptionsArguments):
-            # note: we remove the requires_grad setting from the TensorOptions because
-            # it is ignored anyways (and we actually have an assertion that it isn't set
-            # which would fail otherwise). We handle requires_grad explicitly here
-            # instead of passing it through to the kernel.
-            exprs.append(f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)")
-            # Manually set the requires_grad bit on the result tensor.
-            requires_grad = f"{arg.name}.requires_grad()"
-        else:
-            exprs.append(arg.name)
+            if isinstance(arg.argument, TensorOptionsArguments):
+                # note: we remove the requires_grad setting from the TensorOptions because
+                # it is ignored anyways (and we actually have an assertion that it isn't set
+                # which would fail otherwise). We handle requires_grad explicitly here
+                # instead of passing it through to the kernel.
+                exprs.append(
+                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                )
+                # Manually set the requires_grad bit on the result tensor.
+                requires_grad = f"{arg.name}.requires_grad()"
+            else:
+                exprs.append(arg.name)
 
-    return f"""\
-inline at::Tensor {name}({', '.join(formals)}) {{
+        r += f"""\
+inline at::Tensor {sig.name()}({', '.join(formals)}) {{
   at::AutoDispatchBelowADInplaceOrView guard;
-  return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
+  return autograd::make_variable(at::{sig.name()}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """
+    return r

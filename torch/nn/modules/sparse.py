@@ -28,7 +28,7 @@ class Embedding(Module):
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
         sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
                                  See Notes for more details regarding sparse gradients.
@@ -69,6 +69,7 @@ class Embedding(Module):
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding(input)
         tensor([[[-0.0251, -1.6902,  0.7172],
                  [-0.6431,  0.0748,  0.6969],
@@ -116,11 +117,12 @@ class Embedding(Module):
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
+    freeze: bool
     sparse: bool
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = False, _weight: Optional[Tensor] = None,
+                 sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Embedding, self).__init__()
@@ -137,12 +139,13 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
+            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs),
+                                    requires_grad=not _freeze)
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
-            self.weight = Parameter(_weight)
+            self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
 
@@ -183,14 +186,14 @@ class Embedding(Module):
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
                 First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
-            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
             padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                          therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
                                          i.e. it remains as a fixed "pad".
             max_norm (float, optional): See module initialization documentation.
             norm_type (float, optional): See module initialization documentation. Default ``2``.
-            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
+            scale_grad_by_freq (bool, optional): See module initialization documentation. Default ``False``.
             sparse (bool, optional): See module initialization documentation.
 
         Examples::
@@ -200,6 +203,7 @@ class Embedding(Module):
             >>> embedding = nn.Embedding.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
@@ -210,12 +214,12 @@ class Embedding(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
+            _freeze=freeze,
             padding_idx=padding_idx,
             max_norm=max_norm,
             norm_type=norm_type,
             scale_grad_by_freq=scale_grad_by_freq,
             sparse=sparse)
-        embedding.weight.requires_grad = not freeze
         return embedding
 
 
@@ -245,10 +249,10 @@ class EmbeddingBag(Module):
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  ``"sum"`` computes the weighted sum, taking :attr:`per_sample_weights`
                                  into consideration. ``"mean"`` computes the average of the values
                                  in the bag, ``"max"`` computes the max value over each bag.
@@ -277,6 +281,7 @@ class EmbeddingBag(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
         >>> offsets = torch.tensor([0,4], dtype=torch.long)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding_sum(input, offsets)
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
@@ -410,12 +415,12 @@ class EmbeddingBag(Module):
         Args:
             embeddings (Tensor): FloatTensor containing weights for the EmbeddingBag.
                 First dimension is being passed to EmbeddingBag as 'num_embeddings', second as 'embedding_dim'.
-            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embeddingbag.weight.requires_grad = False``. Default: ``True``
             max_norm (float, optional): See module initialization documentation. Default: ``None``
             norm_type (float, optional): See module initialization documentation. Default ``2``.
-            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
-            mode (string, optional): See module initialization documentation. Default: ``"mean"``
+            scale_grad_by_freq (bool, optional): See module initialization documentation. Default ``False``.
+            mode (str, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
             include_last_offset (bool, optional): See module initialization documentation. Default: ``False``.
             padding_idx (int, optional): See module initialization documentation. Default: ``None``.
@@ -427,6 +432,7 @@ class EmbeddingBag(Module):
             >>> embeddingbag = nn.EmbeddingBag.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([[1, 0]])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """

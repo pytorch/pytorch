@@ -8,6 +8,7 @@
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
@@ -291,8 +292,11 @@ static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   if (!seq)
     throw python_error();
 
+  const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  if (length >= 0) {
+    list.reserve(length);
+  }
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
     if (!THPVariable_Check(item)) {

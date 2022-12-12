@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -45,48 +46,6 @@ using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
-
-// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder()
-      .ndims(ndims)
-      .dtype(dtype)
-      .contiguity(std::vector<bool>(ndims, true))
-      .build();
-}
-
-// Make a tensor that is known to be non-contiguous of dimensionality=ndims,
-// but unknown sizes
-TensorView* makeSymbolicTensor(size_t ndims, DataType dtype = DataType::Float) {
-  return TensorViewBuilder().ndims(ndims).dtype(dtype).build();
-}
-
-// Make a non-contiguous tensor of compile-time known sizes
-TensorView* makeConcreteTensor(
-    std::vector<int64_t> shape,
-    DataType dtype = DataType::Float) {
-  return TensorViewBuilder().shape(shape).dtype(dtype).build();
-}
-
-void checkIntValue(
-    ExpressionEvaluator& evaluator,
-    Val* val,
-    Int::ScalarType expected_value) {
-  TORCH_CHECK(val->isAnInt());
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
-
-void checkIntValue(
-    kir::ExpressionEvaluator& evaluator,
-    const Val* val,
-    Int::ScalarType expected_value) {
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
 
 // Used to signify invalid ranges, i.e., values at offset 0 to
 // start_offset, and values at offset stop_offset to the end of the
@@ -2175,7 +2134,7 @@ TEST_F(NVFuserTest, FusionHdiff_CUDA) {
   out->axis(3)->parallelize(ParallelType::TIDy);
   out->axis(4)->parallelize(ParallelType::TIDx);
   // Apply the same parallelization to all other tensors
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   // Store intermediate stencil results on smem so that they can be
   // accessed by threads
@@ -2733,7 +2692,7 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2793,7 +2752,7 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -2894,7 +2853,7 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   out->axis(1)->parallelize(ParallelType::BIDx);
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(3)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   const int s1 = 101;
   const int s2 = 99;
@@ -3017,6 +2976,7 @@ TEST_F(NVFuserTest, FusionConv2D_CUDA) {
 TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
+  ContextCudnnTF32Disabled disabling_tf32_cudnn;
 
   // Input: [C, H, W]
   auto inp = makeSymbolicTensor(3);
@@ -3817,7 +3777,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3873,7 +3833,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv3->computeAt(tv5, -1);
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -3934,7 +3894,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv3->computeAt(tv_avg, -1);
 
   tv_avg->axis(-1)->parallelize(ParallelType::TIDx);
-  scheduler_utils::parallelizeAllLike(tv_avg, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv_avg);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -4122,7 +4082,7 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
 
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   int numel_x = 99;
   int numel_y = 101;
@@ -5080,7 +5040,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   max_tensor->axis(4)->parallelize(ParallelType::TIDy);
   max_tensor->axis(5)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(max_tensor, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(max_tensor);
 
   inp_cache->setMemoryType(MemoryType::Shared);
 
@@ -5332,7 +5292,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   out->axis(2)->parallelize(ParallelType::TIDy);
   out->axis(0)->parallelize(ParallelType::BIDx);
 
-  scheduler_utils::parallelizeAllLike(out, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(out);
 
   tv0_cache->doubleBuffer();
 
@@ -5380,7 +5340,7 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   tv5->axis(1)->parallelize(ParallelType::TIDx);
 
-  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+  scheduler_utils::parallelizeAllLike(tv5);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({1024 * 32}, options);
@@ -5433,6 +5393,72 @@ TEST_F(NVFuserTest, FusionGatherIterTypePromotion_CUDA) {
   auto outputs = fe.runFusion(inputs);
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionContigPredicateShift_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({2, 2});
+
+  auto tv0 = makeConcreteTensor(shape);
+  // [0:I]
+  fusion.addInput(tv0);
+
+  // Below, tv2 and tv3 are mostly the same, except for tv2 is padded
+  // with 0, whereas tv3 is not, so the valid range of tv3 is [0:I-1]
+
+  // [0:I]
+  auto tv1 = shift(tv0, {-1, 0});
+
+  // [0:I-1]
+  auto tv2 = shift(tv0, {-1, 0}, false);
+
+  // tv3 is not an output of shift, but it gets a partial root
+  // domain from tv2, so it must be predicated at the root domain
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv3);
+
+  // contig merge
+  tv1->merge(0);
+  tv1->split(0, 4);
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  // Create 3x2 and trim to 2x2. This would cause the output tensor
+  // non-zero values if not properly predicated.
+  at::Tensor t0 = at::randn({3, 2}, options);
+  t0 = t0.index(
+      {at::indexing::Slice(0, 2), at::indexing::Slice(0, at::indexing::None)});
+
+  // Use random output to detect invalid writes
+  at::Tensor t1 = at::rand_like(t0, options);
+  // Use zero-cleared output to detect invalid writes
+  at::Tensor t3 = at::zeros_like(t0, options);
+
+  std::vector<IValue> inputs = {t0};
+  std::vector<at::Tensor> outputs = {t1, t3};
+
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(0, -1), at::indexing::Slice(0, at::indexing::None)};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  fe.runFusion(inputs, outputs);
+
+  // Make sure the padded region is zero filled
+  TORCH_CHECK(t1[1].equal(at::zeros(2, options)));
+  // Make sure not touched as the shift is not padded
+  TORCH_CHECK(t3[1].equal(at::zeros(2, options)));
+
+  auto ref = shift(t0, {-1, 0});
+
+  TORCH_CHECK(t1.equal(ref));
+  TORCH_CHECK(t3.index(indices).equal((ref + 1).index(indices)));
 }
 
 } // namespace jit

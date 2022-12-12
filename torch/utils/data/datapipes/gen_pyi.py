@@ -179,6 +179,10 @@ def get_method_definitions(file_path: Union[str, List[str]],
     methods_and_signatures, methods_and_class_names, methods_w_special_output_types = \
         parse_datapipe_files(file_paths)
 
+    for fn_name in method_to_special_output_type:
+        if fn_name not in methods_w_special_output_types:
+            methods_w_special_output_types.add(fn_name)
+
     method_definitions = []
     for method_name, arguments in methods_and_signatures.items():
         class_name = methods_and_class_names[method_name]
@@ -202,7 +206,7 @@ iterDP_method_to_special_output_type: Dict[str, str] = {"demux": "List[IterDataP
 mapDP_file_path: str = "map"
 mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 mapDP_deprecated_files: Set[str] = set()
-mapDP_method_to_special_output_type: Dict[str, str] = {}
+mapDP_method_to_special_output_type: Dict[str, str] = {"shuffle": "IterDataPipe"}
 
 
 def main() -> None:
@@ -227,5 +231,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    print("Generating Python interface file 'datapipe.pyi'...")
     main()

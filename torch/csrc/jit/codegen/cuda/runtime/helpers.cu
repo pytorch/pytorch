@@ -27,6 +27,18 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
   return ceilDiv((int64_t)a, b);
 }
 
+__device__ constexpr double ceilDiv(double a, double b) {
+  return std::ceil(a / b);
+}
+
+__device__ constexpr double ceilDiv(double a, int64_t b) {
+  return std::ceil(a / b);
+}
+
+__device__ constexpr double ceilDiv(int64_t a, double b) {
+  return std::ceil(a / b);
+}
+
 // Monotonic and precise lerp is described here:
 // https://math.stackexchange.com/a/1798323
 __device__ double lerp(double start, double end, double weight) {
@@ -299,14 +311,6 @@ __device__ int64_t where(bool c, int a, int64_t b) {
   return c ? a : b;
 }
 
-__device__ double randLike(Philox& rnd) {
-  return uniform(rnd(), rnd());
-}
-
-__device__ float randLikef(Philox& rnd) {
-  return uniformf(rnd());
-}
-
 __device__ constexpr int64_t remainder(int64_t a, int64_t b) {
   auto mod = a % b;
   if ((mod != 0) && ((b < 0) != (mod < 0)))
@@ -527,4 +531,111 @@ __device__ inline int64_t readCycleCounter() {
   // function.
   __threadfence();
   return clock64();
+}
+
+__device__ float print_impl(const char* name, float value) {
+  printf(
+      "%s = %f @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      value,
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+__device__ double print_impl(const char* name, double value) {
+  printf(
+      "%s = %lf @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      value,
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+__device__ int print_impl(const char* name, int value) {
+  printf(
+      "%s = %d @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      value,
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+__device__ int64_t print_impl(const char* name, int64_t value) {
+  printf(
+      "%s = %ld @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      value,
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+__device__ bool print_impl(const char* name, bool value) {
+  printf(
+      "%s = %s @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      value ? "true" : "false",
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+__device__ __half print_impl(const char* name, __half value) {
+  printf(
+      "%s = %f @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      __half2float(value),
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+
+#if __CUDACC_VER_MAJOR__ >= 11
+__device__ __bfloat print_impl(const char* name, __bfloat value) {
+  printf(
+      "%s = %f @ threadIdx=(%d,%d,%d), blockIdx=(%d,%d,%d)\n",
+      name,
+      __bfloat2float(value),
+      (int)threadIdx.x,
+      (int)threadIdx.y,
+      (int)threadIdx.z,
+      (int)blockIdx.x,
+      (int)blockIdx.y,
+      (int)blockIdx.z);
+  return value;
+}
+#endif
+
+#define print(...) print_impl(#__VA_ARGS__, (__VA_ARGS__))
+
+template <typename OutT, typename IndexT, typename InputT>
+__device__ OutT arange(IndexT index, InputT start, InputT step) {
+  return start + step * index;
 }

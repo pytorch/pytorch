@@ -45,6 +45,8 @@ DifferentiableViewMeta::DifferentiableViewMeta(
     self_impl->set_version_counter(
         impl::version_counter(backward_info_.value().base_));
     attr_version_ = self_impl->version_counter().current_version();
+    TORCH_INTERNAL_ASSERT(
+        backward_info_.value().base_.unsafeGetTensorImpl() != self_impl);
   }
   if (shared_view_info_) {
     TORCH_INTERNAL_ASSERT(
@@ -79,11 +81,11 @@ ViewInfo ViewInfo::chain(
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
-        auto size = base.sizes().vec();
-        auto stride = base.strides().vec();
-        auto storage_offset = base.storage_offset();
+        auto size = base.sym_sizes().vec();
+        auto stride = base.sym_strides().vec();
+        auto storage_offset = base.sym_storage_offset();
         view_func = [=](const at::Tensor& root_base) {
-          auto temp = root_base.as_strided(size, stride, storage_offset);
+          auto temp = root_base.as_strided_symint(size, stride, storage_offset);
           return view_func(temp);
         };
       } else {
@@ -109,12 +111,12 @@ ViewInfo ViewInfo::chain(
     // if current_view doesn't have a view_func but it's parent has one
     // Copy parent view function to gain ownership
     auto prev_view_fn = view_fn_;
-    auto size = tensor.sizes().vec();
-    auto stride = tensor.strides().vec();
-    auto storage_offset = tensor.storage_offset();
+    auto size = tensor.sym_sizes().vec();
+    auto stride = tensor.sym_strides().vec();
+    auto storage_offset = tensor.sym_storage_offset();
     view_func = [=](const at::Tensor& root_base) {
       auto temp = prev_view_fn(root_base);
-      return temp.as_strided(size, stride, storage_offset);
+      return temp.as_strided_symint(size, stride, storage_offset);
     };
   }
 
@@ -679,20 +681,26 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //       that would provide a way to recreate the grad_fn chain.
       if (view_info.has_view_fn()) {
         auto view_fn = view_info.view_fn();
-        auto diff_view = view_fn(view_info.base_);
+        Tensor diff_view;
+        {
+          // We can reach this path with grad_mode disabled, e.g. engine
+          AutoGradMode grad_mode(true);
+          diff_view = view_fn(view_info.base_);
+        }
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {
         auto fn =
             std::make_shared<torch::autograd::generated::AsStridedBackward0>();
         fn->self_geometry = at::TensorGeometry(view_info.base_);
-        fn->size = self.sizes().vec();
-        fn->stride = self.strides().vec();
-        fn->storage_offset = self.storage_offset();
+        fn->size = self.sym_sizes().vec();
+        fn->stride = self.sym_strides().vec();
+        fn->storage_offset = self.sym_storage_offset();
         fn->set_next_edges(
             torch::autograd::collect_next_edges(view_info.base_));
         fn->add_input_metadata(
             view_info.base_.options(),
-            self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+            self.sym_sizes(), // Note: sizes(), not base_.sizes(), is
+                              // intentional
             self.unsafeGetTensorImpl()->is_python_dispatch());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
@@ -753,7 +761,38 @@ void handle_view_on_rebase(
     } else {
       modified_obj = "is being";
     }
-    if (grad_fn) {
+
+    if (creation_meta == CreationMeta::INFERENCE_MODE ||
+        creation_meta == CreationMeta::NO_GRAD_MODE || !grad_fn) {
+      std::string prefix;
+      if (grad_fn) {
+        prefix = c10::str(
+            "Output ",
+            diff_view_meta->output_nr_,
+            " of ",
+            grad_fn->name(),
+            " is a view of a view which was created in");
+      } else {
+        prefix = "A view was created in";
+      }
+      if (creation_meta == CreationMeta::INFERENCE_MODE) {
+        msg = c10::str(
+            prefix,
+            " inference mode and ",
+            modified_obj,
+            " modified inplace in normal mode.");
+      } else {
+        // create_meta is not necessarily CreationMeta::NO_GRAD_MODE
+        // e.g. CreationMeta::IN_CUSTOM_FUNCTION is possible, but we know that
+        // if there is no grad_fn, that means that the view was performed in
+        // no-grad mode
+        msg = c10::str(
+            prefix,
+            " no_grad mode and ",
+            modified_obj,
+            " modified inplace with grad mode enabled.");
+      }
+    } else {
       msg = c10::str(
           "Output ",
           diff_view_meta->output_nr_,
@@ -762,16 +801,6 @@ void handle_view_on_rebase(
           " is a view and ",
           modified_obj,
           " modified inplace.");
-    } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
-      msg = c10::str(
-          "A view was created in inference mode and ",
-          modified_obj,
-          " modified inplace in normal mode.");
-    } else {
-      msg = c10::str(
-          "A view was created in no_grad mode and ",
-          modified_obj,
-          " modified inplace with grad mode enabled.");
     }
 
     if (creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
@@ -781,7 +810,6 @@ void handle_view_on_rebase(
           " allow the output views to be modified inplace. You should replace the inplace operation by an"
           " out-of-place one.");
     } else if (creation_meta == CreationMeta::NO_GRAD_MODE) {
-      TORCH_INTERNAL_ASSERT(!grad_fn);
       msg = c10::str(
           msg,
           " Given that this use case is ambiguous and error-prone, it is forbidden."
@@ -789,14 +817,12 @@ void handle_view_on_rebase(
           " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
           " the inplace to be tracked).");
     } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
-      TORCH_INTERNAL_ASSERT(!grad_fn);
       msg = c10::str(
           msg,
           " Given that this use case is ambiguous and error-prone, it is forbidden."
           " You can clarify your code by moving both the view and the inplace either both"
           " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
           " the inplace to be tracked).");
-      TORCH_CHECK(false, msg);
     } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
       msg = c10::str(
           msg,

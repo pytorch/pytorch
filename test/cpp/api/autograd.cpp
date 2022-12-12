@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
 #include <test/cpp/api/support.h>
@@ -217,26 +218,40 @@ TEST(AutogradAPITests, AnomalyMode) {
     ASSERT_TRUE(
         warnings.str().find("Traceback of forward") != std::string::npos);
   }
-  {
-    WarningCapture warnings;
-    // Double backward
+  auto double_backward_produce_nan = [](bool should_throw) {
     auto x = torch::tensor({0.0}, torch::requires_grad());
     auto y = x.pow(1.5);
     auto gr =
         // NOLINTNEXTLINE(bugprone-argument-comment)
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});
-                       , "returned nan");
-    auto msgs = warnings.messages();
-    ASSERT_EQ(msgs.size(), 2);
-    ASSERT_TRUE(
-        msgs[0].find("Traceback of forward call that caused the error") !=
-        std::string::npos);
-    ASSERT_TRUE(
-        msgs[1].find(
-            "Traceback of forward call that induced the previous calculation") !=
-        std::string::npos);
+    if (should_throw) {
+      WarningCapture warnings;
+      ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});
+                         , "returned nan");
+      auto msgs = warnings.messages();
+      ASSERT_EQ(msgs.size(), 2);
+      ASSERT_TRUE(
+          msgs[0].find("Traceback of forward call that caused the error") !=
+          std::string::npos);
+      ASSERT_TRUE(
+          msgs[1].find(
+              "Traceback of forward call that induced the previous calculation") !=
+          std::string::npos);
+    } else {
+      grad({gr[0]}, {x}, {torch::tensor({0.0})});
+    }
+  };
+
+  double_backward_produce_nan(true);
+  {
+    torch::autograd::DetectAnomalyGuard detect_anomaly(/*check_nan=*/false);
+    double_backward_produce_nan(false);
+    {
+      torch::autograd::DetectAnomalyGuard detect_anomaly(/*check_nan=*/true);
+      double_backward_produce_nan(true);
+    }
   }
+  double_backward_produce_nan(true);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -274,6 +289,138 @@ TEST(CustomAutogradTest, CustomFunction) {
 
   ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}) * 2);
+}
+
+TEST(CustomAutogradTest, CustomFunctionWithTensorList) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext* ctx, at::TensorList tensors) {
+      torch::autograd::variable_list vars;
+      for (const at::Tensor& tensor : tensors) {
+        vars.push_back(tensor);
+      }
+      ctx->save_for_backward(vars);
+      return tensors[0] + tensors[1] + tensors[0] * tensors[1];
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+      variable_list output = {
+          grad_output[0] + grad_output[0] * var2,
+          grad_output[0] + grad_output[0] * var1};
+      return output;
+    }
+  };
+
+  at::Tensor x = torch::randn({5, 5}, torch::requires_grad());
+  at::Tensor y = torch::randn({5, 5}, torch::requires_grad());
+  torch::autograd::variable_list variables = {x, y};
+  at::TensorList tensors = variables;
+  auto res = MyFunction::apply(tensors);
+  auto go = torch::ones({}, torch::requires_grad());
+  res.sum().backward(go, false, true);
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}));
+}
+
+TEST(CustomAutogradTest, GraphTaskTrimEdges) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2,
+        int mul,
+        bool needs_input1_grad,
+        bool needs_input2_grad) {
+      // setup the expected should and should not compute idx
+      ctx->saved_data["needs_input1_grad"] = needs_input1_grad;
+      ctx->saved_data["needs_input2_grad"] = needs_input2_grad;
+
+      ctx->saved_data["mul"] = mul;
+      ctx->save_for_backward({var1, var2});
+      return var1 + mul * var2 + var1 * var2;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      // Test `needs_input_grad` method is working correctly.
+      // We have to test this within the backward function.
+      auto needs_input1_grad = ctx->saved_data["needs_input1_grad"].toBool();
+      auto needs_input2_grad = ctx->saved_data["needs_input2_grad"].toBool();
+      IndexRange var1_idx = {0, 1};
+      IndexRange var2_idx = {1, 2};
+      EXPECT_EQ(ctx->needs_input_grad(0), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad(1), needs_input2_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var1_idx}), needs_input1_grad);
+      EXPECT_EQ(ctx->needs_input_grad({var2_idx}), needs_input2_grad);
+      EXPECT_EQ(
+          ctx->needs_input_grad({var1_idx, var2_idx}),
+          needs_input1_grad || needs_input2_grad);
+
+      // calculate gradients
+      int mul = ctx->saved_data["mul"].toInt();
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+
+      Variable grad_var1, grad_var2;
+      if (ctx->needs_input_grad(0)) {
+        grad_var1 = grad_output[0] + grad_output[0] * var2;
+      }
+      if (ctx->needs_input_grad(1)) {
+        grad_var2 = grad_output[0] * mul + grad_output[0] * var1;
+      }
+      variable_list output = {
+          grad_var1,
+          grad_var2,
+          Variable(),
+          Variable(),
+          Variable(),
+      };
+      return output;
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  auto go = torch::ones_like(x);
+  Variable out;
+
+  // grad_x
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ true,
+      /* needs_input2_grad= */ false);
+  auto grad_x = torch::autograd::grad({out}, {x}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_x, y + torch::ones({5, 5}));
+
+  // grad_y
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ false,
+      /* needs_input2_grad= */ true);
+  auto grad_y = torch::autograd::grad({out}, {y}, {go})[0];
+  ASSERT_VARIABLE_EQ(grad_y, x + torch::ones({5, 5}) * 2);
+
+  // grad_x and grad_y
+  out = MyFunction::apply(
+      x,
+      y,
+      2,
+      /* needs_input1_grad= */ true,
+      /* needs_input2_grad= */ true);
+  auto grads = torch::autograd::grad({out}, {x, y}, {go});
+  ASSERT_VARIABLE_EQ(grads[0], y + torch::ones({5, 5}));
+  ASSERT_VARIABLE_EQ(grads[1], x + torch::ones({5, 5}) * 2);
 }
 
 TEST(CustomAutogradTest, FunctionReturnsInput) {
@@ -1007,7 +1154,7 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
-  c10::Warning::WarnAlways guard(true);
+  c10::WarningUtils::WarnAlways guard(true);
 
   torch::Tensor x = torch::randn({5, 5}).set_requires_grad(true);
   auto z = x * x;
@@ -1103,19 +1250,19 @@ std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(
 }
 
 torch::Tensor view_op(const torch::Tensor& self) {
-  return self;
+  return self.alias();
 }
 
 torch::Tensor view_op_with_extra_arg(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return self;
+  return self.alias();
 }
 
 std::vector<torch::Tensor> ret_tensor_vector_view(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return {self, self};
+  return {self.alias(), self.alias()};
 }
 
 std::vector<at::Tensor> ret_tensor_vector(

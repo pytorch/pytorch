@@ -53,6 +53,7 @@ class WelfordResult;
 
 class SegmentCandidateFinder;
 class SegmentedFusion;
+class KernelArgumentHolder;
 
 //! Fusion Guard is our "context manager". It holds the actrive fusion and
 //! allows it to be accessed anywhere through FusionGuard::getCurFusion()
@@ -110,9 +111,6 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! Register output as an output of the fusion
   void addOutput(Val* output);
 
-  //! Register output as an output of the fusion
-  void addOutput(WelfordResult& output);
-
   //! Deregister input as an input of the fusion
   void removeInput(Val* input);
 
@@ -138,6 +136,10 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! Lower the fusion and print a kernel
   void printKernel(DataType index_type = DataType::Int);
 
+  //! Lower the fusion and evaluate bank conflict info
+  std::unordered_map<std::string, std::pair<int, int>> bankConflictInfo(
+      DataType index_type = DataType::Int);
+
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.
   std::vector<Expr*> exprs();
@@ -153,8 +155,16 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! also included as they must show up in the final code.
   std::vector<Val*> usedMathVals();
 
+  //! Returns all vals that are produced by used math expressions and
+  //!  also do not have further consumers.
+  //!
+  //! In the case of an active multi-output expressions, the returned vector
+  //!  will include the expression outputs that did not lead to an fusion
+  //!  output.
+  std::vector<Val*> terminatingMathVals();
+
   //! Return all Exprs that use val
-  std::unordered_set<Expr*> unordered_uses(Val* val) const;
+  std::unordered_set<Expr*> unordered_uses(const Val* val) const;
 
   //! Return the Expr that produces val
   Expr* definition(const Val* val) const;
@@ -163,18 +173,19 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   bool isStochastic();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
-  std::unique_ptr<SegmentedFusion> segment(
-      const at::ArrayRef<at::IValue>& inputs);
+  std::unique_ptr<SegmentedFusion> segment(const KernelArgumentHolder& args);
 
   const auto& inputs() const {
     return inputs_;
   }
 
+  std::vector<Val*> inputsAndCreated();
+
   const auto& outputs() const {
     return outputs_;
   }
 
-  std::vector<Val*> getTerminatingOutputs();
+  std::vector<Val*> getTerminatingOutputs() const;
 
   // Aliasing output to input value, this is a WAR to allow inplace update on
   // input tensor.

@@ -5,7 +5,7 @@
 import logging
 
 import torch
-from torch.ao.sparsity.sparsifier.utils import (
+from torch.ao.pruning.sparsifier.utils import (
     fqn_to_module,
     get_arg_info_from_tensor_fqn,
     module_to_fqn,

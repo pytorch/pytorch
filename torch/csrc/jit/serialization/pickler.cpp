@@ -480,6 +480,20 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
 
+  if (!quantized) {
+    // Only push it for regular tensor if the dictionary is not empty.
+    auto metadata = torch::jit::getTensorMetadata(tensor);
+    if (!metadata.empty()) {
+      // IValues based on std::unordered_map<K, V> are slow and deprecated.
+      // Thus, pass a c10::Dict to pushDict.
+      c10::Dict<std::string, bool> math_bits_;
+      for (const auto& pair : metadata) {
+        math_bits_.insert(pair.first, pair.second);
+      }
+      pushDict(math_bits_);
+    }
+  }
+
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   // Call torch._utils._rebuild_tensor_v2
@@ -567,20 +581,32 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  pushGlobal("torch.jit._pickle", "restore_type_tag");
+  if (tag_aggregates_) {
+    pushGlobal("torch.jit._pickle", "restore_type_tag");
+  }
 }
+namespace {
+c10::optional<std::string> type_printer(const c10::Type& type) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(type_printer);
+  }
+  return c10::nullopt;
+}
+} // namespace
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
+  if (!tag_aggregates_) {
+    return;
+  }
   TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
+
   auto type = ivalue.type();
-  if (auto dyn = type->castRaw<c10::DynamicType>()) {
-    type = dyn->fallback();
-  }
-  pushString(type->annotation_str());
+  auto annot_str = type->annotation_str(type_printer);
+  pushString(annot_str);
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);

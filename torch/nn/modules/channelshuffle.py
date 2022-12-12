@@ -15,6 +15,7 @@ class ChannelShuffle(Module):
 
     Examples::
 
+        >>> # xdoctest: +IGNORE_WANT("FIXME: incorrect want")
         >>> channel_shuffle = nn.ChannelShuffle(2)
         >>> input = torch.randn(1, 4, 2, 2)
         >>> print(input)

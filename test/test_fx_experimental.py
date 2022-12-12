@@ -7,43 +7,44 @@ import pickle
 import sys
 import tempfile
 import unittest
-from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch.fx.experimental.meta_tracer
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.passes import graph_manipulation
-from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.partitioner_utils import (
-    NodeLatency,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
     Device,
+    get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping,
+    NodeLatency,
     PartitionerConfig,
     PartitionMode,
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-import torch.fx.experimental.meta_tracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
     _torchscript_type_to_python_type,
+    create_type_hint,
     normalize_function,
     normalize_module,
     type_matches,
-    create_type_hint,
 )
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.split_module import split_module
+from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
-    ops,
-    onlyCPU,
     instantiate_device_type_tests,
+    onlyCPU,
+    ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
@@ -782,7 +783,7 @@ terrible spacing
 
         x = torch.randn(5, 3)
         foo = torch.randn(5, 3)
-        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
+        torch.testing.assert_close(split(x, foo=foo), traced(x, foo=foo))
 
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
@@ -814,7 +815,7 @@ terrible spacing
         split = split_module(traced, mtt, lambda node: 0)
 
         x = torch.randn(50, 512)
-        torch.testing.assert_allclose(split(x), traced(x))
+        torch.testing.assert_close(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -1014,6 +1015,19 @@ class {test_classname}(torch.nn.Module):
         else:
             self.fail("Didn't find call_function torch.add")
 
+    def test_normalize_args_perserve_type(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a: List[torch.Tensor]):
+                return torch.add(a[0], a[1])
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.type, List[torch.Tensor])
+
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
         m = resnet18()
@@ -1066,6 +1080,37 @@ class {test_classname}(torch.nn.Module):
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
+
+    def test_annotate_getitem_node(self):
+        class CustomType:
+            pass
+
+        class CustomNamedTuple(NamedTuple):
+            x: int
+            y: float
+
+        class MyModule(torch.nn.Module):
+            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
+        my_module = MyModule()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -1468,6 +1513,8 @@ class TestNormalizeOperators(JitTestCase):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        if isinstance(op.op, torch._ops.OpOverload):
+            self.skipTest("normalize operator doesn't work on torch.ops")
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
             arg_values = [sample_input.input] + list(sample_input.args)

@@ -1,4 +1,5 @@
 #include <oneapi/dnnl/dnnl_graph.hpp>
+#include <torch/csrc/jit/codegen/onednn/decompose_silu.h>
 #include <torch/csrc/jit/codegen/onednn/defer_size_check.h>
 #include <torch/csrc/jit/codegen/onednn/graph_fuser.h>
 #include <torch/csrc/jit/codegen/onednn/guard_shape.h>
@@ -56,11 +57,19 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
           aten::hardtanh_,
           aten::abs_,
           aten::square_,
-      };
+          aten::pow_,
+          aten::leaky_relu_,
+          aten::round_,
+          aten::exp_,
+          aten::abs_,
+          aten::hardswish_,
+          aten::silu_};
       return supportedOps.count(nodeToFunctionalize->kind()) != 0;
     });
     RemoveListMutation(g);
-    GRAPH_DUMP("After mutation removal. Before PrepareBinaryForLLGA", g);
+    GRAPH_DUMP("After mutation removal. Before DecomposeSiluForLlga", g);
+    DecomposeSiluForLLGA(g);
+    GRAPH_DUMP("After DecomposeSiluForLlga. Before PrepareBinaryForLLGA", g);
     PrepareBinaryForLLGA(g);
     GRAPH_DUMP("After PrepareBinaryForLLGA. Before DeferSizeCheck", g);
     DeferSizeCheck(g);

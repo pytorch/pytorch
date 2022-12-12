@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.api import (
     shard_parameter,
@@ -171,7 +170,7 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
         optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
         optim.step()
         sharded_optim = ShardedOptimizer(
-            dict(named_params_with_sharded_tensor(sharded_megatron_lm)),
+            dict(sharded_megatron_lm.named_parameters()),
             torch.optim.SGD,
             lr=0.1,
         )

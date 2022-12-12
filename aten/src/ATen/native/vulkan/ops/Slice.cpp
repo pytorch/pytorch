@@ -95,7 +95,7 @@ Tensor slice_width(
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
@@ -126,7 +126,7 @@ Tensor slice_width(
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images
@@ -171,7 +171,7 @@ Tensor slice_height(
 
     api::PipelineBarrier pipeline_barrier{};
 
-    context->submit_texture_copy(
+    context->submit_copy<api::VulkanImage, api::VulkanImage>(
         // pipeline barrier
         pipeline_barrier,
         // images
@@ -200,7 +200,7 @@ Tensor slice_height(
 
       api::PipelineBarrier pipeline_barrier{};
 
-      context->submit_texture_copy(
+      context->submit_copy<api::VulkanImage, api::VulkanImage>(
           // pipeline barrier
           pipeline_barrier,
           // images

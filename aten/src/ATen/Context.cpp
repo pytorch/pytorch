@@ -104,6 +104,30 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::userEnabledFlashSDP() const {
+  return enabled_flashSDP;
+}
+
+void Context::setSDPUseFlash(bool e) {
+  enabled_flashSDP = e;
+}
+
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
+bool Context::userEnabledMathSDP() const {
+  return enabled_mathSDP;
+}
+
+void Context::setSDPUseMath(bool e) {
+  enabled_mathSDP = e;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -125,7 +149,11 @@ bool Context::checkCuBLASConfigDeterministic() {
 
 void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
+  if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
+    return;
+  }
+
+  auto msg = c10::str(
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
     "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
     "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
@@ -134,6 +162,12 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
     "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
   );
+
+  if (deterministicAlgorithmsWarnOnly()) {
+    TORCH_WARN(msg);
+  } else {
+    TORCH_CHECK(false, msg);
+  }
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -261,8 +295,24 @@ bool Context::hasLAPACK() {
 }
 
 at::QEngine Context::qEngine() const {
-  // If wasn't explicitly set - take the last one available
-  return quantized_engine.value_or(supportedQEngines().back());
+  static auto _quantized_engine = []() {
+    at::QEngine qengine = at::kNoQEngine;
+#if defined(C10_MOBILE) && defined(USE_PYTORCH_QNNPACK)
+    qengine = at::kQNNPACK;
+#endif
+
+#if AT_MKLDNN_ENABLED()
+    qengine = at::kONEDNN;
+#endif
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      qengine = at::kFBGEMM;
+    }
+#endif
+    return qengine;
+  }();
+  return quantized_engine.value_or(_quantized_engine);
 }
 
 void Context::setQEngine(at::QEngine e) {
@@ -298,9 +348,12 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
+      engines.push_back(at::kX86);
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
     return engines;
   }();
   return supported_qengines;

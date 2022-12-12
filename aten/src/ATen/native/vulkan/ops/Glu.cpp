@@ -16,37 +16,35 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
       "Vulkan glu only supports GLU for dim = 1, but got dim = ",
       dim);
   TORCH_CHECK(
-      channels_size(input_arg) % 8 == 0,
-      "Vulkan glu expects channel dim to be multiple of 8!");
+      get_dim<Dim4D::Channel>(input_arg) % 2 == 0,
+      "Vulkan glu expects channel dim to be multiple of 2!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const IntArrayRef v_input_sizes = v_input.sizes();
 
-  auto output_ch_ext = v_input.sizes()[1] / 8;
+  auto output_ch_size = v_input.sizes()[1] / 2;
 
   api::Context* const context = api::context();
 
   vTensor v_output{
       context,
-      {v_input_sizes[0],
-       v_input_sizes[1] / 2,
-       v_input_sizes[2],
-       v_input_sizes[3]},
+      {v_input_sizes[0], output_ch_size, v_input_sizes[2], v_input_sizes[3]},
       v_input.options(),
   };
 
   const struct Block final {
     uvec3 extents;
     int32_t chext;
-  } block{v_output.extents(), safe_downcast<int32_t>(output_ch_ext)};
+  } block{v_output.extents(), safe_downcast<int32_t>(output_ch_size)};
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
       // shader descriptor
-      VK_KERNEL(glu),
+      output_ch_size % 4 == 0 ? VK_KERNEL(glu_channel_mul4)
+                              : VK_KERNEL(glu_channel),
       // pipeline barrier
       pipeline_barrier,
       // global work group size

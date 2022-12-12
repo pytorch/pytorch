@@ -1,8 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/TensorShape.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
@@ -40,12 +43,8 @@ class NVFuserEnabler {
 
  public:
   static bool nvfuserCanBeEnabled() {
-#ifdef USE_ROCM
-    return false;
-#else
     return at::globalContext().hasCUDA() &&
         NVFuserPassManager::isRegistered() && getExecutorMode();
-#endif
   }
 
  private:
@@ -115,7 +114,7 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
-#ifdef FBCODE_CAFFE2
+#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
     return false;
 #else
     return nvfuserCanBeEnabled();
@@ -224,6 +223,15 @@ bool profileNode(const Node* node) {
 bool skipNode(const std::string& symbol_str, bool flip) {
   return getFuserInterface()->fn_skip_n != nullptr &&
       getFuserInterface()->fn_skip_n(symbol_str, flip);
+}
+
+AnalyzeViewConstraint getViewConstraint(
+    const std::vector<int64_t>& original_sizes,
+    const std::vector<int64_t>& new_sizes) {
+  if (getFuserInterface()->fn_analyze_view != nullptr) {
+    return getFuserInterface()->fn_analyze_view(original_sizes, new_sizes);
+  }
+  TORCH_INTERNAL_ASSERT(false, "Requires nvFuser which requires CUDA build.");
 }
 
 //! [ Note -- type guard logic in CudaFusionGuard ]
@@ -511,85 +519,6 @@ bool inferViewShape(
   return true;
 }
 
-//! [ Note -- type guard logic in CudaFusionViewGuard ]
-//!
-//! CudaFusionViewGuard is used to guard input tensors to a `CudaFusionGroup`
-//! that contains view operations, so that we would not feed inputs that
-//! violate the graph defined in `GraphCache`.
-//!
-//! output = view(self, view-sizes)
-//!
-//! View Guard Inputs:
-//!   1. self tensor_sizes - dynamic size List[Int]
-//!   2. view_sizes - profile_ivalue List[Int]
-//!   3. tensor_constraint - Constant List[Int]
-//!   4. view_sizes_constraint - Constant List[Int]
-//!
-//! Things that we check:
-//!   1. The #dimensions are the same for self tensor and its constraint
-//!   2. The #dimensions are the same for view-sizes and its constraint
-//!   3. Self tensor does not violate its constraint
-//!     a. Queue unrestricted sizes
-//!     b. Calculate #elements in self tensor
-//!   4. view-sizes does not violate its constraint
-//!     a. Pop unrestricted sizes from queue
-//!     b. Calculate #elements in view-sizes
-//!   5. The #elements is the same for self tensor and view-sizes
-//!
-//! Constraints:
-//! A restricted axis creates a graph constraint, so its sizes is static.
-//! An unrestricted axis is allowed to have a dynamic size, if it is consistent
-//! between self tensor and view-sizes. It is marked with -1 in the constraint.
-//! Only iterDomains with the Keep transform are dynamic. All other transforms
-//! create a static constraint.
-//!
-bool checkViewGuard(
-    c10::List<int64_t> tensor_sizes,
-    c10::List<int64_t> view_sizes,
-    c10::List<int64_t> tensor_constraint,
-    c10::List<int64_t> view_sizes_constraint) {
-  // 1: Num Dimensions Check
-  if (tensor_constraint.size() != tensor_sizes.size() ||
-      view_sizes_constraint.size() != view_sizes.size()) {
-    return false;
-  }
-
-  // If axis allows dynamic sizes, then add tensor size to this queue.
-  // For dynamic axes in view_sizes, check that it is consistent with
-  // the corresponding tensor size.
-  std::queue<int64_t> dynamic_axis_queue;
-
-  // 2. Tensor Static Check
-  int64_t tensor_size_product = 1;
-  for (const auto idx : c10::irange(tensor_sizes.size())) {
-    if (tensor_constraint[idx] == -1) {
-      dynamic_axis_queue.push(tensor_sizes[idx]);
-    } else if (tensor_constraint[idx] != tensor_sizes[idx]) {
-      return false;
-    }
-    tensor_size_product *= tensor_sizes[idx];
-  }
-
-  // 3. View-Sizes Static Check
-  int64_t view_size_product = 1;
-  for (const auto idx : c10::irange(view_sizes.size())) {
-    auto dynamic_size = (view_sizes_constraint[idx] == -1)
-        ? dynamic_axis_queue.front()
-        : view_sizes_constraint[idx];
-    if (dynamic_size != view_sizes[idx]) {
-      return false;
-    }
-    view_size_product *= dynamic_size;
-    if (view_sizes_constraint[idx] == -1) {
-      dynamic_axis_queue.pop();
-    }
-  }
-
-  // 4. Check view invariant
-  // The number of elements in the input and output tensors are the same.
-  return tensor_size_product == view_size_product;
-}
-
 //!
 //! CudaFusionViewGuard Example Graph:
 //!
@@ -639,7 +568,7 @@ RegisterOperators view_guard({
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             // view_sizes_constraint - Constant List[Int]
-            at::ArrayRef<IValue> inputs = last(stack, 4);
+            at::ArrayRef<IValue> inputs = last(stack, 3);
 
             // tensor_sizes is the runtime size for the self tensor
             // tensor_sizes - dynamic size List[Int]
@@ -654,23 +583,16 @@ RegisterOperators view_guard({
                 "profiled_view_sizes needs to be Int list");
             auto profiled_view_sizes = inputs[1].toIntList();
 
-            // tensor_constraint is a constant List[Int]
+            // tensor_constraints is a constant List[Int]
             // used to guard tensor_sizes
             TORCH_INTERNAL_ASSERT(
                 inputs[2].isIntList(),
                 "tensor constraint needs to be Int List");
-            auto tensor_constraint = inputs[2].toIntList();
-
-            // view_sizes_constraint is a constant List[Int]
-            // used to guard profiled_view_sizes
-            TORCH_INTERNAL_ASSERT(
-                inputs[3].isIntList(),
-                "view_sizes constraint needs to be Int List");
-            auto view_sizes_constraint = inputs[3].toIntList();
+            auto tensor_constraints = inputs[2].toIntList();
 
             // Drop after gather all input arguments
             // If an argument is moved, it is destroyed when dropped from stack
-            drop(stack, 4);
+            drop(stack, 3);
 
             auto status = inferViewShape(tensor_sizes, profiled_view_sizes);
             if (!status) {
@@ -682,12 +604,14 @@ RegisterOperators view_guard({
               push(stack, IValue(true));
               return;
             }
-
-            auto guard_status = checkViewGuard(
-                tensor_sizes,
-                profiled_view_sizes,
-                tensor_constraint,
-                view_sizes_constraint);
+            std::vector<int64_t> tensor_sizes_int_vec = tensor_sizes.vec();
+            std::vector<int64_t> view_sizes_int_vec = tensor_sizes.vec();
+            std::vector<int64_t> previous_constraints =
+                tensor_constraints.vec();
+            auto new_constraints = fuser::cuda::getViewConstraint(
+                tensor_sizes_int_vec, view_sizes_int_vec);
+            bool guard_status =
+                (new_constraints.conglomerateString() == previous_constraints);
             push(stack, IValue(guard_status));
             return;
           };
@@ -726,6 +650,62 @@ RegisterOperators reg_add_optional({
             } else {
               push(stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
             }
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_permute_copy({
+    Operator(
+        "prim::permute_copy(Tensor(a) self, int[] dims) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "permute_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dims;
+            pop(stack, self, dims);
+            push(stack, at::native::view(self.toTensor(), dims.toIntVector()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_transpose_copy({
+    Operator(
+        "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "transpose_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self, dim0, dim1;
+            pop(stack, self, dim0, dim1);
+            push(
+                stack,
+                at::transpose(self.toTensor(), dim0.toInt(), dim1.toInt()));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_t_copy({
+    Operator(
+        "prim::t_copy(Tensor(a) self) -> Tensor",
+        [](const Node* node) -> Operation {
+          return [node](Stack& stack) {
+            TORCH_CHECK(
+                node->s(attr::name) == "CudaFusionGroup",
+                "t_copy is only used by nvfuser to identify non-mutating ",
+                "alias ops, should be restored after fusion pass!");
+            IValue self;
+            pop(stack, self);
+            push(stack, at::t(self.toTensor()));
           };
         },
         aliasAnalysisFromSchema()),
@@ -917,8 +897,7 @@ RegisterOperators reg_expand_copy({
                 "alias ops, should be restored after fusion pass!");
             IValue self, size, implicit;
             pop(stack, self, size, implicit);
-            push(
-                stack, at::native::expand(self.toTensor(), size.toIntVector()));
+            push(stack, self.toTensor().expand(size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),

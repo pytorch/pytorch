@@ -18,6 +18,91 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+// Alias used for std::transform
+IterDomain* exactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
+
+//! Checks that the current loop nest is realizing a serial
+//!  broadcast so that each index of producer buffer can be visited
+//!  multiple times, in which case the aggressive is not valid.
+bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
+  //! Note: see issue #1785:
+  //!  serial broadcast resolution doesn't only happen to
+  //! immediate outputs of broadcast ops. We can also have
+  //! example:
+  //!  T1[I,B] = broadcast(T0[I]])
+  //!  T3[I,I] = T1[I,B] + T2[I,I]
+  //!  T4[I,I] = T3[I,I]
+  //!  and generates the following loop:
+  //! alloc T0[4]
+  //! For i in 0..3
+  //!   T0[...] =
+  //!
+  //! For j in 0...X:
+  //!   alloc T3[4]
+  //!   for k in 0..3:
+  //!     alloc T1[1]
+  //!     T1[0] = T0[k] // <- This is actually a broadcast resolution
+  //!     T3[k] = T1[0] + T2[...]
+  //!   T4[...] = T3[...]
+  //!
+  //! In this case we are actually visiting each pixel of T0 in each iteration
+  //!  of the j loop while T1 was the broadcasted tensor causing this reuse.
+  //!
+  //! The current version of checking covers this scenario by checking the root
+  //!  ids of the consumer concrete loop id's. Any time a local tensor like T0
+  //!  appears in a re-use scenario like above, we should see a serial loop id
+  //!  that was derived from some root id that doesn't concretely map to T0's
+  //!  domain.
+
+  // Serial concrete loop id's that cover consumer's iter domain.
+  std::vector<Val*> consumer_serial_loop_concrete_ids;
+
+  for (auto consumer_leaf_id : consumer->domain()->domain()) {
+    auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        consumer_leaf_id, IdMappingMode::LOOP);
+
+    // Check for any serial loop id with non-trivial extent
+    if (!concrete_loop_id->isThread() &&
+        !concrete_loop_id->extent()->isOneInt()) {
+      consumer_serial_loop_concrete_ids.push_back(concrete_loop_id);
+    }
+  }
+
+  // Collect the root id's that the serial loop iterdomain
+  //  are transformed from.
+  auto serial_loop_roots = InputsOf::outputs(
+      FusionGuard::getCurFusion(), consumer_serial_loop_concrete_ids);
+
+  // Collect exact concrete id's in producer's root domain
+  std::unordered_set<IterDomain*> producer_exact_concrete_root_ids;
+  auto producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
+  std::transform(
+      producer_root.begin(),
+      producer_root.end(),
+      std::inserter(
+          producer_exact_concrete_root_ids,
+          producer_exact_concrete_root_ids.begin()),
+      exactConcreteId);
+
+  // Check if serial loop roots indexes any exact root id's that
+  //  is not within the set of producer's root exact id's. These
+  //  id's will imply that the same producer pixel is accessed
+  //  in multiple iterations of the materialized serial loop.
+  for (auto serial_loop_root :
+       ir_utils::filterByType<IterDomain>(serial_loop_roots)) {
+    if (!producer_exact_concrete_root_ids.count(
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                serial_loop_root, IdMappingMode::EXACT))) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 //! Get string representation of Allocate size for symbolic comparison
 //!
@@ -484,7 +569,7 @@ class BufferUseDefInfo {
             "Lower_alias_memory : dynamic sized register allocation");
         return;
       }
-      if (register_size.value() <= kRegisterSizeThreshold) {
+      if (register_size->as<int64_t>() <= kRegisterSizeThreshold) {
         should_try_alias = false;
       }
     }
@@ -541,49 +626,6 @@ class BufferUseDefInfo {
     current_pos_ = -1;
   }
 
-  //! Checks that the current loop nest is not realizing a serial
-  //!  broadcast so that each index of producer buffer will only
-  //!  be visited once.
-  bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
-    auto producer_root =
-        TensorDomain::noReductions(producer->getMaybeRFactorDomain());
-    auto consumer_root =
-        TensorDomain::noReductions(consumer->getMaybeRFactorDomain());
-
-    if (producer_root.size() != consumer_root.size()) {
-      // This case would be a single broadcast or a single reduce
-      //  which wouldn't be a broadcast resolution
-      return true;
-    }
-
-    std::vector<Val*> serial_ids;
-    std::copy_if(
-        producer->domain()->domain().begin(),
-        producer->domain()->domain().end(),
-        std::back_inserter(serial_ids),
-        [](IterDomain* id) { return !id->isThread(); });
-
-    auto serial_producer_roots =
-        InputsOf::outputs(FusionGuard::getCurFusion(), serial_ids);
-    auto serial_root_id =
-        ir_utils::filterByType<IterDomain>(serial_producer_roots);
-    std::unordered_set<IterDomain*> serial_producer_root_set(
-        serial_root_id.begin(), serial_root_id.end());
-
-    for (const auto idx : c10::irange(producer_root.size())) {
-      if (producer_root[idx]->isBroadcast() &&
-          !consumer_root[idx]->isBroadcast()) {
-        // Check if this broadcast contributed to any serial
-        //  scheduled iterdomains:
-        if (serial_producer_root_set.count(producer_root[idx])) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
   // Iterate over the inputs and outputs of exprs and update
   //  the liveness info of local buffers if applicaable.
   void collectLivenessInfo(const Expr* expr) {
@@ -599,7 +641,7 @@ class BufferUseDefInfo {
     for (auto input_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(input_tv);
       if (maybe_alloc_info.has_value()) {
-        if (isSerialBroadcastResolution(input_tv, out_tv)) {
+        if (!isSerialBroadcastResolution(input_tv, out_tv)) {
           maybe_alloc_info.value()->inner_live_interval->markRead(current_pos_);
         } else {
           // Disable inner alias info for this buffer, since line number based
@@ -1016,6 +1058,13 @@ class AllocateReuseModifier {
     auto this_tv = alloc_info->alloc_expr->buffer()->as<TensorView>();
     auto reuse_tv = to_reuse->alloc_expr->buffer()->as<TensorView>();
 
+    // Aggressively disable inner sharing for swizzled tvs since
+    //  the indexing order is in general not tractable.
+    // But outer sharing should still apply.
+    if (this_tv->hasSwizzleOp() || reuse_tv->hasSwizzleOp()) {
+      return false;
+    }
+
     // Check the values in between the two buffers.
     auto vals_between_this_and_reuse =
         DependencyCheck::getAllValsBetween({this_tv}, {reuse_tv});
@@ -1070,6 +1119,9 @@ class AllocateReuseModifier {
 
   InPlaceSharingInfo checkOpsInBetween(std::vector<Val*>& all_used_vals) {
     InPlaceSharingInfo info;
+    std::unordered_set<Val*> all_used_val_set(
+        all_used_vals.begin(), all_used_vals.end());
+
     for (auto val : all_used_vals) {
       if (auto tv = dynamic_cast<TensorView*>(val)) {
         auto tv_def = tv->definition();

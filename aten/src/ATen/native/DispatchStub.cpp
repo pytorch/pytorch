@@ -1,6 +1,8 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
 #include <c10/util/Exception.h>
+#include <c10/macros/Macros.h>
 
 #include <cpuinfo.h>
 #include <cstdlib>
@@ -121,6 +123,12 @@ void* DispatchStubImpl::get_call_ptr(
     case DeviceType::HIP:
       TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
       return hip_dispatch_ptr;
+
+#if defined(USE_MPS)
+    case DeviceType::MPS:
+      TORCH_INTERNAL_ASSERT(mps_dispatch_ptr, "DispatchStub: missing MPS kernel");
+      return mps_dispatch_ptr;
+#endif
 
     default:
       AT_ERROR("DispatchStub: unsupported device type", device_type);

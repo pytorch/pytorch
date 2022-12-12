@@ -1,7 +1,17 @@
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/tanh.h>
+#endif
 
 namespace at {
 namespace native {
@@ -9,19 +19,25 @@ namespace vulkan {
 namespace ops {
 namespace {
 //
-// input_vk: input tensor of shape (L, N, H_in) when batch_first=False or (N, L,
-// H_in) when batch_first=True
-//           containing the features of the input sequence
+// input_vk: input tensor of shape (L, N, H_in) when batch_first=False or
+// (N, L, H_in) when batch_first=True containing the features of the input
+// sequence
+//
 // hx_vk: tensor of shape (D * num_layers, N, H_out) containing the initial
-// hidden state for each element in the input sequence. cx_vk: tensor of shape
-// (D * num_layers, N, H_cell) containing the initial cell state for each
-// element in the input sequence. output: tensor of shape (L, N, D * H_out) when
-// batch_first=False or (N, L, D * H_out) when batch_first=True
-//         containing the output features (h_t) from the last layer of the LSTM,
-//         for each t
+// hidden state for each element in the input sequence.
+//
+// cx_vk: tensor of shape (D * num_layers, N, H_cell) containing the initial
+// cell state for each element in the input sequence.
+//
+// output: tensor of shape (L, N, D * H_out) when batch_first=False or
+// (N, L, D * H_out) when batch_first=True, containing the output features
+// (h_t) from the last layer of the LSTM, for each t
+//
 // h_n: tensor of shape (D * num_layers, N, H_out) containing the final hidden
-// state for each element in the sequence. c_n: tensor of shape (D * num_layers,
-// N, H_cell) containing the final cell state for each element in the sequence.
+// state for each element in the sequence.
+//
+// c_n: tensor of shape (D * num_layers, N, H_cell) containing the final cell
+// state for each element in the sequence.
 //
 //  where
 //    L = sequence length
@@ -62,10 +78,15 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan LSTM expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan LSTM expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
+
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
 
   const Tensor& hx_vk = hx[0];
   const Tensor& cx_vk = hx[1];
@@ -75,8 +96,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   std::vector<at::Tensor> c_n_list; // cell state output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   h_n_list.reserve(num_layers);
   c_n_list.reserve(num_layers);
@@ -135,6 +155,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
 
   auto h_n = at::cat(h_n_list, 1);
   auto c_n = at::cat(c_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
   return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
@@ -150,13 +171,18 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-std::vector<c10::intrusive_ptr<VulkanOpContext>> pack_lstm_linear_op_contexts(
+std::vector<c10::intrusive_ptr<LinearPackedContext>>
+pack_lstm_linear_op_contexts(
     const std::vector<Tensor>& params_cpu,
     int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
-      "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'.");
-  std::vector<c10::intrusive_ptr<VulkanOpContext>> linear_op_contexts;
+      "Vulkan LSTM expects 'params_cpu' size to be 4 * 'num_layers'."
+      " But 'params_cpu' has size: ",
+      params_cpu.size(),
+      " and 'num_layers' is: ",
+      num_layers);
+  std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 8);
 
   for (int64_t l = 0; l < num_layers; ++l) {
@@ -200,7 +226,7 @@ std::vector<c10::intrusive_ptr<VulkanOpContext>> pack_lstm_linear_op_contexts(
   return linear_op_contexts;
 }
 
-VulkanOpContext lstm_context_create(
+LstmPackedContext::LstmPackedContext(
     const std::vector<Tensor>& params_cpu, // weights/biases (cpu)
     bool has_biases,
     int64_t num_layers,
@@ -214,137 +240,68 @@ VulkanOpContext lstm_context_create(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan LSTM expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan LSTM expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan LSTM expects 'dropout' to be 0.0.");
 
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(7);
-  packed_context.emplace_back(
-      pack_lstm_linear_op_contexts(params_cpu, num_layers));
-  packed_context.emplace_back(has_biases);
-  packed_context.emplace_back(num_layers);
-  packed_context.emplace_back(dropout);
-  packed_context.emplace_back(train);
-  packed_context.emplace_back(bidirectional);
-  packed_context.emplace_back(batch_first);
-
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(7);
-  unpacked_context.emplace_back(params_cpu);
-  unpacked_context.emplace_back(has_biases);
-  unpacked_context.emplace_back(num_layers);
-  unpacked_context.emplace_back(dropout);
-  unpacked_context.emplace_back(train);
-  unpacked_context.emplace_back(bidirectional);
-  unpacked_context.emplace_back(batch_first);
-
-  return VulkanOpContext::create(packed_context, unpacked_context);
+  packed_.reserve(Packed::NumArgs);
+  packed_.emplace_back(pack_lstm_linear_op_contexts(params_cpu, num_layers));
+  packed_.emplace_back(has_biases);
+  packed_.emplace_back(num_layers);
+  packed_.emplace_back(dropout);
+  packed_.emplace_back(train);
+  packed_.emplace_back(bidirectional);
+  packed_.emplace_back(batch_first);
 }
 
-std::tuple<Tensor, Tensor, Tensor> lstm_context_run(
-    const Tensor& input_vk, // input sequence (vulkan)
-    const Tensor& hx_vk, // initial hidden state (vulkan)
-    const Tensor& cx_vk, // initial cell state (vulkan)
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context) {
-  TORCH_INTERNAL_ASSERT(
-      input_vk.sizes().size() == 3, "Vulkan LSTM expects input dims to be 3.");
-  TORCH_INTERNAL_ASSERT(
-      hx_vk.sizes().size() == 3,
-      "Vulkan LSTM expects hidden state dims to be 3.");
-  TORCH_INTERNAL_ASSERT(
-      cx_vk.sizes().size() == 3,
-      "Vulkan LSTM expects cell state dims to be 3.");
+LstmPackedContext LstmPackedContext::pack(c10::impl::GenericList unpacked) {
+  return LstmPackedContext(
+      unpacked.get(Unpacked::Params).toTensorVector(),
+      unpacked.get(Unpacked::hasBiases).toBool(),
+      unpacked.get(Unpacked::NumLayers).toInt(),
+      unpacked.get(Unpacked::Dropout).toDouble(),
+      unpacked.get(Unpacked::Train).toBool(),
+      unpacked.get(Unpacked::Bidirectional).toBool(),
+      unpacked.get(Unpacked::BatchFirst).toBool());
+}
 
-  const c10::List<c10::IValue> packed_linear_op_contexts =
-      packed_context.get(0).toList();
-  const int64_t packed_num_layers = packed_context.get(2).toInt();
+const c10::impl::GenericList LstmPackedContext::unpack() const {
+  c10::impl::GenericList unpacked_lstm_context{c10::AnyType::get()};
+  unpacked_lstm_context.reserve(Unpacked::NumArgs);
 
-  const int64_t linear_op_contexts_per_layer =
-      8; // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf), (b_ig,
-         // w_ig), (b_hg, w_hg), (b_io, w_io), (b_ho, w_ho)
-  std::vector<at::Tensor> h_n_list; // hidden state output
-  std::vector<at::Tensor> c_n_list; // cell state output
+  const c10::List<c10::IValue> packed_linear_contexts =
+      get_val(Packed::LinearContexts).toList();
 
-  // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  const int64_t num_layers = get_val(Packed::NumLayers).toInt();
+  const int64_t linear_contexts_per_layer = 8;
 
-  h_n_list.reserve(packed_num_layers);
-  c_n_list.reserve(packed_num_layers);
+  std::vector<Tensor> params_cpu;
+  params_cpu.reserve(num_layers * linear_contexts_per_layer);
 
-  for (int64_t l = 0; l < packed_num_layers; ++l) {
-    // extract each hidden state and squeeze into 2D dim
-    auto h = at::slice(hx_vk, 0, l, l + 1, 1);
-    h = h.reshape({h.size(0) * h.size(1), h.size(2)});
+  for (c10::IValue packed_linear_context : packed_linear_contexts) {
+    const c10::impl::GenericList unpacked_linear_context =
+        packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
 
-    auto c = at::slice(cx_vk, 0, l, l + 1, 1);
-    c = c.reshape({c.size(0) * c.size(1), c.size(2)});
+    TORCH_CHECK(
+        unpacked_linear_context.size() > 0u,
+        "unpacked_linear_context does not have any elements!");
 
-    const auto& cxt_ii =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 0]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_hi =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 1]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_if =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 2]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_hf =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 3]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_ig =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 4]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_hg =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 5]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_io =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 6]
-            .toCustomClass<VulkanOpContext>();
-    const auto& cxt_ho =
-        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 7]
-            .toCustomClass<VulkanOpContext>();
-
-    const auto& i = at::sigmoid(
-        linear_context_run(
-            x, cxt_ii->get_packed(), cxt_ii->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hi->get_packed(), cxt_hi->get_unpacked(), 1.0f, 1.0f));
-    const auto& f = at::sigmoid(
-        linear_context_run(
-            x, cxt_if->get_packed(), cxt_if->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hf->get_packed(), cxt_hf->get_unpacked(), 1.0f, 1.0f));
-    const auto& g = at::tanh(
-        linear_context_run(
-            x, cxt_ig->get_packed(), cxt_ig->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_hg->get_packed(), cxt_hg->get_unpacked(), 1.0f, 1.0f));
-    const auto& o = at::sigmoid(
-        linear_context_run(
-            x, cxt_io->get_packed(), cxt_io->get_unpacked(), 1.0f, 1.0f) +
-        linear_context_run(
-            h, cxt_ho->get_packed(), cxt_ho->get_unpacked(), 1.0f, 1.0f));
-    c = f * c + i * g;
-    h = o * at::tanh(c);
-    x = h; // next input
-    h_n_list.emplace_back(
-        h.reshape({1, 1, h.size(0), h.size(1)})); // 2D to 4D for cat op
-    c_n_list.emplace_back(
-        c.reshape({1, 1, c.size(0), c.size(1)})); // 2D to 4D for cat op
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
+            .toTensor()
+            .t());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Bias)
+            .toTensor());
+  }
+  unpacked_lstm_context.emplace_back(params_cpu);
+  for (int64_t i = 1; i < 7; ++i) {
+    unpacked_lstm_context.emplace_back(get_val(i));
   }
 
-  auto h_n = at::cat(h_n_list, 1);
-  auto c_n = at::cat(c_n_list, 1);
-  h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
-  c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
-  return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
+  return unpacked_lstm_context;
 }
 
-c10::intrusive_ptr<VulkanOpContext> create_lstm_context(
+c10::intrusive_ptr<LstmPackedContext> create_lstm_context(
     std::vector<Tensor>&& params_cpu,
     bool has_biases,
     int64_t num_layers,
@@ -352,7 +309,7 @@ c10::intrusive_ptr<VulkanOpContext> create_lstm_context(
     bool train,
     bool bidirectional,
     bool batch_first) {
-  return c10::make_intrusive<VulkanOpContext>(lstm_context_create(
+  return c10::make_intrusive<LstmPackedContext>(LstmPackedContext(
       params_cpu,
       has_biases,
       num_layers,
@@ -366,13 +323,103 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
     const Tensor& input_vk, // input sequence (vulkan)
     const Tensor& hx_vk, // initial hidden state (vulkan)
     const Tensor& cx_vk, // initial cell state (vulkan)
-    const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
-  return lstm_context_run(
-      input_vk,
-      hx_vk,
-      cx_vk,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked());
+    const c10::intrusive_ptr<LstmPackedContext>& lstm_context) {
+  TORCH_INTERNAL_ASSERT(
+      input_vk.sizes().size() == 3, "Vulkan LSTM expects input dims to be 3.");
+  TORCH_INTERNAL_ASSERT(
+      hx_vk.sizes().size() == 3,
+      "Vulkan LSTM expects hidden state dims to be 3.");
+  TORCH_INTERNAL_ASSERT(
+      cx_vk.sizes().size() == 3,
+      "Vulkan LSTM expects cell state dims to be 3.");
+
+  const int64_t num_layers =
+      lstm_context->get_val(LstmPackedContext::Packed::NumLayers).toInt();
+  const bool batch_first =
+      lstm_context->get_val(LstmPackedContext::Packed::BatchFirst).toBool();
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
+
+  const c10::List<c10::IValue> packed_linear_op_contexts =
+      lstm_context->get_val(LstmPackedContext::Packed::LinearContexts).toList();
+
+  const int64_t linear_op_contexts_per_layer = 8;
+  // (b_ii, w_ii), (b_hi, w_hi), (b_if, w_if), (b_hf, w_hf),
+  // (b_ig, w_ig), (b_hg, w_hg), (b_io, w_io), (b_ho, w_ho)
+
+  std::vector<at::Tensor> h_n_list; // hidden state output
+  std::vector<at::Tensor> c_n_list; // cell state output
+
+  // reshape to 2D due to Vulkan at::mm op accepts only 2D
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
+
+  h_n_list.reserve(num_layers);
+  c_n_list.reserve(num_layers);
+
+  for (int64_t l = 0; l < num_layers; ++l) {
+    // extract each hidden state and squeeze into 2D dim
+    auto h = at::slice(hx_vk, 0, l, l + 1, 1);
+    h = h.reshape({h.size(0) * h.size(1), h.size(2)});
+
+    auto c = at::slice(cx_vk, 0, l, l + 1, 1);
+    c = c.reshape({c.size(0) * c.size(1), c.size(2)});
+
+    const auto& cxt_ii =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 0]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_hi =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 1]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_if =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 2]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_hf =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 3]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_ig =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 4]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_hg =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 5]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_io =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 6]
+            .toCustomClass<LinearPackedContext>();
+    const auto& cxt_ho =
+        packed_linear_op_contexts[l * linear_op_contexts_per_layer + 7]
+            .toCustomClass<LinearPackedContext>();
+
+    const auto& i = at::sigmoid(
+        run_linear_context(x, cxt_ii) + run_linear_context(h, cxt_hi));
+    // cxt_ii->run(x, 1.0f, 1.0f) + cxt_hi->run(h, 1.0f, 1.0f));
+    const auto& f = at::sigmoid(
+        run_linear_context(x, cxt_if) + run_linear_context(h, cxt_hf));
+    // cxt_if->run(x, 1.0f, 1.0f) + cxt_hf->run(h, 1.0f, 1.0f));
+    const auto& g =
+        at::tanh(run_linear_context(x, cxt_ig) + run_linear_context(h, cxt_hg));
+    // cxt_ig->run(x, 1.0f, 1.0f) + cxt_hg->run(h, 1.0f, 1.0f));
+    const auto& o = at::sigmoid(
+        run_linear_context(x, cxt_io) + run_linear_context(h, cxt_ho));
+    // cxt_io->run(x, 1.0f, 1.0f) + cxt_ho->run(h, 1.0f, 1.0f));
+    c = f * c + i * g;
+    h = o * at::tanh(c);
+    x = h; // next input
+    h_n_list.emplace_back(
+        h.reshape({1, 1, h.size(0), h.size(1)})); // 2D to 4D for cat op
+    c_n_list.emplace_back(
+        c.reshape({1, 1, c.size(0), c.size(1)})); // 2D to 4D for cat op
+  }
+
+  auto h_n = at::cat(h_n_list, 1);
+  auto c_n = at::cat(c_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
+  h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
+  c_n = c_n.reshape({c_n.size(0) * c_n.size(1), c_n.size(2), c_n.size(3)});
+  return std::tuple<Tensor, Tensor, Tensor>(x, h_n, c_n);
 }
 
 } // namespace ops

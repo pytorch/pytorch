@@ -4,10 +4,11 @@
 import os
 import ctypes
 import torch
+import unittest
 from typing import Tuple
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
+from torch.testing._internal.common_quantized import supported_qengines
 from torch.testing._internal.common_utils import TestCase, run_tests
-
 
 def qpt(t, scale, zero_point, dtype=torch.quint8):
     t = torch.tensor(t)
@@ -20,6 +21,8 @@ def nhwc(t):
     return t
 
 
+@unittest.skipUnless('qnnpack' in supported_qengines,
+                     "This Pytorch Build has not been built with or does not support QNNPACK")
 class TestNNAPI(TestCase):
 
     def setUp(self):
@@ -111,12 +114,12 @@ class TestNNAPI(TestCase):
 
     def test_quantize(self):
         self.check(
-            torch.nn.quantized.Quantize(0.25, 2, torch.quint8),
+            torch.ao.nn.quantized.Quantize(0.25, 2, torch.quint8),
             nhwc(torch.tensor([[[[1.0]], [[2.0]]]])))
 
     def test_dequantize(self):
         self.check(
-            torch.nn.quantized.DeQuantize(),
+            torch.ao.nn.quantized.DeQuantize(),
             nhwc(qpt([[[[1.0]], [[2.0]]]], 0.25, 2)))
 
     def test_unsqueeze(self):
@@ -561,7 +564,7 @@ class TestNNAPI(TestCase):
                 convert_arg = torch.zeros(*convert_dims)
 
                 if "quant" in kind:
-                    model = torch.nn.quantized.ConvTranspose2d(in_ch, out_ch, kernel)
+                    model = torch.ao.nn.quantized.ConvTranspose2d(in_ch, out_ch, kernel)
                     model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
                     inp = qpt(inp, 1.0 / 16, 128)
                     # I've seen numerical differences between QNNPACK and NNAPI,
@@ -586,7 +589,7 @@ class TestNNAPI(TestCase):
 
 
     def test_qadd(self):
-        func = torch.nn.quantized.QFunctional()
+        func = torch.ao.nn.quantized.QFunctional()
         func.scale = 0.5
         func.zero_point = 120
 
@@ -649,7 +652,7 @@ class TestNNAPI(TestCase):
         torch.manual_seed(29)
         weight = qpt(torch.randn(16, 32), 0.125, 0, torch.qint8)
         bias = torch.randn(16)
-        mod = torch.nn.quantized.Linear(32, 16)
+        mod = torch.ao.nn.quantized.Linear(32, 16)
         mod.set_weight_bias(weight, bias)
         inp = qpt(torch.randn(2, 32), 0.05, 130, torch.quint8)
         self.check(mod, inp)

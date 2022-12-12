@@ -57,26 +57,30 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
+const static int kMainOpsetVersion = 17;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 17> kOpsetVersionToIRVersion = {
-    kInvalidOpsetVersion,
-    3,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    3,
-    3,
-    3,
-    3,
-    4,
-    5,
-    6,
-    7,
-    7,
-    7,
-    8,
-    8};
+constexpr static std::array<int64_t, kMainOpsetVersion + 1>
+    kOpsetVersionToIRVersion = {
+        kInvalidOpsetVersion,
+        3, // opset 1
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        3, // opset 5
+        3, // opset 6
+        3, // opset 7
+        3, // opset 8
+        4, // opset 9
+        5, // opset 10
+        6, // opset 11
+        7, // opset 12
+        7, // opset 13
+        7, // opset 14
+        8, // opset 15
+        8, // opset 16
+        8, // opset 17
+};
 
 std::string getNodeStackTraceString(const Node* n) {
   return n->sourceRange().str();
@@ -422,7 +426,11 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
     default:
-      AT_ERROR("unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ScalarType ",
+          toString(at_type),
+          " is an unexpected tensor scalar type");
   }
 }
 
@@ -721,7 +729,7 @@ void GraphEncoder::EncodeBlock(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  AT_ASSERT(graph_proto != nullptr);
+  TORCH_INTERNAL_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch_jit";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
@@ -798,7 +806,7 @@ void GraphEncoder::AddInitializersIntoGraphProto(
     const std::map<std::string, at::Tensor>& initializers,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
-  AT_ASSERT(block->inputs().size() >= initializers.size());
+  TORCH_INTERNAL_ASSERT(block->inputs().size() >= initializers.size());
   for (auto input : block->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
@@ -880,20 +888,29 @@ void GraphEncoder::EncodeNode(
     node_proto->set_domain(domain);
   }
   if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         !node->kind().is_aten() && !node->kind().is_prim() &&
         !node->kind().is_attr());
   }
   node_proto->set_op_type(node->kind().toUnqualString());
+  const auto node_name_attribute_symbol =
+      Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute);
   if (add_node_names) {
-    auto node_name =
+    std::string node_name =
         node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+    if (node->hasAttribute(node_name_attribute_symbol)) {
+      node_name = node->s(node_name_attribute_symbol);
+    }
     node_proto->set_name(node_name);
     onnx_node_name_map_[node] = node_name;
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
+    if (attr_name == node_name_attribute_symbol) {
+      // Skip the node name attribute.
+      continue;
+    }
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {
@@ -906,7 +923,7 @@ void GraphEncoder::EncodeNode(
         node_proto, node, attr_name, use_external_data_format, onnx_file_path);
   }
   if (node->kind() == ::c10::onnx::Loop) {
-    AT_ASSERT(node->blocks().size() == 1);
+    TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
 
     auto body = node_proto->add_attribute();
     body->set_name("body");
@@ -923,7 +940,7 @@ void GraphEncoder::EncodeNode(
         onnx_file_path);
   }
   if (node->kind() == ::c10::onnx::If) {
-    AT_ASSERT(node->blocks().size() == 2);
+    TORCH_INTERNAL_ASSERT(node->blocks().size() == 2);
 
     auto then_branch = node_proto->add_attribute();
     then_branch->set_name("then_branch");
@@ -961,7 +978,7 @@ void GraphEncoder::AddAttribute(
     const std::string& ref_attr_name,
     const AttributeKind attr_kind) {
   auto attr = node_proto->add_attribute();
-  AT_ASSERT(name.is_attr());
+  TORCH_INTERNAL_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   attr->set_ref_attr_name(ref_attr_name);
   attr->set_type(ATenAttributeKindToOnnxAttributeType(attr_kind, name));
@@ -992,7 +1009,7 @@ void GraphEncoder::AddAttribute(
   };
 
   auto attr = node_proto->add_attribute();
-  AT_ASSERT(name.is_attr());
+  TORCH_INTERNAL_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
   attr->set_type(
       ATenAttributeKindToOnnxAttributeType(node->kindOf(name), name));
@@ -1219,7 +1236,7 @@ void GraphEncoder::EncodeTensor(
   // or use_external_data_format should be true, not both at the same time. They
   // can both be false at the same time (for ONNX export for regular model
   // size).
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       !((defer_weight_export_ && external_ref) && use_external_data_format));
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
@@ -1227,18 +1244,19 @@ void GraphEncoder::EncodeTensor(
   if (defer_weight_export_ && external_ref) {
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
-    AT_ASSERT(external_ref.value() == tensor_proto->name());
-    AT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    TORCH_INTERNAL_ASSERT(external_ref.value() == tensor_proto->name());
+    TORCH_INTERNAL_ASSERT(
+        raw_data_export_map_.count(external_ref.value()) == 0);
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
-    AT_ASSERT(t.is_contiguous());
+    TORCH_INTERNAL_ASSERT(t.is_contiguous());
     size_t tensorSize = static_cast<size_t>(c10::multiply_integers(
         std::begin(tensor.sizes()), std::end(tensor.sizes())));
     if (use_external_data_format &&
         tensorSize > ParamSizeThresholdForExternalStorage) {
-      AT_ASSERT(!onnx_file_path.empty());
-      AT_ASSERT(tensor_proto->has_name());
+      TORCH_INTERNAL_ASSERT(!onnx_file_path.empty());
+      TORCH_INTERNAL_ASSERT(tensor_proto->has_name());
       auto tensorName = GetExternalFileName(tensor_proto->name());
       CreateExternalFile(t, tensorName, onnx_file_path);
       onnx::StringStringEntryProto* location =

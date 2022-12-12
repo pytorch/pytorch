@@ -80,7 +80,7 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
 
           auto* blob = ws->CreateBlob(convBiasName);
           caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-          CHECK_NOTNULL(tensor);
+          TORCH_CHECK_NOTNULL(tensor);
           // Get output channel
           size_t c = filterTensor->dim32(0);
           tensor->Resize(c);

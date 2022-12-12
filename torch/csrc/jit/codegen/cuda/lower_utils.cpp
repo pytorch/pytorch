@@ -36,13 +36,42 @@ kir::IfThenElse* cloneIfThenElse(kir::IfThenElse* ite) {
 
 namespace ir_utils {
 
-TVDomainGuard::TVDomainGuard(TensorView* _tv, TensorDomain* td)
-    : tv_(_tv), prev_domain(tv_->domain()) {
+TVDomainGuard::TVDomainGuard(TensorView* tv, TensorDomain* td)
+    : tv_(tv), prev_domain_(tv_->domain()) {
   tv_->setDomain(td);
 }
 
+TVDomainGuard::TVDomainGuard(TVDomainGuard&& guard)
+    : tv_(nullptr), prev_domain_(guard.prev_domain_) {
+  std::swap(tv_, guard.tv_);
+}
+
 TVDomainGuard::~TVDomainGuard() {
-  tv_->setDomain(prev_domain);
+  if (tv_ != nullptr) {
+    tv_->setDomain(prev_domain_);
+  }
+}
+
+ir_utils::TVDomainGuard overrideContiguityGuard(
+    TensorView* tv,
+    bool contiguity) {
+  // Use domain guard to ignore the contiguity of
+  //  consumer tv.
+  TensorDomain* domain_with_specified_contiguity = nullptr;
+  std::vector<bool> contiguity_vector(
+      tv->getMaybeRFactorDomain().size(), contiguity);
+  if (tv->hasRFactor()) {
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(),
+        tv->getRFactorDomain(),
+        tv->domain()->domain(),
+        contiguity_vector);
+  } else {
+    domain_with_specified_contiguity = IrBuilder::create<TensorDomain>(
+        tv->getRootDomain(), tv->domain()->domain(), contiguity_vector);
+  }
+
+  return ir_utils::TVDomainGuard(tv, domain_with_specified_contiguity);
 }
 
 std::vector<IterDomain*> iterDomainInputsOf(
@@ -91,9 +120,14 @@ bool isTvOp(const Expr* expr) {
       (expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
+       expr->getExprType().value() == ExprType::RNGOp ||
+       expr->getExprType().value() == ExprType::FullOp ||
+       expr->getExprType().value() == ExprType::ARangeOp ||
+       expr->getExprType().value() == ExprType::EyeOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::GroupedWelfordOp ||
        expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
@@ -104,8 +138,10 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::ViewAsScalar ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
+       expr->getExprType().value() == ExprType::GroupedGridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||
-       expr->getExprType().value() == ExprType::GridWelford)) {
+       expr->getExprType().value() == ExprType::GridWelford ||
+       expr->getExprType().value() == ExprType::GroupedGridWelford)) {
     return true;
   }
   return false;
@@ -183,14 +219,13 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
-bool isReductionOp(const Expr* expr) {
-  // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
-}
-
-bool isReductionTvOp(const Expr* expr) {
-  return isTvOp(expr) && isReductionOp(expr);
+TensorView* getTvInput(const Expr* expr) {
+  for (auto inp : expr->inputs()) {
+    if (auto tv = getTv(inp)) {
+      return tv;
+    }
+  }
+  return nullptr;
 }
 
 bool isScalarOp(const Expr* expr) {
@@ -198,31 +233,6 @@ bool isScalarOp(const Expr* expr) {
     if (!out->isScalar())
       return false;
   return true;
-}
-
-bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
-  if (!isTvOp(expr)) {
-    return false;
-  }
-
-  if (!(isReductionOp(expr) || expr->isA<BroadcastOp>() ||
-        expr->isA<kir::GridBroadcast>())) {
-    return false;
-  }
-
-  // GroupedReductionOp can have multiple output TVs, but they must be
-  // parallelized in the same way, so just checking one of them is enough.
-  auto tv = getTvOutput(expr);
-
-  if (tv->hasBlockReduction() || tv->hasGridReduction()) {
-    return true;
-  } else if (expr->isA<BroadcastOp>()) {
-    const ParallelTypeBitmap pt_map =
-        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
-    return pt_map.any();
-  }
-
-  return false;
 }
 
 c10::optional<IterDomain*> getMaybeWarpReductionDim(
@@ -361,20 +371,6 @@ bool isGlobalLoadInit(const Expr* expr) {
   return false;
 }
 
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init) {
-  const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(IterDomainBuilder(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
-  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
-  const auto buffer_tv =
-      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
-  return IrBuilder::create<kir::Allocate>(
-      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
-}
-
 namespace {
 
 class ExprFlattener : private kir::IrVisitor {
@@ -409,14 +405,252 @@ std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
 }
 
-IterDomain* caMapExactConcreteId(IterDomain* id) {
-  return GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
+namespace {
+
+class ReplaceExprInput : private kir::ExprMutator {
+ public:
+  static std::vector<Expr*> replace(
+      const std::vector<Expr*>& exprs,
+      const std::unordered_map<Val*, Val*>& replacement_map) {
+    ReplaceExprInput replacer(replacement_map);
+    replacer.traverseAndInsert(exprs);
+    return replacer.exprs_;
+  }
+
+ private:
+  ReplaceExprInput(const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {}
+
+  using kir::ExprMutator::handle;
+
+  c10::optional<std::unordered_map<Val*, Val*>> getMaybeInputReplacementMap(
+      Expr* expr) {
+    bool need_replacement = false;
+
+    std::unordered_map<Val*, Val*> replaced_val;
+    for (auto in : expr->inputs()) {
+      auto replace_it = replacement_map_.find(in);
+      if (replace_it != replacement_map_.end()) {
+        need_replacement = true;
+        replaced_val[in] = replace_it->second;
+      } else {
+        replaced_val[in] = in;
+      }
+    }
+    if (need_replacement) {
+      return c10::optional<std::unordered_map<Val*, Val*>>(replaced_val);
+    } else {
+      return c10::nullopt;
+    }
+  }
+
+  // Copy predicates and register expression replacement
+  void registerReplaceWithPredicate(Expr* old_expr, Expr* new_expr) {
+    new_expr = new_expr->withPredicate(old_expr->predicate())
+                   ->withWritePredicate(old_expr->writePredicate());
+    registerReplace(old_expr, new_expr);
+  }
+
+  void handle(UnaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<UnaryOp>(
+          node->getUnaryOpType(), node->out(), replaced_inputs->at(node->in()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(BinaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<BinaryOp>(
+          node->getBinaryOpType(),
+          node->out(),
+          replaced_inputs->at(node->lhs()),
+          replaced_inputs->at(node->rhs()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(TernaryOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<TernaryOp>(
+          node->getTernaryOpType(),
+          node->out(),
+          replaced_inputs->at(node->in1()),
+          replaced_inputs->at(node->in2()),
+          replaced_inputs->at(node->in3()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(RNGOp* node) final {
+    // RNGOp has no input
+    return;
+  }
+
+  void handle(ReductionOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<ReductionOp>(
+          node->getReductionOpType(),
+          node->init(),
+          node->out(),
+          replaced_inputs->at(node->in()),
+          node->isAllreduce());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(GroupedReductionOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      const auto& map = replaced_inputs.value();
+      auto inputs = node->inputs();
+      for (auto& input : inputs) {
+        auto it = map.find(input);
+        if (it != map.end()) {
+          input = it->second;
+        }
+      }
+      auto replacement = IrBuilder::create<GroupedReductionOp>(
+          node->getReductionOpTypes(),
+          node->initVals(),
+          node->outputs(),
+          inputs,
+          node->isAllreduce());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+  void handle(BroadcastOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<BroadcastOp>(
+          node->out(),
+          replaced_inputs->at(node->in()),
+          node->getBroadcastDimFlags());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(WelfordOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<WelfordOp>(
+          node->outAvg(),
+          node->outVar(),
+          node->outN(),
+          node->initAvg(),
+          node->initVar(),
+          node->initN(),
+          replaced_inputs->at(node->inAvg()),
+          replaced_inputs->at(node->inVar()),
+          replaced_inputs->at(node->inN()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(MmaOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<MmaOp>(
+          node->out(),
+          replaced_inputs->at(node->inA()),
+          replaced_inputs->at(node->inB()),
+          node->init(),
+          node->options());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(LoadStoreOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<LoadStoreOp>(
+          node->opType(), node->out(), node->in());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+ private:
+  const std::unordered_map<Val*, Val*>& replacement_map_;
+};
+
+} // namespace
+
+std::vector<Expr*> replaceInputsInExpr(
+    const std::vector<Expr*>& exprs,
+    const std::unordered_map<Val*, Val*>& replacement_map) {
+  return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
 }
 
 } // namespace ir_utils
 
-namespace loop_utils {
+namespace lower_utils {
+
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (expr->isA<kir::BlockSync>()) {
+    return true;
+  }
+
+  if (!ir_utils::isTvOp(expr)) {
+    return false;
+  }
+
+  if (!(ir_utils::isReductionOp(expr) || expr->isA<BroadcastOp>() ||
+        expr->isA<kir::GridBroadcast>())) {
+    return false;
+  }
+
+  // GroupedReductionOp can have multiple output TVs, but they must be
+  // parallelized in the same way, so just checking one of them is enough.
+  auto tv = ir_utils::getTvOutput(expr);
+
+  if (tv->hasBlockReduction() || tv->hasGridReduction()) {
+    return true;
+  } else if (expr->isA<BroadcastOp>()) {
+    const ParallelTypeBitmap pt_map =
+        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
+    return pt_map.any();
+  }
+
+  return false;
+}
+
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init) {
+  const std::vector<IterDomain*> new_buffer_ids = {
+      IrBuilder::create<IterDomain>(IterDomainBuilder(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
+  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
+  return IrBuilder::create<kir::Allocate>(
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
+}
 
 BasicAllocInfo getAllocInformation(
     const TensorView* tv,
@@ -463,7 +697,7 @@ BasicAllocInfo getAllocInformation(
 
     // Allocation of a double buffered tensor is placed outside its
     // double buffer axis.
-    if (tv->isDoubleBuffered() &&
+    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
         tv->axis(info.alloc_pos) ==
             gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
       outer_alloc_found = true;
@@ -493,193 +727,18 @@ BasicAllocInfo getAllocInformation(
   return info;
 }
 
-} // namespace loop_utils
-
-namespace {
-
-class ReplaceExprInput : private kir::ExprMutator {
- public:
-  static std::vector<Expr*> replace(
-      const std::vector<Expr*>& exprs,
-      const std::unordered_map<Val*, Val*>& replacement_map) {
-    ReplaceExprInput replacer(replacement_map);
-    replacer.traverseAndInsert(exprs);
-    return replacer.exprs_;
+//! Implementing this in here to avoid including too many headers
+//!  in type.cpp. Conceptually this should be a generic definition
+//!  rather than a util.
+bool supportInlinePredicate(Expr* expr) {
+  if (ir_utils::isCpAsyncOp(expr)) {
+    return true;
   }
-
- private:
-  ReplaceExprInput(const std::unordered_map<Val*, Val*>& replacement_map)
-      : replacement_map_(replacement_map) {}
-
-  using kir::ExprMutator::handle;
-
-  c10::optional<std::unordered_map<Val*, Val*>> getMaybeInputReplacementMap(
-      Expr* expr) {
-    bool need_replacement = false;
-
-    std::unordered_map<Val*, Val*> replaced_val;
-    for (auto in : expr->inputs()) {
-      auto replace_it = replacement_map_.find(in);
-      if (replace_it != replacement_map_.end()) {
-        need_replacement = true;
-        replaced_val[in] = replace_it->second;
-      } else {
-        replaced_val[in] = in;
-      }
-    }
-    if (need_replacement) {
-      return c10::optional<std::unordered_map<Val*, Val*>>(replaced_val);
-    } else {
-      return c10::nullopt;
-    }
-  }
-
-  // Copy predicates and register expression replacement
-  void registerReplaceWithPredicate(Expr* old_expr, Expr* new_expr) {
-    new_expr->setPredicate(old_expr->predicate());
-    new_expr->setWritePredicate(old_expr->writePredicate());
-    registerReplace(old_expr, new_expr);
-  }
-
-  void handle(UnaryOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<UnaryOp>(
-          node->getUnaryOpType(),
-          node->out(),
-          replaced_inputs.value().at(node->in()));
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(BinaryOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<BinaryOp>(
-          node->getBinaryOpType(),
-          node->out(),
-          replaced_inputs.value().at(node->lhs()),
-          replaced_inputs.value().at(node->rhs()));
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(TernaryOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<TernaryOp>(
-          node->getTernaryOpType(),
-          node->out(),
-          replaced_inputs.value().at(node->in1()),
-          replaced_inputs.value().at(node->in2()),
-          replaced_inputs.value().at(node->in3()));
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(ReductionOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<ReductionOp>(
-          node->getReductionOpType(),
-          node->init(),
-          node->out(),
-          replaced_inputs.value().at(node->in()),
-          node->isAllreduce());
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(GroupedReductionOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      const auto& map = replaced_inputs.value();
-      auto inputs = node->inputs();
-      for (auto& input : inputs) {
-        auto it = map.find(input);
-        if (it != map.end()) {
-          input = it->second;
-        }
-      }
-      auto replacement = IrBuilder::create<GroupedReductionOp>(
-          node->getReductionOpTypes(),
-          node->initVals(),
-          node->outputs(),
-          inputs,
-          node->isAllreduce());
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-  void handle(BroadcastOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<BroadcastOp>(
-          node->out(),
-          replaced_inputs.value().at(node->in()),
-          node->getBroadcastDimFlags());
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(WelfordOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<WelfordOp>(
-          node->outAvg(),
-          node->outVar(),
-          node->outN(),
-          node->initAvg(),
-          node->initVar(),
-          node->initN(),
-          replaced_inputs.value().at(node->inAvg()),
-          replaced_inputs.value().at(node->inVar()),
-          replaced_inputs.value().at(node->inN()));
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(MmaOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<MmaOp>(
-          node->out(),
-          replaced_inputs.value().at(node->inA()),
-          replaced_inputs.value().at(node->inB()),
-          node->init(),
-          node->options());
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
-  void handle(LoadStoreOp* node) final {
-    auto replaced_inputs = getMaybeInputReplacementMap(node);
-    if (replaced_inputs.has_value()) {
-      auto replacement = IrBuilder::create<LoadStoreOp>(
-          node->opType(), node->out(), node->in());
-      registerReplaceWithPredicate(node, replacement);
-    }
-  }
-
- private:
-  const std::unordered_map<Val*, Val*>& replacement_map_;
-};
-
-} // namespace
-
-std::vector<Expr*> replaceInputsInExpr(
-    const std::vector<Expr*>& exprs,
-    const std::unordered_map<Val*, Val*>& replacement_map) {
-  return ReplaceExprInput::replace(exprs, replacement_map);
+  // TODO: build out support.
+  return false;
 }
 
-bool isTrivialIterDomain(IterDomain* id) {
-  auto pt = id->getParallelType();
-  return id->isReduction() || id->isBroadcast() || id->isStride() ||
-      (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
-      pt == ParallelType::Vectorize ||
-      (isParallelTypeThread(pt) &&
-       !GpuLower::current()->haloInfo().hasHaloWidth(id));
-}
+} // namespace lower_utils
 
 } // namespace cuda
 } // namespace fuser

@@ -52,6 +52,9 @@ jobs:
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      {%- if config.pytorch_extra_install_requirements is defined %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -78,7 +81,7 @@ jobs:
     !{{ upload.binary_env(config) }}
     steps:
       !{{ common.setup_rocm_linux() }}
-      - uses: !{{ common.download_artifact_s3_action }}
+      - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}
@@ -89,7 +92,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: !{{ config["container_image"] }}
       - name: Test Pytorch binary

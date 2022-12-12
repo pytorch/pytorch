@@ -1,10 +1,17 @@
 // Returns the frequency of elements of input non-negative integer tensor.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
-#include <tuple>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/bincount_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -20,15 +27,15 @@ Tensor _bincount_cpu_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
-    return native::zeros({minlength}, kLong);
+    return at::zeros({minlength}, kLong);
   }
   if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.size(0) != self.size(0)) {
-    AT_ERROR("input and weights should have the same length");
+  if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
+    AT_ERROR("weights should be 1-d and have the same length as input");
   }
 
   Tensor output;
@@ -38,7 +45,7 @@ Tensor _bincount_cpu_template(
 
   const input_t* self_p = self.data_ptr<input_t>();
   if (has_weights) {
-    output = native::zeros(
+    output = at::zeros(
         {nbins},
         optTypeMetaToScalarType(weights.options().dtype_opt()),
         weights.options().layout_opt(),
@@ -50,7 +57,7 @@ Tensor _bincount_cpu_template(
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
-    output = native::zeros({nbins}, kLong);
+    output = at::zeros({nbins}, kLong);
     int64_t* output_p = output.data_ptr<int64_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += 1L;

@@ -18,11 +18,13 @@ auto parseDebugDumpOptions() {
   std::unordered_map<DebugDumpOption, bool> options_map = {
       {DebugDumpOption::FusionIr, false},
       {DebugDumpOption::FusionIrMath, false},
+      {DebugDumpOption::FusionIrPresched, false},
       {DebugDumpOption::KernelIr, false},
       {DebugDumpOption::ComputeAtMap, false},
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::CudaToFile, false},
+      {DebugDumpOption::DebugInfo, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
       {DebugDumpOption::FusionSegmenterLog, false},
@@ -35,7 +37,14 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
-      {DebugDumpOption::PerfDebugVerbose, false}};
+      {DebugDumpOption::PerfDebugVerbose, false},
+      {DebugDumpOption::PythonDefinition, false},
+      {DebugDumpOption::PythonFrontendDebug, false},
+      {DebugDumpOption::TransformPropagator, false},
+      {DebugDumpOption::Cubin, false},
+      {DebugDumpOption::Ptx, false},
+      {DebugDumpOption::BankConflictInfo, false},
+      {DebugDumpOption::SyncMap, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -46,6 +55,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionIr] = true;
       } else if (token == "fusion_ir_math") {
         options_map[DebugDumpOption::FusionIrMath] = true;
+      } else if (token == "fusion_ir_presched") {
+        options_map[DebugDumpOption::FusionIrPresched] = true;
       } else if (token == "kernel_ir") {
         options_map[DebugDumpOption::KernelIr] = true;
       } else if (token == "ca_map") {
@@ -56,6 +67,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::CudaFull] = true;
       } else if (token == "cuda_to_file") {
         options_map[DebugDumpOption::CudaToFile] = true;
+      } else if (token == "debug_info") {
+        options_map[DebugDumpOption::DebugInfo] = true;
       } else if (token == "launch_param") {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
@@ -82,17 +95,33 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
+      } else if (token == "python_definition") {
+        options_map[DebugDumpOption::PythonDefinition] = true;
+      } else if (token == "python_frontend_debug") {
+        options_map[DebugDumpOption::PythonFrontendDebug] = true;
+      } else if (token == "transform_propagator") {
+        options_map[DebugDumpOption::TransformPropagator] = true;
+      } else if (token == "cubin") {
+        options_map[DebugDumpOption::Cubin] = true;
+      } else if (token == "ptx") {
+        options_map[DebugDumpOption::Ptx] = true;
+      } else if (token == "bank_conflict") {
+        options_map[DebugDumpOption::BankConflictInfo] = true;
+      } else if (token == "sync_map") {
+        options_map[DebugDumpOption::SyncMap] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid debug dump option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
-            "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
-            "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n");
+            "\tfusion_ir, fusion_ir_math, fusion_ir_presched, kernel_ir, ca_map,\n",
+            "\tcuda_kernel, cuda_full, cuda_to_file, debug_info, launch_param,\n",
+            "\tsegmented_fusion, fusion_args, kernel_args, dump_eff_bandwidth,\n",
+            "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
+            "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
+            "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
+            "\ttransform_propagator, cubin, ptx, bank_conflict, sync_map\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -106,12 +135,12 @@ auto parseDebugDumpOptions() {
 auto parseDisableOptions() {
   std::unordered_map<DisableOption, bool> options_map = {
       {DisableOption::ArchCheck, false},
+      {DisableOption::CompileToSass, false},
       {DisableOption::Fallback, false},
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
       {DisableOption::Nvtx, false},
-      {DisableOption::PredicateElimination, false},
-      {DisableOption::UnrollWithRng, false}};
+      {DisableOption::PredicateElimination, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DISABLE")) {
     c10::string_view options_view(dump_options);
@@ -120,9 +149,13 @@ auto parseDisableOptions() {
       const auto token = options_view.substr(0, end_pos);
       if (token == "arch_check") {
         options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "compile_to_sass") {
+        options_map[DisableOption::CompileToSass] = true;
       } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
+        TORCH_WARN(
+            "fmad is disabled for nvrtc, which could negatively affect performance. Try removing `fma` from env variable PYTORCH_NVFUSER_DISABLE for optimal performance.");
         options_map[DisableOption::Fma] = true;
       } else if (token == "index_hoist") {
         options_map[DisableOption::IndexHoist] = true;
@@ -130,16 +163,13 @@ auto parseDisableOptions() {
         options_map[DisableOption::Nvtx] = true;
       } else if (token == "predicate_elimination") {
         options_map[DisableOption::PredicateElimination] = true;
-      } else if (token == "unroll_with_rng") {
-        options_map[DisableOption::UnrollWithRng] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n",
-            "unroll_with_rng");
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -173,10 +203,11 @@ auto parseEnableOptions() {
       } else {
         TORCH_CHECK(
             false,
-            "Invalid disable option: '",
+            "Invalid enable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tcomplex, kernel_profile");
+            "\tcomplex, kernel_profile, linear_decomposition,",
+            "conv_decomposition");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -265,9 +296,76 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type) {
   auto opt_device = tensor_type.device();
   auto opt_dim = tensor_type.dim();
   auto opt_numel = tensor_type.numel();
-  return opt_device.has_value() && opt_device.value().is_cpu() &&
+  return opt_device.has_value() && opt_device->is_cpu() &&
       opt_dim.has_value() && opt_numel.has_value() && opt_dim.value() == 0 &&
       opt_numel.value() == 1;
+}
+
+// Check device of TensorType in all inputs ensure all tensors are on cuda
+// devices.
+// return common device index (or -1 if device differs).
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
+  int index = -1;
+  for (const auto& input : inputs) {
+    if (!input.isTensor()) {
+      continue;
+    }
+    const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
+    TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
+    auto cur_index = device.index();
+    if (index != -1 && index != cur_index) {
+      return -1;
+    }
+    index = (int)cur_index; // NOLINT
+  }
+  return index;
+}
+
+KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs) {
+  // Save 1 more bit besides the sign bit to be conservative
+  constexpr int64_t most_positive_int32_index =
+      std::numeric_limits<int>::max() / 2;
+  constexpr int64_t most_negative_int32_index =
+      std::numeric_limits<int>::min() / 2;
+
+  // Check all runtime inputs, and if any one of
+  //  the input's index exceeds max_int32 will
+  //  fall back to int64 indexing
+  for (auto ivalue_input : inputs) {
+    if (ivalue_input.isTensor()) {
+      auto tensor_input = ivalue_input.toTensor();
+      int64_t tensor_most_positive_index = 0;
+      int64_t tensor_most_negative_index = 0;
+      for (auto dim_i = 0; dim_i < tensor_input.ndimension(); dim_i++) {
+        // Ignore broadcast dimensions
+        if (tensor_input.size(dim_i) > 1) {
+          // accumulate based on the sign of stride
+          if (tensor_input.stride(dim_i) > 0) {
+            // Acuumulate positive stride
+            tensor_most_positive_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          } else {
+            // Acuumulate negative stride
+            tensor_most_negative_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          }
+        }
+      }
+
+      // Fall back to int64 if it can be either too positive
+      //  or too negative.
+      if (tensor_most_positive_index > most_positive_int32_index ||
+          tensor_most_negative_index < most_negative_int32_index) {
+        return KernelIndexMode::INT64;
+      }
+    }
+  }
+  // return index mode as int32
+  return KernelIndexMode::INT32;
 }
 
 bool isDebugDumpEnabled(DebugDumpOption option) {
@@ -275,12 +373,12 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
   return dump_options.at(option);
 }
 
-bool isDisabled(DisableOption option) {
+bool isOptionDisabled(DisableOption option) {
   const static auto options = parseDisableOptions();
   return options.at(option);
 }
 
-bool isEnabled(EnableOption option) {
+bool isOptionEnabled(EnableOption option) {
   const static auto options = parseEnableOptions();
   return options.at(option);
 }
@@ -289,7 +387,8 @@ bool useFallback() {
   // Keep this env var for compatibility
   const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
   bool fallback_disabled = disable_fb_env ? atoi(disable_fb_env) : false;
-  fallback_disabled = fallback_disabled || isDisabled(DisableOption::Fallback);
+  fallback_disabled =
+      fallback_disabled || isOptionDisabled(DisableOption::Fallback);
 
   return !fallback_disabled;
 }

@@ -15,7 +15,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
@@ -165,6 +165,12 @@ def backward(
             not provided, the gradient is accumulated into all the leaf Tensors that
             were used to compute the attr::tensors.
     """
+    if torch._C._are_functorch_transforms_active():
+        raise RuntimeError(
+            "backward() called inside a functorch transform. This is not "
+            "supported, please use functorch.grad or functorch.vjp instead "
+            "or call backward() outside of functorch transforms.")
+
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
         if grad_tensors is None:
@@ -326,15 +332,31 @@ if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
-from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
-                                _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available,
-                                _record_function_with_args_enter, _record_function_with_args_exit,
-                                _supported_activities, _add_metadata_json, SavedTensor,
-                                _push_saved_tensors_default_hooks, _pop_saved_tensors_default_hooks)
+from torch._C._autograd import (
+    _add_metadata_json,
+    _disable_profiler,
+    _disable_profiler_legacy,
+    _enable_profiler,
+    _enable_profiler_legacy,
+    _enable_record_function,
+    _kineto_step,
+    _KinetoEvent,
+    _pop_saved_tensors_default_hooks,
+    _prepare_profiler,
+    _profiler_enabled,
+    _ProfilerResult,
+    _push_saved_tensors_default_hooks,
+    _record_function_with_args_enter,
+    _record_function_with_args_exit,
+    _set_empty_test_observer,
+    _supported_activities,
+    DeviceType,
+    kineto_available,
+    ProfilerEvent,
+    SavedTensor,
+)
 
-from torch._C._autograd import (_ProfilerResult, _KinetoEvent, _kineto_step,
-                                _prepare_profiler, _enable_profiler, _disable_profiler)
+from torch._C._profiler import ProfilerActivity, ProfilerConfig, ProfilerState
 
 from . import profiler
 

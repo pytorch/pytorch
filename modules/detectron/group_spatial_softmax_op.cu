@@ -103,7 +103,7 @@ bool GroupSpatialSoftmaxOp<float, CUDAContext>::RunOnDevice() {
   int A = D / num_classes_;
 
   auto* P = Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
-  DCHECK_EQ(X.ndim(), 4);
+  TORCH_DCHECK_EQ(X.ndim(), 4);
 
   const float* Xdata = X.data<float>();
   float* Pdata = P->mutable_data<float>();
@@ -123,7 +123,7 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(1);
 
 
-  DCHECK_EQ(Y.ndim(), 4);
+  TORCH_DCHECK_EQ(Y.ndim(), 4);
 
   int N = Y.dim32(0);
   int D = Y.dim32(1);

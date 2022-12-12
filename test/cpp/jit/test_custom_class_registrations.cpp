@@ -222,7 +222,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     }
 
     if (!output_name_) {
-      throw std::runtime_error("Output name not specififed!");
+      throw std::runtime_error("Output name not specified!");
     }
 
     return environment.at(*output_name_);
@@ -275,6 +275,16 @@ struct ReLUClass : public torch::CustomClassHolder {
 };
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<ScalarTypeClass>("_ScalarTypeClass")
+      .def(torch::init<at::ScalarType>())
+      .def_pickle(
+          [](const c10::intrusive_ptr<ScalarTypeClass>& self) {
+            return std::make_tuple(self->scalar_type_);
+          },
+          [](std::tuple<at::ScalarType> s) {
+            return c10::make_intrusive<ScalarTypeClass>(std::get<0>(s));
+          });
+
   m.class_<ReLUClass>("_ReLUClass")
       .def(torch::init<>())
       .def("run", &ReLUClass::run);

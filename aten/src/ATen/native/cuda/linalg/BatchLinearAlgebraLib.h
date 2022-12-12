@@ -59,10 +59,6 @@ void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tenso
 
 #ifdef USE_CUSOLVER
 
-// entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
-Tensor _inverse_helper_cuda_lib(const Tensor& self);
-Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs);
-
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 void svd_cusolver(const Tensor& A, const bool full_matrices, const bool compute_uv,
   const c10::optional<c10::string_view>& driver, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& info);
@@ -90,8 +86,6 @@ namespace cuda { namespace detail {
 struct LinalgDispatch {
    std::tuple<Tensor, Tensor> (*symeig_helper)(const Tensor& self, bool eigenvectors, bool upper);
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
-   std::tuple<Tensor, Tensor> (*legacy_lstsq)(const Tensor &B, const Tensor &A);
-   Tensor& (*inv_out_helper)(Tensor &result, Tensor& infos_lu, Tensor& infos_getri);
 };
 C10_EXPORT void registerLinalgDispatch(const LinalgDispatch&);
 }} // namespace cuda::detail

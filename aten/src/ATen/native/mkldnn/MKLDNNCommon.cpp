@@ -117,6 +117,10 @@ ideep::tensor itensor_from_tensor(const Tensor& tensor) {
   }
 }
 
+int set_verbose(int level) {
+    return ideep::utils::set_verbose(level);
+}
+
 }}
 
 #endif // AT_MKLDNN_ENABLED()

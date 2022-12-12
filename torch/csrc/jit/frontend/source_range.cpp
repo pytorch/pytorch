@@ -217,6 +217,9 @@ void SourceRange::print_with_context(
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
   size_t end_line = range_end;
+  if (begin_line > str.size()) {
+    return;
+  }
   while (begin_line > 0 && str[begin_line - 1] != '\n')
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')

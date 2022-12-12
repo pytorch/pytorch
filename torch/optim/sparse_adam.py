@@ -40,7 +40,9 @@ class SparseAdam(Optimizer):
         sparse_params = []
         for index, param in enumerate(params):
             if isinstance(param, dict):
-                for d_index, d_param in enumerate(param.get("params", [])):
+                # given param group, convert given params to a list first before iterating
+                param['params'] = list(param.get("params", []))
+                for d_index, d_param in enumerate(param['params']):
                     if d_param.is_sparse:
                         sparse_params.append([index, d_index])
             elif param.is_sparse:
@@ -58,7 +60,7 @@ class SparseAdam(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -75,7 +77,7 @@ class SparseAdam(Optimizer):
             eps = group['eps']
             lr = group['lr']
             beta1, beta2 = group['betas']
-            maximize = group['maximize']
+            maximize = group.get('maximize', False)
 
             for p in group['params']:
                 if p.grad is not None:

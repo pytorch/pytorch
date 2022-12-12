@@ -210,11 +210,11 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
     auto tv_inp = inp->as<TensorView>();
 
-    // Change for welford Op, we want the users of all outputs of welfordOp
-    //  to use a single predicate name.
+    // If tv_inp was an output of a multi-output expression, just change it to a
+    // consistent sibling to use a single predicate name.
     if (auto tv_def = tv_inp->definition()) {
-      if (auto wop = dynamic_cast<WelfordOp*>(tv_def)) {
-        tv_inp = wop->out()->as<TensorView>();
+      if (tv_def->outputs().size() > 1) {
+        tv_inp = ir_utils::getTvOutput(tv_def);
       }
     }
 
@@ -237,7 +237,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
           id_reductions.set(id->getParallelType());
         }
         if (id->isBroadcast() &&
-            GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+            GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
                 id)) {
           id_bcasts.set(id->getParallelType());
         }
@@ -285,6 +285,184 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   }
 }
 
+namespace {
+
+//! A simple backward data flow pass:
+//!  This pass propagates information backward to annotate "redundant use
+//!  chain"'s.
+//! The reason this is needed is that, say for example, if we have a chain
+//! of register-to-register ops that begins with a redundant shared mem write
+//! and ends with an op that non-redundantly uses the result, we'd need to
+//! insert a sync at the begining of the register-to-register chain.
+//!
+//! The same mechanism also applies in the case of a register/sharedmem chain
+//! that starts and ends with global memory read/write.
+//!
+//! The propagation rule is summarized as follows:
+//!
+//!   Shared TV val:
+//!      Reset all block redundant info to its own redundant write info
+//!      Backpropagate grid redundant info
+//!   Global TV val:
+//!      Reset all redundant info to its own redundant write info
+//!   Local Tv val:
+//!      Backpropagate all redundant info
+//!   Exprs:
+//!      Propagate redundant info backwards from outputs to inputs:
+//!        For each parallel type,
+//!          The parallel type is redundantly used in the expr input
+//!          only if all of the outputs redundantly use the same type.
+class RedundantUseAnalysis : BackwardVisitor {
+ public:
+  RedundantUseAnalysis(Fusion* fusion, const ThreadPredicateMap& pred_map)
+      : fusion_(fusion), pred_map_(pred_map) {
+    traverseTo(fusion, fusion->terminatingMathVals());
+  }
+
+  //! Returns a bit map signifying the parallel dimensions
+  //!  on which the given tv is redundantly used. On these
+  //!  dimensions not all threads/blocks are required to
+  //!  hold valid value for their dependent computations.
+  ParallelTypeBitmap getRedundantUseBitMap(const TensorView* tv) {
+    // Since all tv's consumers are visited at this point, we
+    //  can aggregate the final redundant use info for this tv.
+    if (fusion_->unordered_uses(tv).empty()) {
+      // Base case, un-used is also not redundantly used
+      return ParallelTypeBitmap();
+    } else {
+      // Aggregate redundant use as a conjunction of all
+      //  consumer's redundant consumer info propagated
+      //  backward from their consumer chains.
+      ParallelTypeBitmap redundant_use;
+      redundant_use.setAllBID();
+      redundant_use.setAllTID();
+      for (auto expr : fusion_->unordered_uses(tv)) {
+        redundant_use &= redundant_expr_use_map_.at(expr);
+      }
+
+      return redundant_use;
+    }
+  }
+
+ private:
+  using BackwardVisitor::handle;
+
+  void handle(TensorView* tv) final {
+    auto redundant_tv_map = pred_map_.getPredicateInfo(tv).redundant_types;
+
+    // Setup the info to propagate backward for the producer tv's and
+    //  expressions.
+    ParallelTypeBitmap& redundant_consumer_map =
+        redundant_consumer_parallel_type_map_[tv];
+
+    // Initialize the use map to the redundant pred result
+    redundant_consumer_map = redundant_tv_map;
+
+    if (tv->getMemoryType() == MemoryType::Shared) {
+      backPropagateRedundantUse(
+          redundant_consumer_map,
+          tv,
+          false, // no propagate TID redundant use for shared tv
+          true //  propagate BID redundant use
+      );
+
+    } else if (tv->getMemoryType() == MemoryType::Local) {
+      backPropagateRedundantUse(
+          redundant_consumer_map,
+          tv,
+          true, // propagate TID redundant use
+          true // propagate BID redundant use
+      );
+    }
+  }
+
+  void backPropagateRedundantUse(
+      ParallelTypeBitmap& use_map,
+      TensorView* tv,
+      bool propagate_tid,
+      bool propagate_bid) {
+    // Clear the propagated part of the original result
+    if (propagate_bid) {
+      use_map.setAllBID();
+    }
+    if (propagate_tid) {
+      use_map.setAllTID();
+    }
+
+    for (auto expr : fusion_->unordered_uses(tv)) {
+      // Assuming all consumer expressions have been
+      //  visited at this point since we are traversing
+      //  backward.
+      auto expr_use_map = redundant_expr_use_map_.at(expr);
+      // Clear the part of expression use map that does not
+      //  need to be propagated.
+      if (!propagate_bid) {
+        expr_use_map.setAllBID();
+      }
+      if (!propagate_tid) {
+        expr_use_map.setAllTID();
+      }
+
+      // Accumulate expression redundant usage
+      //  This implements the `only if all` part in
+      //   the discussion above.
+      use_map &= expr_use_map;
+    }
+  }
+
+  void handle(Expr* expr) final {
+    if (ir_utils::isTvOp(expr)) {
+      // Initialize redundant info for current expr
+      c10::optional<ParallelTypeBitmap> maybe_expr_pred_map;
+
+      for (auto consumer_tv :
+           ir_utils::filterByType<TensorView>(expr->outputs())) {
+        auto tv_redundant_bitmap =
+            redundant_consumer_parallel_type_map_.at(consumer_tv);
+
+        if (maybe_expr_pred_map.has_value()) {
+          // Accumulate redundant info of this tv output.
+          maybe_expr_pred_map.value() &= tv_redundant_bitmap;
+        } else {
+          // Copy the tv's redundant info as the first valid case.
+          maybe_expr_pred_map = tv_redundant_bitmap;
+        }
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          maybe_expr_pred_map.has_value(), "TV op not having a tv output");
+      redundant_expr_use_map_[expr] = maybe_expr_pred_map.value();
+    }
+  }
+
+ private:
+  // Populated redundant use information on the used tv's
+  //  This map provides information on if the given tv does not require
+  // valid data from its producer on any parallel dimensions.
+  // For example:
+  //  T1_local = T0_shared[...]
+  //  if(tid.x == 0)
+  //    T2_shared[...] = T1_local[...]
+  // Then tidx would be redundant consumer parallel type
+  //  for T1, as T1 is local tensor, and only threads satisfying
+  //  tidx == 0 would need to provide a valid data.
+  // In this case, not all threads would need to read correct data
+  //  from T0_shared, which would help remove some sync's.
+  std::unordered_map<const TensorView*, ParallelTypeBitmap>
+      redundant_consumer_parallel_type_map_;
+
+  // Populated redundant use information on the used tv expressions.
+  std::unordered_map<const Expr*, ParallelTypeBitmap> redundant_expr_use_map_;
+
+  // Short cut to the owning fusion of this analysis.
+  Fusion* fusion_ = nullptr;
+
+  // Short cut to the active pred map analysis this pass is running as part of.
+  const ThreadPredicateMap& pred_map_;
+};
+
+} // namespace
+
 void ThreadPredicateMap::build(Fusion* fusion) {
   FUSER_PERF_SCOPE("GpuLower::Lower::ThreadPredicateMap");
 
@@ -298,6 +476,15 @@ void ThreadPredicateMap::build(Fusion* fusion) {
     updateBitSet(expr);
   }
   updated_tvs_.clear();
+  populateRedundantUseMap(fusion);
+}
+
+void ThreadPredicateMap::populateRedundantUseMap(Fusion* fusion) {
+  RedundantUseAnalysis redundant_use(fusion, *this);
+  for (auto& it : thread_predicates_) {
+    it.second.redundant_use_types =
+        redundant_use.getRedundantUseBitMap(it.first);
+  }
 }
 
 ThreadPredicateMap::const_iterator ThreadPredicateMap::find(
@@ -388,7 +575,8 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
 
   for (auto id : iter_domains) {
     if (!id->isBroadcast() ||
-        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(id)) {
+        !GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
+            id)) {
       continue;
     }
     if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
@@ -397,6 +585,23 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
   }
 
   return parallel_broadcast & at(tv).limited_types;
+}
+
+ParallelTypeBitmap ThreadPredicateMap::getRedundantConsumerType(
+    Expr* expr) const {
+  c10::optional<ParallelTypeBitmap> result;
+  for (auto out_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
+    auto out_tv_redundant_map = getPredicateInfo(out_tv).redundant_use_types;
+    if (!result.has_value()) {
+      result = out_tv_redundant_map;
+    } else {
+      result.value() &= out_tv_redundant_map;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      result.has_value(), "ThreadPredicateMap : TV op assumed");
+  return result.value();
 }
 
 void ThreadPredicateMap::markAsUpdated(const TensorView* tv) {
@@ -410,6 +615,7 @@ void ThreadPredicateMap::print() const {
     std::cout << "T" << kv.first->name();
     std::cout << " {" << kv.second.limited_types.toString() << "}\n";
     std::cout << "{" << kv.second.redundant_types.toString() << "}\n";
+    std::cout << "{" << kv.second.redundant_use_types.toString() << "}\n";
   }
   std::cout << "--------------------------------\n\n";
 }

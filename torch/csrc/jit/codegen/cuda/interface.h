@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
@@ -34,6 +35,9 @@ struct CudaFuserInterface {
   void (*fn_insert_profile_inodes)(ProfilingRecord* pr) = nullptr;
   bool (*fn_profile_n)(const Node*) = nullptr;
   bool (*fn_skip_n)(const std::string&, bool flip) = nullptr;
+  AnalyzeViewConstraint (*fn_analyze_view)(
+      const std::vector<int64_t>& original_sizes,
+      const std::vector<int64_t>& new_sizes) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
@@ -47,6 +51,10 @@ TORCH_API void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
 TORCH_API bool profileNode(const Node* node);
 
 TORCH_API bool skipNode(const std::string& symbol_str, bool flip = true);
+
+TORCH_API AnalyzeViewConstraint getViewConstraint(
+    const std::vector<int64_t>& original_sizes,
+    const std::vector<int64_t>& new_sizes);
 
 TORCH_API bool complyWith(
     const at::Tensor& tensor,

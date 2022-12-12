@@ -4,8 +4,8 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from torch.ao.quantization.quantization_types import Pattern
-from .quantization_patterns import (
+from torch.ao.quantization.utils import Pattern
+from .quantize_handler import (
     QuantizeHandler,
 )
 from ..qconfig import (
@@ -17,8 +17,8 @@ from ..utils import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-
-from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
+from torch.nn.utils.parametrize import type_before_parametrizations
+from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set, Iterable
 
 
 # TODO: revisit this list. Many helper methods shouldn't be public
@@ -27,7 +27,8 @@ __all__ = [
     "find_matches",
 ]
 
-
+# TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
+# would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
 _MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
@@ -52,13 +53,16 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, MatchAllNode):
         return True
 
+    if node == pattern:
+        return True
+
     if not isinstance(node, Node) or len(node.users) > max_uses:
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
             return False
-        if not type(modules[node.target]) == self_match:
+        if not type_before_parametrizations(modules[node.target]) == self_match:
             return False
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:
@@ -132,6 +136,8 @@ def find_matches(
         if isinstance(node_pattern, Node):
             match_map[node_pattern.name] = (
                 last_node, matched_node_pattern, pattern, match_value)
+        elif not isinstance(node_pattern, Iterable):
+            return
         else:
             for n in node_pattern:
                 _recursive_record_node_in_match_map(last_node, match_map, n, matched_node_pattern, pattern, match_value)
@@ -145,6 +151,7 @@ def find_matches(
             match_map):
         if isinstance(pattern, tuple):
             s, *args = pattern
+            is_single_arg = len(args) == 1
             current_node_pattern: List[Node] = []
             record_match(
                 s,
@@ -161,7 +168,17 @@ def find_matches(
                         current_node_pattern,
                         match_map)
             if len(current_node_pattern) > 1:
-                matched_node_pattern.append(tuple(current_node_pattern))
+                # current_node_pattern is  the node pattern we get from matching
+                # the subpattern with arguments of the node
+                # we use is_single_arg to recover the original structure of the pattern
+                # if the original pattern has a single argument, we will have
+                # (original_op, (original_arg, ...))
+                # otherwise, we'll have a list of arguments
+                # (original_op, arg0, arg1, arg2, ...)
+                if is_single_arg:
+                    matched_node_pattern.append(tuple(current_node_pattern))
+                else:
+                    matched_node_pattern.extend(list(current_node_pattern))
             else:
                 matched_node_pattern.append(current_node_pattern[0])
         else:

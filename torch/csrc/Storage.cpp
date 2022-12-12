@@ -99,6 +99,8 @@ static PyObject* THPStorage_pynew(
     } else if (device.type() == at::kMPS) {
       allocator = at::mps::GetMPSAllocator();
 #endif
+    } else if (device.type() == at::DeviceType::XPU) {
+      allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
     } else {
@@ -172,10 +174,9 @@ static PyObject* THPStorage_pynew(
       THPUtils_setError(
           THPStorageStr
           "(): tried to construct a storage from a sequence (%s), "
-          "but one of the items was of type %s instead of %s",
+          "but one of the items was of type %s instead of int",
           THPUtils_typename(sequence),
-          THPUtils_typename(item.get()),
-          THPUtils_typeTraits<uint8_t>::python_type_str);
+          THPUtils_typename(item.get()));
       return nullptr;
     }
     return (PyObject*)self.release();
@@ -262,9 +263,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   HANDLE_TH_ERRORS
   if (!THPByteUtils_checkReal(value)) {
     THPUtils_setError(
-        "can only set storage content with a %s, but got "
+        "can only set storage content with a int types, but got "
         "%s instead",
-        THPUtils_typeTraits<uint8_t>::python_type_str,
         THPUtils_typename(value));
     return -1;
   }
@@ -389,7 +389,7 @@ bool THPStorage_init(PyObject* module) {
 }
 
 void THPStorage_postInit(PyObject* module) {
-  THPStorageClass = PyObject_GetAttrString(module, "_UntypedStorage");
+  THPStorageClass = PyObject_GetAttrString(module, "UntypedStorage");
   if (!THPStorageClass)
     throw python_error();
 }

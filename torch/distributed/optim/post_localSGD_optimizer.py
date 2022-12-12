@@ -1,6 +1,7 @@
+import warnings
+
 import torch
 import torch.distributed.algorithms.model_averaging.averagers as averagers
-import warnings
 
 
 class PostLocalSGDOptimizer(torch.optim.Optimizer):
@@ -15,48 +16,45 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
 
     Example::
 
-        >>>  import torch
-        >>>  import torch.distributed as dist
-        >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
-        >>>  import torch.nn as nn
-        >>>  from torch.distributed.optim import PostLocalSGDOptimizer
-        >>>  from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
-        >>>    PostLocalSGDState,
-        >>>    post_localSGD_hook,
-        >>>  )
+        >>> # xdoctest: +SKIP("undefined variables")
+        >>> import torch
+        >>> import torch.distributed as dist
+        >>> import torch.distributed.algorithms.model_averaging.averagers as averagers
+        >>> import torch.nn as nn
+        >>> from torch.distributed.optim import PostLocalSGDOptimizer
+        >>> from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
+        >>>   PostLocalSGDState,
+        >>>   post_localSGD_hook,
+        >>> )
         >>>
-        >>>  model = nn.parallel.DistributedDataParallel(
-        >>>     module, device_ids=[rank], output_device=rank
-        >>>  )
+        >>> model = nn.parallel.DistributedDataParallel(
+        >>>    module, device_ids=[rank], output_device=rank
+        >>> )
         >>>
-        >>>  # Register a post-localSGD communication hook.
-        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
-        >>>  model.register_comm_hook(state, post_localSGD_hook)
+        >>> # Register a post-localSGD communication hook.
+        >>> state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
+        >>> model.register_comm_hook(state, post_localSGD_hook)
         >>>
-        >>>  # Create a post-localSGD optimizer that wraps a local optimizer.
-        >>>  # Note that ``warmup_steps`` used in ``PostLocalSGDOptimizer`` must be the same as
-        >>>  # ``start_localSGD_iter`` used in ``PostLocalSGDState``.
-        >>>  local_optim = torch.optim.SGD(params=model.parameters(), lr=0.01)
-        >>>  opt = PostLocalSGDOptimizer(
-        >>>      optim=local_optim,
-        >>>      averager=averagers.PeriodicModelAverager(period=4, warmup_steps=100)
-        >>>  )
+        >>> # Create a post-localSGD optimizer that wraps a local optimizer.
+        >>> # Note that ``warmup_steps`` used in ``PostLocalSGDOptimizer`` must be the same as
+        >>> # ``start_localSGD_iter`` used in ``PostLocalSGDState``.
+        >>> local_optim = torch.optim.SGD(params=model.parameters(), lr=0.01)
+        >>> opt = PostLocalSGDOptimizer(
+        >>>     optim=local_optim,
+        >>>     averager=averagers.PeriodicModelAverager(period=4, warmup_steps=100)
+        >>> )
         >>>
-        >>>  # In the first 100 steps, DDP runs global gradient averaging at every step.
-        >>>  # After 100 steps, DDP runs gradient averaging within each subgroup (intra-node by default),
-        >>>  # and post-localSGD optimizer runs global model averaging every 4 steps after applying the local optimizer.
-        >>>  for step in range(0, 200):
-        >>>     opt.zero_grad()
-        >>>     loss = loss_fn(output, labels)
-        >>>     loss.backward()
-        >>>     opt.step()
+        >>> # In the first 100 steps, DDP runs global gradient averaging at every step.
+        >>> # After 100 steps, DDP runs gradient averaging within each subgroup (intra-node by default),
+        >>> # and post-localSGD optimizer runs global model averaging every 4 steps after applying the local optimizer.
+        >>> for step in range(0, 200):
+        >>>    opt.zero_grad()
+        >>>    loss = loss_fn(output, labels)
+        >>>    loss.backward()
+        >>>    opt.step()
     """
 
-    def __init__(
-        self,
-        optim: torch.optim.Optimizer,
-        averager: averagers.ModelAverager
-    ):
+    def __init__(self, optim: torch.optim.Optimizer, averager: averagers.ModelAverager):
         self.optim = optim
         self.param_groups = self.optim.param_groups
         self.averager = averager
@@ -75,7 +73,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         to ensure reload does not cause unnecessary warm up again.
         """
         optim_state_dict = self.optim.state_dict()
-        optim_state_dict['step'] = self.averager.step
+        optim_state_dict["step"] = self.averager.step
         return optim_state_dict
 
     def load_state_dict(self, state_dict):
@@ -88,11 +86,13 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         it will raise a warning and initialize the model averager's step to 0.
         """
         self.optim.load_state_dict(state_dict)
-        if 'step' in state_dict:
-            self.averager.step = state_dict['step']
+        if "step" in state_dict:
+            self.averager.step = state_dict["step"]
         else:
-            warnings.warn("Loaded state dict does not contain a step counter for an averager. "
-                          "Setting step counter to 0.")
+            warnings.warn(
+                "Loaded state dict does not contain a step counter for an averager. "
+                "Setting step counter to 0."
+            )
             self.averager.step = 0
 
     def step(self):

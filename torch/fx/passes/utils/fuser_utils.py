@@ -167,26 +167,26 @@ def fuse_as_graphmodule(gm: GraphModule,
 
     return fused_gm, original_inputs, original_outputs
 
+
 def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, ...], orig_outputs: Tuple[Node, ...]):
-    # assign sub_gm into gm
-    setattr(gm, sub_gm.__class__.__name__, sub_gm)
+    # add sub_gm into gm
+    submodule_name = sub_gm.__class__.__name__
+    gm.add_submodule(submodule_name, sub_gm)
 
     # Create a call_module node in main graph.
     module_node = gm.graph.call_module(
-        sub_gm.__class__.__name__,
+        submodule_name,
         args=orig_inputs,
         kwargs=None)
 
     if len(orig_outputs) == 1:
         # main_remapping[comp.orig_outputs[0]] = module_node
-        orig_outputs[0].replace_all_uses_with(module_node)
+        orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
     else:
         for i, orig_output in enumerate(orig_outputs):
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-            orig_output.replace_all_uses_with(proxy_out)
-
-
+            orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
     return gm
 
 def erase_nodes(gm: GraphModule, nodes: NodeList):
@@ -194,7 +194,6 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
     # erase original nodes in inversed topological order
     for node in reversed(nodes):
         gm.graph.erase_node(node)
-
 
 
 def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:

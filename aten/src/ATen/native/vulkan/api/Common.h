@@ -2,41 +2,63 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
+#include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
+#define CONCAT_LITERALS(a, b) #a #b
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                     \
-  ::at::native::vulkan::api::ShaderSource { \
-#name, name##_glsl,                     \
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::ShaderSource {      \
+    CONCAT_LITERALS(vulkan., name), name##_glsl, \
   }
 #else
 #include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name)                                  \
-  ::at::native::vulkan::api::ShaderSource {              \
-#name, name##_spv, name##_spv_len, name##_spv_layout \
+#define VK_KERNEL(name)                                         \
+  ::at::native::vulkan::api::ShaderSource {                     \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
+        name##_spv_layout                                       \
+  }
+#define VK_SHADER(name)                                                        \
+  ::at::native::vulkan::api::ShaderInfo {                                      \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len,                \
+        name##_spv_layout, name##_spv_tile_size, name##_spv_bias_storage_type, \
+        name##_spv_weight_storage_type,                                        \
   }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-#define VK_CHECK(function)              \
-  do {                                  \
-    const VkResult result = (function); \
-    TORCH_CHECK(                        \
-        VK_SUCCESS == result,           \
-        C10_STRINGIZE(__FILE__),        \
-        " [",                           \
-        C10_STRINGIZE(__LINE__),        \
-        "] "                            \
-        "VkResult:",                    \
-        result);                        \
+/*
+ * Check that the return code of a Vulkan API call is VK_SUCCESS, throwing an
+ * error with the returned code if not. If STRIP_ERROR_MESSAGES is defined then
+ * only the return code will be preserved.
+ */
+#ifdef STRIP_ERROR_MESSAGES
+#define VK_CHECK(function)                                       \
+  do {                                                           \
+    const VkResult result = (function);                          \
+    if (VK_SUCCESS != result) {                                  \
+      throw c10::Error(                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+          c10::str(result));                                     \
+    }                                                            \
   } while (false)
-
-#define VK_CHECK_RELAXED(function)                          \
-  do {                                                      \
-    const VkResult result = (function);                     \
-    TORCH_CHECK(VK_SUCCESS <= result, "VkResult:", result); \
+#else
+#define VK_CHECK(function)                                       \
+  do {                                                           \
+    const VkResult result = (function);                          \
+    if (VK_SUCCESS != result) {                                  \
+      throw c10::Error(                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+          c10::str(                                              \
+              C10_STRINGIZE(__FILE__),                           \
+              "[",                                               \
+              C10_STRINGIZE(__LINE__),                           \
+              "] Expected VK_SUCCESS, got VkResult of ",         \
+              result));                                          \
+    }                                                            \
   } while (false)
+#endif /* STRIP_ERROR_MESSAGES */
 
 #endif /* USE_VULKAN_API */

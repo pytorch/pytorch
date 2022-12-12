@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 #include <ATen/native/Activation.h>
+#include <ATen/native/mkldnn/Common.h>
 
 namespace torch {
 namespace jit {
@@ -43,6 +44,12 @@ int nnc_lowerings_lazy_registration() {
       {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> (Tensor Y)"},
       computePrepackedLinearClampRun);
 #endif
+
+#if AT_MKLDNN_ENABLED()
+  RegisterNNCLoweringsFunction mkldnn_prepacked_conv2d_run(
+      {"mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> (Tensor Y)"},
+      computeMkldnnPrepackedConvRun);
+#endif // AT_MKLDNN_ENABLED()
 
   RegisterNNCLoweringsFunction aten_sub(
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> (Tensor)",
@@ -592,6 +599,22 @@ int nnc_lowerings_lazy_registration() {
             [](const ExprHandle& a) {
               return sigmoid(promoteIntegerToDefaultType(a));
             });
+      });
+
+  RegisterNNCLoweringsFunction aten_silu(
+      {"aten::silu(Tensor self) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeOneOperand(
+            "aten_silu",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a) { return a * sigmoid(a); });
       });
 
   RegisterNNCLoweringsFunction aten_reciprocal(
@@ -1288,6 +1311,58 @@ int nnc_lowerings_lazy_registration() {
             });
       });
 
+  RegisterNNCLoweringsFunction aten_mish(
+      {"aten::mish(Tensor self) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeOneOperand(
+            "aten_mish",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a) {
+              auto default_type_a = promoteIntegerToDefaultType(a);
+              return default_type_a * tanh(log1p(exp(default_type_a)));
+            });
+      });
+
+  RegisterNNCLoweringsFunction aten_elu(
+      {"aten::elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeFourOperand(
+            "aten_elu",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a,
+               const ExprHandle& alpha,
+               const ExprHandle& scale,
+               const ExprHandle& input_scale) {
+              auto zero = Cast::make(a.dtype(), 0);
+              auto one = Cast::make(a.dtype(), 1);
+
+              auto poscoef = Cast::make(a.dtype(), scale);
+              auto negiptcoef = Cast::make(a.dtype(), input_scale);
+              auto negcoef = Cast::make(a.dtype(), alpha) * poscoef;
+
+              return CompareSelect::make(
+                  a,
+                  zero,
+                  a * poscoef,
+                  (exp(a * negiptcoef) - one) * negcoef,
+                  kGT);
+            });
+      });
+
   RegisterNNCLoweringsFunction aten_hardsigmoid(
       {"aten::hardsigmoid(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
@@ -1803,7 +1878,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_mean(
       {"aten::mean(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+       "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
       computeMean);
   RegisterNNCLoweringsFunction aten_max_reduction(
       {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"},

@@ -18,7 +18,7 @@ case ${CUDA_VERSION} in
         ;;
     11.7)
         # Use cudnn8.3 with hard-coded cuda11.5 version
-        cudnn_file_name="cudnn-windows-x86_64-8.3.2.44_cuda11.5-archive"
+        cudnn_file_name="cudnn-windows-x86_64-8.5.0.96_cuda11-archive"
         ;;
     *)
         echo "CUDA_VERSION: ${CUDA_VERSION} not supported yet"
@@ -36,7 +36,7 @@ else
     tmp_dir=$(mktemp -d)
     (
         pushd "${tmp_dir}"
-        curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
+        curl --retry 3 --retry-all-errors -o "${cudnn_installer_name}" "$cudnn_installer_link"
         7z x "${cudnn_installer_name}" -ocudnn
         # Use '${var:?}/*' to avoid potentially expanding to '/*'
         # Remove all of the directories before attempting to copy files

@@ -1,4 +1,5 @@
 import argparse
+import copy
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
@@ -24,18 +25,26 @@ from .tools_common import (
     NodeSet,
     is_node_output_tensor,
 )
-import warnings
+
 
 __all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_MIN_ACC_MODULE_SIZE = 1
+DEFAULT_SKIP_FUSION = False
+DEFAULT_ALLOW_NON_TENSOR = False
 
 class _SplitterSettingBase:
-    def __init__(self):
+    def __init__(
+        self,
+        min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
+        skip_fusion=DEFAULT_SKIP_FUSION,
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+    ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--min_acc_module_size",
-            default=1,
+            required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
@@ -61,9 +70,9 @@ class _SplitterSettingBase:
         )
         args, unknown = parser.parse_known_args()
 
-        self.min_acc_module_size: int = args.min_acc_module_size
-        self.skip_fusion: bool = args.skip_fusion
-        self.allow_non_tensor: bool = args.allow_non_tensor
+        self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
+        self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
+        self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
 
 
 @compatibility(is_backward_compatible=False)
@@ -199,7 +208,8 @@ class SplitResult(NamedTuple):
 def generate_inputs_for_submodules(
     model: torch.nn.Module,
     inputs: Sequence[Any],
-    target_submodules: Iterable[str]
+    target_submodules: Iterable[str],
+    deepcopy: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
@@ -219,17 +229,24 @@ def generate_inputs_for_submodules(
     submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
 
     def pre_forward(module, module_inputs):
-        results[submodule_to_names[module]] = module_inputs
-    try:
-        for name, mod in model.named_modules():
-            if name in target_submodules:
-                handles.append(mod.register_forward_pre_hook(pre_forward))
-        model(*inputs)
-    except Exception as e:
-        warnings.warn(f"Failed to generate submodule inputs because of the following error:\n{e}")
-    finally:
+        results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs
+
+    for name, mod in model.named_modules():
+        if name in target_submodules:
+            handles.append(mod.register_forward_pre_hook(pre_forward))
+
+    def clean_up_handles():
         for h in handles:
             h.remove()
+
+    try:
+        with torch.no_grad():
+            model(*inputs)
+    except Exception as e:
+        clean_up_handles()
+        raise e
+
+    clean_up_handles()
     return results
 
 
@@ -315,10 +332,20 @@ class _SplitterBase:
         self.update_deps_for_fusions()
 
         self.non_acc_submodule_name = non_acc_submodule_name
+        self._node_submodule_map: Dict[str, str] = {}
 
     # ===============================================================
     # Helpers for ctor and initial state
     # ===============================================================
+
+    def get_node_submodule_map(self) -> Dict[str, str]:
+        """ Returns a map from node name to submodule name, e.g.
+            node: main_module_impl_impl_over_arch_unary_multiple_embedding
+              _pooling_embedding_pooling_sparse_entity_equivalence_key
+              _proxy_embedding_bag
+            maps to submodule name of: _run_on_acc_1
+        """
+        return self._node_submodule_map
 
     def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
         """
@@ -715,12 +742,9 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # Determine which subgraph to start from based on node dependency
-        acc_subgraph: bool = True
-        for n in current_cpu_nodes:
-            if self.deps[n] <= visited_nodes:
-                acc_subgraph = False
-                break
+        # Determine which subgraph to start from based on which subgraph has
+        # 0-dep node
+        acc_subgraph: bool = not any([len(self.deps[n]) == 0 for n in current_cpu_nodes])
 
         current_subgraph_nodes: NodeList = []
 
@@ -809,14 +833,14 @@ class _SplitterBase:
     def tag(self, subgraphs: List[Subgraph]):
         self.tags: List[str] = []
         for subgraph in subgraphs:
-            subgraph_name = self.non_acc_submodule_name
-
             tag = f"_run_on_acc_{len(self.tags)}" if subgraph.is_acc else f"{self.non_acc_submodule_name}{len(self.tags)}"
             self.tags.append(tag)
             for node in subgraph.nodes:
                 if hasattr(node, "tag"):
                     raise FxNetSplitterInternalError(f"Node {node} was already tagged")
+
                 node.tag = tag  # type: ignore[attr-defined]
+                self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:
         split_module = split_by_tags(self.module, self.tags)

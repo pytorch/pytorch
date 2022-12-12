@@ -17,7 +17,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void ShiftPredicateInserter::insert(
+Expr* ShiftPredicateInserter::insert(
     Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     Bool* thread_pred,
@@ -28,9 +28,9 @@ void ShiftPredicateInserter::insert(
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
   const bool needs_shift_predicate =
-      gpu_lower->haloInfo().needsShiftPredicate(out_tv->definition());
+      gpu_lower->haloInfo()->needsShiftPredicate(out_tv->definition());
   if (!needs_shift_predicate) {
-    return;
+    return expr;
   }
 
   // The conditional branches to create:
@@ -56,9 +56,8 @@ void ShiftPredicateInserter::insert(
   // If the expr involves a thread-block barrier, set the predicate of
   // the expr with shift_pred. Since the expr is not shift, the
   // padding is safe to omit.
-  if (ir_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
-    expr->setPredicate(shift_pred);
-    return;
+  if (lower_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
+    return expr->withPredicate(shift_pred);
   }
 
   auto shift_ite = IrBuilder::create<kir::IfThenElse>(shift_pred);
@@ -76,7 +75,7 @@ void ShiftPredicateInserter::insert(
 
   // No padding condition is required if this is within unswitch.
   if (within_unswitch) {
-    return;
+    return expr;
   }
 
   // Padding by zero
@@ -89,6 +88,8 @@ void ShiftPredicateInserter::insert(
   bounds_ite->thenBody().push_back(pad_expr);
   // Insert the else block
   shift_ite->elseBody().push_back(bounds_ite);
+
+  return expr;
 }
 
 int AxisHaloInfo::width() const {
@@ -145,13 +146,6 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {
   return it->second;
 }
 
-AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  return const_cast<AxisHaloInfo&>(
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<const HaloInfo*>(this)->getRootAxisInfo(id));
-}
-
 void HaloInfo::setRootAxisInfo(
     IterDomain* id,
     const AxisHaloInfo& root_axis_info) {
@@ -161,7 +155,9 @@ void HaloInfo::setRootAxisInfo(
   return;
 }
 
-void HaloInfo::build(Fusion* fusion) {
+HaloInfo::HaloInfo(Fusion* fusion, std::shared_ptr<const ComputeAtMap> ca_map)
+    // Make a copy of the permissive map for extent comparators
+    : permissive_map_(ca_map->idGraph().permissiveNodes()) {
   const auto vals = fusion->usedMathVals();
   auto tvs = ir_utils::filterByType<TensorView>(vals);
 
@@ -202,7 +198,7 @@ void HaloInfo::build(Fusion* fusion) {
 
   // Note that validation requires consumer halo info
   for (auto tv : tvs) {
-    validate(tv);
+    validate(tv, ca_map);
   }
 }
 
@@ -445,6 +441,23 @@ void HaloInfo::build(TensorDomain* td) {
       } else {
         setHaloWidth(merge->out(), 0);
       }
+    } else if (auto swizzle = dynamic_cast<Swizzle2D*>(expr)) {
+      // Assume no halo on swizzled domain for now.
+      TORCH_INTERNAL_ASSERT(
+          getExtent(swizzle->inX()) == nullptr,
+          "Halo is not supported with swizzle. Halo-extended ID: ",
+          swizzle->inX()->toString(),
+          " used in ",
+          swizzle->toString());
+      TORCH_INTERNAL_ASSERT(
+          getExtent(swizzle->inY()) == nullptr,
+          "Halo is not supported with swizzle. Halo-extended ID: ",
+          swizzle->inY()->toString(),
+          " used in ",
+          swizzle->toString());
+      for (auto id : ir_utils::filterByType<IterDomain>(expr->outputs())) {
+        setHaloWidth(id, 0);
+      }
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported expr: ", expr);
     }
@@ -469,12 +482,13 @@ void HaloInfo::build(TensorDomain* td) {
 //! Other types of parallelization should be supported except for
 //! vectorization. Vectorization should be eventually supported but
 //! needs further work.
-void HaloInfo::validate(TensorView* tv) const {
+void HaloInfo::validate(
+    TensorView* tv,
+    std::shared_ptr<const ComputeAtMap> ca_map) const {
   const auto mem_type = tv->getMemoryType();
 
   for (auto axis : tv->domain()->domain()) {
-    auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-        axis, IdMappingMode::LOOP);
+    auto concrete_id = ca_map->getConcreteMappedID(axis, IdMappingMode::LOOP);
 
     // The extent is assumed to be the same
     TORCH_INTERNAL_ASSERT(
@@ -521,7 +535,7 @@ void HaloInfo::validate(TensorView* tv) const {
           consumer->domain()->domain().begin(),
           consumer->domain()->domain().end(),
           [&](IterDomain* consumer_axis) {
-            return GpuLower::current()->caMap()->areMapped(
+            return ca_map->areMapped(
                 axis, consumer_axis, IdMappingMode::PERMISSIVE);
           });
       if (it == consumer->domain()->domain().end()) {
@@ -621,11 +635,10 @@ bool extentCompare(
     const HaloInfo& halo_map,
     IterDomain* id1,
     IterDomain* id2,
-    Cmp cmp) {
-  auto gpu_lower = GpuLower::current();
+    Cmp cmp,
+    const DisjointSets<IterDomain*>& permissive_map) {
   TORCH_INTERNAL_ASSERT(
-      gpu_lower->caMap()->areMapped(id1, id2, IdMappingMode::PERMISSIVE),
-      "Invalid axes to compare");
+      permissive_map.strictAreMapped(id1, id2), "Invalid axes to compare");
 
   // It's invalid to compare two axes and when only either of them has
   // halo.
@@ -647,10 +660,10 @@ bool extentCompare(
       auto merge2 = dynamic_cast<Merge*>(id2->definition());
       TORCH_INTERNAL_ASSERT(
           merge2 != nullptr, "Invalid comparison: ", id1, " and ", id2);
-      auto inner_le =
-          extentCompare(halo_map, merge1->inner(), merge2->inner(), cmp);
-      auto outer_le =
-          extentCompare(halo_map, merge1->outer(), merge2->outer(), cmp);
+      auto inner_le = extentCompare(
+          halo_map, merge1->inner(), merge2->inner(), cmp, permissive_map);
+      auto outer_le = extentCompare(
+          halo_map, merge1->outer(), merge2->outer(), cmp, permissive_map);
       return inner_le && outer_le;
     } else {
       // This is not considered. Should never reach here.
@@ -662,11 +675,11 @@ bool extentCompare(
 } // namespace
 
 bool HaloInfo::extentLessEqual(IterDomain* id1, IterDomain* id2) const {
-  return extentCompare(*this, id1, id2, std::less_equal<>());
+  return extentCompare(*this, id1, id2, std::less_equal<>(), permissive_map_);
 }
 
 bool HaloInfo::extentEqual(IterDomain* id1, IterDomain* id2) const {
-  return extentCompare(*this, id1, id2, std::equal_to<>());
+  return extentCompare(*this, id1, id2, std::equal_to<>(), permissive_map_);
 }
 
 std::string HaloInfo::toString() const {
@@ -717,19 +730,20 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) const {
 }
 
 std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
-    const LoopIndexing& loop_indexing) {
+    const LoopIndexing& loop_indexing) const {
   // Use a local workspace to avoid re-defining halo info.
-  HaloInfo local_halo_info;
+  HaloInfo local_halo_info = *GpuLower::current()->haloInfo();
 
-  auto& global_halo_info = GpuLower::current()->haloInfo();
+  auto global_halo_info = GpuLower::current()->haloInfo();
 
   // Setup root:
   for (auto consumer_root_id : loop_indexing.consumerTv()->getRootDomain()) {
     auto consumer_index_concrete_id =
-        ir_utils::caMapExactConcreteId(consumer_root_id);
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            consumer_root_id, IdMappingMode::EXACT);
     local_halo_info.setRootAxisInfo(
         consumer_index_concrete_id,
-        global_halo_info.getRootAxisInfo(consumer_root_id));
+        global_halo_info->getRootAxisInfo(consumer_root_id));
   }
 
   // Track IDs that are generated by merging halo-extended IDs
@@ -742,7 +756,8 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
           merged_shifted_ids.find(split->in()) == merged_shifted_ids.end(),
           "Splitting IterDomain that is a merged domain of halo-extended domains is not allowed");
 
-      auto in_id = ir_utils::caMapExactConcreteId(split->in());
+      auto in_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          split->in(), IdMappingMode::EXACT);
 
       // If no halo info is found, nothing needs to be done. This ID
       // must be an ancestor of a domain set by setRootAxisInfo.
@@ -754,32 +769,43 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
 
       if (halo_width == 0) {
         local_halo_info.setHaloWidth(
-            ir_utils::caMapExactConcreteId(split->outer()), 0);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                split->outer(), IdMappingMode::EXACT),
+            0);
         local_halo_info.setHaloWidth(
-            ir_utils::caMapExactConcreteId(split->inner()), 0);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                split->inner(), IdMappingMode::EXACT),
+            0);
         continue;
       }
 
       // propagate to inner domain
-      auto out_id = ir_utils::caMapExactConcreteId(split->inner());
+      auto out_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          split->inner(), IdMappingMode::EXACT);
 
       auto expanded_extent =
           SimplifyingIrBuilder::addExpr(out_id->extent(), halo_width);
       local_halo_info.extent_map_.insert({out_id, expanded_extent});
 
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(split->outer()), 0);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              split->outer(), IdMappingMode::EXACT),
+          0);
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(split->inner()), halo_width);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              split->inner(), IdMappingMode::EXACT),
+          halo_width);
 
       // TODO: add support for inheritance map
     } else if (auto merge = dynamic_cast<Merge*>(expr)) {
       // If either of the two inputs has halo extension, propagate it
       // to the merged output ID
       auto inner_extent = local_halo_info.getExtent(
-          ir_utils::caMapExactConcreteId(merge->inner()));
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              merge->inner(), IdMappingMode::EXACT));
       auto outer_extent = local_halo_info.getExtent(
-          ir_utils::caMapExactConcreteId(merge->outer()));
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              merge->outer(), IdMappingMode::EXACT));
       if (inner_extent != nullptr || outer_extent != nullptr) {
         if (inner_extent == nullptr) {
           inner_extent = merge->inner()->extent();
@@ -790,14 +816,41 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
         auto expanded_extent =
             SimplifyingIrBuilder::mulExpr(outer_extent, inner_extent);
         local_halo_info.extent_map_.insert(
-            {ir_utils::caMapExactConcreteId(merge->out()), expanded_extent});
+            {GpuLower::current()->caMap()->getConcreteMappedID(
+                 merge->out(), IdMappingMode::EXACT),
+             expanded_extent});
         // Splitting the output of this merge is not allowed, so
         // remember it
-        merged_shifted_ids.insert(ir_utils::caMapExactConcreteId(merge->out()));
+        merged_shifted_ids.insert(
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                merge->out(), IdMappingMode::EXACT));
         // Note that halo_width_map_ is not updated
       } else {
-        setHaloWidth(ir_utils::caMapExactConcreteId(merge->out()), 0);
+        local_halo_info.setHaloWidth(
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                merge->out(), IdMappingMode::EXACT),
+            0);
       }
+    } else if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(expr)) {
+      // Swizzle with halo not yet supported, just set the width
+      //  to zero at the moment.
+      TORCH_INTERNAL_ASSERT(
+          local_halo_info.getHaloWidth(
+              GpuLower::current()->caMap()->getConcreteMappedID(
+                  swizzle_2d->inX(), IdMappingMode::EXACT)) == 0 &&
+              local_halo_info.getHaloWidth(
+                  GpuLower::current()->caMap()->getConcreteMappedID(
+                      swizzle_2d->inY(), IdMappingMode::EXACT)) == 0,
+          "Swizzle on ID with halo not yet supported.");
+      TORCH_INTERNAL_ASSERT("Swizzle on ID with halo not yet supported.");
+      local_halo_info.setHaloWidth(
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              swizzle_2d->outX(), IdMappingMode::EXACT),
+          0);
+      local_halo_info.setHaloWidth(
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              swizzle_2d->outY(), IdMappingMode::EXACT),
+          0);
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported expr: ", expr);
     }

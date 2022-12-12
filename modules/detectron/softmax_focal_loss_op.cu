@@ -165,7 +165,7 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
       P->size(), 0.f, P->mutable_data<float>(), &context_);
   math::Set<float, CUDAContext>(
       losses_.size(), 0.f, losses_.mutable_data<float>(), &context_);
-  DCHECK_EQ(X.ndim(), 4);
+  TORCH_DCHECK_EQ(X.ndim(), 4);
 
   const float* Xdata = X.data<float>();
   const float* Wdata = wp.data<float>();

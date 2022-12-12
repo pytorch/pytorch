@@ -19,7 +19,7 @@ void conv(const ConvArgs& args,
             (X.dim32(1) - KH + args.pad_t + args.pad_b) / args.stride_h + 1,
             (X.dim32(2) - KW + args.pad_l + args.pad_r) / args.stride_w + 1,
             W.dim32(0));
-  CHECK_EQ(W.dim32(3), X.dim32(3));
+  TORCH_CHECK_EQ(W.dim32(3), X.dim32(3));
   const auto OH = Y->dim32(1);
   const auto OW = Y->dim32(2);
   const auto OC = Y->dim32(3);
@@ -155,7 +155,7 @@ inline void gemmNT(int M, int N, int K, const float* A, const float* B, float* C
 }
 
 inline void qgemmNT(int M, int N, int K, const uint8_t* A, const uint8_t* B, float* C) {
-  CHECK_EQ(K % 8, 0);
+  TORCH_CHECK_EQ(K % 8, 0);
   const int QK = K / 8;
   for (auto m = 0; m < M; ++m) {
     for (auto n = 0; n < N; ++n) {

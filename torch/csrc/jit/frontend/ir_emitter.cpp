@@ -662,12 +662,10 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
-#if ENABLE_UPGRADERS
     // At this point, we might have received a graph that is compiled with
     // old operator schemas that might not exist in the system anymore.
     // Therefore, we replace such ops with its' valid upgrader.
     ReplaceOldOperatorsWithUpgraders(graph);
-#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -4709,7 +4707,7 @@ struct to_ir {
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
       // since we are only dealing with tuple slicing, we try to keep
-      // tuple args seperate for now
+      // tuple args separate for now
       tuple_args.reserve(3);
 
       start ? tuple_args.emplace_back(start)
@@ -5642,7 +5640,7 @@ void CompilationUnit::define_interface(
   for (const Stmt& stmt : classDef.body()) {
     if (stmt.kind() != TK_DEF) {
       throw ErrorReport(stmt)
-          << "interface declartions can only contain method definitions";
+          << "interface declarations can only contain method definitions";
     }
     auto method_def = Def(stmt);
     if (!method_def.decl().return_type().present()) {

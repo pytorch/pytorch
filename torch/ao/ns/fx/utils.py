@@ -4,7 +4,7 @@ import operator
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 
 toq = torch.ops.quantized
 from typing import Tuple, Callable, Dict, Set, List, Optional, Union

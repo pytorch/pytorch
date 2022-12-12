@@ -2,9 +2,9 @@
 
 import unittest
 
-import caffe2.python.onnx.backend as backend
-import torch
+import pytorch_test_common
 
+import torch
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -45,11 +45,13 @@ else:
 BATCH_SIZE = 2
 
 
-class TestModels(common_utils.TestCase):
+class TestModels(pytorch_test_common.ExportTestCase):
     opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
 
-    def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
+    def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, **kwargs):
+        import caffe2.python.onnx.backend as backend
+
         with torch.onnx.select_model_mode_for_export(
             model, torch.onnx.TrainingMode.EVAL
         ):
@@ -142,13 +144,10 @@ class TestModels(common_utils.TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @unittest.skip(
-        "This test has been flaky on trunk and PRs. See https://github.com/pytorch/pytorch/issues/79540"
-    )
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
-        self.exportTest(toC(inception_v3()), toC(x))
+        self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
 
     def test_squeezenet(self):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
@@ -232,7 +231,7 @@ class TestModels(common_utils.TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)

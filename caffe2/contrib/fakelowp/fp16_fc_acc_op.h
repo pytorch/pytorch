@@ -78,7 +78,7 @@ class Fp16FCAccOp final : public Operator<Context> {
 
     Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
-    DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
+    TORCH_DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);
     Y_shape_cache_[canonical_axis] = N;
     Y->Resize(Y_shape_cache_);

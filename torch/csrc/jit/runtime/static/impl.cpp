@@ -56,9 +56,9 @@ namespace jit {
 
 namespace {
 
-bool allArgsAreTensors(Node* node) {
+bool allArgsAreTensors(const Node* node) {
   const auto& inputs = node->inputs();
-  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
+  return std::all_of(inputs.begin(), inputs.end(), [](const Value* value) {
     return value->type()->kind() == TypeKind::TensorType;
   });
 }
@@ -69,7 +69,7 @@ bool allArgsAreTensors(Node* node) {
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(Node* node) {
+bool isUnsupportedOp(const Node* node) {
   auto kind = node->kind();
   if (kind != aten::__is__ && kind != aten::__isnot__) {
     return false;
@@ -87,12 +87,21 @@ bool isUnsupportedOp(Node* node) {
   return allArgsAreTensors(node);
 }
 
-// graph must be frozen or canEnableStaticRuntime would return false
-// if there's any prim::CallMethod op left in the graph
-bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
-  // check for sub-blocks
+namespace {
+
+bool canEnableStaticRuntimeImpl(const Block* block) {
+  if (block == nullptr) {
+    return false;
+  }
+
   bool can_support = true;
-  for (auto* node : graph->block()->nodes()) {
+  for (auto* node : block->nodes()) {
+    for (auto* subblock : node->blocks()) {
+      // The ordering prevents && from short circuiting, which we want -
+      // it's useful to see *all* the unsupported ops.
+      can_support = canEnableStaticRuntimeImpl(subblock) && can_support;
+    }
+
     const auto kind = node->kind();
     if (kind == prim::Constant) {
       continue;
@@ -107,14 +116,16 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   return can_support;
 }
 
+} // namespace
+
+// Graph must be frozen. canEnableStaticRuntime will return false
+// if there's any prim::CallMethod ops left in the graph.
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  return canEnableStaticRuntimeImpl(graph->block());
+}
+
 namespace {
 
-// CustomClass extending torch::CustomClassHolder can be typecasted
-// to IValue StaticRuntimeMetadata is created so that we can attach
-// SR metadata to IR's prim::fork nodes. These CustomClass needs to be
-// registered first in order to be used as IValue.below is an
-// UNUSED VARIABLE but NEEDED to invoke the class_ constructor necessary
-// for class registration.
 auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
     "StaticRuntime",
     "StaticRuntimeMetadata");
@@ -187,6 +198,7 @@ void OptimizeGraph(
     }
     FuseListUnpack(graph);
     RemoveUnnecessaryOutputs(graph);
+    PrepackWeights(graph);
 #endif
   }
 
@@ -1924,7 +1936,7 @@ ProcessedFunction::ProcessedFunction(
         stack.emplace_back(static_cast<int>(size));
       }
       node_op(stack);
-      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      TORCH_DCHECK_EQ(stack.size(), pnode->num_outputs());
       for (const auto i : c10::irange(pnode->num_outputs())) {
         pnode->Output(i) = std::move(stack[i]);
       }
@@ -2050,7 +2062,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
        num_outputs() == 1);
-  if (!force_check && skip_check) {
+  if (!schema || (!force_check && skip_check)) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
       return true;

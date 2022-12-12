@@ -100,8 +100,9 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = RelaxedBernoulli(torch.tensor([2.2]),
-                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
+        ...                      torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
         tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
 

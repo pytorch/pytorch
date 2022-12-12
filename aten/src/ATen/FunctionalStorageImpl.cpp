@@ -1,7 +1,9 @@
 #include <ATen/FunctionalStorageImpl.h>
 
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <vector>
 
@@ -13,23 +15,9 @@ ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   return ViewMeta(forward_fn, reverse_fn, out_idx);
 }
 
-Alias::Alias(const at::Tensor& base) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base));
-  base_ = base;
-}
-
-const at::Tensor& Alias::base() const {
-  return base_;
-}
-
-void Alias::add_update(const at::Tensor& updated_val, const std::vector<ViewMeta>& metas) {
-  updates_.push_back({updated_val, metas});
-  generation_++;
-}
-
 // Note [Functionalization: Alias Removal Part 2]
 // See Note [Functionalization: Alias Removal] for more details.
-// This function applies a single update from one of the views to the Alias object.
+// This function applies a single update from one of the views to the StorageImpl.
 // We start out with <original_base> and <mutated_view>, and our goal is to end up with <mutated_base>.
 // Consider this program:
 //
@@ -44,15 +32,15 @@ void Alias::add_update(const at::Tensor& updated_val, const std::vector<ViewMeta
 // update.new_val = c  # the updated value of c
 // update.view_metas = [view1_meta, view2_meta, view3_meta]
 //
-// Syncing any of a, b or c will eventually call apply_update() on the alias, and the following will run:
+// Syncing any of a, b or c will eventually call apply_update() on the storage, and the following will run:
 //
 // tmp_values = [base, a, b]  # NB: c is not necessary
 // t = update.new_val
 // t = view3_inverse(b, t, 0)  # 0 is output index, these are all single output views so it's 0
 // t = view2_inverse(a, t, 0)
-// t = view1_inverse(base, t, 0)  # t now represents the updated alias.
-// alias.base_ = t
-const Tensor apply_update(const Alias::Update& update, const Tensor& base) {
+// t = view1_inverse(base, t, 0)  # t now represents the updated storage.
+// storage.base_ = t
+const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.size() == 0) return t;
@@ -75,7 +63,41 @@ const Tensor apply_update(const Alias::Update& update, const Tensor& base) {
   return t;
 }
 
-bool Alias::apply_updates() {
+
+c10::SymInt get_nbytes(const Tensor& value) {
+  if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    // Today, the two implementations of SymInt are in Python (proxy tensor),
+    // and lazy tensor (LTC/XLA).
+    // LTC hasn't implemented SymInt support yet though
+    // Once it does, we should remove this check.
+    if (value.key_set().has(c10::DispatchKey::Python)) {
+      return value.storage().sym_nbytes();
+    }
+  }
+  // XLA storage objects also do not properly track nbytes.
+  return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
+}
+
+FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
+  : c10::StorageImpl(
+      c10::StorageImpl::use_byte_size_t(),
+      get_nbytes(base),
+      DataPtr{nullptr, base.device()},
+      GetAllocator(kMeta),
+      /*resizeable=*/true
+    ),
+    base_(base)
+  {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
+}
+
+void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
+  TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
+  updates_.push_back({updated_val, metas});
+  generation_++;
+}
+
+bool FunctionalStorageImpl::apply_updates() {
   // N.B:none of the tensors used in this function should be FunctionalTensorWrappers at this point.
   // The only reason we currently need the TLS exclude guard here is because of functorch's DynamicLayer stack.
   // It adds the Functionalize key into TLS before redispatching to the functionalization kernels,
@@ -87,34 +109,6 @@ bool Alias::apply_updates() {
   }
   updates_.clear();
   return any_updates;
-}
-
-FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
-  : c10::StorageImpl(
-      c10::StorageImpl::use_byte_size_t(),
-      value.numel() * value.dtype().itemsize(),
-      DataPtr{nullptr, value.device()},
-      // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
-      nullptr,
-      /*resizeable=*/false
-    ),
-    alias_(Alias(value))
-  {}
-
-void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& view_metas) {
-  alias_.add_update(updated_val, view_metas);
-}
-
-bool FunctionalStorageImpl::apply_updates() {
-  return alias_.apply_updates();
-}
-
-const Tensor& FunctionalStorageImpl::base() {
-  return alias_.base();
-}
-
-size_t FunctionalStorageImpl::generation() const {
-  return alias_.generation();
 }
 
 } // namespace functionalization

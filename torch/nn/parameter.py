@@ -60,6 +60,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
+        # TODO(kshitij12345): Support saving Python Attribute
         # See Note [Don't serialize hooks]
         return (
             torch._utils._rebuild_parameter,
@@ -156,7 +157,7 @@ def is_lazy(param):
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
-    Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
+    Uninitialized Parameters are a a special case of :class:`torch.nn.Parameter`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.nn.Parameter`, uninitialized parameters
@@ -176,11 +177,18 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
         data = torch.empty(0, **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
+            memo[id(self)] = result
+            return result
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
-    Unitialized Buffer is a a special case of :class:`torch.Tensor`
+    Uninitialized Buffer is a a special case of :class:`torch.Tensor`
     where the shape of the data is still unknown.
 
     Unlike a :class:`torch.Tensor`, uninitialized parameters

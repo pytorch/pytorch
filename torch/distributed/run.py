@@ -82,7 +82,7 @@ Single-node multi-worker
 
 ::
 
-    >>> torchrun
+    torchrun
         --standalone
         --nnodes=1
         --nproc_per_node=$NUM_TRAINERS
@@ -101,7 +101,7 @@ port automatically instead of manually assgining different ports for each run.
 
 ::
 
-    >>> torchrun
+    torchrun
         --rdzv_backend=c10d
         --rdzv_endpoint=localhost:0
         --nnodes=1
@@ -114,7 +114,7 @@ Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failur
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=$NUM_NODES
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -135,7 +135,7 @@ Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
 
 ::
 
-    >>> torchrun
+    torchrun
         --nnodes=1:4
         --nproc_per_node=$NUM_TRAINERS
         --max_restarts=3
@@ -294,6 +294,7 @@ Important Notices
 
 ::
 
+ >>> # xdoctest: +SKIP("stub")
  >>> import torch.distributed as dist
  >>> dist.init_process_group(backend="gloo|nccl")
 
@@ -604,13 +605,13 @@ def determine_local_world_size(nproc_per_node: str):
     try:
         logging.info(f"Using nproc_per_node={nproc_per_node}.")
         return int(nproc_per_node)
-    except ValueError:
+    except ValueError as e:
         if nproc_per_node == "cpu":
             num_proc = os.cpu_count()
             device_type = "cpu"
         elif nproc_per_node == "gpu":
             if not torch.cuda.is_available():
-                raise ValueError("Cuda is not available.")
+                raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
         elif nproc_per_node == "auto":
@@ -621,7 +622,7 @@ def determine_local_world_size(nproc_per_node: str):
                 num_proc = os.cpu_count()
                 device_type = "cpu"
         else:
-            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}")
+            raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
         log.info(
             f"Using nproc_per_node={nproc_per_node},"

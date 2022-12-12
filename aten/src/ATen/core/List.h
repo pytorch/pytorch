@@ -69,7 +69,11 @@ struct ListElementConstReferenceTraits<c10::optional<std::string>> {
 template<class T, class Iterator>
 class ListElementReference final {
 public:
-  operator T() const;
+  operator std::conditional_t<
+      std::is_reference<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      const T&,
+      T>() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
@@ -106,9 +110,16 @@ private:
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+template <class T, class Iterator>
+class ListIterator final {
+ public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = ListElementReference<T, Iterator>;
+
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -157,7 +168,7 @@ public:
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 

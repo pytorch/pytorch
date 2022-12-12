@@ -176,6 +176,37 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(orig_sn_weight, module.l1.weight)
 
 
+    def test_tied_weights_warns(self):
+        module = MockModule()
+        module.tied_bias = module.l1.bias
+        module.register_buffer("tied_buffer", module.buffer)
+        weight = torch.tensor([[1.0]],)
+        bias = torch.tensor([0.0])
+        buffer = torch.tensor([0.0])
+
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x))
+
+        # if tied values are the same tensors, shouldn't warn
+        parameters['tied_bias'] = bias
+        parameters['tied_buffer'] = buffer
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x))
+        del parameters['tied_bias']
+        del parameters['tied_buffer']
+
+        with self.assertWarnsOnceRegex(UserWarning, "functional_call was passed multiple values"):
+            parameters['tied_bias'] = torch.tensor([5.0])
+            stateless.functional_call(module, parameters, x)
+        del parameters['tied_bias']
+
+        with self.assertWarnsOnceRegex(UserWarning, "functional_call was passed multiple values"):
+            parameters['tied_buffer'] = torch.tensor([5.0])
+            stateless.functional_call(module, parameters, x)
+
+
     def test_setattr(self):
         class Foo(torch.nn.Module):
             def __init__(self):

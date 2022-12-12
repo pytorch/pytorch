@@ -2,6 +2,9 @@
 
 #include <c10/util/irange.h>
 
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
@@ -11,6 +14,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <array>
@@ -57,7 +61,7 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
   }
 }
 
-inline void check_inplace(const at::TensorList tensors, bool requires_grad) {
+inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
   for (const auto& tensor : tensors) {
     check_inplace(tensor, requires_grad);
   }
@@ -81,8 +85,20 @@ inline void throw_error_for_complex_autograd(
   }
 }
 
+inline void throw_error_if_base_and_tensor_are_same(
+    const at::Tensor& base,
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      base.unsafeGetTensorImpl() != tensor.unsafeGetTensorImpl(),
+      "View operation returned a tensor that is the same as the input base tensor.  This "
+      "is no longer allowed; you must explicitly create a new tensor (e.g., using .detach()). "
+      "As a user, you could have made a mistake implementing __torch_dispatch__ or a Python "
+      "operator decomposition or meta registration; if that's not the case, please "
+      "report a bug to PyTorch or the backend you are using.");
+}
+
 inline void throw_error_for_complex_autograd(
-    const at::TensorList& tensorlist,
+    at::ITensorListRef tensorlist,
     const char* name) {
   for (const auto& tensor : tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
@@ -167,6 +183,7 @@ inline at::Tensor as_view(
   // be used for both of them.
   if ((!diff_view_meta || diff_view_meta->shared_view_info()) &&
       is_bw_differentiable && is_fw_differentiable) {
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     if (diff_view_meta) {
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
@@ -220,6 +237,7 @@ inline at::Tensor as_view(
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
     }
+    throw_error_if_base_and_tensor_are_same(base, tensor);
     return make_variable_differentiable_view(
         tensor,
         std::move(new_bw_info),
@@ -377,7 +395,7 @@ inline void check_no_requires_grad(
 }
 
 inline void check_no_requires_grad(
-    at::TensorList tensors,
+    at::ITensorListRef tensors,
     const char* name,
     const char* fn_name = "") {
   // GradMode check is expensive, so check it only once for TensorLists
@@ -406,7 +424,7 @@ inline void check_no_requires_grad(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    at::TensorList tensors) {
+    at::ITensorListRef tensors) {
   return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
     return SavedVariable{tensor, false /* is output */};
   });
@@ -425,22 +443,88 @@ inline std::vector<SavedVariable> make_saved_variable_list(
       });
 }
 
-inline std::vector<std::vector<int64_t>> to_args_sizes(at::TensorList tensors) {
+inline std::vector<std::vector<int64_t>> to_args_sizes(
+    at::ITensorListRef tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
-    args_sizes[i] = tensors[i].sizes().vec();
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_sizes[i++] = t.sizes().vec();
+  }
+  return args_sizes;
+}
+
+inline std::vector<std::vector<c10::SymInt>> to_args_sizes_symint(
+    at::ITensorListRef tensors) {
+  std::vector<std::vector<c10::SymInt>> args_sizes(tensors.size());
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_sizes[i++] = t.sym_sizes().vec();
   }
   return args_sizes;
 }
 
 inline std::vector<c10::ScalarType> to_args_scalartypes(
-    at::TensorList tensors) {
+    at::ITensorListRef tensors) {
   std::vector<c10::ScalarType> args_scalartypes(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
-    args_scalartypes[i] = tensors[i].scalar_type();
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_scalartypes[i++] = t.scalar_type();
   }
   return args_scalartypes;
 }
+
+namespace impl {
+
+namespace {
+
+// If run_jit_decomposition were not a member function, we would be able
+// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// However, member functions cannot be passed this way - instead we wrap our
+// call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
+class WrapperFunctor final : public c10::OperatorKernel {
+ public:
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet ks,
+      torch::jit::Stack* stack) {
+    impl_->run_jit_decomposition(op, stack);
+  }
+  JitDecompInterface* impl_;
+};
+
+} // namespace
+
+template <class Return, class... Args>
+Return run_jit_decomposition_with_args_for_jvp(
+    c10::string_view name,
+    const c10::OperatorHandle& opHandle,
+    c10::DispatchKeySet dispatchKeySet,
+    Args&&... args) {
+  // see NOTE: [Jit Decomposition Interface]
+  JitDecompInterface* impl = getJitDecompImpl();
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      impl && impl->has_jit_decomposition(opHandle.schema()),
+      "Trying to use forward AD with ",
+      name,
+      " that does not support it because it has not been implemented yet.\nPlease file an issue "
+      "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+      "so that we can prioritize its implementation.\n"
+      "Note that forward AD support for some operators require PyTorch to be built with "
+      "TorchScript and for JIT to be enabled. "
+      "If the environment var PYTORCH_JIT=0 is set or if the library is not built with TorchScript, "
+      "some operators may no longer be used with forward AD.");
+
+  return c10::KernelFunction::makeFromBoxedKernel(
+             c10::BoxedKernel::makeFromFunctor(
+                 std::make_unique<WrapperFunctor>(impl)))
+      .call<Return, Args...>(
+          opHandle, dispatchKeySet, std::forward<Args>(args)...);
+}
+
+} // namespace impl
 
 } // namespace autograd
 } // namespace torch

@@ -741,7 +741,7 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  TORCH_CUDABLAS_CHECK(cublasLtMatmul(
+  cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       &alpha_val,
@@ -757,7 +757,33 @@ void gemm_and_bias(
       &heuristicResult.algo,
       workspace.data_ptr(),
       workspaceSize,
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " result_ld ",
+      result_ld,
+      " abcType ",
+      abcType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType);
 }
 
 template void gemm_and_bias(
@@ -1162,7 +1188,7 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched, getriBatched on platforms other than cuda
+// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched on platforms other than cuda
 #ifdef CUDART_VERSION
 
 template <>
@@ -1323,67 +1349,6 @@ void getrfBatched<c10::complex<float>>(
       batchsize));
 }
 
-template <>
-void getriBatched<double>(
-    int n, double** dA_array, int ldda, int* ipiv_array, double** dC_array, int lddc, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
-}
-
-template <>
-void getriBatched<float>(
-    int n, float** dA_array, int ldda, int* ipiv_array, float** dC_array, int lddc, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
-}
-
-template <>
-void getriBatched<c10::complex<double>>(
-    int n,
-    c10::complex<double>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    c10::complex<double>** dC_array,
-    int lddc,
-    int* info_array,
-    int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasZgetriBatched(
-      handle,
-      n,
-      reinterpret_cast<cuDoubleComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      reinterpret_cast<cuDoubleComplex**>(dC_array),
-      lddc,
-      info_array,
-      batchsize));
-}
-
-template <>
-void getriBatched<c10::complex<float>>(
-    int n,
-    c10::complex<float>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    c10::complex<float>** dC_array,
-    int lddc,
-    int* info_array,
-    int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasCgetriBatched(
-      handle,
-      n,
-      reinterpret_cast<cuComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      reinterpret_cast<cuComplex**>(dC_array),
-      lddc,
-      info_array,
-      batchsize));
-}
 
 template <>
 void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {

@@ -119,15 +119,7 @@ def shard_parameter(
     st = _shard_tensor(tensor, sharding_spec, src_rank, process_group)
 
     # Replace param with ShardedTensor.
-
-    # Need to delete the attribute first since param_name might be
-    # torch.nn.Parameter and can't be replaced with ShardedTensor which is
-    # not torch.nn.Parameter.
-    delattr(module, param_name)
-
-    # Now we can set the attribute appropriately.
-    setattr(module, param_name, st)
-
+    module.register_parameter(param_name, nn.Parameter(st))
 
 def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
     """

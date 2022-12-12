@@ -134,6 +134,12 @@ Example usage:
     .Arg(
         "cosine_lr_shrink",
         "defaults to 0.99, part of CompositeCosineLRPolicy")
+    .Arg(
+         "num_iter_1",
+        "(int, default 0) number of iterations over which to warmup for slope policy")
+    .Arg(
+         "num_iter_2",
+        "(int, default 0) number of iterations over which to gradually gate for slope policy")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {
@@ -185,5 +191,7 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     "int? cosine_period = 50, "
     "float? cosine_t_mult = 1.0, "
     "float? cosine_lr_shrink = 0.99, "
-    "float? decay = 1.0) -> Tensor output",
+    "float? decay = 1.0, "
+    "int? num_iter_1 = 0, "
+    "int? num_iter_2 = 0) -> Tensor output",
     LearningRateOpFloatCPU);

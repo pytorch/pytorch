@@ -11,7 +11,7 @@ from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
 )
-from caffe2.python import core, workspace
+from caffe2.python import core, utils, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
 from numpy.testing import assert_allclose, assert_equal
@@ -135,6 +135,26 @@ class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
+
+
+class TestAdagradWithDedicatedLRIteration(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        return build_adagrad(model, base_learning_rate=1.0, lars=0.5, use_dedicated_lr_iteration_counter=True, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+        # check iteration counters have the same value by default
+        non_lr_iter = workspace.FetchBlob(utils.OPTIMIZER_ITERATION_NAME)
+        lr_iter = workspace.FetchBlob(utils.OPTIMIZER_ITERATION_LR_NAME)
+        self.assertEqual(non_lr_iter, lr_iter)
+
+    def testGPUDense(self):
+        raise unittest.SkipTest("GPU support is not validated")
 
 
 class TestRowWiseAdagrad(OptimizerTestBase, TestCase):

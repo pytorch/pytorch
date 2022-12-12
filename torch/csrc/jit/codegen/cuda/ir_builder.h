@@ -91,6 +91,15 @@ class TORCH_CUDA_CU_API IrBuilder {
   // Ternary operations
   static Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 
+  // Swizzle operations
+  static Val* swizzle2DIntExpr(
+      Val* x,
+      Val* y,
+      Val* extent_x,
+      Val* extent_y,
+      Swizzle2DType swizzle_type);
+  static Val* pairSelectExpr(Val* in, kir::PairSelect::Selection sel);
+
  private:
   static Val* newResult(DataType dtype);
   static Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);

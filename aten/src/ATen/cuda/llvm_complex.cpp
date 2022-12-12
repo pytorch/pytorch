@@ -48,6 +48,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (const value_type& __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(const value_type& __re) {__re_ += __re; return *this;}
@@ -106,6 +110,10 @@ public:
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
 
+    constexpr operator bool() const {
+        return real() || imag();
+    }
+
     complex& operator= (float __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
     complex& operator+=(float __re) {__re_ += __re; return *this;}
@@ -161,6 +169,10 @@ public:
 
     void real(value_type __re) {__re_ = __re;}
     void imag(value_type __im) {__im_ = __im;}
+
+    constexpr operator bool() const {
+        return real() || imag();
+    }
 
     complex& operator= (double __re)
         {__re_ = __re; __im_ = value_type(); return *this;}
@@ -482,7 +494,15 @@ inline constexpr
 bool
 operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
-    return (__x.real() || __x.imag()) && (__y.real() || __y.imag());
+    return bool(__x) && bool(__y);
+}
+
+template<class _Tp>
+inline constexpr
+bool
+operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return bool(__x) || bool(__y);
 }
 
 // 26.3.7 values:
@@ -834,7 +854,7 @@ complex<typename __promote<_Tp, _Up>::type>
 pow(const complex<_Tp>& __x, const complex<_Up>& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 template<class _Tp, class _Up>
@@ -847,7 +867,7 @@ typename enable_if
 pow(const complex<_Tp>& __x, const _Up& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 template<class _Tp, class _Up>
@@ -860,7 +880,7 @@ typename enable_if
 pow(const _Tp& __x, const complex<_Up>& __y)
 {
     typedef complex<typename __promote<_Tp, _Up>::type> result_type;
-    return _VSTD::pow(result_type(__x), result_type(__y));
+    return std::pow(result_type(__x), result_type(__y));
 }
 
 // __sqr, computes pow(x, 2)

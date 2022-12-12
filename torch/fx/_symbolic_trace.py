@@ -1,8 +1,11 @@
 import builtins
+import copy
 import functools
 import inspect
 import math
 import os
+import warnings
+import collections
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import (
@@ -26,7 +29,7 @@ from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
-from .proxy import ParameterProxy, Proxy, TracerBase
+from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -41,7 +44,6 @@ _is_fx_tracing_flag = False
 
 def is_fx_tracing():
     return _is_fx_tracing_flag
-
 
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
@@ -248,6 +250,13 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.root_module_name: str = ""
+        # Maps the containing module's name to the operator name
+        self.scope = Scope("", None)
+        # Records the module call stack
+        self.module_stack = collections.OrderedDict()
+        # Mapping of node name to module scope
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -361,8 +370,9 @@ class Tracer(TracerBase):
                 submodule ``bar``, which contains submodule ``baz``, that module will
                 appear with the qualified name ``foo.bar.baz`` here.
         """
-        return m.__module__.startswith("torch.nn") and not isinstance(
-            m, torch.nn.Sequential
+        return (
+            (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
+            and not isinstance(m, torch.nn.Sequential)
         )
 
     @compatibility(is_backward_compatible=True)
@@ -427,9 +437,80 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
+            # module_stack is an ordered dict so writing then deleting the
+            # entry is equivalent to push/pop on a list
+            self.module_stack[_scope.module_path] = str(_scope.module_type)
+            if not self.is_leaf_module(m, module_qualified_name):
+                ret_val = forward(*args, **kwargs)
+            else:
+                ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
+            key, _ = self.module_stack.popitem(last=True)
+            assert key == _scope.module_path, f" Unexpected key {key}"
+
+        return ret_val
+
+    @compatibility(is_backward_compatible=False)
+    def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
+        """
+        Method that specifies the behavior of this ``Tracer`` when we call getattr
+        on a call to an ``nn.Module`` instance.
+
+        By default, the behavior is to return a proxy value for the attribute. It
+        also stores the proxy value in the ``parameter_proxy_cache``, so that future
+        calls will reuse the proxy rather than creating a new one.
+
+        This method can be overridden to --for example-- not return proxies when
+        querying parameters.
+
+        Args:
+
+            attr (str): The name of the attribute being queried
+            attr_val (Any): The value of the attribute
+            parametr_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
+
+        Return:
+
+            The return value from the getattr call.
+        """
+        def maybe_get_proxy_for_attr(
+            attr_val, collection_to_search, parameter_proxy_cache
+        ):
+            for n, p in collection_to_search:
+                if attr_val is p:
+                    if n not in parameter_proxy_cache:
+                        kwargs = {}
+                        if (
+                            "proxy_factory_fn"
+                            in inspect.signature(self.create_proxy).parameters
+                        ):
+                            kwargs["proxy_factory_fn"] = (
+                                None
+                                if not self.param_shapes_constant
+                                else lambda node: ParameterProxy(
+                                    self, node, n, attr_val
+                                )
+                            )
+                        val_proxy = self.create_proxy("get_attr", n, (), {}, **kwargs)  # type: ignore[arg-type]
+                        parameter_proxy_cache[n] = val_proxy
+                    return parameter_proxy_cache[n]
+            return None
+
+        if isinstance(attr_val, torch.nn.Parameter):
+            maybe_parameter_proxy = maybe_get_proxy_for_attr(
+                attr_val, self.root.named_parameters(), parameter_proxy_cache
+            )
+            if maybe_parameter_proxy is not None:
+                return maybe_parameter_proxy
+
+        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
+            maybe_buffer_proxy = maybe_get_proxy_for_attr(
+                attr_val, self.root.named_buffers(), parameter_proxy_cache
+            )
+            if maybe_buffer_proxy is not None:
+                return maybe_buffer_proxy
+
+        return attr_val
 
     # This method will be refactored
     @compatibility(is_backward_compatible=False)
@@ -496,7 +577,7 @@ class Tracer(TracerBase):
                         )
                         self.create_proxy("call_function", _assert_is_none, args, {})
                     else:
-                        torch.warnings.warn(
+                        warnings.warn(
                             f"Was not able to add assertion to guarantee correct input {name} to "
                             f"specialized function. It is up to the user to make sure that your inputs match the "
                             f"inputs you specialized the function with."
@@ -515,7 +596,7 @@ class Tracer(TracerBase):
                 name,
                 default,
                 {},
-                type_expr=fn_for_analysis.__annotations__.get(name, None),
+                type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
@@ -556,46 +637,6 @@ class Tracer(TracerBase):
 
             return flatten_fn, flat_args
         return root_fn, args
-
-    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        def maybe_get_proxy_for_attr(
-            attr_val, collection_to_search, parameter_proxy_cache
-        ):
-            for n, p in collection_to_search:
-                if attr_val is p:
-                    if n not in parameter_proxy_cache:
-                        kwargs = {}
-                        if (
-                            "proxy_factory_fn"
-                            in inspect.signature(self.create_proxy).parameters
-                        ):
-                            kwargs["proxy_factory_fn"] = (
-                                None
-                                if not self.param_shapes_constant
-                                else lambda node: ParameterProxy(
-                                    self, node, n, attr_val
-                                )
-                            )
-                        val_proxy = self.create_proxy("get_attr", n, (), {}, **kwargs)  # type: ignore[arg-type]
-                        parameter_proxy_cache[n] = val_proxy
-                    return parameter_proxy_cache[n]
-            return None
-
-        if isinstance(attr_val, torch.nn.Parameter):
-            maybe_parameter_proxy = maybe_get_proxy_for_attr(
-                attr_val, self.root.named_parameters(), parameter_proxy_cache
-            )
-            if maybe_parameter_proxy is not None:
-                return maybe_parameter_proxy
-
-        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
-            maybe_buffer_proxy = maybe_get_proxy_for_attr(
-                attr_val, self.root.named_buffers(), parameter_proxy_cache
-            )
-            if maybe_buffer_proxy is not None:
-                return maybe_buffer_proxy
-
-        return attr_val
 
     @compatibility(is_backward_compatible=True)
     def trace(
@@ -638,6 +679,7 @@ class Tracer(TracerBase):
                 ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
 
                 fn = getattr(type(root), self.traced_func_name)
+                self.root_module_name = root._get_name()
                 self.submodule_paths = {mod: name for name, mod in root.named_modules()}
             else:
                 self.root = torch.nn.Module()
@@ -677,7 +719,7 @@ class Tracer(TracerBase):
             @functools.wraps(_orig_module_getattr)
             def module_getattr_wrapper(mod, attr):
                 attr_val = _orig_module_getattr(mod, attr)
-                return self._module_getattr(attr, attr_val, parameter_proxy_cache)
+                return self.getattr(attr, attr_val, parameter_proxy_cache)
 
             @functools.wraps(_orig_module_call)
             def module_call_wrapper(mod, *args, **kwargs):
@@ -720,6 +762,20 @@ class Tracer(TracerBase):
         finally:
             _is_fx_tracing_flag = old_is_fx_tracing_flag
         return self.graph
+
+    def __deepcopy__(self, memo):
+        # _autowrap_search contains modules, which cannot be deepcopied.
+        new_tracer = Tracer.__new__(Tracer)
+
+        for k, v in self.__dict__.items():
+            if k in {'_autowrap_search'}:
+                new_obj = copy.copy(v)
+            else:
+                new_obj = copy.deepcopy(v, memo)
+
+            new_tracer.__dict__[k] = new_obj
+
+        return new_tracer
 
 
 # List of pairs of (global dict, function name) functions
@@ -953,9 +1009,9 @@ def wrap(fn_or_name: Union[str, Callable]):
             "string name"
         )
 
-    if hasattr(fn_or_name, "__code__"):
+    if callable(fn_or_name):
         assert not isinstance(fn_or_name, str)  # to make mypy happy
-        fn_name = fn_or_name.__code__.co_name
+        fn_name = fn_or_name.__name__
     else:
         assert isinstance(
             fn_or_name, str

@@ -43,6 +43,50 @@ Method Module::get_method(const std::string& name) const {
   AT_ERROR("Method '", name, "' is not defined.");
 }
 
+bool Module::compareMethodSchemas(
+    const std::string& name_1,
+    const std::string& name_2) {
+  c10::optional<c10::FunctionSchema> schema_1, schema_2;
+  for (const auto& fn : cu_->methods()) {
+    if (fn->name() == name_1) {
+      schema_1 = fn->getSchema();
+    }
+    if (fn->name() == name_2) {
+      schema_2 = fn->getSchema();
+    }
+  }
+  if (schema_1.has_value() && schema_2.has_value()) {
+    return (schema_1 == schema_2);
+  }
+  return false;
+}
+
+void Module::unsafeRemoveMethod(const std::string& basename) {
+  int64_t i = 0;
+  for (; i < cu_->methods().size(); ++i) {
+    if ((cu_->methods()[i])->name() == basename) {
+      break;
+    }
+  }
+  object_->type()->unsafeRemoveMethod(basename);
+  cu_->unsafeRemoveFunction(i);
+}
+
+void Module::unsafeCopyMethod(
+    const std::string& new_method_name,
+    const Function& to_be_copied) {
+  TORCH_CHECK(
+      !find_method(new_method_name).has_value(),
+      "Trying to replace existing method.");
+  const c10::QualifiedName& tobe_copied_name = to_be_copied.qualname();
+  c10::QualifiedName qualified_method_name(
+      tobe_copied_name.prefix(), new_method_name);
+  std::unique_ptr<Function> new_fn = std::make_unique<Function>(
+      qualified_method_name, to_be_copied.get_code(), to_be_copied.getSchema());
+  object_->type()->addMethod(new_fn.get());
+  cu_->register_function(std::move(new_fn));
+}
+
 c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
@@ -53,6 +97,10 @@ c10::optional<Method> Module::find_method(const std::string& basename) const {
 }
 
 namespace {
+// For JIT, there is a private function to get all modules by iteration in
+// struct slot_iterator_impl (jit/api/module.h). The following function use
+// recursion to mimic the logic without allocating extra memory to get module
+// list and set training attribute directly.
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
@@ -65,7 +113,9 @@ void set_train_recurse(
         "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isObject()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
       set_train_recurse(slot.toObject(), on);
     }
   }

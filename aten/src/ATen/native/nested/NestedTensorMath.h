@@ -1,22 +1,23 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/NestedTensorImpl.h>
-
-#include <vector>
+#include <c10/macros/Macros.h>
 
 namespace at {
 namespace native {
-struct NestedTensorImpl;
 
-// TODO: cache this and only do it once per NestedTensor
-int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
+TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
+    const Tensor& t,
+    double padding,
+    OptionalIntArrayRef output_size);
 
-at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor);
-
-TORCH_API std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt);
-
-TORCH_API Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding, OptionalIntArrayRef output_size);
+template <typename Func>
+Tensor map_nt(const Tensor& nt, Func f) {
+  auto* nt_impl = get_nested_tensor_impl(nt);
+  const auto& sizes = nt_impl->get_nested_size_tensor();
+  return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
+}
 
 } // namespace native
 } // namespace at

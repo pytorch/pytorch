@@ -1,21 +1,26 @@
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
+from typing import Sequence
 
-def narrow_tensor(tensor: torch.Tensor, metadata: ShardMetadata):
+def narrow_tensor_by_index(tensor: torch.Tensor, offsets: Sequence[int], sizes: Sequence[int]) -> torch.Tensor:
     """
-    narrow the tensor according to the metadata
+    Narrow the tensor according to ``offsets`` and ``sizes``.
     """
     narrowed_tensor = tensor
-    shard_offsets = metadata.shard_offsets
-    shard_sizes = metadata.shard_sizes
-    for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
+    for idx, (offset, size) in enumerate(zip(offsets, sizes)):
         if size < tensor.size(idx):
             # Reshape to get shard for this rank and we don't want autograd
             # recording here for the narrow op and 'local_shard' should be a
             # leaf variable in the autograd graph.
             narrowed_tensor = narrowed_tensor.narrow(
                 idx,
-                shard_offsets[idx],
-                shard_sizes[idx]
+                offset,
+                size
             )
     return narrowed_tensor
+
+def narrow_tensor(tensor: torch.Tensor, metadata: ShardMetadata) -> torch.Tensor:
+    """
+    Narrow the tensor according to the metadata
+    """
+    return narrow_tensor_by_index(tensor, metadata.shard_offsets, metadata.shard_sizes)

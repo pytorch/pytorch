@@ -473,6 +473,10 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
 
   bool has_contiguous_first_dim() const {
+    if (ndim() == 0) {
+      return true;
+    }
+
     int num_tensors = ntensors();
     for (const auto i : c10::irange(num_tensors)) {
       if (strides(i)[0] != element_size(i)) {
@@ -655,9 +659,12 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// in operands_).
   int num_outputs_ = 0;
 
-  /// Whether or not all operands have the same shape.  Having all the same
-  /// shape affects whether or not the iterator is eligible for fast setup.
+  /// Whether or not all operands have the same shape and are 1d+. Having all
+  /// the same shape affects whether or not the iterator is eligible for fast
+  /// setup.
   bool all_ops_same_shape_ = false;
+  /// Whether or not all operands are 0d, this affects type promotion
+  bool all_ops_are_scalars_ = false;
 
   /// The "computation" dtype of TensorIterator, specifying what the dtype
   /// we will do the internal computation in TensorIterator.  Typically,

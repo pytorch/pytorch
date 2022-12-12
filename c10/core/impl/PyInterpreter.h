@@ -2,6 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -29,6 +30,8 @@ using Stack = std::vector<c10::IValue>;
 
 namespace c10 {
 namespace impl {
+
+struct C10_API PyInterpreter;
 
 // Note [Python interpreter tag]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -93,9 +96,10 @@ namespace impl {
 // point (on a good day, you might get "pure virtual method called").
 //
 // The idea to solve this problem is we always leak PyInterpreters (so they
-// always stay live even after dlclose), and disarm the "virtual methods" by
-// replacing them with function pointers that just no-op.  This can't be done
-// with a traditional C++ vtable, so we have to roll our own.
+// always stay live even after dlclose), and make sure we can disarm their
+// virtual methods by indirecting through a separate PyInterpreterVTable
+// object.  This can be replaced with a no-op vtable from libc10.so, which
+// is guaranteed to stick around until the bitter end.
 //
 // NB: The downside with representing PyInterpreter tags as full objects is that
 // it takes an extra word on TensorImpl.  If tags were instead just integer
@@ -117,127 +121,84 @@ namespace impl {
 // still fit inside three eight word cache lines.  If you need to penny pinch
 // another word consider doing this!
 
-struct C10_API PyInterpreter {
-  // Feel free to add as much random crap here as you need; each of these
-  // can be thought of as a "C++ to Python" hook.
-  using name_sig = std::string(const PyInterpreter*);
-  using decref_sig = void(const PyInterpreter*, PyObject*, bool);
-  using detach_sig =
-      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
-  using dispatch_sig = void(
-      const PyInterpreter*,
-      const c10::OperatorHandle&,
-      torch::jit::Stack* stack);
-  using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
-  using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
-  using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
-  using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
-  using sizes_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
-  using sym_sizes_sig =
-      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
-  using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
-
-  PyInterpreter(
-      name_sig* name_fn,
-      decref_sig* decref_fn,
-      detach_sig* detach,
-      dispatch_sig* dispatch,
-      is_contiguous_sig* is_contiguous,
-      device_sig* device_fn,
-      dim_sig* dim_fn,
-      strides_sig* strides,
-      sizes_sig* sizes,
-      sym_sizes_sig* sym_sizes,
-      layout_sig* layout)
-      : name_fn_(name_fn),
-        decref_fn_(decref_fn),
-        detach_fn_(detach),
-        dispatch_fn_(dispatch),
-        is_contiguous_fn_(is_contiguous),
-        device_fn_(device_fn),
-        dim_fn_(dim_fn),
-        strides_fn_(strides),
-        sizes_fn_(sizes),
-        sym_sizes_fn_(sym_sizes),
-        layout_fn_(layout) {}
-
-  name_sig* name_fn_;
-  decref_sig* decref_fn_;
-  detach_sig* detach_fn_;
-  dispatch_sig* dispatch_fn_;
-  is_contiguous_sig* is_contiguous_fn_;
-  device_sig* device_fn_;
-  dim_sig* dim_fn_;
-  strides_sig* strides_fn_;
-  sizes_sig* sizes_fn_;
-  sym_sizes_sig* sym_sizes_fn_;
-  layout_sig* layout_fn_;
-
-  // UBSAN suppression fixes: "call to function
-  // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
-  // _object*) through pointer to incorrect function type 'void (*)(const
-  // c10::impl::PyInterpreter *, _object *)'" See
-  // https://github.com/google/sanitizers/issues/911
+struct C10_API PyInterpreterVTable {
+  virtual ~PyInterpreterVTable() {}
 
   // Report the name of this interpreter
-  __ubsan_ignore_function__ std::string name() const {
-    return (*name_fn_)(this);
-  }
+  virtual std::string name() const = 0;
 
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
   // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
-  __ubsan_ignore_function__ void decref(PyObject* pyobj, bool is_tensor) const {
-    return (*decref_fn_)(this, pyobj, is_tensor);
-  }
+  virtual void decref(PyObject* pyobj, bool is_tensor) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
   // situation
-  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
-  }
+  virtual c10::intrusive_ptr<TensorImpl> detach(
+      const TensorImpl* self) const = 0;
 
   // Invoke the Python boxed fallback dispatch to go back into Python
-  __ubsan_ignore_function__ void dispatch(
+  virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+      const = 0;
+
+  // This is only invoked in the multipy/torchdeploy situation from
+  // pythonOpRegistrationTrampoline; this lets us get to the Python
+  // interpreter to actually find the appropriate Python op registration
+  // entry to call.
+  virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const {
-    return (*dispatch_fn_)(this, op, stack);
-  }
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const = 0;
 
-  __ubsan_ignore_function__ bool is_contiguous(const TensorImpl* self) const {
-    return (*is_contiguous_fn_)(this, self);
-  }
+  // Invoke the Python dispatcher to handle this call
+  virtual void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const = 0;
 
-  __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const {
-    return (*device_fn_)(this, self);
-  }
+  virtual bool is_contiguous(const TensorImpl* self, at::MemoryFormat)
+      const = 0;
+  virtual bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+      const = 0;
+  virtual bool is_non_overlapping_and_dense(const TensorImpl* self) const = 0;
+  virtual c10::Device device(const TensorImpl* self) const = 0;
+  virtual int64_t dim(const TensorImpl* self) const = 0;
+  virtual c10::IntArrayRef strides(const TensorImpl* self) const = 0;
+  virtual c10::IntArrayRef sizes(const TensorImpl* self) const = 0;
+  virtual c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const = 0;
+  virtual c10::Layout layout(const TensorImpl* self) const = 0;
+  virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
+  virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
+  virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
 
-  __ubsan_ignore_function__ int64_t dim(const TensorImpl* self) const {
-    return (*dim_fn_)(this, self);
-  }
+  virtual void trace_gpu_event_creation(uintptr_t event) const = 0;
+  virtual void trace_gpu_event_deletion(uintptr_t event) const = 0;
+  virtual void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+      const = 0;
+  virtual void trace_gpu_event_wait(uintptr_t event, uintptr_t stream)
+      const = 0;
+  virtual void trace_gpu_memory_allocation(uintptr_t ptr) const = 0;
+  virtual void trace_gpu_memory_deallocation(uintptr_t ptr) const = 0;
+  virtual void trace_gpu_stream_creation(uintptr_t stream) const = 0;
+  virtual void trace_gpu_device_synchronization() const = 0;
+  virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
+  virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
+};
 
-  __ubsan_ignore_function__ c10::IntArrayRef strides(
-      const TensorImpl* self) const {
-    return (*strides_fn_)(this, self);
-  }
+struct C10_API PyInterpreter {
+  const PyInterpreterVTable* vtable_;
 
-  __ubsan_ignore_function__ c10::IntArrayRef sizes(
-      const TensorImpl* self) const {
-    return (*sizes_fn_)(this, self);
-  }
+  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable){};
 
-  __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
-      const TensorImpl* self) const {
-    return (*sym_sizes_fn_)(this, self);
+  const PyInterpreterVTable& operator*() const noexcept {
+    return *vtable_;
   }
-
-  __ubsan_ignore_function__ c10::Layout layout(const TensorImpl* self) const {
-    return (*layout_fn_)(this, self);
+  const PyInterpreterVTable* operator->() const noexcept {
+    return vtable_;
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
-  // Because the function pointers are raw pointers (not atomics),
+  // The vtable pointer is not an atomic at the moment, which means
   // a disarm() invocation that is concurrent with active destructors
   // is not thread safe and will trigger TSAN.  My hope is that this
   // situations doesn't ever actually happen; tensor destruction should

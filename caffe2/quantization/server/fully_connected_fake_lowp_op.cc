@@ -76,7 +76,7 @@ bool FullyConnectedFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
 
   Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
-  DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
+  TORCH_DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
   Y_shape_cache_.resize(canonical_axis + 1);
   Y_shape_cache_[canonical_axis] = N;
   auto* Y = Output(0, Y_shape_cache_, at::dtype<T_Y>());

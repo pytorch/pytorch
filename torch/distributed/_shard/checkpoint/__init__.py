@@ -1,15 +1,12 @@
-from .metadata import (
-    BytesReadRequest,
-    BytesWriteRequest,
-    ShardedTensorMetadata,
-    ShardStorageMetadata,
-    TensorStorageMetadata,
-    Metadata,
-    TensorReadRequest,
-    TensorWriteRequest,
+# Keep old package for BC purposes, this file should be removed once
+# everything moves to the `torch.distributed.checkpoint` package.
+import sys
+import torch
+import warnings
+
+from torch.distributed.checkpoint import *  # noqa: F403
+warnings.warn(
+    "torch.distributed._shard.checkpoint will be deprecated, use torch.distributed.checkpoint instead",
+    DeprecationWarning
 )
-from .state_dict_loader import load_state_dict
-from .state_dict_saver import save_state_dict
-from .storage import StorageReader, StorageWriter
-from .filesystem import FileSystemReader, FileSystemWriter
-from .api import CheckpointException
+sys.modules['torch.distributed._shard.checkpoint'] = torch.distributed.checkpoint

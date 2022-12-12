@@ -53,7 +53,7 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.0.0'
     implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
     implementation 'com.google.code.findbugs:jsr305:3.0.1'
-    implementation 'com.facebook.soloader:nativeloader:0.10.1'
+    implementation 'com.facebook.soloader:nativeloader:0.10.4'
 
     implementation 'junit:junit:' + rootProject.junitVersion
     implementation 'androidx.test:core:' + rootProject.coreVersion

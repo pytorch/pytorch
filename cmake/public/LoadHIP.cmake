@@ -283,9 +283,6 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
 
-  # Disable Asserts In Code (Can't use asserts on HIP stack.)
-  add_definitions(-DNDEBUG)
-
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
   else()

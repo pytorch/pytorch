@@ -8,17 +8,24 @@ jobs:
   do_merge:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
       - name: Checkout repo
-        uses: actions/checkout@v2
+        id: checkout
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          check-latest: false
+          cache: pip
+          architecture: x64
+      - run: pip install pyyaml==6.0
 
       - name: Setup committer id
         run: |
@@ -28,13 +35,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
-          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
           ON_GREEN: ${{ github.event.client_payload.on_green}}
           LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REBASE: ${{ github.event.client_payload.rebase }}
         run: |
           set -ex
+          if [ -n "${REBASE}" ]; then
+            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
+            git checkout master
+            git fetch -p
+            # give github some time between the push and start workflows so that Github's messages
+            # on the PR appear in chronological order (timing issues can shuffle them around)
+            sleep 60
+          fi
           if [ -n "${FORCE}" ]; then
             if [ -n "${COMMENT_ID}" ]; then
               python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
@@ -50,6 +65,15 @@ jobs:
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
+      - name: Comment on Canceled
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+        run: |
+          set -ex
+          python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
 
 # We want newer merge commands to supercede old ones
 concurrency:

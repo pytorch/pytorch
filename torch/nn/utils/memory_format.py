@@ -41,22 +41,23 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         immediately before a convolution.
 
     Args:
-        module (nn.Module): ``nn.Conv2d`` & ``nn.ConvTranspose2d``  or container
+        module (nn.Module): ``nn.Conv2d`` & ``nn.ConvTranspose2d`` or container
                             ``nn.Module``
-        format: user specified ``memory_format``,
+        memory_format: user specified ``memory_format``,
             e.g. ``torch.channels_last`` or ``torch.contiguous_format``
 
     Returns:
         The original module with updated ``nn.Conv2d``
 
     Example:
-        >>>  input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float16, device="cuda")
-        >>>  model = nn.Sequential(
-        >>>      nn.Conv2d(8, 4, 3)).cuda().half()
-        >>>  # This is identical to:
-        >>>  # nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
-        >>>  model = nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
-        >>>  out = model(input)
+        >>> # xdoctest: +REQUIRES(env:CUBLAS_WORKSPACE_CONFIG)
+        >>> input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float16, device="cuda")
+        >>> model = nn.Sequential(
+        >>>     nn.Conv2d(8, 4, 3)).cuda().half()
+        >>> # This is identical to:
+        >>> # nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
+        >>> model = nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
+        >>> out = model(input)
     """
 
     # TODO: expand this to `_ConvNd` when channels_last support is extended

@@ -38,13 +38,19 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // Insert an expression before the current top-level expression.
   void insertAtTopLevel(Expr* expr);
 
+  void handle(const FullOp*) final;
+  void handle(const ARangeOp*) final;
+  void handle(const EyeOp*) final;
   void handle(const ViewAsScalar*) final;
   void handle(const UnaryOp*) final;
+
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;
+  void handle(const RNGOp*) final;
   void handle(const ReductionOp*) final;
   void handle(const GroupedReductionOp*) final;
   void handle(const WelfordOp*) final;
+  void handle(const GroupedWelfordOp*) final;
   void handle(const LoadStoreOp*) final;
   void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
@@ -55,6 +61,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   void handle(const kir::BlockSync*) final;
   void handle(const kir::GridSync*) final;
   void handle(const kir::CpAsyncWait*) final;
+  void handle(const kir::CpAsyncCommit*) final;
 
   void generate(const std::vector<Expr*>& exprs);
 
@@ -76,6 +83,37 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void handleGridWelford(WelfordOp* new_wop);
 
+  void handleGroupedBlockWelford(
+      const GroupedWelfordOp* wop,
+      const std::vector<WelfordTriplet>& output_vals,
+      const std::vector<WelfordTriplet>& input_vals,
+      const std::vector<WelfordTriplet>& init_vals);
+  void handleGroupedGridWelford(
+      const GroupedWelfordOp* wop,
+      const std::vector<WelfordTriplet>& output_vals,
+      const std::vector<WelfordTriplet>& input_vals,
+      const std::vector<WelfordTriplet>& init_vals);
+
+  // Allocate a unique buffer for grid reductions and broadcast. A
+  // buffer is uniquely allocated for each output tensor of an
+  // expression.
+  kir::Allocate* allocateUniqueBuffer(
+      Val* buffer_size,
+      DataType dtype,
+      bool zero_init,
+      TensorView* out_tv,
+      std::unordered_map<TensorView*, kir::Allocate*>& alloc_map);
+
+  std::vector<kir::Allocate*> allocateWelfordWorkBuffer(
+      const std::vector<WelfordTriplet>& triplets,
+      WelfordTriplet::ValName name,
+      Val* buffer_size);
+
+  // Allocate a fused reduction object uniquely for a given
+  // TensorView. Parameter expr is the expression corresponding to the
+  // fused reduction.
+  void allocateUniqueFusedReduction(Expr* expr, TensorView* out_tv);
+
  private:
   std::vector<Expr*> lowered_exprs_;
 
@@ -90,6 +128,13 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // Track for loops to send to indexing. Similar to what's done in
   // kir::IrVisitor
   std::vector<kir::ForLoop*> for_loops_;
+
+  // Maps to keep track of allocated buffers and objects that must be
+  // allocated only once
+  std::unordered_map<TensorView*, kir::Allocate*> sync_buffer_map_;
+  std::unordered_map<TensorView*, kir::Allocate*> work_buffer_map_;
+  std::unordered_map<TensorView*, kir::AllocateFusedReduction*>
+      fused_reduction_map_;
 };
 
 } // namespace cuda

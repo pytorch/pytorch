@@ -85,19 +85,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
           c10::scalarTypeToTypeMeta(tensor.dtype()),
           backendDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(c10::make_intrusive<LazyTensor>(std::move(tensor))) {
-  // This is a temporary fix for a PyTorch core issue,
-  // according to https://github.com/pytorch/xla/pull/2682.
-  is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
-
-  auto rank = tensor_->shape().Get().sizes().size();
-  sym_sizes_.reserve(rank);
-  for (auto i : c10::irange(rank)) {
-    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
-        this->tensor_->GetIrValue(), i);
-    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-    sym_sizes_.push_back(sn->toSymInt());
-  }
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -142,14 +130,12 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  return FLAGS_ltc_enable_symbolic_shapes
-      ? c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size())
-      : TensorImpl::sym_sizes_default();
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return c10::fromIntArrayRefKnownNonNegative(strides_custom());
 }
 
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
-  return sym_sizes_custom();
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
+  return c10::fromIntArrayRefKnownNonNegative(sizes_custom());
 }
 
 void LTCTensorImpl::setup_size_properties() {
@@ -196,12 +182,33 @@ int64_t LTCTensorImpl::numel_custom() const {
   return numel_default();
 }
 
+int64_t LTCTensorImpl::storage_offset_custom() const {
+  return 0;
+}
+
+bool LTCTensorImpl::is_strides_like_custom(
+    c10::MemoryFormat memory_format) const {
+  TORCH_INTERNAL_ASSERT(memory_format != at::MemoryFormat::Contiguous);
+  return false;
+}
+
+bool LTCTensorImpl::is_non_overlapping_and_dense_custom() const {
+  // This should be true, but false as a temporary fix for a PyTorch core issue,
+  // according to https://github.com/pytorch/xla/pull/2682.
+  return false;
+}
+
 bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
+  // TODO(ezyang): I don't think this branch is actually necessary
+  // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
+  // the memory format?
   if (tensor_->CurrentTensorData()) {
     return tensor_->CurrentTensorData()->is_contiguous();
   }
   // Only check that the storage is already contiguous.
   CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
+  // TODO: I don't think logic is right, we should check the requested memory
+  // format before returning true
   return true;
 }
 

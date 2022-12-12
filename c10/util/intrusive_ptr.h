@@ -24,9 +24,6 @@ namespace intrusive_ptr {
 inline void incref(intrusive_ptr_target* self);
 }
 
-template <typename TTarget>
-struct ExclusivelyOwnedTraits;
-
 // constructor tag used by intrusive_ptr constructors
 struct DontIncreaseRefcount {};
 } // namespace raw
@@ -92,7 +89,7 @@ class C10_API intrusive_ptr_target {
       intrusive_ptr_target* self);
 
   template <typename T>
-  friend struct ExclusivelyOwnedTraits;
+  friend struct ExclusivelyOwnedTensorTraits;
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -249,7 +246,7 @@ class intrusive_ptr final {
   TTarget* target_;
 
   template <typename T>
-  friend struct ExclusivelyOwnedTraits;
+  friend struct ExclusivelyOwnedTensorTraits;
   template <class TTarget2, class NullType2>
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
@@ -327,6 +324,9 @@ class intrusive_ptr final {
   using element_type = TTarget;
 
   intrusive_ptr() noexcept
+      : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
+
+  intrusive_ptr(std::nullptr_t) noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
   // This constructor will not increase the ref counter for you.

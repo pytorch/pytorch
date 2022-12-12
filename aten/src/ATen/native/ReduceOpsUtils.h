@@ -102,7 +102,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
   OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
 }
 
-static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
+static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
@@ -159,7 +159,7 @@ static void resize_reduction_result(
 }
 
 inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
+  const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   DimMask mask = make_dim_mask(dim, self.dim());
   auto shape = shape_from_dim_mask(self, mask, keepdim);

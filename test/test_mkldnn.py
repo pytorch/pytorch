@@ -136,6 +136,22 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
+    def test_mkldnn_conv_shapecheck(self):
+        input = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        w1 = torch.full((1, 1, 1, 24,), 1, dtype=torch.float32)
+        b1 = torch.full((1,), 1, dtype=torch.float32)
+        w2 = torch.full((1, 1, 2, 24,), 1, dtype=torch.float32)
+        b2 = torch.full((2,), 1, dtype=torch.float32)
+        options = zip([-1, 0, 0, 0, 0, 0, 0],  # padding
+                      [1, 0, 1, 1, 1, 1, 1],  # stride
+                      [1, 1, 0, 1, 1, 1, 1],  # dilation
+                      [1, 1, 1, 0, 2, 1, 1],  # groups
+                      [w1, w1, w1, w1, w1, w1, w2],  # weight
+                      [b1, b1, b1, b1, b1, b2, b1])  # bias
+        for pad, st, dil, gr, w, b in options:
+            with self.assertRaises(RuntimeError) as _:
+                torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
+
     def test_autograd_to_mkldnn(self):
         # MKLDNN only supports float32
         root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
@@ -283,7 +299,7 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, dtype):
+    def _test_conv2d_nhwc_base(self, weight_memory_format, dtype):
         conv_module = torch.nn.Conv2d
         input_shapes = (224, 224)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
@@ -303,7 +319,7 @@ class TestMkldnn(TestCase):
                                 dilation=dilation,
                                 bias=bias,
                                 groups=groups).to(dtype=dtype)
-            conv2 = copy.deepcopy(conv1).to(memory_format=torch.channels_last)
+            conv2 = copy.deepcopy(conv1).to(memory_format=weight_memory_format)
             x1 = x.clone()
             x2 = x.clone().to(memory_format=torch.channels_last)
             if train:
@@ -325,13 +341,15 @@ class TestMkldnn(TestCase):
                 self.assertEqual(x1.grad, x2.grad)
 
     def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.bfloat16)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -1041,6 +1059,11 @@ class TestMkldnn(TestCase):
                     x.transpose(dim1, dim2),
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
+
+    def test_transpose_invalid_dime(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch._mkldnn_transpose(x, 0, 12)
 
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()

@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 1
           submodules: false
@@ -36,7 +36,7 @@ jobs:
       - name: Checkout
         shell: bash
         run: |
-          git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --depth=1 --quiet
+          git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --quiet
 
       - name: Check if there already exists a PR
         shell: bash
