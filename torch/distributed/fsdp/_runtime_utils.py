@@ -578,7 +578,7 @@ def _post_backward_hook(
         reduce_grad_kwargs = {"dtype": reduce_dtype, "device": handle.device}
         needs_pre_reduce_cast = reduce_dtype != handle._config.low_prec_param_dtype
         needs_pre_optim_copy = (
-            not _low_precision_hook_enabled(state)  # done in the hook
+            not _low_precision_hook_enabled(state)  # if enabled, copy happens in the hook
             and handle._orig_param_dtype != reduce_dtype
         )
         if handle.uses_sharded_strategy:
@@ -652,7 +652,10 @@ def _post_backward_hook(
                     reduce_unsharded_grad,
                     reduce_sharded_grad,
                 )
-                if handle._config.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+                if handle._config.sharding_strategy in {
+                    HandleShardingStrategy.HYBRID_SHARD,
+                    HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+                }:
                     default_hooks.allreduce_hook(
                         state=state._inter_node_state,
                         grad=reduce_sharded_grad,
@@ -689,8 +692,10 @@ def _post_backward_hook(
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads and needs_pre_optim_copy:
-                    pre_optim_grad.copy_(flat_param.grad)
+                    pre_optim_grad.copy_(flat_param_grad)
                     flat_param.grad.data = pre_optim_grad
+                else:
+                    flat_param.grad.data = flat_param_grad
                 grad_to_offload = flat_param.grad
 
             if handle._config.offload_params:
