@@ -95,7 +95,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 
       retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "\${CUDA_PACKAGE}=\${cu_ver}"
     fi
-    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
+    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg"
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
