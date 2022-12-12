@@ -368,6 +368,8 @@ def run_with_threaded_pg(world_size, timeout, callback):
         except Exception as ex:
             exception_queue.put((rank, sys.exc_info()))
             world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
+        # TODO: must follow the behavior of MultiProcessTestCase's error handling
+        # i.e. run_test(), _check_no_test_errors(), and _check_return_codes()
         finally:
             if world_is_valid():
                 dist.destroy_process_group()
