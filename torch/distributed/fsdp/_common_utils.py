@@ -28,7 +28,7 @@ class _FSDPState(_State):
         self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
-        self.rank: int = 0
+        self.rank: int = -1
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
