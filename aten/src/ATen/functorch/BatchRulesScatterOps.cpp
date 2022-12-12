@@ -319,7 +319,7 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
 ) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level)) {
     return at::index(self, indices);
@@ -506,7 +506,7 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
 , const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_put__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put_(indices, values, accumulate);
@@ -545,7 +545,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
                                   const Tensor &values, bool accumulate, bool unsafe) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "_index_put_impl__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -666,7 +666,7 @@ Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & in
                           const Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "index_put_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put(indices, values, accumulate);
@@ -928,6 +928,11 @@ Tensor index_copy_decomp(
   return at::scatter(self, dim, index_, source);  ;
 }
 
+// Note [Fix vmap slice_scatter]
+// registers a decomposition for `slice_scatter` that calls into `slice.src`
+// *_scatter operators have some special semantics though, that we can't easily
+// through a decomposition: slice_scatter's output needs to have the same
+// size, size, strides and storage_offset as the input.
 Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
                             int64_t dim, c10::optional<int64_t> start,
                             c10::optional<int64_t> end, int64_t step)

@@ -45,7 +45,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   const auto cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
   TORCH_CHECK(
       cols_input == input_channels_,
-      "quantized_sparse_lienar: Input tensor's last and weight tensor's"
+      "quantized_sparse_linear: Input tensor's last and weight tensor's"
       " second dimension must match.");
 
   // On empty input, no output data will be generated,

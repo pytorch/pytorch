@@ -113,12 +113,13 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <numeric>
-#include <vector>
-#include <cmath>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -727,7 +728,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
         prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
-        omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+        omitted_products = at::cat({ones, std::move(prods_from_k_plus_1)}, dim);
       } else if (k == dim_size - 1) {
         const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
@@ -751,7 +752,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       }
     }
 
-    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : grad_input;
+    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : std::move(grad_input);
   }
 }
 
@@ -1059,7 +1060,7 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   std::vector<Tensor> result;
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
-      auto ax_dx = spacing[i];
+      const auto& ax_dx = spacing[i];
       Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
       if (edge_order==1) {
@@ -1219,6 +1220,18 @@ Tensor nansum(const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, c10
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
+namespace {
+template<typename scalar_t, typename accscalar_t = at::acc_type<scalar_t, false>>
+void inline set_result(Tensor& result, accscalar_t sum)
+{
+    if constexpr (std::is_integral_v<accscalar_t>) {
+      // all integer types get promoted to kLong
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
+}
+}
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
@@ -1244,12 +1257,8 @@ Tensor trace_cpu(const Tensor& self) {
     for (const auto i : c10::irange(t_diag_size)) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
+    set_result<scalar_t>(result, sum);
 
-    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
-      // all integer types get promoted to kLong
-      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
-      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
-    );
   });
 
   return result;
@@ -1744,6 +1753,9 @@ static Tensor& std_var_out(
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
+  TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
+              "result type ", self.scalar_type(), " can't be cast to the "
+              "desired output type ", result.scalar_type());
 
   if (iter.numel() == 0) {
     // Trivial reduction
