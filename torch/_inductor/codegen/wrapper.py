@@ -564,8 +564,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         super().__init__()
 
     def set_output_refs(self):
+        def has_cpp_codegen_func(x):
+            return hasattr(x, "cpp_wrapper_codegen_reference") and callable(
+                x.cpp_wrapper_codegen_reference
+            )
+
         self.output_refs = [
-            x.cpp_wrapper_codegen_reference() for x in V.graph.graph_outputs
+            x.cpp_wrapper_codegen_reference()
+            if has_cpp_codegen_func(x)
+            else x.codegen_reference()
+            for x in V.graph.graph_outputs
         ]
 
     def write_prefix(self):
