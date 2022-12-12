@@ -313,6 +313,7 @@ class TestMasked(TestCase):
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
                                             ('coo', 123), ('hybrid_coo', 123),
                                             ('csr', 0), ('csr', 123)],
