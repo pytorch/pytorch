@@ -25,6 +25,7 @@ except ImportError:
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
 
+# log compiled function + graphs at level INFO
 output_code = False
 
 # the name of a file to write the logs to
