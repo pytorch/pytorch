@@ -1891,13 +1891,29 @@ def meta__scaled_dot_product_efficient(
     compute_log_sumexp: bool,
     is_causal: bool = False,
 ):
-    logsumexp_dim = math.ceil(query.size(2) // 32) * 32 if compute_log_sumexp else 0
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    num_heads = query.size(-2)
+    K = query.size(-1)
+    Kv = value.size(-1)
+
+    res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
+
+    logsumexp_dim = math.ceil(query.size(2) / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
-        (query.size(0), query.size(1), logsumexp_dim),
+        (B, num_heads, logsumexp_dim),
         dtype=torch.float,
         device=query.device,
     )
-    return torch.empty_like(query), logsum_exp
+
+    res = res.transpose(1, 2)
+
+    return res, logsum_exp
 
 
 @register_meta(
@@ -1914,7 +1930,6 @@ def meta__scaled_dot_product_efficient_backward(
     logsumexp: Tensor,
     is_causal: bool = False,
 ):
-    pass
     # There has to be a better way than this....
     is_alias = (
         query._storage().data_ptr()
