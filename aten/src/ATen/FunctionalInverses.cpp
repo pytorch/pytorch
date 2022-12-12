@@ -4,8 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 
-#include <iostream>
-
 namespace at {
 namespace functionalization {
 
