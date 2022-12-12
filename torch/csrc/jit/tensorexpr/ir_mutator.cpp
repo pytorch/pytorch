@@ -160,7 +160,7 @@ ExprPtr IRMutator::mutate(LoadPtr v) {
   bool any_index_changed = false;
   std::vector<ExprPtr> indices_new;
   indices_new.reserve(v->indices().size());
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
@@ -269,7 +269,7 @@ ExprPtr IRMutator::mutate(TermPtr v) {
   ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
   std::vector<ExprPtr> variables;
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<Term>(v->hasher(), newScalar, variables);
@@ -279,7 +279,7 @@ ExprPtr IRMutator::mutate(PolynomialPtr v) {
   ExprPtr newScalar = v->scalar()->accept_mutator(this);
 
   std::vector<TermPtr> variables;
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables.push_back(static_to<Term>(t->accept_mutator(this)));
   }
   return alloc<Polynomial>(v->hasher(), newScalar, variables);
@@ -297,7 +297,7 @@ ExprPtr IRMutator::mutate(MaxTermPtr v) {
   }
 
   std::vector<ExprPtr> variables;
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<MaxTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
@@ -310,7 +310,7 @@ ExprPtr IRMutator::mutate(MinTermPtr v) {
   }
 
   std::vector<ExprPtr> variables;
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     variables.push_back(t->accept_mutator(this));
   }
   return alloc<MinTerm>(v->hasher(), newScalar, v->propagate_nans(), variables);
@@ -320,7 +320,7 @@ ExprPtr IRMutator::mutate(ReduceOpPtr v) {
   ExprPtr body_new = v->body()->accept_mutator(this);
 
   std::vector<VarPtr> new_reduce_args;
-  for (auto r : v->reduce_args()) {
+  for (const auto& r : v->reduce_args()) {
     new_reduce_args.push_back(static_to<Var>(r->accept_mutator(this)));
   }
 
@@ -360,7 +360,7 @@ StmtPtr IRMutator::mutate(BlockPtr v) {
   bool any_change = false;
 
   std::vector<StmtPtr> stmts;
-  for (StmtPtr stmt : *v) {
+  for (const StmtPtr& stmt : *v) {
     StmtPtr stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
@@ -382,7 +382,7 @@ StmtPtr IRMutator::mutate(StorePtr v) {
 
   bool any_index_changed = false;
   std::vector<ExprPtr> indices_new;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
@@ -410,7 +410,7 @@ StmtPtr IRMutator::mutate(AtomicAddPtr v) {
 
   bool any_index_changed = false;
   std::vector<ExprPtr> indices_new;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ExprPtr new_ind = ind->accept_mutator(this);
     if (new_ind != ind) {
       any_index_changed = true;
@@ -446,7 +446,7 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   bool buf_args_changed = false;
   std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const BufPtr& buf_arg : v->buf_args()) {
     BufPtr buf_arg_new = to<Buf>(buf_arg->accept_mutator(this));
     TORCH_INTERNAL_ASSERT(
         buf_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
@@ -457,7 +457,7 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   bool args_changed = false;
   std::vector<ExprPtr> args_new;
   args_new.reserve(v->args().size());
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
     ExprPtr arg_new = arg->accept_mutator(this);
     args_new.push_back(arg_new);
     args_changed |= arg_new != arg;

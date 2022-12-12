@@ -376,7 +376,7 @@ static IValue addInput(
 
     // Unpack the list values statically
     for (const auto& entry : dict) {
-      IValue key = entry.key();
+      const IValue& key = entry.key();
       auto static_key = state->graph->insertConstant(key);
       auto static_value =
           state->graph->insert(aten::__getitem__, {value, static_key});
