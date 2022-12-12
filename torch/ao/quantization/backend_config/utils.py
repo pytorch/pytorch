@@ -31,8 +31,7 @@ __all__ = [
 
 def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
     pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}
-    for config in backend_config.configs:
-        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
 
@@ -52,8 +51,7 @@ def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
 
 def get_pattern_to_input_type_to_index(backend_config: BackendConfig) -> Dict[Pattern, Dict[str, int]]:
     pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = {}
-    for config in backend_config.configs:
-        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
 
@@ -67,21 +65,19 @@ def get_root_module_to_quantized_reference_module(
 
 def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
     fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = {}
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
             # Note: both the fuser method and the pattern are specified in forward order in the
             # BackendConfig, but the internal pattern matching code uses the reversed nested tuple
-            # format, so here we convert both to the internal format
-            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
+            # format, so we need to convert both to the internal format
             fuser_method = _get_fuser_method_in_reversed_nested_tuple_format(config)
             fuser_method_mapping[pattern] = fuser_method
     return fuser_method_mapping
 
 def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Pattern, Type[torch.nn.Module]]:
     module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = {}
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.qat_module is not None:
-            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             module_to_qat_module[pattern] = config.qat_module
     return module_to_qat_module
 
@@ -96,9 +92,8 @@ def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dic
     e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
     """
     root_node_getter_mapping: Dict[Pattern, Callable] = {}
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._root_node_getter is not None:
-            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             root_node_getter_mapping[pattern] = config._root_node_getter
     return root_node_getter_mapping
 
@@ -117,9 +112,8 @@ def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> 
         return [extra_input]
     """
     extra_inputs_getter_mapping: Dict[Pattern, Callable] = {}
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config._extra_inputs_getter is not None:
-            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             extra_inputs_getter_mapping[pattern] = config._extra_inputs_getter
     return extra_inputs_getter_mapping
 
@@ -273,10 +267,10 @@ def _get_fuser_method_in_reversed_nested_tuple_format(config: BackendPatternConf
     assert config.fuser_method is not None
     if config._pattern_complex_format is not None:
         return config.fuser_method
-
-    # Pattern is specified in the simple tuple format, need to convert
     if not isinstance(config.pattern, tuple):
         raise ValueError("Expected pattern to be a tuple, got: ", config.pattern)
+
+    # Pattern is specified in the simple tuple format, need to convert
     if len(config.pattern) == 2:
         return _reverse2(config.fuser_method)
     elif len(config.pattern) == 3:

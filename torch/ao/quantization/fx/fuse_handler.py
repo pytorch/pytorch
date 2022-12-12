@@ -1,8 +1,5 @@
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
-from torch.ao.quantization.backend_config.utils import (
-    _get_pattern_in_reversed_nested_tuple_format,
-)
 from torch.fx.graph import Node, Graph
 from ..utils import _parent_name, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
@@ -115,9 +112,8 @@ class DefaultFuseHandler(FuseHandler):
 def _get_fusion_pattern_to_fuse_handler_cls(
         backend_config: BackendConfig) -> Dict[Pattern, Callable]:
     fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
         if config.fuser_method is not None:
-            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             # TODO: is this logic right?
             fusion_pattern_to_fuse_handlers[pattern] = DefaultFuseHandler
     return fusion_pattern_to_fuse_handlers

@@ -294,12 +294,12 @@ class TestBackendConfig(QuantizationTestCase):
         backend_op_config1 = self._get_backend_op_config1()
         backend_op_config2 = self._get_backend_op_config2()
         conf.set_backend_pattern_config(backend_op_config1)
-        self.assertEqual(conf._config_dict, {
-            (torch.nn.Linear, torch.nn.ReLU): backend_op_config1,
+        self.assertEqual(conf._pattern_complex_format_to_config, {
+            (torch.nn.ReLU, torch.nn.Linear): backend_op_config1,
         })
         conf.set_backend_pattern_config(backend_op_config2)
-        self.assertEqual(conf._config_dict, {
-            (torch.nn.Linear, torch.nn.ReLU): backend_op_config1,
+        self.assertEqual(conf._pattern_complex_format_to_config, {
+            (torch.nn.ReLU, torch.nn.Linear): backend_op_config1,
             torch.add: backend_op_config2
         })
 
@@ -315,12 +315,12 @@ class TestBackendConfig(QuantizationTestCase):
         conf = BackendConfig.from_dict(conf_dict)
         self.assertEqual(conf.name, "name1")
         self.assertEqual(len(conf.configs), 2)
-        key1 = (torch.nn.Linear, torch.nn.ReLU)
+        key1 = (torch.nn.ReLU, torch.nn.Linear)
         key2 = torch.add
-        self.assertTrue(key1 in conf._config_dict)
-        self.assertTrue(key2 in conf._config_dict)
-        self.assertEqual(conf._config_dict[key1].to_dict(), op_dict1)
-        self.assertEqual(conf._config_dict[key2].to_dict(), op_dict2)
+        self.assertTrue(key1 in conf._pattern_complex_format_to_config)
+        self.assertTrue(key2 in conf._pattern_complex_format_to_config)
+        self.assertEqual(conf._pattern_complex_format_to_config[key1].to_dict(), op_dict1)
+        self.assertEqual(conf._pattern_complex_format_to_config[key2].to_dict(), op_dict2)
 
     def test_backend_config_to_dict(self):
         op1 = self._get_backend_op_config1()

@@ -276,7 +276,11 @@ class BackendConfig:
     """
     def __init__(self, name: str = ""):
         self.name = name
-        self._config_dict: Dict[Pattern, BackendPatternConfig] = {}
+        # Store all BackendPatternConfigs in a map to handle duplicates
+        # Note: the key in this map uses the complex reversed tuple format.
+        # This is intended only for internal use; users who wish to access
+        # the original patterns should go through `self.configs` instead.
+        self._pattern_complex_format_to_config: Dict[Pattern, BackendPatternConfig] = {}
 
     def set_name(self, name: str) -> BackendConfig:
         """
@@ -290,13 +294,10 @@ class BackendConfig:
         Set the config for an pattern that can be run on the target backend.
         This overrides any existing config for the given pattern.
         """
-        if config.pattern is not None:
-            pattern = config.pattern
-        elif config._pattern_complex_format is not None:
-            pattern = config._pattern_complex_format
-        else:
-            raise ValueError("Expected either 'pattern' or 'pattern_complex_format' to be set")
-        self._config_dict[pattern] = config
+        # Avoid circular dependencies
+        pattern_complex_format = torch.ao.quantization.backend_config.utils \
+            ._get_pattern_in_reversed_nested_tuple_format(config)  # type: ignore[attr-defined]
+        self._pattern_complex_format_to_config[pattern_complex_format] = config
         return self
 
     def set_backend_pattern_configs(self, configs: List[BackendPatternConfig]) -> BackendConfig:
@@ -313,7 +314,7 @@ class BackendConfig:
         """
         Return a copy of the list of configs set in this `BackendConfig`.
         """
-        return list(self._config_dict.values())
+        return list(self._pattern_complex_format_to_config.values())
 
     @classmethod
     def from_dict(cls, backend_config_dict: Dict[str, Any]) -> BackendConfig:

@@ -14,9 +14,6 @@ import torch.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.backend_config.utils import (
-    _get_pattern_in_reversed_nested_tuple_format,
-)
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
 import torch.ao.quantization.quantization_mappings as quantization_mappings
@@ -338,10 +335,9 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
     ]
 
-    for config in backend_config.configs:
+    for pattern, config in backend_config._pattern_complex_format_to_config.items():
 
-        # format: (c, (b, a))
-        pattern = _get_pattern_in_reversed_nested_tuple_format(config)
+        # pattern format: (c, (b, a))
         first_element = pattern
         # look from the end, because pattern is in reverse order
         while isinstance(first_element, (list, tuple)):
