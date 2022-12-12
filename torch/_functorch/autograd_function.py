@@ -7,7 +7,13 @@ import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
+    _unwrap_batched,
 )
+from torch._functorch.vmap import (
+    _broadcast_to_and_flatten,
+    _create_batched_inputs,
+)
+from typing import NamedTuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
 # This is how features like autocast and torch_dispatch (e.g. PythonTLSSnapshot)
@@ -173,9 +179,58 @@ def mark_dirty_error(*args, **kwargs):
 # the unwrapping to be consistent with regular PyTorch dispatcher operations.
 
 
+class VmapInfo(NamedTuple):
+    batch_size: int
+
+
 @custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, autograd_function, *operands):
-    raise RuntimeError("NYI: vmap rule for custom_function_call")
+    if not hasattr(autograd_function, "vmap"):
+        # TODO: link docs when they're ready.
+        # https://github.com/pytorch/pytorch/issues/90224
+        raise RuntimeError(
+            f"You tried to vmap over {autograd_function.__name__}, but "
+            f"it does not have a vmap rule defined. Please add a vmap "
+            f"staticmethod to it.")
+
+    current_level = interpreter.level()
+    info = VmapInfo(batch_size=interpreter.batch_size())
+    unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
+
+    # If none of the tensors are batched at the current level, then we skip the
+    # current level. This saves the user from needing to handle this case in
+    # their vmap staticmethod (and is consistent with our C++ batching rule API)
+    if pytree.tree_all(lambda dim: dim is None, in_dims):
+        with interpreter.lower():
+            return custom_function_call(autograd_function, *operands)
+
+    with interpreter.lower():
+        unwrapped_output, out_dims = autograd_function.vmap(info, in_dims, *unwrapped_operands)
+
+    output = wrap_batched(unwrapped_output, out_dims, current_level)
+    return output
+
+
+def unwrap_batched(args, level):
+    flat_args, spec = pytree.tree_flatten(args)
+    if len(flat_args) == 0:
+        return args, ()
+    result = [_unwrap_batched(arg, level) if isinstance(arg, torch.Tensor)
+              else (arg, None) for arg in flat_args]
+    output, bdims = zip(*result)
+    return pytree.tree_unflatten(output, spec), pytree.tree_unflatten(bdims, spec)
+
+
+def wrap_batched(args, bdims, level):
+    # TODO: raise better error message to the user when they don't follow the API.
+    # Should probably mimic the logic of _process_batched_inputs,
+    # but that one is hyperspecialized on error messages.
+    # https://github.com/pytorch/pytorch/issues/90224
+    flat_args, spec = pytree.tree_flatten(args)
+    flat_bdims = _broadcast_to_and_flatten(bdims, spec)
+    assert flat_bdims is not None
+    result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
+    return result
 
 
 @custom_function_call.py_impl(TransformType.Jvp)
