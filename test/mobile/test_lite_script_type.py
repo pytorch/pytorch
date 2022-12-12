@@ -4,6 +4,7 @@ import torch
 import torch.utils.bundled_inputs
 import io
 from typing import Dict, List, NamedTuple
+import unittest
 
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -34,6 +35,7 @@ class TestLiteScriptModule(TestCase):
         )
 
 
+    @unittest.skip("T137512434")
     def test_typing_dict_with_namedtuple(self):
         class Foo(NamedTuple):
             id: torch.Tensor

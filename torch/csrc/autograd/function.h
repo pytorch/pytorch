@@ -55,6 +55,15 @@ class NodeGuard {
   std::shared_ptr<Node> last_evaluating_node_;
 };
 
+// Global (not thread-local) feature flag for the new autograd.Function
+// extension. The extension consists of:
+// - splitting autograd.Function.forward into forward() and setup_context().
+// - adding a vmap staticmethod to autograd.Function
+// The feature flag is for preventing users from unknowningly stumbling upon
+// the feature and will be removed once we've ironed out the details.
+TORCH_API bool isAutogradFunctionExtensionEnabled();
+TORCH_API void setAutogradFunctionExtensionEnabled(bool enabled);
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1058,9 +1058,9 @@ class DistributedDataParallel(Module, Joinable):
             with self._inside_ddp_forward():
                 return module_to_run(*inputs, **kwargs)
 
-    def forward(self, *inputs, **kwargs):
+    def pre_forward(self):
         with torch.autograd.profiler.record_function(
-            "DistributedDataParallel.forward"
+            "DistributedDataParallel.pre_forward"
         ):
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 assert self.logger is not None
@@ -1090,7 +1090,6 @@ class DistributedDataParallel(Module, Joinable):
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
-            buffer_hook_registered = hasattr(self, "buffer_hook")
             if self._check_sync_bufs_pre_fwd():
                 self._sync_buffers()
 
@@ -1100,8 +1099,10 @@ class DistributedDataParallel(Module, Joinable):
                     is_joined_rank=False
                 )
 
-            output = self._run_ddp_forward(*inputs, **kwargs)
-
+    def post_forward(self, output):
+        with torch.autograd.profiler.record_function(
+            "DistributedDataParallel.post_forward"
+        ):
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
             if self._check_sync_bufs_post_fwd():
@@ -1164,6 +1165,15 @@ class DistributedDataParallel(Module, Joinable):
             output = _tree_unflatten_with_rref(
                 output_placeholders, treespec, output_is_rref
             )
+        return output
+
+    def forward(self, *inputs, **kwargs):
+        self.pre_forward(*inputs, **kwargs)
+        with torch.autograd.profiler.record_function(
+            "DistributedDataParallel.forward"
+        ):
+            output = self._run_ddp_forward(*inputs, **kwargs)
+        output = self.post_forward(output)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -1630,10 +1640,10 @@ class DistributedDataParallel(Module, Joinable):
         )
         try:
             overlapped_optim.register_ddp(self)
-        except NotImplementedError:
+        except NotImplementedError as e:
             raise RuntimeError(
                 f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
-            )
+            ) from e
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0

@@ -7,8 +7,14 @@ namespace detail {
 
 bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (torch::is_symint(src)) {
+    auto node = src.attr("node");
+    if (py::isinstance<c10::SymNodeImpl>(node)) {
+      value = c10::SymInt(py::cast<c10::SymNode>(node));
+      return true;
+    }
+
     value = c10::SymInt(static_cast<c10::SymNode>(
-        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(node)));
     return true;
   }
 
@@ -25,11 +31,19 @@ py::handle type_caster<c10::SymInt>::cast(
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
-    // TODO: generalize this to work with C++ backed class
     auto* py_node =
         dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
-    TORCH_INTERNAL_ASSERT(py_node);
-    return torch::get_symint_class()(py_node->getPyObj()).release();
+    if (py_node) {
+      // Return the Python directly (unwrap)
+      return torch::get_symint_class()(py_node->getPyObj()).release();
+    } else {
+      // Wrap the C++ into Python
+      auto inner = py::cast(si.toSymNodeImpl());
+      if (!inner) {
+        throw python_error();
+      }
+      return torch::get_symint_class()(inner).release();
+    }
   } else {
     return py::cast(si.as_int_unchecked()).release();
   }
@@ -62,6 +76,40 @@ py::handle type_caster<c10::SymFloat>::cast(
     return torch::get_symfloat_class()(py_node->getPyObj()).release();
   } else {
     return py::cast(si.as_float_unchecked()).release();
+  }
+}
+
+bool type_caster<c10::Scalar>::load(py::handle src, bool) {
+  TORCH_INTERNAL_ASSERT(
+      0, "pybind11 loading for c10::Scalar NYI (file a bug if you need it)");
+}
+
+py::handle type_caster<c10::Scalar>::cast(
+    const c10::Scalar& scalar,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  if (scalar.isIntegral(/*includeBool*/ false)) {
+    // We have to be careful here; we cannot unconditionally route through
+    // SymInt because integer data from Tensors can easily be MIN_INT or
+    // very negative, which conflicts with the allocated range.
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymInt()).release();
+    } else {
+      return py::cast(scalar.toLong()).release();
+    }
+  } else if (scalar.isFloatingPoint()) {
+    // This isn't strictly necessary but we add it for symmetry
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymFloat()).release();
+    } else {
+      return py::cast(scalar.toDouble()).release();
+    }
+  } else if (scalar.isBoolean()) {
+    return py::cast(scalar.toBool()).release();
+  } else if (scalar.isComplex()) {
+    return py::cast(scalar.toComplexDouble()).release();
+  } else {
+    TORCH_INTERNAL_ASSERT(0, "unrecognized scalar type ", scalar.type());
   }
 }
 

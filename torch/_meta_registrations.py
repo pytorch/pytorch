@@ -6,6 +6,7 @@ import torch._prims_common as utils
 from torch import Tensor
 from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
 from torch._ops import OpOverload
+from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -14,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -88,6 +90,13 @@ def meta_randint(
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta(aten.rand.default)
+def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -177,13 +186,30 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
-def squareCheckInputs(self, f_name):
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+        )
 
 
 def checkUplo(uplo: str):
@@ -203,6 +229,25 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky_ex.default)
+def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.cholesky")
+    checkFloatingOrComplex(A, "linalg.cholesky")
+
+    A_shape = A.shape
+    ndim = len(A_shape)
+
+    # L
+    L_strides = make_contiguous_strides_for(A_shape, False)
+    L = A.new_empty(A_shape)
+    L.as_strided_(A_shape, L_strides)
+
+    # infos
+    infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
+    return L, infos
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
@@ -958,8 +1003,8 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
     )
     check(p >= 0, lambda: "cdist only supports non-negative p values")
     check(
-        compute_mode >= 0 and compute_mode <= 2,
-        lambda: f"possible modes: 0, 1, 2, but was: {compute_mode}",
+        compute_mode in (None, 1, 2),
+        lambda: f"possible modes: None, 1, 2, but was: {compute_mode}",
     )
     r1 = x1.size(-2)
     r2 = x2.size(-2)
@@ -1166,6 +1211,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
+@register_meta([aten.round.default, aten.round.decimals])
+def meta_round(self, **kwargs):
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -1349,9 +1401,8 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices.default)
-def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+def max_pool2d_checks_and_compute_shape(
+    input, kernel_size, stride, padding, dilation, ceil_mode
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -1376,6 +1427,9 @@ def meta_max_pool2d_with_indices(
 
     padH, padW = unpack("padding", padding)
     dilationH, dilationW = unpack("dilation", dilation)
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
 
     memory_format = utils.suggest_memory_format(input)
     if memory_format == torch.channels_last:
@@ -1393,11 +1447,6 @@ def meta_max_pool2d_with_indices(
             False,
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
-
-    nbatch = input.size(-4) if input.dim() == 4 else 1
-    nInputPlane = input.size(-3)
-    inputHeight = input.size(-2)
-    inputWidth = input.size(-1)
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
     outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
@@ -1420,6 +1469,49 @@ def meta_max_pool2d_with_indices(
         memory_format,
     )
 
+    return nInputPlane, outputHeight, outputWidth
+
+
+@register_meta(aten.max_pool2d_with_indices_backward.default)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        self, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    check(
+        self.dtype == grad_output.dtype,
+        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+    )
+
+    nOutputPlane = nInputPlane
+    ndim = self.ndim
+
+    def _check_dim_size(t):
+        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
+        check_dim_size(t, ndim, ndim - 2, outputHeight)
+        check_dim_size(t, ndim, ndim - 1, outputWidth)
+
+    _check_dim_size(grad_output)
+    _check_dim_size(indices)
+
+    memory_format = utils.suggest_memory_format(self)
+    return torch.empty(
+        self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    memory_format = utils.suggest_memory_format(input)
     if input.dim() == 3:
         size = [nInputPlane, outputHeight, outputWidth]
     else:
@@ -1434,6 +1526,25 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.grid_sampler_2d_backward.default)
+def grid_sampler_2d_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
+
+
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
@@ -1446,12 +1557,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange
@@ -1676,7 +1824,14 @@ def meta_scatter_add_(self, dim, index, src):
     return self
 
 
-@register_meta(aten.scatter)
+@register_meta(
+    [
+        aten.scatter.src,
+        aten.scatter.value,
+        aten.scatter.reduce,
+        aten.scatter.value_reduce,
+    ]
+)
 @out_wrapper()
 def meta_scatter(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
@@ -1684,7 +1839,14 @@ def meta_scatter(self, dim, index, src_or_value, reduce=None):
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.scatter_)
+@register_meta(
+    [
+        aten.scatter_.src,
+        aten.scatter_.value,
+        aten.scatter_.reduce,
+        aten.scatter_.value_reduce,
+    ]
+)
 def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
     scatter_meta_impl(self, dim, index, src, reduce)
@@ -1702,32 +1864,6 @@ def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
 def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
-
-
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
-
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
-
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
 
 
 @register_meta([aten.sort.default, aten.sort.stable])
@@ -1826,6 +1962,12 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
+            if op_overload in global_decomposition_table["meta"]:
+                raise RuntimeError(
+                    f"{op_overload} is a CompositeImplicitAutograd op, we shouldn't "
+                    "register meta function for it. Instead, we should let the decomposition run and write "
+                    "meta kernels for the base operators."
+                )
             pass
         elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
@@ -1839,6 +1981,7 @@ def activate_meta():
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+            "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32  # noqa: B950
         }:
             pass
         else:

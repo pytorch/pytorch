@@ -7,14 +7,19 @@ from .eval_frame import (
     export,
     optimize,
     optimize_assert,
+    OptimizedModule,
     reset_code,
     run,
     skip,
 )
+from .external_utils import is_compiling
 from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
+    "allow_in_graph",
     "assume_constant_result",
+    "disallow_in_graph",
+    "graph_break",
     "optimize",
     "optimize_assert",
     "export",
@@ -25,6 +30,8 @@ __all__ = [
     "reset",
     "list_backends",
     "skip",
+    "OptimizedModule",
+    "is_compiling",
 ]
 
 
@@ -45,7 +52,8 @@ def reset():
 
 def list_backends():
     """
-    Return valid strings that can be passed to:
+    Return valid strings that can be passed to::
+
         @torch._dynamo.optimize(<backend>)
         def foo(...):
            ....
@@ -58,7 +66,8 @@ def list_backends():
 def allow_in_graph(fn):
     """
     Customize which functions TorchDynamo will include in the generated
-    graph.  Similar to torch.fx.wrap().
+    graph. Similar to `torch.fx.wrap()`.
+    ::
 
         torch._dynamo.allow_in_graph(my_custom_function)
 
@@ -71,7 +80,7 @@ def allow_in_graph(fn):
 
         fn(...)
 
-    Will capture a single graph containing my_custom_function().
+    Will capture a single graph containing `my_custom_function()`.
     """
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
@@ -85,6 +94,7 @@ def disallow_in_graph(fn):
     """
     Customize which functions TorchDynamo will exclude in the generated
     graph and force a graph break on.
+    ::
 
         torch._dynamo.disallow_in_graph(torch.sub)
 
@@ -97,8 +107,8 @@ def disallow_in_graph(fn):
 
         fn(...)
 
-    Will break the graph on torch.sub, and give two graphs each with a
-    single torch.add() op.
+    Will break the graph on `torch.sub`, and give two graphs each with a
+    single `torch.add()` op.
     """
     if isinstance(fn, (list, tuple)):
         return [disallow_in_graph(x) for x in fn]

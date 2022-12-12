@@ -41,7 +41,7 @@ from torch.ao.quantization.quantization_mappings import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns
-import torch.ao.quantization.fx.quantization_patterns as qp
+import torch.ao.quantization.fx.quantize_handler as qh
 from torch.ao.ns.fx.pattern_utils import (
     get_type_a_related_to_b,
 )
@@ -85,7 +85,7 @@ from torch.ao.ns._numeric_suite_fx import (
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -299,7 +299,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
+    for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 
@@ -669,21 +669,21 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 base_op = pattern
 
             qhandler_cls_all_ops_quantizeable = [
-                qp.CatQuantizeHandler,
-                qp.ConvReluQuantizeHandler,
-                qp.LinearReLUQuantizeHandler,
-                qp.BatchNormQuantizeHandler,
-                qp.EmbeddingQuantizeHandler,
-                qp.RNNDynamicQuantizeHandler,
+                qh.CatQuantizeHandler,
+                qh.ConvReluQuantizeHandler,
+                qh.LinearReLUQuantizeHandler,
+                qh.BatchNormQuantizeHandler,
+                qh.EmbeddingQuantizeHandler,
+                qh.RNNDynamicQuantizeHandler,
             ]
 
             qhandler_cls_quant_op_same_signature = [
-                qp.FixedQParamsOpQuantizeHandler,
-                qp.CopyNodeQuantizeHandler,
-                qp.GeneralTensorShapeOpQuantizeHandler,
+                qh.FixedQParamsOpQuantizeHandler,
+                qh.CopyNodeQuantizeHandler,
+                qh.GeneralTensorShapeOpQuantizeHandler,
             ]
 
-            if qhandler_cls == qp.BinaryOpQuantizeHandler:
+            if qhandler_cls == qh.BinaryOpQuantizeHandler:
                 # these ops do not have quantized equivalents
                 ops_to_skip = [
                     torch.bmm,
@@ -697,11 +697,11 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
-            elif qhandler_cls == qp.RNNDynamicQuantizeHandler:
+            elif qhandler_cls == qh.RNNDynamicQuantizeHandler:
                 # TODO(future PR): add support for all classes in
                 # RNNDynamicQuantizeHandler
                 pass
-            elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
+            elif qhandler_cls == qh.DefaultNodeQuantizeHandler:
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -1606,23 +1606,23 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
             if (
                 qhandler_cls in (
-                    qp.BinaryOpQuantizeHandler,
-                    qp.RNNDynamicQuantizeHandler,
+                    qh.BinaryOpQuantizeHandler,
+                    qh.RNNDynamicQuantizeHandler,
                 )
             ):
                 # TODO(future PR): implement shadowing for binary ops
                 # TODO(future PR): implement shadowing for RNN ops
                 continue
-            elif qhandler_cls == qp.CatQuantizeHandler:
+            elif qhandler_cls == qh.CatQuantizeHandler:
                 self.assertTrue(
                     base_op in FUNS_IO_TYPE_FP32_OR_INT8,
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.ConvReluQuantizeHandler,
-                    qp.LinearReLUQuantizeHandler,
-                    qp.BatchNormQuantizeHandler,
-                    qp.DefaultNodeQuantizeHandler,
+                    qh.ConvReluQuantizeHandler,
+                    qh.LinearReLUQuantizeHandler,
+                    qh.BatchNormQuantizeHandler,
+                    qh.DefaultNodeQuantizeHandler,
                 )
             ):
                 self.assertTrue(
@@ -1630,9 +1630,9 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     f"missing IO type handling for {base_op}")
             elif (
                 qhandler_cls in (
-                    qp.FixedQParamsOpQuantizeHandler,
-                    qp.CopyNodeQuantizeHandler,
-                    qp.GeneralTensorShapeOpQuantizeHandler,
+                    qh.FixedQParamsOpQuantizeHandler,
+                    qh.CopyNodeQuantizeHandler,
+                    qh.GeneralTensorShapeOpQuantizeHandler,
                 )
             ):
                 if (
@@ -1650,7 +1650,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     # version, so it does not fit into the cases above.
                     (base_op is torch.nn.Softmax),
                     f"missing IO type handling for {base_op}")
-            elif qhandler_cls == qp.EmbeddingQuantizeHandler:
+            elif qhandler_cls == qh.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now
                 continue
             else:
@@ -2464,6 +2464,87 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
         self.checkDynamicQuantizedLinear(msq.shadow_wrapper_1_1.mod_0, torch.qint8)
         self.checkQuantizedLinear(msq.shadow_wrapper_1_2.mod_0)
+
+    def test_qconfig_multi_mapping_repr(self):
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_module_name(
+                "fc2",
+                [
+                    None,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                    torch.ao.quantization.default_qat_qconfig_v2,
+                ],
+            )
+        )
+        self.assertTrue(isinstance(qconfig_multi_mapping.__repr__(), str))
+
+    def test_custom_functions_and_tracer(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+                self.fc2 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.fc2(x)
+                return x
+
+        m = M().eval()
+        example_inputs = (torch.randn(2, 2),)
+
+        qconfig_mappings = QConfigMultiMapping().set_global(
+            [torch.quantization.default_qat_qconfig]
+        )
+
+        custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(
+            ["fc2"], []
+        )
+
+        custom_prepare_fn = torch.ao.quantization.quantize_fx.prepare_qat_fx
+
+        def custom_convert_fn(module, to_print):
+            print(to_print)
+            mod = torch.ao.quantization.quantize_fx.convert_fx(module)
+            return mod
+
+        backend_config = get_native_backend_config()
+
+        # test that input is valid
+        _ = m(*example_inputs)
+
+        kwargs = {"to_print": "working"}
+
+        msp = prepare_n_shadows_model(
+            m,
+            example_inputs,
+            qconfig_mappings,
+            backend_config,
+            custom_prepare_fn=custom_prepare_fn,
+            custom_prepare_kwargs=None,
+            custom_tracer=custom_tracer,
+        )
+
+        for _ in range(2):
+            msp(*example_inputs)
+
+        msq = convert_n_shadows_model(
+            msp, custom_convert_fn=custom_convert_fn, custom_convert_kwargs=kwargs
+        )
+        print(msq)
+        loggers_set_enabled(msq, True)
+        msq(*example_inputs)
+
+        results = extract_results_n_shadows_model(msq)
+        print_comparisons_n_shadows_model(results)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """

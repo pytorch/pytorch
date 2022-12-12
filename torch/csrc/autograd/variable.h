@@ -797,6 +797,11 @@ inline Variable make_variable(
   return Variable();
 }
 
+namespace utils {
+
+TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
+
+} // namespace utils
 } // namespace autograd
 } // namespace torch
 
