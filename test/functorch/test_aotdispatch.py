@@ -355,7 +355,7 @@ class TestAOTAutograd(AOTTestCase):
             return a + b
 
         inp = [torch.randn(3, 1, requires_grad=True)]
-        self.verify_aot_autograd(f, inp) #, test_mutation=True)
+        self.verify_aot_autograd(f, inp)
 
     def test_input_mutation_simple(self):
         def f(a):
