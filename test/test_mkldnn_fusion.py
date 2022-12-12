@@ -365,7 +365,7 @@ class TestMkldnnFusion(JitTestCase):
                         algorithm = pointwise_info.algorithm
 
                         if prepack_weight:
-                            packed_weight = torch._C._nn.mkldnn_reorder_conv_transpose2d_weight(
+                            packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
                                 mod.conv_transpose.weight.to_mkldnn(),
                                 mod.conv_transpose.padding,
                                 mod.conv_transpose.stride,

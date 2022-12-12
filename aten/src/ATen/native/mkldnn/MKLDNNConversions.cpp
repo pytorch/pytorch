@@ -15,7 +15,6 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
-#include <ATen/ops/mkldnn_reorder_conv_transpose2d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
 #endif
 
@@ -134,6 +133,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);
+
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
 }
@@ -217,6 +217,7 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
     int64_t groups,
     IntArrayRef output_padding,
     c10::OptionalArrayRef<int64_t> input_size) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -260,6 +261,12 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
                                  self.options().device_opt());
 }
 
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
+      TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
@@ -287,17 +294,6 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef dilation,
     int64_t groups) {
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
-}
-
-Tensor mkldnn_reorder_conv_transpose2d_weight(
-    const Tensor& self,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups,
-    IntArrayRef output_padding,
-    c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK(false, "mkldnn_reorder_conv_transpose2d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()
