@@ -73,6 +73,14 @@ TORCH_API c10::intrusive_ptr<Work> scatter(
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ScatterOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<Work> alltoall_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& output,
+    at::Tensor& input,
+    const std::vector<int64_t> outputSplitSizes,
+    const std::vector<int64_t> inputSplitSizes,
+    const AllToAllOptions& opts = {});
+
 TORCH_API c10::intrusive_ptr<Work> alltoall(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList output_tensors,
@@ -98,6 +106,11 @@ TORCH_API c10::intrusive_ptr<Work> recv(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     int64_t srcRank,
+    int64_t tag);
+
+TORCH_API c10::intrusive_ptr<Work> recv_any_source(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
     int64_t tag);
 
 } // namespace ops
