@@ -597,6 +597,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
 std::vector<int64_t> _original_deconv_weight_size(
     const Tensor& weight_t,
     int64_t groups) {
+  TORCH_CHECK(weight_t.is_mkldnn() || weight_t.is_meta(), "expects weight_t to be mkldnn or meta tensor");
   // The size of weight_t is the prepacked size.
   //  Groups > 1: [g*o, i/g, ...]
   //  Groups == 1: [o, i, ...]
@@ -648,7 +649,7 @@ Tensor _mkldnn_convolution_transpose(
         "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
   auto memory_format =
       mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
@@ -661,19 +662,10 @@ Tensor _mkldnn_convolution_transpose(
 
   const ideep::tensor x = itensor_from_tensor(input);
 
-  ideep::tensor w;
-  if (weight.is_mkldnn()) {
-    // weight is the prepacked mkldnn tensor
-    w = itensor_from_tensor(weight);
-  } else {
-    // aten tensor with the shape of the prepacked tensor
-    at::Tensor origin_weight_t;
-    if (groups > 1) {
-      origin_weight_t = weight.transpose(0, 1).reshape(weight_IOHW_sizes);
-    } else {
-      origin_weight_t = weight.transpose(0, 1);
-    }
-    w = itensor_from_tensor(origin_weight_t);
+  ideep::tensor w = itensor_from_tensor(weight);;
+  if (!weight.is_mkldnn()) {
+    // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+    // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
 
@@ -749,6 +741,26 @@ Tensor mkldnn_convolution_transpose_pointwise(
       scalars,
       algorithm
   );
+}
+
+Tensor mkldnn_convolution_transpose_pointwise_meta(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    IntArrayRef output_padding,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+
+  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  auto output_sizes = conv_input_size(input_t.sizes(), weight_IOHW_sizes, padding, output_padding, stride, dilation, groups);
+
+  auto output = at::empty(output_sizes, input_t.options());
+  return output;
 }
 
 Tensor mkldnn_convolution_backward_input(
@@ -900,6 +912,13 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
       TORCH_FN(mkldnn_convolution_transpose_pointwise));
 }
+
+TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_transpose_pointwise"),
+      TORCH_FN(mkldnn_convolution_transpose_pointwise_meta));
+}
+
 }}  // namespace at::native
 
 #endif
