@@ -258,6 +258,10 @@ class TestFSDPRuntime(FSDPTest):
             self.assertEqual(k1, k2)
 
         print(f"RV: keys passed: {list(sd.keys())}")
+        for v1, v2 in zip(sd.values(), sd_local.values()):
+            self.assertEqual(v1.shape,v2.shape)
+
+        print(f"RV: shapes pass")
         for (k1, v1), (k2, v2) in zip(sd.items(), sd_local.items()):
             self.assertEqual(k1, k2)
             self.assertEqual(v1, v2)
