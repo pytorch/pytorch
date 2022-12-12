@@ -813,7 +813,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     try:
         global JVP_NESTING
         JVP_NESTING += 1
-        with fwAD._enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)

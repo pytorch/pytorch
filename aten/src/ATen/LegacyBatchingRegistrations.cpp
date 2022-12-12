@@ -1,12 +1,14 @@
 #include <torch/library.h>
 #include <ATen/RedispatchFunctions.h>
-#include <ATen/VmapTransforms.h>
-#include <ATen/BatchedFallback.h>
+#include <ATen/LegacyVmapTransforms.h>
+#include <ATen/LegacyBatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 #include <c10/core/SymIntArrayRef.h>
+
+#include <utility>
 
 namespace at {
 
@@ -143,7 +145,7 @@ Tensor binary_pointwise_batching_rule(
     logical_other = logical_other.to(result_type);
   }
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
-      {logical_self, logical_other});
+      {std::move(logical_self), std::move(logical_other)});
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
