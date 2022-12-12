@@ -534,8 +534,8 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    param = handle.flat_param
-    param._post_backward_called = True
+    flat_param = handle.flat_param
+    flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
     ):
@@ -551,9 +551,9 @@ def _post_backward_hook(
         )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
-        if param.grad is None:
+        if flat_param.grad is None:
             return
-        if param.grad.requires_grad:
+        if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
 
         free_unsharded_flat_param = _should_free_in_backward(state, handle)
@@ -573,16 +573,16 @@ def _post_backward_hook(
         state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
         with torch.cuda.stream(state._streams["post_backward"]):
-            autograd_computed_grad = param.grad.data
+            autograd_computed_grad = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
                 )
             if (
                 not _low_precision_hook_enabled(state)
-                and param.grad.dtype != handle._config.reduce_dtype
+                and flat_param.grad.dtype != handle._config.reduce_dtype
             ):
-                param.grad.data = param.grad.to(handle._config.reduce_dtype)
+                flat_param.grad.data = flat_param.grad.to(handle._config.reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
@@ -590,8 +590,8 @@ def _post_backward_hook(
                 # ahead of the first backward pass reduction, which is possible
                 # since the reduction is issued in a separate stream and is
                 # async and would result in reducing the wrong gradient.
-                unsharded_grad = param.grad.data
-                param.grad = None
+                unsharded_grad = flat_param.grad.data
+                flat_param.grad = None
                 chunks = list(unsharded_grad.chunk(state.world_size))
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
@@ -615,24 +615,28 @@ def _post_backward_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
                     )
-                _cast_grad_to_param_dtype(state, new_sharded_grad, param)
+                _cast_grad_to_param_dtype(state, new_sharded_grad, flat_param)
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient
                 # reductions may happen in arbitrary order
-                accumulate_grad = hasattr(param, "_saved_grad_shard")
+                accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
                 if accumulate_grad:
-                    _check_grad_to_accumulate(new_sharded_grad, param._saved_grad_shard)
-                    param._saved_grad_shard += new_sharded_grad
+                    _check_grad_to_accumulate(
+                        new_sharded_grad, flat_param._saved_grad_shard
+                    )
+                    flat_param._saved_grad_shard += new_sharded_grad
                 else:
-                    param._saved_grad_shard = new_sharded_grad
-                grad_to_offload = param._saved_grad_shard
+                    flat_param._saved_grad_shard = new_sharded_grad
+                grad_to_offload = flat_param._saved_grad_shard
             else:
-                state._communication_hook(state._communication_hook_state, param.grad)
+                state._communication_hook(
+                    state._communication_hook_state, flat_param.grad
+                )
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
-                    _cast_grad_to_param_dtype(state, param.grad, param)
-                grad_to_offload = param.grad.data
+                    _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
+                grad_to_offload = flat_param.grad.data
 
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
@@ -640,7 +644,7 @@ def _post_backward_hook(
                 # TODO: Investigate why `NO_SHARD` breaks correctness when
                 # using `non_blocking=True` here.
                 non_blocking = handle.uses_sharded_strategy
-                param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
                     grad_to_offload.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
                 # Since the gradient being offloaded may have been produced in

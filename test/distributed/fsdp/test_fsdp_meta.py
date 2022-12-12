@@ -389,7 +389,8 @@ class TestFSDPWithMetaDevice(FSDPTest):
             module.apply(model._module_init_fn)
 
         model = Model()
-        # Wrap only `lin1` and the top level `model`
+        # Wrap `lin1` and the top level `model` to create nested FSDP instances
+        # where each instance has parameters
         FSDP(
             model,
             auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
