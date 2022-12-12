@@ -2,7 +2,7 @@ import dataclasses
 import enum
 import weakref
 from contextlib import contextmanager
-from typing import Callable, List, Optional, Set
+from typing import Callable, List, NamedTuple, Optional, Set
 import sympy
 
 """
@@ -52,6 +52,11 @@ There is value in keeping this GuardBuilderBase empty to keep layering clean.
 
 class GuardBuilderBase:
     pass
+
+
+class ShapeGuard(NamedTuple):
+    expr: sympy.Expr
+    stack: str
 
 
 @dataclasses.dataclass

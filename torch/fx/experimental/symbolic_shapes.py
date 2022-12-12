@@ -468,13 +468,7 @@ class ShapeGuardPrinter(StrPrinter):
 
 class ShapeEnv(object):
     def __init__(self):
-        # TODO(voz): For real prod cases downstream of dynamo, we should always have a tracing context
-        # available from .get()
-        tracing_context = TracingContext.get()
-        if tracing_context:
-            self.guards = tracing_context.guards_context.shape_guards
-        else:
-            self.guards = []
+        self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
