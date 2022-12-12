@@ -956,6 +956,10 @@ class MultiThreadedTestCase(TestCase):
     def world_size(self) -> int:
         raise RuntimeError("world size not implemented")
 
+    @property
+    def rank(self) -> int:
+        return c10d.get_rank()
+
 
 class SaveForwardInputsModule(nn.Module):
     def __init__(
