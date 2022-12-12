@@ -398,7 +398,7 @@ class TestCommunicationHooks(FSDPTest):
         loss_mp = fsdp_with_mp(in_data).sum()
         loss_hook.backward()
         # Make sure grads were cast to the parameter's precision
-        self.assertEqual(fsdp_with_hook.params[0].dtype, state.parameter_type)
+        self.assertEqual(fsdp_with_hook.params[0].grad.dtype, state.parameter_type)
         loss_mp.backward()
         optim_hook.step()
         optim_mp.step()
