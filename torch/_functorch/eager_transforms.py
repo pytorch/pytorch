@@ -7,7 +7,6 @@
 from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
-from itertools import accumulate
 import contextlib
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
@@ -339,7 +338,8 @@ def _safe_zero_index(x):
     return x[0]
 
 
-def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
+def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
+           chunk_size: Optional[int] = None):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using reverse mode autodiff
@@ -455,6 +455,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
+    assert chunk_size is None or chunk_size > 0, "`chunk_size` should be greater than 0."
+
     @wraps(func)
     def wrapper_fn(*args):
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -466,44 +468,29 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
         flat_output, output_spec = tree_flatten(output)
 
-        primals = _slice_argnums(args, argnums)
-        flat_primals, primals_spec = tree_flatten(primals)
-
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
 
-        out_vec_size = sum(flat_output_numels)
-        # Pre-allocate to avoid holding list of Tensors.
-        stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
-        # results = []
-        for idx in range(out_vec_size):
-            # Generate Basis
-            basis = flat_output[0].new_zeros(out_vec_size)
-            basis[idx] = 1
-            flat_acc = list(accumulate(flat_output_numels))
+        primals = _slice_argnums(args, argnums)
+        flat_primals, primals_spec = tree_flatten(primals)
 
-            prev_end = 0
-            tensors = []
-            for end in flat_acc:
-                view_t = basis[prev_end:end]
-                tensors.append(view_t)
-                prev_end = end
+        chunked_results = []
+        for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
+                                                             flat_output_numels,
+                                                             chunk_size=chunk_size):
+            basis = tree_unflatten(flat_basis_chunk, output_spec)
+            chunked_result = vmap(vjp_fn)(basis)
+            flat_results, _ = tree_flatten(chunked_result)
+            chunked_results.append(flat_results)
 
-            tensors = tuple(t.view_as(o) for t, o in zip(tensors, flat_output))
-            r = vjp_fn(tree_unflatten(tensors, output_spec))
-            r, _ = tree_flatten(r)
-            for r_, sr in zip(r, stacked_results):
-                sr.index_put_((torch.tensor([idx]),), r_)
-            # results.append(r)
-
-        flat_results, results_spec = tree_flatten(stacked_results)
-        # flat_results = []
-        # for idx in range(len(flat_primals)):
-        #     r = tuple(map(lambda r_: r_[idx], results))
-        #     # Stack is not memory efficient as
-        #     # it allocates a new large Tensor!
-        #     flat_results.append(torch.stack(r))
+        # Concatenate chunks.
+        flat_results = []
+        # Iterate and concat the jacobians of different
+        # inputs.
+        for idx in range(len(flat_primals)):
+            r = tuple(map(lambda r_: r_[idx], chunked_results))
+            flat_results.append(torch.cat(r, 0))
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
@@ -577,7 +564,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 # - one of shape [   3] for the second output
 
 
-def _construct_standard_basis_for(tensors, tensor_numels):
+def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -597,15 +584,31 @@ def _construct_standard_basis_for(tensors, tensor_numels):
     # for context behind this function.
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
+    assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
+    if chunk_size:
+        n_chunks = total_numel // chunk_size
+        numels = [chunk_size] * n_chunks
+        numels.append(total_numel % chunk_size)
+    else:
+        chunk_size = total_numel
+        numels = [total_numel]
+
     diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
-    chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
-                   for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
-        chunk.diagonal(diag_start_idx).fill_(1)
-    chunks = tuple(chunk.view(total_numel, *tensor.shape)
-                   for chunk, tensor in zip(chunks, tensors))
-    return chunks
+
+    for chunk_idx, total_numel in enumerate(numels):
+        chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
+                       for tensor, tensor_numel in zip(tensors, tensor_numels))
+
+        for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+            chunk.diagonal(diag_start_idx + chunk_idx * chunk_size).fill_(1)
+        chunks = tuple(chunk.view(total_numel, *tensor.shape)
+                       for chunk, tensor in zip(chunks, tensors))
+        yield chunks
+
+def _construct_standard_basis_for(tensors, tensor_numels):
+    for basis in _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
+        return basis
 
 
 def _validate_and_wrap_argnum(argnum, num_args):
