@@ -1,10 +1,13 @@
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
+from torch.ao.quantization.backend_config.utils import (
+    _get_pattern_in_reversed_nested_tuple_format,
+)
 from torch.fx.graph import Node, Graph
 from ..utils import _parent_name, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Union, List
+from typing import Any, Callable, Dict, List, Union
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -35,7 +38,7 @@ class FuseHandler(ABC):
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
              is_qat: bool) -> Node:
         pass
 
@@ -53,7 +56,7 @@ class DefaultFuseHandler(FuseHandler):
              extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config: FuseCustomConfig,
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             fuser_method_mapping: Dict[Pattern, Union[torch.nn.Sequential, Callable]],
              is_qat: bool) -> Node:
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = named_modules[str(root_node.target)]
@@ -112,8 +115,9 @@ class DefaultFuseHandler(FuseHandler):
 def _get_fusion_pattern_to_fuse_handler_cls(
         backend_config: BackendConfig) -> Dict[Pattern, Callable]:
     fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
-    for pattern, config in backend_config.configs.items():
+    for config in backend_config.configs:
         if config.fuser_method is not None:
+            pattern = _get_pattern_in_reversed_nested_tuple_format(config)
             # TODO: is this logic right?
             fusion_pattern_to_fuse_handlers[pattern] = DefaultFuseHandler
     return fusion_pattern_to_fuse_handlers
