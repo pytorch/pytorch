@@ -23,11 +23,13 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_symint(const Tensor& output, SymIntArrayRef shape);
 
 // Utility for resize_output
 //  Returns a bool saying resize should happen or not and
 //  raises a warning if resizing for one or more elements
 TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
@@ -54,34 +56,11 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_by
   }
 }
 
-inline TensorImpl* resize_impl_cpu_(
+TORCH_API TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
     at::OptionalIntArrayRef stride,
-    bool resize_storage = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride.value())) {
-    return self;
-  }
-
-  const auto itemsize = self->dtype().itemsize();
-  const auto storage_offset = self->storage_offset();
-  size_t storage_size = 1;
-  if (stride) {
-    self->set_sizes_and_strides(size, *stride);
-    storage_size = at::detail::computeStorageNbytes(
-        size, *stride, itemsize, storage_offset);
-  } else {
-    self->set_sizes_contiguous(size);
-    storage_size = at::detail::computeStorageNbytesContiguous(
-        size, itemsize, storage_offset);
-  }
-
-  if (resize_storage) {
-    maybe_resize_storage_cpu(self, storage_size);
-  }
-
-  return self;
-}
+    bool resize_storage = true);
 
 template <typename T>
 T maybe_convert_symint(c10::SymInt) = delete;

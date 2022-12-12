@@ -1280,6 +1280,17 @@ class TestTransformers(NNTestCase):
         model(x, x, x)
         # completes without error
 
+    @unittest.skipIf(not TEST_CUDA or not SM80OrLater or TEST_WITH_ROCM, "CUDA unavailable")
+    def test_unaligned_tensors(self):
+        device = 'cuda'
+        dtype = torch.float16
+        size = (2, 2, 8, 5)
+        q = torch.randn(size, device=device, dtype=dtype)
+        k = torch.randn(size, device=device, dtype=dtype)
+        v = torch.randn(size, device=device, dtype=dtype)
+        with sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
