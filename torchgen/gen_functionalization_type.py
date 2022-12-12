@@ -237,7 +237,7 @@ def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding
     context: List[Binding] = []
     unwrapped_tensor_args: List[str] = []
     for arg in sig.arguments():
-        if is_tensor_like(arg.argument):
+        if is_tensor_like(arg.argument) or arg.argument.type == BaseType(BaseTy.Storage):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
             a_ = arg.name
             unwrapped_name = f"{arg.name}_meta"

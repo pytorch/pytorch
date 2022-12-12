@@ -2,6 +2,7 @@
 // ${generated_comment}
 
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalInverses.h>
 #include <torch/library.h>
@@ -35,6 +36,17 @@ constexpr auto exclude_keys_for_meta_dispatch =
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
         c10::DispatchKey::Python
     });
+
+inline c10::Storage to_meta(const c10::Storage& t) {
+    auto *allocator = c10::GetAllocator(c10::kMeta);
+    auto storage_impl = c10::make_intrusive<StorageImpl>(
+        c10::StorageImpl::use_byte_size_t(),
+        t.nbytes(),
+        allocator->allocate(t.nbytes()),
+        allocator,
+        /*resizeable=*/true);
+    return c10::Storage(storage_impl);
+}
 
 
 inline Tensor to_meta(const Tensor& t) {

@@ -146,6 +146,15 @@ class TestFunctionalization(TestCase):
         r = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
         self.assertEqual(r.stride(), (5, 1))
 
+    def test_set_(self):
+        def f(x):
+            y = torch.ones(2)
+            y.set_(x.storage())
+            return y
+
+        r = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2))
+        self.assertEqual(str(r.device), 'cpu')
+
     def test_view_clone_view_inplace(self):
         def f(input):
             shape = [1, 1024, 128, 128]
