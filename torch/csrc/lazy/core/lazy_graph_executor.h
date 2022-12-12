@@ -337,8 +337,8 @@ class TORCH_API LazyGraphExecutor {
 
   // One can override to insert your own profiler.
   virtual PostOrderData RunPostOrder(
-    const std::vector<Value>& ir_values,
-    SyncTensorCollection* coll);
+      const std::vector<Value>& ir_values,
+      SyncTensorCollection* coll);
 
  private:
   struct CompilationResult {
