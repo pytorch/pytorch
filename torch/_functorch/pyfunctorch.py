@@ -12,7 +12,7 @@ from torch._C._functorch import (
     pop_dynamic_layer_stack,
     push_dynamic_layer_stack,
 )
-from torch.autograd.forward_ad import _enable_fwd_grad
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
 
 """
 This file contains the functorch integration with PyDispatcher.
@@ -146,7 +146,7 @@ class JvpInterpreter(FuncTorchInterpreter):
     def lower(self):
         prev_fwd_grad_mode = self.prev_fwd_grad_mode()
         if not self.prev_fwd_grad_mode:
-            return contextlib.nested(_enable_fwd_grad(False), super().lower())
+            return contextlib.nested(_set_fwd_grad_enabled(False), super().lower())
         return super().lower()
 
     def prev_fwd_grad_mode(self):
