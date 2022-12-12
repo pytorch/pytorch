@@ -33,9 +33,7 @@ struct ViewMeta {
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
       int64_t out_idx = 0)
-      : forward_fn(std::move(forward)),
-        reverse_fn(std::move(reverse)),
-        out_index(out_idx) {}
+      : forward_fn(forward), reverse_fn(reverse), out_index(out_idx) {}
 
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;

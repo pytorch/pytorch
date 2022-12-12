@@ -22,8 +22,6 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
-
-#include <utility>
 #endif
 
 namespace {
@@ -171,7 +169,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
       return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
+  at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
 }
 
@@ -280,7 +278,7 @@ at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRe
     }
   );
 
-  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());

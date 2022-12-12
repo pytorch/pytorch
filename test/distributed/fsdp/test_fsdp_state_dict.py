@@ -230,9 +230,7 @@ class TestFSDPStateDict(FSDPTest):
                 # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
                 # so bypass the check for now.
                 if isinstance(model, FSDP):
-                    self.assertEqual(
-                        fsdp_state_dict, {}, f"Expected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}"
-                    )
+                    self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)

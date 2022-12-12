@@ -72,7 +72,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  vmap_check_escaped(maybe_layer, "boxed_reduction_batch_rule");
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);

@@ -2,7 +2,6 @@
 #include <ATen/native/BinaryOps.h>
 
 #include <type_traits>
-#include <utility>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
@@ -1068,7 +1067,7 @@ Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar
       return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
     }
     auto res = get_out_like(other);
-    return alpha.equal(1) ? std::move(res) : res.mul(alpha);
+    return alpha.equal(1) ? res : res.mul(alpha);
   } else {
     return get_out_like(self);
   }
