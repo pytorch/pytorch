@@ -48,7 +48,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
              contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
 }
 
-// Return true if no tensor in the list has an underlying IR (leaf or
+// Return true if any tensor in the list has an underlying IR (leaf or
 // operation).
 bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
   for (const auto& tensor : tensors) {
