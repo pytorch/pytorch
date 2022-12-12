@@ -8,6 +8,8 @@ import torch
 from typing import List, Any
 from functools import wraps
 import unittest
+from torch.testing._internal.common_utils skipIfTorchDynamo
+
 
 from torch.testing._internal.common_utils import \
     (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
