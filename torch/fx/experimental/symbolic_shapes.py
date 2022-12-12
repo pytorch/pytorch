@@ -13,6 +13,7 @@ import collections
 import textwrap
 import logging
 from torch import SymInt, SymFloat
+from torch._guards import ShapeGuard
 
 try:
     import sympy  # type: ignore[import]
@@ -467,7 +468,7 @@ class ShapeGuardPrinter(StrPrinter):
 
 class ShapeEnv(object):
     def __init__(self):
-        self.guards = []
+        self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
@@ -896,9 +897,9 @@ class ShapeEnv(object):
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append((expr, stack))
+                self.guards.append(ShapeGuard(expr, stack))
             elif concrete_val is sympy.false:
-                self.guards.append((sympy.Not(expr), stack))
+                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
             else:
-                self.guards.append((sympy.Eq(expr, concrete_val), stack))
+                self.guards.append(ShapeGuard(sympy.Eq(expr, concrete_val), stack))
         return concrete_val
