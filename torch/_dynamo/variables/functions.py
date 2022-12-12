@@ -6,6 +6,7 @@ import itertools
 import types
 from typing import Dict, List
 
+
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -41,20 +42,25 @@ def wrap_bound_arg(tx, val, options, source=None):
         # since InstructionTranslator __init__ prepares VariableTrackers for args of top
         # level function including defaults.
         #
-        # TODO: wish i could assert this; but if the default tensor arg lives on
-        # a NNModuleVariable, currently the UserFunctionVariable itself has no source
-        # so we need to fix that first
-        # assert source is not None, "source must be provided for tensor arg"
+
+        # Circular import...
+        from torch._dynamo.variables.builder import VariableBuilder
         if source:
-            return tx.output.register_attr_or_module(
-                val,
-                # should there be a "name" here?
-                source=source,
-            )
+            # return tx.output.register_attr_or_module(
+            #     val,
+            #     # should there be a "name" here?
+            #     source=source,
+            # )
+            return VariableBuilder(tx, source)(val)
         else:
-            return tx.output.register_attr_or_module(
-                val,
-            )
+            # TODO: wish i could assert this; but if the default tensor arg lives on
+            # a NNModuleVariable, currently the UserFunctionVariable itself has no source
+            # so we need to fix that first
+            # assert source is not None, "source must be provided for tensor arg"
+            return VariableBuilder(tx, source)(val)
+            # return tx.output.register_attr_or_module(
+            #     val,
+            # )
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
@@ -148,10 +154,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         fn: types.FunctionType = self.fn
         # TODO comment
         defaults = fn.__defaults__ or []
-        defaults_source = AttrSource(self.source, "__defaults__")
-        defaults_item_sources = [
-            GetItemSource(defaults_source, i) for i, _ in enumerate(defaults)
-        ]
+
+        def sources_for_defaults(source, func, defaults_key):
+            assert defaults_key in ("__defaults__", "__kwdefaults__")
+            defaults_container = getattr(func, defaults_key, [])
+            defaults_container_source = AttrSource(source, defaults_key)
+            if defaults_key == "__defaults__":
+                defaults_iterable = enumerate(defaults_container or []) 
+            else:
+                defaults_iterable = defaults_container.items()
+            return [GetItemSource(defaults_container_source, idx) for idx, _ in defaults_iterable]
+
         fake_func = types.FunctionType(
             fn.__code__,
             fn.__globals__,
@@ -159,7 +172,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             tuple(
                 [
                     wrap(val=arg, source=source)
-                    for arg, source in zip(defaults, defaults_item_sources)
+                    for arg, source in zip(defaults, sources_for_defaults(self.source, fn, "__defaults__"))
                 ]
             ),
             fn.__closure__,
