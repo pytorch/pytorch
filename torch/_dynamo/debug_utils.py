@@ -139,13 +139,9 @@ def _cuda_system_info_comment():
     except FileNotFoundError:
         model_str += "# nvcc not found\n"
 
-    gpu_names = subprocess.run(
-        ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
-        stdout=subprocess.PIPE,
+    gpu_names = Counter(
+        torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
     )
-    gpu_names = gpu_names.stdout.decode().split("\n")
-    gpu_names = [name for name in gpu_names if name not in ("", "name")]
-    gpu_names = Counter(gpu_names)
 
     model_str += "# GPU Hardware Info: \n"
     for name, count in gpu_names.items():
