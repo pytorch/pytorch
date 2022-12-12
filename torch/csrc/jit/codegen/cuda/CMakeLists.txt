@@ -195,7 +195,7 @@ if(BUILD_PYTHON)
   target_compile_options(${NVFUSER} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
   # avoid using Python3_add_library, copied from functorch
-  set_target_properties(${NVFUSER} PROPERTIES PREFIX "" DEBUG_POSTFIX "") 
+  set_target_properties(${NVFUSER} PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   if(NOT MSVC)
     target_compile_options(${NVFUSER} PRIVATE -Wno-unused-variable)
     set_target_properties(${NVFUSER} PROPERTIES SUFFIX ".so")
