@@ -80,10 +80,6 @@ TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 
-// NB: Not lock safe, you should only call this from Python where the GIL will
-// prevent race conditions.
-TORCH_API bool areTransformsActive();
-
 // NOTE: [Life handles and lexically scoped transforms]
 // functorch transforms are lexically scoped.
 // Given a level, we store a "life handle" that is a boolean that tells us if the
@@ -92,9 +88,7 @@ TORCH_API bool areTransformsActive();
 // functorch's TensorWrapper (for grad transforms) stores a life handle.
 // If a TensorWrapper escapes from the scope of the transform, then somehow
 // it must know it escaped; it can tell by querying the life handle.
-//
-// NB: not lock safe. TODO: does it need a lock?
-TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
+TORCH_API const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level);
 
 // Returns if an operator is in-place. An operator is inplace if:
 // 1. The first argument is a Tensor and it is being written to
