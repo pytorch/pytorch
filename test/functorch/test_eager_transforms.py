@@ -35,11 +35,12 @@ from functorch import (
 from torch._functorch.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from torch._functorch.eager_transforms import enable_fwd_grad, _slice_argnums
+from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
 from torch._ops import PyOperator
 from torch._functorch.utils import enable_autograd_function
 from torch.autograd.function import _set_autograd_function_extension_enabled
+import torch.autograd.forward_ad as fwAD
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -2144,28 +2145,13 @@ class TestJvp(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jvp(lambda x: (x, [x, aux]), (x, ), (t, ), has_aux=True)
 
-    def test_fwd_grad_enabled(self, device):
-        # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
-        enabled = torch._C._functorch.get_fwd_grad_enabled()
-        self.assertTrue(enabled)
-
     def test_autograd_function_disables_fwd_grad(self, device):
         # Sanity check. We don't really assume this anywhere so
         # it's fine if this breaks one day.
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
+                enabled = fwAD._is_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -2176,32 +2162,16 @@ class TestJvp(TestCase):
         x = torch.randn(3, requires_grad=True)
         MySquare.apply(x)
 
-    def test_enable_fwd_grad(self, device):
-        # Tests a private helper function
-        try:
-            torch._C._functorch.set_fwd_grad_enabled(False)
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-
-            with enable_fwd_grad():
-                enabled = torch._C._functorch.get_fwd_grad_enabled()
-                self.assertTrue(enabled)
-
-            enabled = torch._C._functorch.get_fwd_grad_enabled()
-            self.assertFalse(enabled)
-        finally:
-            torch._C._functorch.set_fwd_grad_enabled(True)
-
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad(False):
+        with fwAD._set_fwd_grad_enabled(False):
             _, y = jvp(torch.sin, (x,), (t,))
         self.assertEqual(y, x.cos())
 
     def test_disable_fwd_grad_inside(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
@@ -2214,13 +2184,13 @@ class TestJvp(TestCase):
 
     def test_disable_fwd_grad_mixed(self, device):
         def f(x):
-            with enable_fwd_grad(False):
+            with fwAD._set_fwd_grad_enabled(False):
                 shift = x ** 2
             return x ** 2 - shift
 
         x = torch.randn([], device=device)
         t = torch.ones_like(x)
-        with enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             _, y = jvp(f, (x,), (t,))
 
         self.assertEqual(y, 2 * x)
