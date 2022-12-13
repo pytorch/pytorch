@@ -73,8 +73,27 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
   Tensor grad_output, input = input_;
 
   if (!is_backward_pass) {
-    // these checks aren't relevant for constant pad
-    if (mode != MPSGraphPaddingModeConstant) {
+    TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
+      "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
+      "output H: ", output_h, " W: ", output_w);
+
+    std::vector<int64_t> outputSizes;
+    if (mode == MPSGraphPaddingModeConstant) {
+      // support arbitrary input dimensions for constant pad.
+      auto input_sizes = input_.sizes();
+      auto ori_padding_dim = padding_size / 2;
+      auto l_diff = ndims - ori_padding_dim;
+
+      for (size_t i = 0; i < (size_t)l_diff; i ++) {
+        outputSizes.emplace_back(input_sizes[i]);
+      }
+      for (const auto i : c10::irange((size_t)ori_padding_dim)) {
+        auto pad_idx = padding.size() - ((i + 1) * 2);
+        auto new_dim = input_sizes[l_diff + i] + padding[pad_idx] + padding[pad_idx + 1];
+        outputSizes.emplace_back(new_dim);
+      }
+    } else {
+      // these checks aren't relevant for constant pad
       TORCH_CHECK(pad_l < input_w && pad_r < input_w,
         "Argument #4: Padding size should be less than the corresponding "
         "input dimension, but got: padding (", pad_l, ", ", pad_r,
@@ -92,21 +111,16 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
           "input dimension, but got: padding (", pad_front, ", ", pad_back,
           ") at dimension ", dim_d, " of input ", ndims);
       }
+      outputSizes.insert(outputSizes.begin(), output_w);
+      if (padding_dim >= 2)
+        outputSizes.insert(outputSizes.begin(), output_h);
+      if (padding_dim >= 3)
+        outputSizes.insert(outputSizes.begin(), output_d);
+      if (ndims >= 1 + padding_dim)
+        outputSizes.insert(outputSizes.begin(), nplane);
+      if (ndims >= 2 + padding_dim)
+        outputSizes.insert(outputSizes.begin(), nbatch);
     }
-    TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
-      "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
-      "output H: ", output_h, " W: ", output_w);
-
-    std::vector<int64_t> outputSizes;
-    outputSizes.insert(outputSizes.begin(), output_w);
-    if (padding_dim >= 2)
-      outputSizes.insert(outputSizes.begin(), output_h);
-    if (padding_dim >= 3)
-      outputSizes.insert(outputSizes.begin(), output_d);
-    if (ndims >= 1 + padding_dim)
-      outputSizes.insert(outputSizes.begin(), nplane);
-    if (ndims >= 2 + padding_dim)
-      outputSizes.insert(outputSizes.begin(), nbatch);
 
     output.resize_(outputSizes);
 
