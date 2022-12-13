@@ -25,7 +25,9 @@ class TestComputeNativeFunctionStub(unittest.TestCase):
     manually adding these parametrized tests.
     """
 
-    def _test_function_schema_generates_correct_kernel(self, obj, expected) -> None:
+    def _test_function_schema_generates_correct_kernel(
+        self, obj: Dict[str, object], expected: str
+    ) -> None:
         func = _get_native_function_from_yaml(obj)
 
         gen = ComputeNativeFunctionStub()
