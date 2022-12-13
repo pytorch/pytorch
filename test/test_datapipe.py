@@ -2735,6 +2735,46 @@ class TestSharding(TestCase):
 
         self.assertEqual(sorted(expected), sorted(items))
 
+    def test_multi_sharding(self):
+        # Raises Error when multiple sharding on the single branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        sharded_dp = numbers_dp.sharding_filter()
+        sharded_dp = sharded_dp.sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+            torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 0)
+
+        # Raises Error when sharding on both data source and branch
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp)
+        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Raises Error when multiple sharding on the branch and end
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp).sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Single sharding_filter on data source
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        zip_dp = dp1.zip(dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
+
+        # Single sharding_filter per branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp1 = dp1.sharding_filter()
+        sharded_dp2 = dp2.sharding_filter()
+        zip_dp = sharded_dp1.zip(sharded_dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
+
 
 class TestIterDataPipeSingletonConstraint(TestCase):
 

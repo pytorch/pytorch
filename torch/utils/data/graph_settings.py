@@ -41,21 +41,20 @@ def apply_sharding(datapipe: DataPipe,
     RuntimeError will be raised when multiple ``sharding_filter`` are presented in the same branch.
     """
     graph = traverse_dps(datapipe)
-    cache: Set[int] = set()
 
-    def _helper(graph, applied_datapipe=None):
-        for dp_id, (dp, sub_graph) in graph.items():
-            if dp_id in cache:
-                continue
-            cache.add(dp_id)
+    def _helper(graph, prev_applied=None):
+        for _, (dp, sub_graph) in graph.items():
+            applied = None
             if hasattr(dp, 'is_shardable') and dp.is_shardable():
                 if hasattr(dp, 'apply_sharding'):
-                    if applied_datapipe:
-                        raise RuntimeError("This implementation of sharding can be only applied once per branch of DataPipe graph. "
-                                           f"Already applied to {applied_datapipe} while trying to apply to {dp}")
+                    if prev_applied is not None:
+                        raise RuntimeError("Dynamic sharding can be only applied once per branch of DataPipe graph. "
+                                           f"Already applied to {prev_applied} while trying to apply to {dp}")
                     dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
-                    applied_datapipe = dp
-            _helper(sub_graph, applied_datapipe)
+                    applied = dp
+            if applied is None:
+                applied = prev_applied
+            _helper(sub_graph, applied)
 
     _helper(graph)
 
