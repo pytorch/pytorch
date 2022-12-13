@@ -706,12 +706,12 @@ struct HelperInterpBase {
   static inline void _compute_weights_aa(
     const int64_t i, const int64_t input_size, const scalar_t scale, const scalar_t support,
     scalar_t* wt_ptr, const int64_t interp_size, aa_filter_fn_t filter_fn,
-    int64_t& xmin, int64_t& xsize
+    int64_t& xmin, int64_t& xsize, bool antialias
   ) {
 
     scalar_t center = scale * (i + 0.5);
     scalar_t total_w = 0.0;
-    scalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
+    scalar_t invscale = (scale >= 1.0 && antialias) ? 1.0 / scale : 1.0;
     xmin = std::max(
         static_cast<int64_t>(center - support + 0.5), static_cast<int64_t>(0));
     xsize = std::min(static_cast<int64_t>(center + support + 0.5), input_size) -
@@ -726,6 +726,7 @@ struct HelperInterpBase {
     for (j = 0; j < xsize; j++) {
       if (total_w != 0.0) {
         wt_ptr[j] /= total_w;
+        // std::cout << "wt_ptr[j] = " << wt_ptr[j] << std::endl;
       }
     }
     for (; j < interp_size; j++) {
@@ -789,7 +790,8 @@ struct HelperInterpBase {
           interp_size,
           aa_filter_fn,
           xmin,
-          xmax);
+          xmax,
+          /*antialias=*/true);
 
       idx_ptr_xmin[i] = xmin * stride;
       idx_ptr_size[i] = xmax;
@@ -862,7 +864,8 @@ struct HelperInterpBase {
           interp_size,
           aa_filter_fn,
           xmin,
-          xmax);
+          xmax,
+          antialias);
 
       idx_ptr_xmin[i] = xmin * stride;
       idx_ptr_size[i] = xmax;
@@ -1225,6 +1228,26 @@ struct HelperInterpCubic : public HelperInterpBase {
 #undef a
   }
 
+  // TODO: unify with above? The only difference is the -0.75 value instead of
+  // 0.5, for it to be consistent with `get_cubic_upsample_coefficients()` used
+  // for float dtypes in aten/src/ATen/native/UpSample.h
+  template<typename scalar_t>
+  static inline scalar_t no_aa_filter(scalar_t x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+#define a -0.75
+    if (x < 0.0) {
+      x = -x;
+    }
+    if (x < 1.0) {
+      return ((a + 2.0) * x - (a + 3.0)) * x * x + 1;
+    }
+    if (x < 2.0) {
+      return (((x - 5) * x + 8) * x - 4) * a;
+    }
+    return 0.0;
+#undef a
+  }
+
   static inline std::vector<Tensor> compute_indices_weights_aa(
     at::ScalarType scalar_type,
     int64_t input_size,
@@ -1271,7 +1294,7 @@ struct HelperInterpCubic : public HelperInterpBase {
   ) {
 
     auto interp_size = HelperInterpCubic::interp_size;
-    auto fn = HelperInterpCubic::aa_filter<double>;
+    auto fn = antialias ? HelperInterpCubic::aa_filter<double>: HelperInterpCubic::no_aa_filter<double>;
     return HelperInterpCubic::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
         align_corners, opt_scale, interp_size, fn, antialias);
@@ -1886,7 +1909,8 @@ void cpu_upsample_genNd_backward_aa(
           interp_height,
           filter_fn,
           ymin,
-          ysize);
+          ysize,
+          /*antialias=*/true);
 
       for (const auto ow : c10::irange(output_width)) {
         F::_compute_weights_aa(
@@ -1898,7 +1922,8 @@ void cpu_upsample_genNd_backward_aa(
             interp_width,
             filter_fn,
             xmin,
-            xsize);
+            xsize,
+          /*antialias=*/true);
 
         for (const auto c : c10::irange(begin, end)) {
           scalar_t grad_output_value =
