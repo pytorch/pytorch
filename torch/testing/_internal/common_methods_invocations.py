@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state,
+    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest
 )
 
 import torch._refs as refs  # noqa: F401
@@ -278,6 +278,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
 
     # input shape, output shape, output stride, output storage offset
     test_cases = [
+        ((1,), (), (), 0),
         ((1,), (1,), (1,), 0),
         ((3, 3), (2, 2), (1, 2), 0),
         ((3, 3), (2, 2), (1, 2), 1),
@@ -292,6 +293,7 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         input_t = make_arg(input_shape)
         input_src = make_arg(output_shape)
         yield SampleInput(input_t, input_src, output_shape, stride, storage_offset=storage_offset)
+
 
 def error_inputs_as_strided_scatter(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -494,9 +496,9 @@ def sample_inputs_prelu(op_info, device, dtype, requires_grad, **kwargs):
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
             yield SampleInput(make_arg(shape), args=(weight_tensor,))
 
-        if len(shape) >= 2:
-            channel_size = shape[1]
-            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+        channel_size = shape[1] if len(shape) >= 2 else 1
+        yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+
     weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
 
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
@@ -7780,7 +7782,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'log1p',
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
     ),
 
     ForeachFuncInfo(
@@ -9891,7 +9893,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.log1p',),
                    domain=(-1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10821,8 +10823,6 @@ op_db: List[OpInfo] = [
                             'test_non_standard_bool_values'),
            )),
     OpInfo('as_strided_scatter',
-           op=lambda x, src, size, stride, storage_offset=0:
-               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
@@ -11896,7 +11896,7 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
@@ -11934,11 +11934,11 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
@@ -12050,6 +12050,9 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_prelu,
         reference_inputs_func=reference_inputs_prelu,
         decorators=[
+            # https://github.com/pytorch/pytorch/issues/89895
+            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
             # FIXME: second derivative is implemented but seems to be incorrect
             # https://github.com/pytorch/pytorch/issues/68760
             DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
@@ -13901,6 +13904,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -17702,6 +17706,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -18423,6 +18428,11 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.as_strided_scatter",
+        torch_opinfo_name="as_strided_scatter",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",

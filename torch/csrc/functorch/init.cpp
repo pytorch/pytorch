@@ -234,14 +234,6 @@ RandomnessType get_randomness_enum(const std::string& randomness) {
   }
 }
 
-void set_fwd_grad_enabled(bool enabled) {
-  c10::AutogradState::get_tls_state().set_fw_grad_mode(enabled);
-}
-
-bool get_fwd_grad_enabled() {
-  return c10::AutogradState::get_tls_state().get_fw_grad_mode();
-}
-
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
@@ -257,7 +249,8 @@ int64_t _grad_decrement_nesting() {
 
 int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
-  bool prev_fwd_grad_mode = get_fwd_grad_enabled();
+  bool prev_fwd_grad_mode =
+      c10::AutogradState::get_tls_state().get_fw_grad_mode();
   return initAndPushDynamicLayer(
       TransformType::Jvp,
       c10::nullopt,
@@ -388,12 +381,26 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
+static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
+    const Tensor& tensor,
+    int64_t level) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (!batched) {
+    return std::make_tuple(tensor, nullopt);
+  }
+  if (batched->level() == level) {
+    return std::make_tuple(batched->value(), batched->bdim());
+  }
+  return std::make_tuple(tensor, nullopt);
+}
+
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
 
   m.def("_add_batch_dim", &_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &_remove_batch_dim, "remove batch dim");
+  m.def("_unwrap_batched", &unwrapBatched);
   m.def(
       "_wrap_functional_tensor",
       &_wrap_functional_tensor,
@@ -445,11 +452,12 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_autograd_function_allowed",
       &at::functorch::getAutogradFunctionAllowed);
+  m.def("unwrap_if_dead", &unwrapIfDead);
+  m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
   m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
-  m.def("are_transforms_active", &at::functorch::areTransformsActive);
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
@@ -463,8 +471,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
   m.def("dump_dls", &dump_dls);
   m.def("dump_local_tls", &dump_local_tls);
-  m.def("set_fwd_grad_enabled", &set_fwd_grad_enabled);
-  m.def("get_fwd_grad_enabled", &get_fwd_grad_enabled);
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });

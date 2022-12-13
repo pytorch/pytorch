@@ -68,8 +68,10 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
+    "_state_dict_pre_hooks",
     "_modules",
     # The two attributes below are generated methods, not available at pickling time.
     "forward_async",

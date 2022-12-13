@@ -1437,19 +1437,19 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     def test_export_with_module_layer(self):
         from functorch.experimental.control_flow import cond
 
-        def true_fn(layer, val):
-            return layer(val) * torch.tensor(2)
-
-        def false_fn(layer, val):
-            return layer(val) * torch.tensor(-1)
-
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, pred, x):
-                return cond(pred, true_fn, false_fn, [self.linear, x])
+                def true_fn(val):
+                    return self.linear(val) * torch.tensor(2)
+
+                def false_fn(val):
+                    return self.linear(val) * torch.tensor(-1)
+
+                return cond(pred, true_fn, false_fn, [x])
 
         mod = Module()
         x = torch.randn([3, 3])

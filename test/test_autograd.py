@@ -544,6 +544,94 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
             torch._C._will_engine_execute_node(out)
 
+    def test_custom_function_setup_context_simple(self):
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                return x ** 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return gO * 2 * x
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            x = torch.randn([], requires_grad=True)
+            y = MySquare.apply(x)
+            gx, = torch.autograd.grad(y, x)
+            self.assertEqual(gx, 2 * x)
+
+    def test_custom_function_setup_context_multi_output(self):
+        # Multiple outputs with some non-Tensor outputs.
+        class MySquare(Function):
+            @staticmethod
+            def forward(x):
+                two_x = x.item() * 2
+                return x ** 2, two_x
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, = inputs
+                _, two_x = outputs
+                ctx.two_x = two_x
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, gO, _):
+                return gO * ctx.two_x
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            x = torch.randn([], requires_grad=True)
+            y, _ = MySquare.apply(x)
+            gx, = torch.autograd.grad(y, x)
+            self.assertEqual(gx, 2 * x)
+
+    def test_custom_function_setup_context_multi_input(self):
+        class MyReshape(Function):
+            @staticmethod
+            def forward(x, shape, scale_forward, scale_backward):
+                return x.reshape(shape) * scale_forward
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                x, shape, scale_forward, scale_backward = inputs
+                ctx.scale_backward = scale_backward
+                ctx.x_shape = x.shape
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO.reshape(ctx.x_shape) * ctx.scale_backward, None, None, None
+
+        class MyReshapeRef(Function):
+            @staticmethod
+            def forward(ctx, x, shape, scale_forward, scale_backward):
+                ctx.scale_backward = scale_backward
+                ctx.x_shape = x.shape
+                return x.reshape(shape) * scale_forward
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO.reshape(ctx.x_shape) * ctx.scale_backward, None, None, None
+
+        def test(x, shape, scale_forward, scale_backward):
+            y = MyReshape.apply(x, shape, scale_forward, scale_backward).sum()
+            gx, = torch.autograd.grad(y, x)
+
+            y_expected = MyReshapeRef.apply(x, shape, scale_forward, scale_backward).sum()
+            gx_expected, = torch.autograd.grad(y_expected, x)
+
+            self.assertEqual(y_expected, y)
+            self.assertEqual(gx_expected, gx)
+
+        with torch.autograd.function._set_autograd_function_extension_enabled(True):
+            test(torch.randn(24, requires_grad=True), (3, 8), 7, 11)
+            test(torch.randn(2, 3, 4, requires_grad=True), (6, 4), -1, 2)
+
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
@@ -980,6 +1068,20 @@ class TestAutograd(TestCase):
             b.sum().backward()
             self.assertEqual(pre_counter[0], 4)
             self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+
+    def test_autograd_function_extension_feature_flag(self):
+        try:
+            prev = torch._C._is_autograd_function_extension_enabled()
+
+            torch._C._set_autograd_function_extension_enabled(True)
+            state = torch._C._is_autograd_function_extension_enabled()
+            self.assertTrue(state)
+
+            torch._C._set_autograd_function_extension_enabled(False)
+            state = torch._C._is_autograd_function_extension_enabled()
+            self.assertFalse(state)
+        finally:
+            torch._C._set_autograd_function_extension_enabled(prev)
 
     def test_grad_fn_prehooks_multiple_outputs(self):
         # Compute gradients without hooks
@@ -7590,6 +7692,37 @@ class TestAutogradForwardMode(TestCase):
         baz_primal, baz_tangent = fwAD.unpack_dual(baz)
         self.assertEqual(baz_primal, foo)
         self.assertEqual(baz_tangent, None)
+
+    def test_fwd_grad_enabled(self):
+        # Tests some private helper functions to enable/disable fwd grad mode
+        enabled = fwAD._is_fwd_grad_enabled()
+        self.assertTrue(enabled)
+
+        try:
+            torch._C._set_fwd_grad_enabled(False)
+            enabled = fwAD._is_fwd_grad_enabled()
+            self.assertFalse(enabled)
+        finally:
+            torch._C._set_fwd_grad_enabled(True)
+
+        enabled = fwAD._is_fwd_grad_enabled()
+        self.assertTrue(enabled)
+
+    def test_set_fwd_grad_enabled(self):
+        # Tests a private helper function
+        try:
+            torch._C._set_fwd_grad_enabled(False)
+            enabled = fwAD._is_fwd_grad_enabled()
+            self.assertFalse(enabled)
+
+            with fwAD._set_fwd_grad_enabled(True):
+                enabled = fwAD._is_fwd_grad_enabled()
+                self.assertTrue(enabled)
+
+            enabled = fwAD._is_fwd_grad_enabled()
+            self.assertFalse(enabled)
+        finally:
+            torch._C._set_fwd_grad_enabled(True)
 
     def test_nested_level(self):
         with fwAD.dual_level() as level:

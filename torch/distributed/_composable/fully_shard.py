@@ -50,7 +50,7 @@ def fully_shard(
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
-    state = _init_process_group_state(state, process_group)
+    state = _init_process_group_state(state, process_group, ShardingStrategy.FULL_SHARD, policy)
     limit_all_gathers = True
     use_orig_params = True
     backward_prefetch_limit = 1

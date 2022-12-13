@@ -2,13 +2,16 @@
 
 import sys
 
+from typing import Union
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy as always_wrap,
     enable_wrap,
+    ModuleWrapPolicy,
     wrap,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -342,6 +345,61 @@ class TestFSDPWithMetaDevice(FSDPTest):
             return NestedModel(device="meta")
 
         self._test_bad_arg(meta_module_fn)
+
+    @skip_if_lt_x_gpu(2)
+    def test_meta_device_with_mixed_precision(self):
+        """
+        Tests meta device initialization with a ``param_init_fn`` when
+        specifying mixed precision with ``param_dtype=torch.float32``.
+        """
+
+        class FakeLinear(nn.Module):
+            def __init__(
+                self, in_dim: int, out_dim: int, device: Union[torch.device, str]
+            ) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(
+                    torch.randn((in_dim, out_dim), device=device)
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x @ self.weight
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin1 = nn.Linear(5, 5, device="meta")
+                self.lin2 = FakeLinear(5, 5, device="meta")
+                self.relu = nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.lin2(self.relu(self.lin1(x)))
+
+            def _module_init_fn(self, module: nn.Module):
+                if isinstance(module, nn.Linear):
+                    torch.nn.init.normal_(module.weight, mean=0.0, std=0.1)
+                    if module.bias is not None:
+                        torch.nn.init.zeros_(module.bias)
+
+        def _param_init_fn(module: nn.Module) -> None:
+            # TODO: `module.to_empty()` is not generally correct for meta
+            # device initialization.
+            # https://github.com/pytorch/pytorch/issues/90465
+            module.to_empty(device=torch.device("cuda"))
+            module.apply(model._module_init_fn)
+
+        model = Model()
+        # Wrap `lin1` and the top level `model` to create nested FSDP instances
+        # where each instance has parameters
+        FSDP(
+            model,
+            auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+            mixed_precision=MixedPrecision(
+                param_dtype=torch.float32, reduce_dtype=torch.float16
+            ),
+            param_init_fn=_param_init_fn,
+            device_id=torch.cuda.current_device(),
+        )
 
 
 instantiate_parametrized_tests(TestFSDPWithMetaDevice)

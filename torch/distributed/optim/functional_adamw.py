@@ -1,10 +1,11 @@
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.optim._functional as F
 
 from torch import Tensor
 
-__all__ : List[str] = []
+__all__: List[str] = []
 
 # Define a TorchScript compatible Functional AdamW Optimizer
 # where we use these optimizer in a functional way.
@@ -73,42 +74,50 @@ class _FunctionalAdamW(object):
         if param not in self.state:
             self.state[param] = {}
             state = self.state[param]
-            state['step'] = torch.tensor(0.0)
+            state["step"] = torch.tensor(0.0)
             # Exponential moving average of gradient values
-            state['exp_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            state["exp_avg"] = torch.zeros_like(
+                param, memory_format=torch.preserve_format
+            )
             # Exponential moving average of squared gradient values
-            state['exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+            state["exp_avg_sq"] = torch.zeros_like(
+                param, memory_format=torch.preserve_format
+            )
             if self.amsgrad:
                 # Maintains max of all exp. moving avg. of sq. grad. values
-                state['max_exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                state["max_exp_avg_sq"] = torch.zeros_like(
+                    param, memory_format=torch.preserve_format
+                )
 
         state = self.state[param]
 
-        exp_avgs.append(state['exp_avg'])
-        exp_avg_sqs.append(state['exp_avg_sq'])
+        exp_avgs.append(state["exp_avg"])
+        exp_avg_sqs.append(state["exp_avg_sq"])
 
         if self.amsgrad:
-            max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+            max_exp_avg_sqs.append(state["max_exp_avg_sq"])
 
-        state_steps.append(state['step'])
+        state_steps.append(state["step"])
         with torch.no_grad():
-            F.adamw(params_with_grad,
-                    grads,
-                    exp_avgs,
-                    exp_avg_sqs,
-                    max_exp_avg_sqs,
-                    state_steps,
-                    amsgrad=self.amsgrad,
-                    maximize=self.maximize,
-                    beta1=self.defaults['beta1'],
-                    beta2=self.defaults['beta2'],
-                    lr=self.defaults['lr'],
-                    weight_decay=self.defaults['weight_decay'],
-                    eps=self.defaults['eps'],
-                    foreach=self.foreach)
+            F.adamw(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=self.amsgrad,
+                maximize=self.maximize,
+                beta1=self.defaults["beta1"],
+                beta2=self.defaults["beta2"],
+                lr=self.defaults["lr"],
+                weight_decay=self.defaults["weight_decay"],
+                eps=self.defaults["eps"],
+                foreach=self.foreach,
+            )
 
     def step(self, gradients: List[Optional[Tensor]]):
-        params = self.param_group['params']
+        params = self.param_group["params"]
         params_with_grad = []
         grads = []
         exp_avgs = []
@@ -123,7 +132,7 @@ class _FunctionalAdamW(object):
                 + f"Gradients length: {len(gradients)}"
             )
 
-        for param, gradient in zip(self.param_group['params'], gradients):
+        for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
                 params_with_grad.append(param)
                 grads.append(gradient)
@@ -131,37 +140,45 @@ class _FunctionalAdamW(object):
                 if param not in self.state:
                     self.state[param] = {}
                     state = self.state[param]
-                    state['step'] = torch.tensor(0.0)
+                    state["step"] = torch.tensor(0.0)
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state["exp_avg"] = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                    )
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                    state["exp_avg_sq"] = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                    )
                     if self.amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(param, memory_format=torch.preserve_format)
+                        state["max_exp_avg_sq"] = torch.zeros_like(
+                            param, memory_format=torch.preserve_format
+                        )
 
                 state = self.state[param]
 
-                exp_avgs.append(state['exp_avg'])
-                exp_avg_sqs.append(state['exp_avg_sq'])
+                exp_avgs.append(state["exp_avg"])
+                exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if self.amsgrad:
-                    max_exp_avg_sqs.append(state['max_exp_avg_sq'])
+                    max_exp_avg_sqs.append(state["max_exp_avg_sq"])
 
-                state_steps.append(state['step'])
+                state_steps.append(state["step"])
 
         with torch.no_grad():
-            F.adamw(params_with_grad,
-                    grads,
-                    exp_avgs,
-                    exp_avg_sqs,
-                    max_exp_avg_sqs,
-                    state_steps,
-                    amsgrad=self.amsgrad,
-                    maximize=self.maximize,
-                    beta1=self.defaults['beta1'],
-                    beta2=self.defaults['beta2'],
-                    lr=self.defaults['lr'],
-                    weight_decay=self.defaults['weight_decay'],
-                    eps=self.defaults['eps'],
-                    foreach=self.foreach)
+            F.adamw(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=self.amsgrad,
+                maximize=self.maximize,
+                beta1=self.defaults["beta1"],
+                beta2=self.defaults["beta2"],
+                lr=self.defaults["lr"],
+                weight_decay=self.defaults["weight_decay"],
+                eps=self.defaults["eps"],
+                foreach=self.foreach,
+            )

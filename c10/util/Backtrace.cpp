@@ -121,7 +121,7 @@ c10::optional<FrameInformation> parse_frame_information(
   // `<object-file>(<mangled-function-name>+<offset-into-function>)
   // [<return-address>]`
 
-  auto function_name_start = frame_string.find("(");
+  auto function_name_start = frame_string.find('(');
   if (function_name_start == std::string::npos) {
     return c10::nullopt;
   }

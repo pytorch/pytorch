@@ -16,6 +16,7 @@ import torch
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
+from .external_utils import is_compiling
 from .utils import is_safe_constant
 
 """
@@ -189,7 +190,7 @@ def _allowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
 
-    for extra in (is_fx_tracing,):
+    for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
