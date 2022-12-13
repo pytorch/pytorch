@@ -1885,14 +1885,29 @@ def meta__scaled_dot_product_flash(
     ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
         1, 2
     )
-
+    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
     logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
+        (batch_size, num_heads, max_seqlen_q),
         dtype=torch.float,
         device=query.device,
     )
+    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
+    head_size_rounded = 64 if head_dim <= 64 else 128
+    blocksize_c = (
+        128
+        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
+        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
+        else 256
+    )
+    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
+    if max_seqlen_k <= 128:
+        max_seqlen_k = 128
+    elif max_seqlen_k <= 256:
+        max_seqlen_k = 256
+
     softmax = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_batch_k),
+        (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
         dtype=query.dtype,
         device=query.device,
     )
