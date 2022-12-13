@@ -564,7 +564,7 @@ https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/
                        help="Disable numactl")
     group.add_argument("--core_list", metavar="\b", default=None, type=str,
                        help="Specify the core list as \"core_id, core_id, ....\", otherwise, all the cores will be used.")
-    group.add_argument("--log_path", metavar="\b", default="logs", type=str,
+    group.add_argument("--log_path", metavar="\b", default="", type=str,
                        help="The log file directory. Default path is "", which means disable logging to files.")
     group.add_argument("--log_file_prefix", metavar="\b", default="run", type=str,
                        help="log file prefix")
@@ -611,6 +611,8 @@ def main(args):
 
     if args.log_path:
         os.makedirs(args.log_path, exist_ok=True)
+    else:
+        args.log_path = os.devnull
 
     if args.latency_mode and args.throughput_mode:
         raise RuntimeError("Either args.latency_mode or args.throughput_mode should be set")
