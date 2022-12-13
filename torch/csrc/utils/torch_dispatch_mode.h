@@ -2,7 +2,7 @@
 
 #include <c10/core/ModePyObjTrampoline.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/utils/mode_utils.h>
+#include <torch/csrc/utils/ConcreteModePyObjTrampoline.h>
 
 namespace torch {
 namespace torch_dispatch_mode {
