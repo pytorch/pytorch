@@ -12,6 +12,7 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <type_traits>
 #include <utility>
+#include <c10/core/SymIntArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -729,8 +730,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
       }
       return std::make_tuple(
           std::move(std::get<0>(out_and_lse)),
-          at::empty(
-              {query_.size(0), query_.size(1), query_.size(2), key.size(2)},
+          at::empty_symint(
+              c10::SymIntArrayRef{query_.sym_size(0), query_.sym_size(1), query_.sym_size(2), key.sym_size(2)},
               query_.options()));
     }
     case sdp::SDPBackend::math:
@@ -801,8 +802,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // TODO: Need to fix when we have empty for nested tensors.
     attn = need_attn_weights || query_.is_nested()
         ? attn
-        : at::empty(
-              {query_.size(0), query_.size(1), query_.size(2), key.size(2)},
+        : at::empty_symint(
+              c10::SymIntArrayRef{query_.sym_size(0), query_.sym_size(1), query_.sym_size(2), key.sym_size(2)},
               query_.options());
     return std::make_tuple(output, attn);
 }
