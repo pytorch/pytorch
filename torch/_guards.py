@@ -182,11 +182,11 @@ class Guard:
 T = TypeVar("T")
 
 
-class Checkpointable(ABC):
-    def copy_graphstate(self) -> Generic[T]:
+class Checkpointable(ABC, Generic[T]):
+    def copy_graphstate(self) -> T:
         pass
 
-    def restore_graphstate(self, state: Generic[T]):
+    def restore_graphstate(self, state: T):
         pass
 
 
@@ -194,7 +194,7 @@ class GuardsCheckpointState(NamedTuple):
     dynamo_guards: Set[Guard] = set()
 
 
-class GuardsContext(Checkpointable):
+class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
 

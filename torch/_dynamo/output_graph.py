@@ -175,7 +175,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer, Checkpointable):
+class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
