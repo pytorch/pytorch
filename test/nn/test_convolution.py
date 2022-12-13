@@ -2160,16 +2160,18 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfCudnnVersionLessThan(7603)
+    # randint and randint_like with dtype=torch.cfloat raises
+    # RuntimeError: check_random_bounds handles only integral, floating-point and boolean types
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
-            input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
-                .to(memory_format=torch.channels_last)
+            input = torch.randint(-3, 3, (n, c, h, w), device=device)\
+                .to(memory_format=torch.channels_last, dtype=dtype)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)\
                 .to(device='cuda', dtype=dtype, memory_format=torch.channels_last)
             for p in conv.parameters():
-                p.data = torch.randint_like(p, -3, 3)
+                p.data = torch.randint_like(p, -3, 3, dtype=torch.int64).to(dtype=dtype)
 
             # use FP64 channels-first conv as reference
             ref_input = input.detach().clone().contiguous().double().requires_grad_()
@@ -2181,7 +2183,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out = conv(input)
             ref_out = ref_conv(ref_input)
 
-            grad = torch.randint_like(out, -3, 3)
+            grad = torch.randint_like(out, -3, 3, dtype=torch.int64).to(dtype=dtype)
             ref_grad = grad.detach().clone().double().contiguous()
 
             out.backward(grad)
