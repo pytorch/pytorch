@@ -303,5 +303,14 @@ inline at::OptionalIntArrayRef getBlockSize(Tensor const& self) {
   }
 }
 
+inline at::OptionalSymIntArrayRef getSymIntBlockSize(Tensor const& self) {
+  if (self.layout() == at::kSparseBsr || self.layout() == at::kSparseBsc) {
+    int64_t n_batch = numBatchDimensions(self);
+    return self.values().sym_sizes().slice(n_batch + 1, 2);
+  } else {
+    return c10::nullopt;
+  }
+}
+
 } // namespace sparse_csr
 } // namespace at

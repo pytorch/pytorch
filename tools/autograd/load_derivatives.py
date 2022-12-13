@@ -774,6 +774,17 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
             },
         ),
+        # replace self.blocksize() with self_blocksize_opt
+        (
+            r"{}.blocksize\(\)",
+            {
+                "suffix": "_self_blocksize_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"at::sparse_csr::getSymIntBlockSize({name})",
+            },
+        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",
