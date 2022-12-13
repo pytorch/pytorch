@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ops/composite.h>
-#include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <arith.h>
+#include <ir_builder.h>
+#include <ops/composite.h>
+#include <transform_view.h>
 
 namespace torch {
 namespace jit {

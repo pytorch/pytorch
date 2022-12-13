@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <ir_builder.h>
+#include <kernel.h>
+#include <kernel_expr_evaluator.h>
+#include <kernel_ir.h>
+#include <lower2device.h>
+#include <lower_utils.h>
+#include <type.h>
 
 #include <iostream>
 

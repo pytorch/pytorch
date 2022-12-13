@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <kernel_expr_evaluator.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
+#include <lower_allocation.h>
 
 #include <unordered_set>
 

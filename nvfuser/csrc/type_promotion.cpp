@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
+#include <type_promotion.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <arith.h>
+#include <ir_interface_nodes.h>
 
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/ScalarType.h>

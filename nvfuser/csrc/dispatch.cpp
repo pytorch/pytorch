@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <type.h>
 
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <dispatch.h>
 
 namespace torch {
 namespace jit {

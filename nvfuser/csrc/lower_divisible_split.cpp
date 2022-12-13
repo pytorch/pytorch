@@ -1,8 +1,8 @@
 
-#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
+#include <lower_divisible_split.h>
 
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <disjoint_set.h>
+#include <ir_utils.h>
 
 #include <unordered_set>
 

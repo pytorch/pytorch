@@ -5,12 +5,12 @@
 
 #include <c10/util/irange.h>
 
-#include <torch/csrc/jit/codegen/cuda/contiguity.h>
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <contiguity.h>
+#include <executor_utils.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 

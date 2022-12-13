@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/mma_type.h>
+#include <fusion.h>
+#include <mma_type.h>
 
 namespace torch {
 namespace jit {

@@ -2,11 +2,11 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/lower_shift.h>
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
+#include <compute_at_map.h>
+#include <disjoint_set.h>
+#include <ir_all_nodes.h>
+#include <lower_shift.h>
+#include <lower_trivial_broadcast.h>
 
 namespace torch {
 namespace jit {

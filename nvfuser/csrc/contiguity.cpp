@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <lower2device.h>
 
-#include <torch/csrc/jit/codegen/cuda/contiguity.h>
+#include <contiguity.h>
 
 namespace torch {
 namespace jit {

@@ -1,22 +1,22 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/compute_at.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/inlining.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
+#include <arith.h>
+#include <compute_at.h>
+#include <expr_evaluator.h>
+#include <fusion.h>
+#include <inlining.h>
+#include <ir_all_nodes.h>
+#include <ir_builder.h>
+#include <ir_cloner.h>
+#include <ir_interface_nodes.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <lower2device.h>
+#include <lower_double_buffer.h>
+#include <scheduler/mma_utils.h>
 
 // Cleanup
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <transform_iter.h>
+#include <transform_replay.h>
 
 namespace torch {
 namespace jit {

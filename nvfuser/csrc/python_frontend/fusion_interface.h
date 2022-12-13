@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <kernel_cache.h>
 
 //! nvFuser Fusion IR namespace abbreviation
 namespace Nvf = torch::jit::fuser::cuda;

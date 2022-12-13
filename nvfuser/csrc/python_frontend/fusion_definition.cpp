@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <instrumentation.h>
+#include <python_frontend/fusion_cache.h>
+#include <python_frontend/fusion_definition.h>
+#include <python_frontend/fusion_interface.h>
+#include <utils.h>
 
 // Require namespace for perf scope instrumentation
 using namespace torch::jit::fuser::cuda::inst;

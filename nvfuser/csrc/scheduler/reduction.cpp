@@ -1,16 +1,16 @@
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction.h>
+#include <scheduler/reduction.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <executor_utils.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_utils.h>
+#include <scheduler/reduction_utils.h>
+#include <scheduler/registry.h>
+#include <scheduler/utils.h>
+#include <scheduler/vectorize_helper.h>
+#include <transform_replay.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <ir_iostream.h>
 
 #include <ATen/cuda/CUDAContext.h>
 

@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <ir_builder.h>
+#include <ir_utils.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
 
-#include <torch/csrc/jit/codegen/cuda/grouped_reduction.h>
+#include <grouped_reduction.h>
 
 namespace torch {
 namespace jit {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <iter_visitor.h>
+#include <root_domain_map.h>
 
 #include <unordered_map>
 #include <unordered_set>

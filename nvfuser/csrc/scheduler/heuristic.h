@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <executor_launch_params.h>
+#include <utils.h>
 
 #include <string>
 

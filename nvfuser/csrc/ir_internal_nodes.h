@@ -2,10 +2,10 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/mma_type.h>
-#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
+#include <fusion.h>
+#include <ir_base_nodes.h>
+#include <mma_type.h>
+#include <parallel_type_bitmap.h>
 
 //! Nodes in here should generally not be used by users. They should be behind
 //! the scenes and users shouldn't have to be aware of what they do to use the

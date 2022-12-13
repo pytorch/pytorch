@@ -1,12 +1,12 @@
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <ir_iostream.h>
+#include <ir_printer.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <fusion.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_utils.h>
+#include <kernel.h>
+#include <lower_utils.h>
 
 #include <c10/util/irange.h>
 

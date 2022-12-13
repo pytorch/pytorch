@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <ir_interface_nodes.h>
+#include <ir_utils.h>
 
 namespace torch {
 namespace jit {

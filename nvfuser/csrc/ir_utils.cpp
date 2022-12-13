@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <arith.h>
+#include <fusion.h>
+#include <ir_builder.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <lower_utils.h>
 
 #include <set>
 

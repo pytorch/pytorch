@@ -1,13 +1,13 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <executor_launch_params.h>
+#include <executor_utils.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <ir_cloner.h>
+#include <ir_printer.h>
+#include <kernel_expr_evaluator.h>
+#include <lower2device.h>
+#include <utils.h>
 
 #include <c10/core/DeviceType.h>
 

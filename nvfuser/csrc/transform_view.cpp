@@ -1,13 +1,13 @@
-#include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <transform_view.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <arith.h>
+#include <fusion.h>
+#include <instrumentation.h>
+#include <ir_builder.h>
+#include <ir_internal_nodes.h>
+#include <ir_iostream.h>
+#include <iter_visitor.h>
+#include <transform_iter.h>
 
 namespace torch {
 namespace jit {

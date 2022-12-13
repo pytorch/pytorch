@@ -1,8 +1,8 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/scheduler/normalization.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
+#include <scheduler/normalization.h>
+#include <scheduler/pointwise.h>
+#include <scheduler/reduction.h>
+#include <scheduler/transpose.h>
 
 namespace torch {
 namespace jit {

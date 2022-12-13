@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <ir_all_nodes.h>
 
 namespace torch {
 namespace jit {

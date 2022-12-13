@@ -1,14 +1,14 @@
-#include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <parser.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
-#include <torch/csrc/jit/codegen/cuda/type_inference.h>
-#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <arith.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_builder.h>
+#include <ir_iostream.h>
+#include <ops/all_ops.h>
+#include <type_inference.h>
+#include <type_promotion.h>
+#include <utils.h>
 
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>

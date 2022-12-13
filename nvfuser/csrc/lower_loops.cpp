@@ -1,13 +1,13 @@
-#include <torch/csrc/jit/codegen/cuda/lower_loops.h>
+#include <lower_loops.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <arith.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <kernel_expr_evaluator.h>
+#include <lower2device.h>
+#include <lower_utils.h>
+#include <transform_replay.h>
 
 #include <algorithm>
 #include <deque>

@@ -1,10 +1,10 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
-#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <dynamic_type.h>
+#include <executor_kernel_arg.h>
+#include <executor_launch_params.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <lower2device.h>
 
 #include <c10/core/DeviceType.h>
 

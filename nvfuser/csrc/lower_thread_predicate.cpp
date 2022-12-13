@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <lower_thread_predicate.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <arith.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <lower2device.h>
+#include <lower_utils.h>
 
 #include <c10/util/irange.h>
 

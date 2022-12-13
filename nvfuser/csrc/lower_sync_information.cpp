@@ -1,9 +1,9 @@
 
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <instrumentation.h>
+#include <ir_utils.h>
+#include <lower2device.h>
 
-#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
+#include <lower_sync_information.h>
 
 namespace torch {
 namespace jit {

@@ -1,16 +1,16 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
-#include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
-#include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <arith.h>
+#include <disjoint_set.h>
+#include <ir_cloner.h>
+#include <ir_interface_nodes.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <kernel.h>
+#include <kernel_ir.h>
+#include <lower2device.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
+#include <transform_rfactor.h>
+#include <transform_view.h>
 
 #include <c10/util/irange.h>
 

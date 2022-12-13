@@ -2,14 +2,14 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
-#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
-#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
-#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
+#include <fusion.h>
+#include <ir_base_nodes.h>
+#include <ir_builder.h>
+#include <lower_sync_information.h>
+#include <lower_warp_reduce.h>
+#include <parallel_dimension_map.h>
+#include <utils.h>
+#include <vectorization_info.h>
 
 #include <memory>
 #include <unordered_map>

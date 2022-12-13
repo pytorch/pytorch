@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <root_domain_map.h>
 
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
+#include <lower_trivial_broadcast.h>
 
 namespace torch {
 namespace jit {

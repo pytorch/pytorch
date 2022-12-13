@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <compute_at_map.h>
+#include <ir_all_nodes.h>
+#include <ir_utils.h>
+#include <scheduler/utils.h>
 
 namespace torch {
 namespace jit {

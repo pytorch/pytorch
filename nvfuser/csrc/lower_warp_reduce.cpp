@@ -1,10 +1,10 @@
 #include <ATen/cuda/CUDAContext.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <expr_evaluator.h>
+#include <kernel_expr_evaluator.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
+#include <lower_utils.h>
+#include <lower_warp_reduce.h>
 
 namespace torch {
 namespace jit {

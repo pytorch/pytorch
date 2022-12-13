@@ -1,14 +1,14 @@
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <dispatch.h>
+#include <expr_evaluator.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <ir_builder.h>
+#include <ir_cloner.h>
+#include <ir_printer.h>
+#include <kernel.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
+#include <mutator.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 

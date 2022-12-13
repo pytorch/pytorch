@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <root_domain_map.h>
 
 #include <sstream>
 

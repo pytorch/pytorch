@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_heuristic.h>
+#include <disjoint_set.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <maxinfo_propagator.h>
+#include <scheduler/reduction_heuristic.h>
 
 namespace torch {
 namespace jit {

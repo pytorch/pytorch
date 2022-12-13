@@ -1,16 +1,16 @@
-#include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <lower_validation.h>
 
-#include <torch/csrc/jit/codegen/cuda/contiguity.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <contiguity.h>
+#include <expr_evaluator.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <lower2device.h>
+#include <lower_utils.h>
+#include <transform_iter.h>
+#include <transform_replay.h>
+#include <type.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <limits>

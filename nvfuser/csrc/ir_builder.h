@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_container.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <ir_container.h>
 
 namespace torch {
 namespace jit {

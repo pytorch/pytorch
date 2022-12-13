@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
+#include <ir_utils.h>
+#include <lower2device.h>
+#include <partial_split_map.h>
 
 namespace torch {
 namespace jit {

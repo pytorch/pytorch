@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <ir_interface_nodes.h>
+#include <maxinfo_propagator.h>
+#include <transform_replay.h>
 
 #include <memory>
 #include <unordered_set>

@@ -1,14 +1,13 @@
-#include <torch/csrc/jit/codegen/cuda/manager.h>
-#include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/partition.h>
-#include <torch/csrc/jit/codegen/cuda/register_interface.h>
+#include <manager.h>
+#include <parser.h>
+#include <partition.h>
+#include <register_interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/TensorShape.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>

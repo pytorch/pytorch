@@ -3,10 +3,10 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
+#include <compute_at_map.h>
+#include <ir_all_nodes.h>
+#include <kernel_ir.h>
+#include <parallel_type_bitmap.h>
 
 #include <bitset>
 #include <map>

@@ -3,13 +3,13 @@
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
-#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
-#include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
+#include <arith.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <kernel_cache.h>
+#include <scheduler/all_schedulers.h>
+#include <test/test_gpu_validator.h>
+#include <test/test_utils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <cassert>

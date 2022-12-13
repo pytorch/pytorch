@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <ir_all_nodes.h>
+#include <root_domain_map.h>
 
 #include <c10/macros/Export.h>
 

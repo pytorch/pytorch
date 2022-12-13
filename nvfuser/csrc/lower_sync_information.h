@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
+#include <ir_all_nodes.h>
+#include <parallel_type_bitmap.h>
 
 #include <unordered_map>
 

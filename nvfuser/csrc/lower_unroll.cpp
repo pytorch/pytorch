@@ -1,15 +1,15 @@
-#include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
+#include <lower_unroll.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
+#include <arith.h>
+#include <index_compute.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <kernel_expr_evaluator.h>
+#include <lower2device.h>
+#include <lower_misaligned_vectorization.h>
+#include <lower_utils.h>
+#include <predicate_compute.h>
 
 namespace torch {
 namespace jit {

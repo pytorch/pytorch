@@ -1,17 +1,17 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/codegen.h>
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_bank_conflict.h>
+#include <arith.h>
+#include <codegen.h>
+#include <disjoint_set.h>
+#include <fusion.h>
+#include <fusion_segmenter.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_cloner.h>
+#include <ir_printer.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <kernel.h>
+#include <lower2device.h>
+#include <lower_bank_conflict.h>
 
 namespace torch {
 namespace jit {

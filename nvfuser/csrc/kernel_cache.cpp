@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <kernel_cache.h>
 
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/parser.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <instrumentation.h>
+#include <ir_utils.h>
+#include <parser.h>
+#include <scheduler/debug_utils.h>
+#include <scheduler/registry.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 

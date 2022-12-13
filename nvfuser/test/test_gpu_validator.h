@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <executor_utils.h>
+#include <expr_evaluator.h>
+#include <fusion.h>
+#include <ir_iostream.h>
+#include <lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 

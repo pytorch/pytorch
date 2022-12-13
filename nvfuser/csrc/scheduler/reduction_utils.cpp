@@ -1,13 +1,13 @@
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
+#include <scheduler/reduction_utils.h>
 
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/inlining.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <expr_evaluator.h>
+#include <inlining.h>
+#include <ir_cloner.h>
+#include <ir_utils.h>
+#include <maxinfo_propagator.h>
+#include <scheduler/registry.h>
+#include <scheduler/utils.h>
+#include <transform_replay.h>
 
 namespace torch {
 namespace jit {

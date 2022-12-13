@@ -1,16 +1,16 @@
 
-#include <torch/csrc/jit/codegen/cuda/executor.h>
+#include <executor.h>
 
-#include <torch/csrc/jit/codegen/cuda/codegen.h>
-#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower_bank_conflict.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <codegen.h>
+#include <executor_kernel_arg.h>
+#include <executor_utils.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <kernel_ir.h>
+#include <lower_bank_conflict.h>
+#include <utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>

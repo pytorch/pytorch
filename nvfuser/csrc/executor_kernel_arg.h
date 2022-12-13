@@ -3,7 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <array>
 

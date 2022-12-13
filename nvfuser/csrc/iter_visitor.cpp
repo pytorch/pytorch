@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <iter_visitor.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <fusion.h>
+#include <ir_all_nodes.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <type.h>
 
 namespace torch {
 namespace jit {

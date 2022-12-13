@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/inlining.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <inlining.h>
+#include <root_domain_map.h>
+#include <transform_replay.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>

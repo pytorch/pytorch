@@ -3,7 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <ir_interface_nodes.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {

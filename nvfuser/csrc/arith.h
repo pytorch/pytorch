@@ -2,9 +2,9 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
-#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
+#include <ir_interface_nodes.h>
+#include <type.h>
+#include <type_promotion.h>
 
 class Val;
 

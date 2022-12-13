@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/hash.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <scheduler/heuristic.h>
+#include <utils.h>
 
 #include <sstream>
 

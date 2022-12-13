@@ -1,13 +1,13 @@
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
+#include <predicate_compute.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <arith.h>
+#include <expr_evaluator.h>
+#include <fusion.h>
+#include <index_compute.h>
+#include <instrumentation.h>
+#include <ir_utils.h>
+#include <lower2device.h>
+#include <transform_iter.h>
 
 #include <c10/util/irange.h>
 

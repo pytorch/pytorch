@@ -1,16 +1,16 @@
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <transform_replay.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <arith.h>
+#include <disjoint_set.h>
+#include <fusion.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_builder.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <maxinfo_propagator.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
 
 #include <deque>
 

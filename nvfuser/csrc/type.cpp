@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <type.h>
 
 #include <ATen/cuda/CUDAContext.h>
 

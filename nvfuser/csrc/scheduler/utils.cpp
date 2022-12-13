@@ -1,15 +1,15 @@
-#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
+#include <scheduler/registry.h>
+#include <scheduler/utils.h>
+#include <scheduler/vectorize_helper.h>
 
-#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
-#include <torch/csrc/jit/codegen/cuda/contiguity.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <compute_at_map.h>
+#include <contiguity.h>
+#include <expr_evaluator.h>
+#include <instrumentation.h>
+#include <ir_utils.h>
+#include <root_domain_map.h>
+#include <scheduler/mma_utils.h>
+#include <transform_replay.h>
 
 #include <algorithm>
 

@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <instrumentation.h>
 
 #include <c10/macros/Export.h>
 

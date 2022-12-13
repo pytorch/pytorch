@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <fusion.h>
 
 /*
  * This file handles Parsing PyTorch jit ir;

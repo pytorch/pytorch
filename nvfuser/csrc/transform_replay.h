@@ -2,8 +2,8 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
+#include <ir_internal_nodes.h>
+#include <maxinfo_propagator.h>
 
 #include <algorithm>
 #include <unordered_map>

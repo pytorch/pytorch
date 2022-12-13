@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <ir_utils.h>
+#include <iter_visitor.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
 
-#include <torch/csrc/jit/codegen/cuda/lower_fused_reduction.h>
+#include <lower_fused_reduction.h>
 
 #include <algorithm>
 

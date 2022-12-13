@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <dynamic_type.h>
+#include <executor_launch_params.h>
+#include <ir_base_nodes.h>
+#include <kernel.h>
 
 #include <unordered_map>
 #include <utility>

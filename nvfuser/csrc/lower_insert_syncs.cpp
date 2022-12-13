@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <dispatch.h>
+#include <instrumentation.h>
+#include <ir_utils.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
+#include <lower_insert_syncs.h>
+#include <lower_utils.h>
 
 #include <unordered_set>
 

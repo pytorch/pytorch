@@ -2,10 +2,10 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <instrumentation.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
+#include <root_domain_map.h>
 
 #include <vector>
 

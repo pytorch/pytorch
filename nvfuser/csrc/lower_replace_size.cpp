@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <instrumentation.h>
+#include <ir_builder.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <lower_utils.h>
+#include <root_domain_map.h>
 
-#include <torch/csrc/jit/codegen/cuda/lower_replace_size.h>
+#include <lower_replace_size.h>
 
 namespace torch {
 namespace jit {

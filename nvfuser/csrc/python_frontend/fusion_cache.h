@@ -1,8 +1,8 @@
 #pragma once
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
+#include <kernel_cache.h>
+#include <python_frontend/fusion_record.h>
 
 #include <memory>
 

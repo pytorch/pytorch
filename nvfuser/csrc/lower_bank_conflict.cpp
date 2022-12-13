@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/lower_bank_conflict.h>
+#include <lower_bank_conflict.h>
 
-#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <dynamic_type.h>
+#include <expr_evaluator.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
+#include <type.h>
 
 #include <unordered_set>
 

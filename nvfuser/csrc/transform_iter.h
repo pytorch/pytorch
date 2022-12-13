@@ -2,11 +2,11 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <disjoint_set.h>
+#include <ir_all_nodes.h>
+#include <ir_iostream.h>
+#include <iter_visitor.h>
+#include <root_domain_map.h>
 #include <unordered_map>
 #include <vector>
 

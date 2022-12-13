@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/cuda/inlining.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <inlining.h>
+#include <ir_utils.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
 
 #include <utility>
 

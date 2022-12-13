@@ -2,8 +2,8 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <ir_base_nodes.h>
+#include <utils.h>
 
 #include <deque>
 #include <unordered_map>

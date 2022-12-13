@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/type.h>
+#include <type.h>
 
 namespace torch {
 namespace jit {

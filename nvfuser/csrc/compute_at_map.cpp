@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
+#include <compute_at_map.h>
 
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <disjoint_set.h>
+#include <ir_utils.h>
+#include <lower2device.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
 
 #include <tuple>
 

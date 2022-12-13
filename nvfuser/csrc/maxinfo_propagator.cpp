@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <maxinfo_propagator.h>
+#include <root_domain_map.h>
 
 namespace torch {
 namespace jit {

@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <kernel.h>
+#include <kernel_expr_evaluator.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
 
 #include <ATen/cuda/CUDAContext.h>
 

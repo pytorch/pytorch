@@ -1,17 +1,17 @@
-#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
+#include <scheduler/pointwise.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/inlining.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <executor_utils.h>
+#include <inlining.h>
+#include <instrumentation.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <lower_utils.h>
+#include <scheduler/pointwise_utils.h>
+#include <scheduler/registry.h>
+#include <scheduler/utils.h>
+#include <scheduler/vectorize_helper.h>
+#include <transform_replay.h>
+#include <utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 

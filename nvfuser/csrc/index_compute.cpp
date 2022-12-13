@@ -1,26 +1,26 @@
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <index_compute.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/contiguity.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
-#include <torch/csrc/jit/codegen/cuda/lower_index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
-#include <torch/csrc/jit/codegen/cuda/lower_shift.h>
-#include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
-#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
-#include <torch/csrc/jit/codegen/cuda/lower_validation.h>
-#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <arith.h>
+#include <contiguity.h>
+#include <expr_evaluator.h>
+#include <instrumentation.h>
+#include <ir_all_nodes.h>
+#include <ir_iostream.h>
+#include <ir_utils.h>
+#include <kernel_expr_evaluator.h>
+#include <lower2device.h>
+#include <lower_double_buffer.h>
+#include <lower_index_compute.h>
+#include <lower_magic_zero.h>
+#include <lower_shift.h>
+#include <lower_unroll.h>
+#include <lower_utils.h>
+#include <lower_validation.h>
+#include <root_domain_map.h>
+#include <transform_iter.h>
+#include <transform_replay.h>
 
 namespace torch {
 namespace jit {

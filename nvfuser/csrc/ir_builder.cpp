@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <fusion.h>
+#include <ir_builder.h>
+#include <ir_cloner.h>
+#include <kernel.h>
 
 namespace torch {
 namespace jit {

@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/ops/alias.h>
-#include <torch/csrc/jit/codegen/cuda/transform_view.h>
-#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
+#include <arith.h>
+#include <ir_builder.h>
+#include <ir_utils.h>
+#include <ops/alias.h>
+#include <transform_view.h>
+#include <type_promotion.h>
 
 namespace torch {
 namespace jit {

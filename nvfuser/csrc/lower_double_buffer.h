@@ -2,9 +2,9 @@
 
 #include <c10/macros/Export.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
+#include <ir_all_nodes.h>
+#include <kernel_ir.h>
+#include <kernel_ir_dispatch.h>
 
 // Double buffering a tensor doubles its allocation size and uses two
 // buffers to facilitate computation and memory access

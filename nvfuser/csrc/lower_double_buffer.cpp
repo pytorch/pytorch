@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <ir_utils.h>
+#include <kernel_ir.h>
+#include <lower2device.h>
 
-#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <lower_double_buffer.h>
 
 namespace torch {
 namespace jit {

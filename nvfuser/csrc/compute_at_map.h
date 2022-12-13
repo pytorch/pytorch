@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
+#include <disjoint_set.h>
+#include <ir_all_nodes.h>
+#include <kernel_ir.h>
+#include <lower_trivial_reductions.h>
 
 #include <deque>
 #include <unordered_map>

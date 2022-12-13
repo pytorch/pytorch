@@ -1,13 +1,13 @@
 #pragma once
-#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/compile_time_info.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_heuristic.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/reduction_heuristic.h>
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <executor_kernel_arg.h>
+#include <fusion.h>
+#include <scheduler/all_schedulers.h>
+#include <scheduler/compile_time_info.h>
+#include <scheduler/heuristic.h>
+#include <scheduler/pointwise_heuristic.h>
+#include <scheduler/reduction_heuristic.h>
+#include <scheduler/utils.h>
+#include <utils.h>
 
 namespace torch {
 namespace jit {

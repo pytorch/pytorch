@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/executor.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
-#include <torch/csrc/jit/codegen/cuda/transform_replay.h>
+#include <executor.h>
+#include <expr_evaluator.h>
+#include <ir_all_nodes.h>
+#include <kernel_ir_dispatch.h>
+#include <lower2device.h>
+#include <lower_magic_zero.h>
+#include <transform_replay.h>
 
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
