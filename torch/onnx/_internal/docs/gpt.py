@@ -15,9 +15,8 @@ inputs = tokenizer("Hello world!", return_tensors="pt")
 outputs = model(**inputs)
 
 # Export tiny GPT2.
-from torch.onnx._internal._fx import export
+from torch.onnx._internal._fx import export, export_without_kwargs
 #onnx_model = export(model, **inputs)
 input_ids = inputs["input_ids"]
-onnx_model = export(model, input_ids)
-#attention_mask = inputs["attention_mask"]
-#onnx_model = export(model, input_ids, attention_mask=attention_mask)
+attention_mask = inputs["attention_mask"]
+onnx_model = export_without_kwargs(model, input_ids, attention_mask)

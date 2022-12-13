@@ -12,6 +12,7 @@ import torch._decomp
 import torch._dynamo
 import torch._ops
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
@@ -310,7 +311,8 @@ def _export(
         # Use default decomposition table.
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
-    decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
+    #decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
+    decomposed_module = module #functorch.make_fx(module, decomposition_table)(*args)
 
     # Use this mode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor
@@ -366,8 +368,27 @@ def export(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool 
     # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
     # to _export.
     return _export(
-        graph_module,
-        *args,
-        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
-        use_binary_format=use_binary_format,
-    )
+            graph_module,
+            *args,
+            decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+            use_binary_format=use_binary_format,
+        )
+
+
+def export_without_kwargs(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True):
+    # args will be converted to symbolic tensor. Let's copy to avoid side effects.
+    args = copy.deepcopy(args)
+    # Translate callable to FX graph.
+    #
+    # TODO(wechi): There are several symbolic tracing mechanisms to convert
+    # nn.Module to FX graph. We should choose the right one after they are
+    # matured.
+    graph_module = make_fx(fn, decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(*args)
+    # Export FX graph to ONNX ModelProto.
+    #
+    return _export(
+            graph_module,
+            *args,
+            decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+            use_binary_format=use_binary_format,
+        )
