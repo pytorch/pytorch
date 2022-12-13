@@ -5,9 +5,6 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <c10/util/irange.h>
 
-#include <stdio.h> // TODO: remove
-#include <iostream> // TODO: remove
-
 namespace {
 
 static __m128i inline mm_cvtepu8_epi32(void* ptr) {
@@ -167,8 +164,6 @@ void ImagingResampleVertical_8bpc(
   }
 }
 
-// TODO: Cleanup error checks (as in comments)
-// TODO: probably use pytorch's allocator instead of malloc
 template <typename scale_type, class F>
 uint32_t* ImagingResampleInner(
     uint32_t* unpacked_input_p,
@@ -212,7 +207,6 @@ uint32_t* ImagingResampleInner(
         xin);
     unpacked_output_p = unpacked_input_p = unpacked_output_temp_p;
   }
-
   if (need_vertical) {
     int interp_dim = 2;
     auto [vert_indices_weights, ksize_vert, vert_weights_precision] =
@@ -235,13 +229,17 @@ uint32_t* ImagingResampleInner(
         vert_weights_precision,
         xout,
         yout);
-    free(unpacked_output_temp_p);
+    if (unpacked_output_temp_p != nullptr) {
+      free(unpacked_output_temp_p);
+    }
   }
 
-  // /* none of the previous steps are performed, copying */
-  // if (!imOut) {
-  //     imOut = ImagingCopy(imIn);
-  // }
+  if (unpacked_output_p == nullptr) {
+    // Happens if need_horizontal and need_vertical are both False.
+    // But this should never be hit because we check for that in
+    // upsample_avx_bilinear_or_bicubic()
+    unpacked_output_p = unpacked_input_p;
+  }
 
   return unpacked_output_p;
 }
@@ -262,6 +260,12 @@ void upsample_avx_bilinear_or_bicubic(
 
   uint32_t* unpacked_input_p =
       (uint32_t*)malloc(sizeof(uint32_t) * num_pixels_input);
+  uint32_t* unpacked_output_p = nullptr;
+
+  if (xin == xout && yin == yout) {
+    output.copy_(input);
+    return;
+  }
 
   for (const auto i : c10::irange(batch_size)) {
     unpack_rgb(
@@ -269,13 +273,23 @@ void upsample_avx_bilinear_or_bicubic(
         input[i],
         input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
-    uint32_t* unpacked_output_p = ImagingResampleInner<scale_type, F>(
-        unpacked_input_p, xin, yin, xout, yout, align_corners, scales, antialias);
+    unpacked_output_p = ImagingResampleInner<scale_type, F>(
+        unpacked_input_p,
+        xin,
+        yin,
+        xout,
+        yout,
+        align_corners,
+        scales,
+        antialias);
 
     pack_rgb(
         (const uint8_t*)unpacked_output_p,
         output[i],
         output.is_contiguous(at::MemoryFormat::ChannelsLast));
+    if (unpacked_output_p != nullptr && unpacked_output_p != unpacked_input_p) {
+      free(unpacked_output_p);
+    }
   }
   free(unpacked_input_p);
 }

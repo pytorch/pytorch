@@ -297,8 +297,8 @@ inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
 
     uint8_t t = *(uint8_t*)&src_min[0];
     int64_t wts_idx = *(int64_t*)&data[2 + 4][0];
-    short* wts_ptr = (short*)&data[2 + 3][wts_idx];
-    short wts = wts_ptr[0];
+    int16_t* wts_ptr = (int16_t*)&data[2 + 3][wts_idx];
+    int16_t wts = wts_ptr[0];
 
     // Intermediate computations are using integer type
     int output = 1 << (weights_precision - 1);
@@ -338,8 +338,6 @@ static inline void basic_loop_aa_single_dim_nonzero_strides(
   }
 }
 
-// #define VERBOSE
-
 template <>
 inline void basic_loop_aa_single_dim_nonzero_strides<uint8_t>(
     char** data,
@@ -365,8 +363,8 @@ inline void basic_loop_aa_single_dim_nonzero_strides<uint8_t>(
 
     uint8_t t = *(uint8_t*)&src_min[0];
     int64_t wts_idx = *(int64_t*)&data[2 + 4][i * strides[2 + 4]];
-    short* wts_ptr = (short*)&data[2 + 3][wts_idx];
-    short wts = wts_ptr[0];
+    int16_t* wts_ptr = (int16_t*)&data[2 + 3][wts_idx];
+    int16_t wts = wts_ptr[0];
 
     // Intermediate computations are using integer type
     int output = 1 << (weights_precision - 1);
@@ -704,7 +702,7 @@ struct HelperInterpBase {
   template <typename scalar_t, typename aa_filter_fn_t>
   static inline void _compute_weights_aa(
     const int64_t i, const int64_t input_size, const scalar_t scale, const scalar_t support,
-    scalar_t* wt_ptr, const int64_t interp_size, aa_filter_fn_t filter_fn,
+    scalar_t* wt_ptr, const int64_t max_interp_size, aa_filter_fn_t filter_fn,
     int64_t& xmin, int64_t& xsize, bool antialias
   ) {
 
@@ -728,7 +726,7 @@ struct HelperInterpBase {
         // std::cout << "wt_ptr[j] = " << wt_ptr[j] << std::endl;
       }
     }
-    for (; j < interp_size; j++) {
+    for (; j < max_interp_size; j++) {
       wt_ptr[j] = static_cast<scalar_t>(0.0);
     }
   }
@@ -743,11 +741,13 @@ struct HelperInterpBase {
     std::vector<Tensor> output;
 
     scalar_t support;
+    int max_interp_size;
     if (antialias) {
         support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-        interp_size = (int)ceil(support) * 2 + 1;
+        max_interp_size = (int)ceil(support) * 2 + 1;
     } else {
         support = interp_size * 0.5;
+        max_interp_size = interp_size;
     }
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
@@ -763,7 +763,7 @@ struct HelperInterpBase {
 
     {
       // Weights
-      new_shape[reshape_dim] = output_size * interp_size;
+      new_shape[reshape_dim] = output_size * max_interp_size;
       auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>()));
       auto strides = wts.strides().vec();
       strides[reshape_dim] = 0;
@@ -789,8 +789,8 @@ struct HelperInterpBase {
           input_size,
           scale,
           support,
-          wt_ptr + i * interp_size,
-          interp_size,
+          wt_ptr + i * max_interp_size,
+          max_interp_size,
           aa_filter_fn,
           xmin,
           xmax,
@@ -799,9 +799,9 @@ struct HelperInterpBase {
       idx_ptr_xmin[i] = xmin * stride;
       idx_ptr_size[i] = xmax;
       idx_ptr_stride[i] = stride;
-      wt_idx_ptr[i] = i * interp_size * weight_index_stride;
+      wt_idx_ptr[i] = i * max_interp_size * weight_index_stride;
     }
-    return {output, interp_size};
+    return {output, max_interp_size};
   }
 
   template <typename aa_filter_fn_t>
@@ -815,7 +815,7 @@ struct HelperInterpBase {
         input_size, output_size, align_corners, opt_scale);
 
     std::vector<Tensor> indices_weights;
-    std::tie(indices_weights, interp_size) = HelperInterpBase::_compute_indices_weights_aa<double, aa_filter_fn_t, sizeof(short)>(
+    std::tie(indices_weights, interp_size) = HelperInterpBase::_compute_indices_weights_aa<double, aa_filter_fn_t, sizeof(int16_t)>(
         input_size, output_size, stride, ndims, reshape_dim, scale, interp_size, aa_filter_fn, antialias);
 
     // Rescale float weights to int16 and compute weights precision
@@ -840,7 +840,7 @@ struct HelperInterpBase {
     }
 
     // rescale float values to int16, we use the same buffer as PIL-SIMD
-    short * data_i16 = (short *) data_f64;
+    int16_t * data_i16 = (int16_t *) data_f64;
     for (const auto i : c10::irange(weights_f64_size)) {
       double v = data_f64[i];
       if (v < 0) {
@@ -1338,40 +1338,12 @@ template <typename scalar_t, bool is_horizontal>
 void cpu_upsample_generic_aa(at::TensorIterator& iter, unsigned int weights_precision) {
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-
-#ifdef VERBOSE
-    if (TI_SHOW_STRIDES) {
-      std::cout << "AA TI_SHOW: N=" << n << std::endl;
-      std::cout << "AA TI_SHOW_STRIDES: "
-        << strides[0] << " "
-        << strides[1] << " | ";
-
-      constexpr int m = 3 + 2;
-      int ndims = 1;
-      for (int i=0; i<ndims; i++) {
-        for (int j=0; j<m; j++) {
-          std::cout << strides[m * i + j + 2] << " ";
-        }
-        std::cout << "| ";
-      }
-      std::cout << std::endl;
-    }
-#endif
-
     if (is_horizontal) {
-
-#ifdef VERBOSE
-      std::cout << "AA TI_BASIC_LOOP -> NONZERO STRIDES" << std::endl << std::flush;
-#endif
       // Strides are : X 0 | 8 8 8 0 8
       // upsampling data within a contiguous dimension (aka horizontal resampling)
       basic_loop_aa_single_dim_nonzero_strides<scalar_t>(
           data, strides, n, weights_precision);
-
     } else {
-#ifdef VERBOSE
-      std::cout << "AA TI_BASIC_LOOP -> ZERO STRIDES" << std::endl << std::flush;
-#endif
       // Strides are : X Y | 0 0 0 0 0
       // upsampling data between contiguous dimensions (aka vertical resampling)
       basic_loop_aa_single_dim_zero_strides<scalar_t>(
@@ -1408,10 +1380,6 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   auto restrided_input = input.as_strided(shape, strides);
 
   auto input_scalar_type = input.scalar_type();
-
-#ifdef VERBOSE
-  std::cout << "interp_dim: " << interp_dim << ", oshape: " << oshape << std::endl;
-#endif
 
   std::vector<Tensor> indices_weights;
   unsigned int weights_precision = 0;
@@ -1463,6 +1431,12 @@ void separable_upsample_generic_Nd_kernel_impl(
   auto output_shape = output.sizes();
   auto input_shape = input.sizes();
   auto temp_oshape = input_shape.vec();
+
+  if (output_shape == input_shape) {
+    output.copy_(input);
+    return;
+  }
+
   at::Tensor temp_output, temp_input = input;
 
   int interp_dim = 0;
