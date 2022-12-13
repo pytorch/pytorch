@@ -256,7 +256,6 @@ class BackendConfig(object):
             pass
 
         required_devices = ["cpu", "cuda"]
-        print(f"backend={backend}, device_maps={self.device_backend_map}")
         for device in required_devices:
             assert device in self.device_backend_map
 
@@ -1066,9 +1065,7 @@ def _new_process_group_helper(
         # only create single backend pg when backend is set to gloo, nccl, mpi, etc.
         if backend_enum.lower() in Backend.backend_list:
             for device in backend_config.get_device_backend_map().keys():
-                print("set backend")
-                pg._set_backend(torch.device(device), backend_type, backend)
-                print(f"finished creating {backend} for device {device}")
+                pg._register_backend(torch.device(device), backend_type, backend)
 
             # break out of outer loop to not create any more backends
             break

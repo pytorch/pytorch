@@ -1569,7 +1569,7 @@ Arguments:
               py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "_set_backend",
+              "_register_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const c10::Device& device,
                  const ::c10d::ProcessGroup::BackendType& backendType,
