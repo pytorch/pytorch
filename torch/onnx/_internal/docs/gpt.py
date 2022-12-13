@@ -1,4 +1,5 @@
 # Import generic wrappers
+import onnx
 import transformers
 from transformers import AutoModel, AutoTokenizer
 from torch import _dynamo as torchdynamo
@@ -23,7 +24,8 @@ def test_gpt2_one_shot(model_name):
     #onnx_model = export(model, **inputs)
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
-    onnx_model = export_without_kwargs(model, input_ids, attention_mask)
+    onnx_model = export_without_kwargs(model, input_ids, attention_mask, use_binary_format=False)
+    print(onnx.helper.printable_graph(onnx_model.graph))
 
 
 def test_gpt2_auto_regressive(model_name):

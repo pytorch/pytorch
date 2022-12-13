@@ -117,9 +117,13 @@ def _retrieve_or_wrap_scalar_as_constant(
         ts_value = g.op("prim::Constant")
         ts_value.setType(torch._C.OptionalType.ofTensor())
     elif isinstance(ts_value, list) and all(
-        isinstance(val, (float, int)) for val in ts_value
+        isinstance(val, int) for val in ts_value
     ):
-        pass
+        ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
+    elif isinstance(ts_value, list) and all(
+        isinstance(val, float) for val in ts_value
+    ):
+        ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
     elif isinstance(ts_value, torch.dtype):
         from torch.onnx import _type_utils
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
