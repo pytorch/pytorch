@@ -240,6 +240,7 @@ class QLinearPackWeightInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("sparse::qlinear_prepack"),
       TORCH_FN(QLinearPackWeightInt8::run));
