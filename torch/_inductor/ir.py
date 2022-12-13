@@ -1998,6 +1998,9 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
+    def cpp_wrapper_codegen_reference(self):
+        return "at::Tensor()"
+
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
