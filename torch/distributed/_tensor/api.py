@@ -217,23 +217,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        # if we find nn.functional name in dispatch op, dispatch to it instead,
-        # this allow us to override some python level behaviors that wouldn't be
-        # possible in __torch_dispatch__ level.
-        if func.__name__ in DTensor._custom_dispatch_ops:
-            # dispatch to the same table as the name should be different between
-            # torch_function and torch_dispatch
-            return DTensor._custom_dispatch_ops[func.__name__](*args, **kwargs)
-        else:
-            # if not, just do nothing here
-            return super().__torch_function__(func, types, args, kwargs)
-
-    @classmethod
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # check that we are not getting mixed vanilla and Distributed tensors
         arg_list, _ = tree_flatten(args)
