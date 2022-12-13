@@ -1642,6 +1642,14 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_reduce_scatter_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensor = torch.zeros_like(tensor).chunk(group.size(), dim=0)[self.rank]
+            work = dist.reduce_scatter_tensor(out_tensor, tensor, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_broadcast_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             work = dist.broadcast(tensor, src=0, group=group, async_op=True)
