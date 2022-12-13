@@ -428,7 +428,7 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
         n, inputTensorValues, opset_version);
   } catch (const std::exception& ex) {
     auto ex_str = std::string(ex.what());
-    ex_str = ex_str.substr(0, ex_str.find("\n"));
+    ex_str = ex_str.substr(0, ex_str.find('\n'));
     TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
     return c10::nullopt;
   }
