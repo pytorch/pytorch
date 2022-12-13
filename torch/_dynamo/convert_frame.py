@@ -480,10 +480,11 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
-            pass
+            logging.info("converting frame raised unsupported, leaving it unconverted")
         except Exception:
             if not config.suppress_errors:
                 raise
+            logging.info("converting frame raised error, suppressing error")
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
