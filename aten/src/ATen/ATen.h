@@ -1,9 +1,5 @@
 #pragma once
 
-#if !defined(_MSC_VER) && __cplusplus < 201402L
-#error C++14 or later compatible compiler is required to use ATen.
-#endif
-
 #include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/DeviceGuard.h>
