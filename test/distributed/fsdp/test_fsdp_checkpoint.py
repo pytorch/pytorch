@@ -360,6 +360,7 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
         for (n1, p1), (n2, p2) in zip(
             model.named_parameters(), model_ac.named_parameters()
         ):
+            self.assertEqual(n1, n2)
             self.assertTrue(p1.grad.allclose(p2.grad))
 
 
