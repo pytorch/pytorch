@@ -67,8 +67,8 @@ class OperatorSupport(OperatorSupportBase):
     ) -> bool:
         """
         Args:
-            `sumodules`: mapping from module name to the module. This can be
-                         retrieved by calling model.named_modules().
+            `submodules`: mapping from module name to the module. This can be
+                          retrieved by calling model.named_modules().
 
             `node`: a Fx node that we want to determine whether it's supported.
 

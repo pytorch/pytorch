@@ -349,7 +349,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             {
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
-                    # ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.SHARD_GRAD_OP,
                 ]
             },
             self._test_multiple_optimizers,

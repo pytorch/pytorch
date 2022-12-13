@@ -955,12 +955,14 @@ class QLinearInt8FusedQDQ final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
 }
 
