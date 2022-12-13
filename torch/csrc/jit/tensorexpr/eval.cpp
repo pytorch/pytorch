@@ -431,13 +431,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   TORCH_API void visit(BlockPtr v) override {
     BlockPtr last = scope_;
     scope_ = v;
-    for (StmtPtr s : v->stmts()) {
+    for (const StmtPtr& s : v->stmts()) {
       s->accept(this);
     }
 
     auto it = var_by_scope_.find(v);
     if (it != var_by_scope_.end()) {
-      for (ExprPtr v : it->second) {
+      for (const ExprPtr& v : it->second) {
         eval_context_.erase(v);
       }
       var_by_scope_.erase(it);
@@ -847,7 +847,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<int8_t> buf_dtypes;
     std::vector<int64_t> extra_args;
 
-    for (BufPtr b : bufs) {
+    for (const BufPtr& b : bufs) {
       auto iter = buffer_mapping_.find(b);
       if (iter == buffer_mapping_.end()) {
         throw malformed_input("could not find buf", v);
@@ -856,7 +856,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       buf_ptrs.push_back(iter->second);
       buf_ranks.push_back(b->dims().size());
       buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
-      for (ExprPtr dim_expr : b->dims()) {
+      for (const ExprPtr& dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());
       }
@@ -865,7 +865,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         buf_strides.push_back(value().intValue());
       }
     }
-    for (ExprPtr a : v->args()) {
+    for (const ExprPtr& a : v->args()) {
       a->accept(this);
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t val;
