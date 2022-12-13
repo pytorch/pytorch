@@ -165,8 +165,9 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 
   static bool lessThan(const Statement* stmt1, const Statement* stmt2);
 
-  virtual std::string toString() const;
-  virtual std::string toInlineString() const;
+  virtual std::string toString(int indent_size = 0) const;
+
+  virtual std::string toInlineString(int indent_size = 0) const;
 
   virtual Statement* clone(IrCloner* ir_cloner) const;
 
@@ -423,7 +424,11 @@ class TORCH_CUDA_CU_API Attribute : public Val {
     return false;
   }
 
-  virtual std::string toString() const override {
+  virtual std::string toString(int) const override {
+    return Printer<T>::toString(value);
+  }
+
+  virtual std::string toInlineString(int) const override {
     return Printer<T>::toString(value);
   }
 };

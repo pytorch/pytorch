@@ -1258,6 +1258,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool sameAs(const Statement* other) const override;
 
+  std::string toString(int indent_size = 0) const override;
+
+  std::string toInlineString(int indent_size = 0) const override;
+
   //! Returns a new IterDomain matching properties of this
   //!
   //! This does NOT copy the is_rfactor_domain flag.
@@ -1579,6 +1583,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   static bool sameAs(
       const std::vector<IterDomain*>& lhs,
       const std::vector<IterDomain*>& rhs);
+
+  std::string toString(int indent_size = 0) const override;
+
+  std::string toInlineString(int indent_size = 0) const override;
 
   const std::vector<IterDomain*>& domain() const {
     return domain_;
@@ -1954,6 +1962,14 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
   }
 
   bool sameAs(const Statement* other) const override;
+
+  std::string toString(int indent_size = 0) const override {
+    return name_;
+  }
+
+  std::string toInlineString(int indent_size = 0) const override {
+    return name_;
+  }
 
   //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
   //! WARNING: Only works with Fusion container at the moment

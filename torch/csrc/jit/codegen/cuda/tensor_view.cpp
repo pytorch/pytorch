@@ -142,6 +142,63 @@ TensorView::TensorView(
 
 NVFUSER_DEFINE_CLONE(TensorView)
 
+std::string TensorView::toString(int indent_size) const {
+  static constexpr char* prefix = "T";
+  std::stringstream ss;
+  ss << prefix << ir_utils::varName(this);
+  switch (getMemoryType()) {
+    case MemoryType::Global:
+      ss << "_g";
+      break;
+    case MemoryType::Shared:
+      ss << "_s";
+      break;
+    case MemoryType::Local:
+      ss << "_l";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
+  }
+  ss << domain()->toString(indent_size);
+
+  if (getComputeAtPosition() > 0) {
+    ss << " ca_pos( ";
+    ss << getComputeAtPosition();
+    ss << " )";
+  }
+  if (hasComputeWith()) {
+    ss << " compute_with( ";
+    bool first = true;
+    if (hasResolvedComputeWith()) {
+      for (auto consumer : getComputeWithConsumers()) {
+        if (!first) {
+          ss << ", ";
+        }
+        ss << prefix << ir_utils::varName(consumer);
+        first = false;
+      }
+      ss << ", ";
+    }
+    ss << getComputeWithPosition();
+    ss << " )";
+  }
+  if (getMaxProducerPosition() > 0) {
+    ss << " produce_pos( ";
+    ss << getMaxProducerPosition();
+    ss << ")";
+  }
+  if (getMaybeMaxProducerPosition() > getMaxProducerPosition()) {
+    ss << " maybe_produce_pos( ";
+    ss << getMaybeMaxProducerPosition();
+    ss << ")";
+  }
+  return ss.str();
+}
+
+std::string TensorView::toInlineString(int indent_size) const {
+  return toString(indent_size);
+}
+
 void TensorView::convertRfactorToRootDomain() {
   // For a given TensorView, does its domain (root / rfactor) contain any
   // concrete sized extents?

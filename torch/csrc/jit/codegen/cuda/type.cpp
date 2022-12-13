@@ -276,7 +276,7 @@ static const char* val_type2string(ValType t) {
   }
 }
 
-static const char* predicate_type2string(PredicateType t) {
+const char* predicate_type2string(PredicateType t) {
   switch (t) {
     case PredicateType::Manual:
       return "Manual";

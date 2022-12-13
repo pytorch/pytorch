@@ -359,6 +359,8 @@ TORCH_CUDA_CU_API bool isIndexSelectIndicesTv(const TensorView* tv);
 TORCH_CUDA_CU_API IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(
     const TensorView* tv);
 
+TORCH_CUDA_CU_API std::string varName(const Val* val);
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

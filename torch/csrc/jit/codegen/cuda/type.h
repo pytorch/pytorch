@@ -385,7 +385,7 @@ std::string stringifyBooleanOp(const BinaryOpType);
 
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
-std::string typePrefix(const DataType);
+TORCH_CUDA_CU_API std::string typePrefix(const DataType);
 
 // TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
 // Returns if parallel type is TID[x, y, z]
@@ -402,6 +402,7 @@ TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const RNGOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API const char* predicate_type2string(PredicateType t);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);

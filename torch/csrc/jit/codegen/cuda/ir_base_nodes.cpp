@@ -60,16 +60,16 @@ bool Statement::lessThan(const Statement* stmt1, const Statement* stmt2) {
   return stmt1->name() < stmt2->name();
 }
 
-std::string Statement::toString() const {
+std::string Statement::toString(int indent_size) const {
   std::stringstream ss;
-  IrPrinter ir_printer(ss);
+  IrPrinter ir_printer(ss, indent_size);
   ir_printer.handle(this);
   return ss.str();
 }
 
-std::string Statement::toInlineString() const {
+std::string Statement::toInlineString(int indent_size) const {
   std::stringstream ss;
-  IrPrinter ir_printer(ss);
+  IrPrinter ir_printer(ss, indent_size);
   ir_printer.print_inline(this);
   return ss.str();
 }

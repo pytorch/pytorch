@@ -51,6 +51,20 @@ Predicate::Predicate(IrBuilderPasskey passkey, Bool* value)
   TORCH_INTERNAL_ASSERT(value != nullptr);
 }
 
+std::string Predicate::toString(int indent_size) const {
+  if (predicate_type() == PredicateType::Manual) {
+    return value()->toString();
+  }
+  return predicate_type2string(predicate_type());
+}
+
+std::string Predicate::toInlineString(int indent_size) const {
+  if (predicate_type() == PredicateType::Manual) {
+    return value()->toInlineString();
+  }
+  return predicate_type2string(predicate_type());
+}
+
 TensorIndex::TensorIndex(
     IrBuilderPasskey passkey,
     const TensorView* view,
@@ -64,6 +78,33 @@ TensorIndex::TensorIndex(
   TORCH_INTERNAL_ASSERT(
       isIntegralType(index->dtype()),
       "Cannot index with a value other than an int.");
+}
+
+std::string TensorIndex::toString(int indent_size) const {
+  std::stringstream ss;
+  ss << "T" << ir_utils::varName(this);
+  switch (view()->getMemoryType()) {
+    case MemoryType::Global:
+      ss << "_g";
+      break;
+    case MemoryType::Shared:
+      ss << "_s";
+      break;
+    case MemoryType::Local:
+      ss << "_l";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
+  }
+  ss << "[";
+  ss << index()->toInlineString(indent_size);
+  ss << "]";
+  ss << " view( T" << ir_utils::varName(view()) << " )";
+  return ss.str();
+}
+
+std::string TensorIndex::toInlineString(int indent_size) const {
+  return toString(indent_size);
 }
 
 Allocate::Allocate(

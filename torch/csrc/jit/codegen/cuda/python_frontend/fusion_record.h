@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/complex.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
@@ -908,20 +909,6 @@ struct CastOpRecord : RecordFunctor {
   Nvf::DataType dtype_;
 };
 
-namespace {
-
-template <typename T>
-inline bool __toBool(T x) {
-  return static_cast<bool>(x);
-}
-
-template <>
-inline bool __toBool<std::complex<double>>(std::complex<double> x) {
-  return x != std::complex<double>(0, 0);
-}
-
-} // namespace
-
 //! Specialized Record Functor for recording FusionDefinition constant state.
 
 template <typename ExprType, typename ValueType>
@@ -963,7 +950,7 @@ struct ConstantRecord : RecordFunctor {
   virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     if (std::is_same<ValueType, bool>::value) {
-      bool value = __toBool(value_);
+      bool value = torch::jit::fuser::cuda::__toBool(value_);
       os << (value ? "True" : "False");
     } else {
       os << std::showpoint << value_;

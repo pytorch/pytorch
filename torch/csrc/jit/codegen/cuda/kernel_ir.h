@@ -60,6 +60,10 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
 
   explicit Predicate(IrBuilderPasskey passkey, Bool* value);
 
+  std::string toString(int indent_size = 0) const override;
+
+  std::string toInlineString(int indent_size = 0) const override;
+
   PredicateType predicate_type() const {
     return ptype_;
   }
@@ -135,6 +139,10 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
     TORCH_INTERNAL_ASSERT(view_ != nullptr);
     return const_cast<TensorView*>(view_); // NOLINT
   }
+
+  std::string toString(int indent_size = 0) const override;
+
+  std::string toInlineString(int indent_size = 0) const override;
 
  private:
   const TensorView* view_ = nullptr;

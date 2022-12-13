@@ -1171,6 +1171,36 @@ bool IterDomain::sameAs(const Statement* other) const {
   return is_same;
 }
 
+std::string IterDomain::toString(int indent_size) const {
+  std::stringstream ss;
+  ss << getIterType();
+  ss << getParallelType();
+  ss << ir_utils::varName(this);
+  ss << "{";
+  if (!start()->isZeroInt()) {
+    ss << start()->toInlineString() << " : ";
+  }
+  if (stop() != extent()) {
+    ss << stop()->toInlineString() << " : ";
+  }
+  if (isBroadcast() && hasExpandedExtent()) {
+    ss << expandedExtent()->toInlineString();
+  } else {
+    ss << extent()->toInlineString();
+  }
+  ss << "}";
+  if (isRFactorProduct())
+    ss << "rf";
+  if (hasPaddingToMultipleOfWarp()) {
+    ss << "_p";
+  }
+  return ss.str();
+}
+
+std::string IterDomain::toInlineString(int indent_size) const {
+  return toString(indent_size);
+}
+
 // Returns a new IterDomain matching properties of this except for
 // is_rfactor_domain_
 IterDomain* IterDomain::cloneWithoutRFactor() const {
@@ -1657,6 +1687,27 @@ bool TensorDomain::sameAs(
       return false;
   }
   return true;
+}
+
+std::string TensorDomain::toString(int indent_size) const {
+  std::stringstream ss;
+  if (nDims() == 0) {
+    ss << "[ 0 ]";
+    return ss.str();
+  }
+  ss << "[ ";
+  for (const auto i : c10::irange(nDims())) {
+    ss << axis(i)->toString();
+    if (i != nDims() - 1) {
+      ss << ", ";
+    }
+  }
+  ss << " ]";
+  return ss.str();
+}
+
+std::string TensorDomain::toInlineString(int indent_size) const {
+  return toString(indent_size);
 }
 
 void TensorDomain::setContiguity(const std::vector<bool>& contig) {

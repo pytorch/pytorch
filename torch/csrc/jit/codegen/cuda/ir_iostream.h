@@ -28,7 +28,8 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   static constexpr char const* kTab = "  ";
 
  public:
-  explicit IrPrinter(std::ostream& os) : os_(os) {}
+  explicit IrPrinter(std::ostream& os, int indent_size = 0)
+      : os_(os), indent_size_(indent_size) {}
 
   // Indent the generated code
   std::ostream& indent() {
@@ -75,12 +76,13 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const IterDomain*) final;
   void handle(const TensorDomain*) final;
   void handle(const TensorView*) final;
-
   void handle(const Bool*) final;
   void handle(const Double*) final;
   void handle(const Int*) final;
   void handle(const ComplexDouble*) final;
   void handle(const NamedScalar*) final;
+  void handle(const kir::Predicate*) final;
+  void handle(const kir::TensorIndex*) final;
 
   void handle(const FullOp*) final;
   void handle(const ARangeOp*) final;
@@ -105,9 +107,6 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const GatherOp*) final;
   void handle(const ViewAsScalar*) final;
   void handle(const ViewOp*) final;
-
-  void handle(const kir::Predicate*) final;
-  void handle(const kir::TensorIndex*) final;
 
   void handle(const kir::GridBroadcast*) final;
   void handle(const kir::GridReduction*) final;

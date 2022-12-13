@@ -11,6 +11,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <complex>
+#include <limits>
+#include <sstream>
 
 //! Nodes in here are intended to be "user facing" users in this sense being
 //! those that want to be able to generate CUDA code.
@@ -24,6 +26,20 @@ class WelfordResult;
 class ViewTransform;
 
 class IrCloner;
+
+namespace ir_utils {
+TORCH_CUDA_CU_API std::string varName(const Val* val);
+}
+
+template <typename T>
+inline bool __toBool(T x) {
+  return static_cast<bool>(x);
+}
+
+template <>
+inline bool __toBool<std::complex<double>>(std::complex<double> x) {
+  return x != std::complex<double>(0, 0);
+}
 
 //! A scalr value. This value can be a symbolic value (defined after
 //! the kernel is compiled) or a constant value (inlined into the kernel
@@ -68,6 +84,56 @@ class TORCH_CUDA_CU_API Scalar : public Val {
       : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
   NVFUSER_DECLARE_CLONE
+
+  std::string toString(int indent_size = 0) const override {
+    std::stringstream ss;
+    if (isSymbolic()) {
+      ss << typePrefix(getDataType().value()) << ir_utils::varName(this);
+      return ss.str();
+    }
+    if (*getDataType() == DataType::Bool) {
+      ss << "(" << (__toBool(value().value()) ? "true" : "false") << ")";
+    } else if (isIntegralType(*getDataType())) {
+      ss << *(value());
+    } else if (isFloatingPointType(*getDataType())) {
+      ss << getDataType().value() << "(";
+      if (getDataType() == DataType::Double) {
+        ss << std::setprecision(std::numeric_limits<double>::max_digits10)
+           << *(value()) << ")";
+      } else if (getDataType() == DataType::Float) {
+        ss << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << *(value()) << ")";
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Invalid data type: ", getDataType().value());
+      }
+    } else if (isComplexType(*getDataType())) {
+      ss << getDataType().value() << "(";
+      if (getDataType() == DataType::ComplexDouble) {
+        ss << std::setprecision(std::numeric_limits<double>::max_digits10)
+           << *(value()) << ")";
+      } else if (getDataType() == DataType::ComplexFloat) {
+        ss << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << *(value()) << ")";
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "Invalid data type: ", getDataType().value());
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unknown scalar type: ", *getDataType());
+    }
+    return ss.str();
+  }
+
+  std::string toInlineString(int indent_size = 0) const override {
+    if (definition() != nullptr) {
+      std::stringstream ss;
+      ss << "( " << definition()->toInlineString(indent_size) << " )";
+      return ss.str();
+    } else {
+      return toString(indent_size);
+    }
+  }
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -164,6 +230,10 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   TensorView(const TensorView* src, IrCloner* ir_cloner);
 
   NVFUSER_DECLARE_CLONE
+
+  std::string toString(int indent_size = 0) const override;
+
+  std::string toInlineString(int indent_size = 0) const override;
 
   TensorDomain* domain() const {
     return domain_;

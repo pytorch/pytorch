@@ -16,18 +16,9 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-const char* boolLiteral(bool value) {
-  return value ? "true" : "false";
-}
 
-std::string varName(const Val* val) {
-  std::stringstream value_name;
-  if (val == nullptr) {
-    value_name << "$nullptr";
-  } else {
-    value_name << val->name();
-  }
-  return value_name.str();
+inline const char* boolLiteral(bool value) {
+  return value ? "true" : "false";
 }
 
 } // namespace
@@ -54,11 +45,46 @@ void IrPrinter::handle(const Statement* s) {
 }
 
 void IrPrinter::handle(const Val* v) {
-  OptInConstDispatch::handle(v);
+  if (print_inline_) {
+    os_ << v->toInlineString(indent_size_);
+  } else {
+    os_ << v->toString(indent_size_);
+  }
 }
 
 void IrPrinter::handle(const Expr* e) {
   OptInConstDispatch::handle(e);
+}
+
+void IrPrinter::handle(const IterDomain* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const TensorDomain* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const TensorView* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const Bool* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const Double* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const Int* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const ComplexDouble* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const NamedScalar* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const kir::Predicate* v) {
+  handle(dynamic_cast<const Val*>(v));
+}
+void IrPrinter::handle(const kir::TensorIndex* v) {
+  handle(dynamic_cast<const Val*>(v));
 }
 
 void IrPrinter::handle(Fusion* fusion) {
@@ -109,176 +135,6 @@ void IrPrinter::handleScope(const kir::Scope& scope) {
     handle(expr);
   }
   indent_size_--;
-}
-
-void IrPrinter::handle(const IterDomain* id) {
-  os_ << id->getIterType();
-  os_ << id->getParallelType();
-  os_ << varName(id);
-  os_ << "{";
-  if (!id->start()->isZeroInt()) {
-    print_inline(id->start());
-    os_ << " : ";
-  }
-  if (id->stop() != id->extent()) {
-    print_inline(id->stop());
-    os_ << " : ";
-  }
-  if (id->isBroadcast() && id->hasExpandedExtent()) {
-    print_inline(id->expandedExtent());
-  } else {
-    print_inline(id->extent());
-  }
-  os_ << "}";
-  if (id->isRFactorProduct())
-    os_ << "rf";
-  if (id->hasPaddingToMultipleOfWarp()) {
-    os_ << "_p";
-  }
-}
-
-void IrPrinter::handle(const TensorDomain* td) {
-  if (td->nDims() == 0) {
-    os_ << "[ 0 ]";
-    return;
-  }
-  os_ << "[ ";
-  for (const auto i : c10::irange(td->nDims())) {
-    handle(td->axis(i));
-    if (i != td->nDims() - 1)
-      os_ << ", ";
-  }
-  os_ << " ]";
-}
-
-void IrPrinter::handle(const TensorView* tv) {
-  static const std::string prefix = "T";
-  os_ << prefix << varName(tv);
-  switch (tv->getMemoryType()) {
-    case MemoryType::Global:
-      os_ << "_g";
-      break;
-    case MemoryType::Shared:
-      os_ << "_s";
-      break;
-    case MemoryType::Local:
-      os_ << "_l";
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
-  }
-  handle(tv->domain());
-
-  if (tv->getComputeAtPosition() > 0) {
-    os_ << " ca_pos( ";
-    os_ << tv->getComputeAtPosition();
-    os_ << " )";
-  }
-  if (tv->hasComputeWith()) {
-    os_ << " compute_with( ";
-    bool first = true;
-    if (tv->hasResolvedComputeWith()) {
-      for (auto consumer : tv->getComputeWithConsumers()) {
-        if (!first) {
-          os_ << ", ";
-        }
-        os_ << prefix << varName(consumer);
-        first = false;
-      }
-      os_ << ", ";
-    }
-    os_ << tv->getComputeWithPosition();
-    os_ << " )";
-  }
-  if (tv->getMaxProducerPosition() > 0) {
-    os_ << " produce_pos( ";
-    os_ << tv->getMaxProducerPosition();
-    os_ << ")";
-  }
-  if (tv->getMaybeMaxProducerPosition() > tv->getMaxProducerPosition()) {
-    os_ << " maybe_produce_pos( ";
-    os_ << tv->getMaybeMaxProducerPosition();
-    os_ << ")";
-  }
-}
-
-void IrPrinter::handle(const Bool* b) {
-  if (print_inline_ && b->definition() != nullptr) {
-    os_ << "( ";
-    handle(b->definition());
-    os_ << " )";
-    return;
-  }
-
-  os_ << "b" << varName(b);
-  if (b->isConst()) {
-    os_ << "(" << (b->value().value() ? "true" : "false") << ")";
-  }
-}
-
-void IrPrinter::handle(const Double* d) {
-  if (print_inline_ && d->definition() != nullptr) {
-    os_ << "( ";
-    handle(d->definition());
-    os_ << " )";
-    return;
-  }
-
-  if (d->isSymbolic()) {
-    os_ << typePrefix(d->getDataType().value()) << varName(d);
-  } else {
-    os_ << d->getDataType().value() << "(";
-    if (d->getDataType() == DataType::Double) {
-      os_ << std::setprecision(std::numeric_limits<double>::max_digits10)
-          << *(d->value()) << ")";
-    } else if (d->getDataType() == DataType::Float) {
-      os_ << std::setprecision(std::numeric_limits<float>::max_digits10)
-          << (float)*(d->value()) << ")";
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false, "Invalid data type: ", d->getDataType().value());
-    }
-  }
-}
-
-void IrPrinter::handle(const Int* i) {
-  if (print_inline_) {
-    if (auto def = i->definition()) {
-      os_ << "( ";
-      handle(def);
-      os_ << " )";
-      return;
-    }
-  }
-
-  if (i->isSymbolic()) {
-    os_ << "i" << varName(i);
-  } else {
-    os_ << *(i->value());
-  }
-}
-
-void IrPrinter::handle(const ComplexDouble* c) {
-  if (print_inline_) {
-    if (auto def = c->definition()) {
-      os_ << "( ";
-      handle(def);
-      os_ << " )";
-      return;
-    }
-  }
-
-  if (c->isSymbolic()) {
-    os_ << "c" << varName(c);
-  } else {
-    os_ << "std::complex<double>"
-        << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << *(c->value());
-  }
-}
-
-void IrPrinter::handle(const NamedScalar* ns) {
-  os_ << ns->name();
 }
 
 void IrPrinter::handle(const FullOp* fop) {
@@ -729,39 +585,6 @@ void IrPrinter::handle(const ViewAsScalar* top) {
 
 void IrPrinter::handle(const ViewOp* top) {
   indent() << top->out() << " = view( " << top->in() << " )\n";
-}
-
-void IrPrinter::handle(const kir::Predicate* node) {
-  switch (node->predicate_type()) {
-    case PredicateType::Manual: {
-      os_ << node->value();
-      break;
-    }
-    default:
-      os_ << node->predicate_type();
-      break;
-  }
-}
-
-void IrPrinter::handle(const kir::TensorIndex* ti) {
-  os_ << "T" << varName(ti);
-  switch (ti->view()->getMemoryType()) {
-    case MemoryType::Global:
-      os_ << "_g";
-      break;
-    case MemoryType::Shared:
-      os_ << "_s";
-      break;
-    case MemoryType::Local:
-      os_ << "_l";
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
-  }
-  os_ << "[";
-  print_inline(ti->index());
-  os_ << "]";
-  os_ << " view( T" << varName(ti->view()) << " )";
 }
 
 void IrPrinter::handle(const kir::Allocate* node) {
