@@ -28,13 +28,13 @@ class UniqueKeyLoader(Loader):
             key = self.construct_object(key_node, deep=deep)  # type: ignore[no-untyped-call]
             try:
                 hash(key)
-            except TypeError:
+            except TypeError as e:
                 raise ConstructorError(
                     "while constructing a mapping",
                     node.start_mark,
                     "found unacceptable key ",
                     key_node.start_mark,
-                )
+                ) from e
             # check for duplicate keys
             if key in mapping:
                 raise ConstructorError(
