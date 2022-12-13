@@ -456,7 +456,7 @@ class CalcProduct(Constraint):
         """
         :param start: start index
         :param end: end index
-        :param theta: variable to store the product
+        :param flattened: variable to store the product
         :param dims_to_flatten: the type which we will flatten
         """
         assert isinstance(dims_to_flatten, list)
