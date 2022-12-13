@@ -11666,6 +11666,23 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
+    def test_multihead_attention_qkv_diff_size(self, device, dtype):
+        embed_dim = 128
+        k_dim = 64
+        v_dim = 32
+        num_heads = 8
+        sl = 10
+        bs = 8
+        model = nn.MultiheadAttention(embed_dim, num_heads, kdim=k_dim, vdim=v_dim).to(device).to(dtype)
+        q = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
+        k = torch.randn(sl, bs, k_dim, device=device, dtype=dtype)
+        v = torch.randn(sl, bs, v_dim, device=device, dtype=dtype)
+        out = model(q, k, v)
+        self.assertEqual(q.size(), out[0].size())
+        self.assertEqual(dtype, out[0].dtype)
+
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
