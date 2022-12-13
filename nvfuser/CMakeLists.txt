@@ -13,6 +13,8 @@ endif()
 
 # --- project
 
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/nvfuser")
+
 set(NVFUSER_ROOT ${PROJECT_SOURCE_DIR})
 set(NVFUSER_SRCS_DIR "${NVFUSER_ROOT}/csrc")
 set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")

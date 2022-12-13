@@ -1174,7 +1174,7 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(torch/csrc/jit/codegen/cuda)
+  add_subdirectory(nvfuser)
 endif()
 
 include(cmake/Summary.cmake)
