@@ -733,6 +733,8 @@ def _register_state_dict_hooks_base(
     hook_registration_fn_kwargs: Dict[str, Any],
 ) -> None:
     """Registers ``hook`` using ``hook_registration_fn``."""
+    # TODO: Use `_get_submodule_state(module)` in each hook instead of
+    # `partial`: https://github.com/pytorch/pytorch/issues/90788
     hook_with_state = functools.partial(hook, state)
     if not _is_composable(state):
         getattr(state, hook_registration_fn_name)(
