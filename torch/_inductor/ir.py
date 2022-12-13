@@ -770,7 +770,6 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-        xnumel = V.graph.sizevars.simplify(sympy_product(ranges))
 
         if reduction_numel == 0:
 
