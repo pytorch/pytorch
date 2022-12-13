@@ -43,8 +43,9 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <type_traits>
 #include <functional>
+#include <type_traits>
+#include <utility>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
@@ -174,26 +175,26 @@ struct BernoulliStub {
 
 Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
   Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  result.bernoulli_(self, gen);
+  result.bernoulli_(self, std::move(gen));
   return result;
 }
 
 Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
   Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  result.bernoulli_(p, gen);
+  result.bernoulli_(p, std::move(gen));
   return result;
 }
 
 Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& result) {
-  return at::native::templates::bernoulli_out_impl<BernoulliStub, Generator>(result, self, gen);
+  return at::native::templates::bernoulli_out_impl<BernoulliStub, Generator>(result, self, std::move(gen));
 }
 
 Tensor& bernoulli_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p_, gen);
+  return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p_, std::move(gen));
 }
 
 Tensor& bernoulli_(Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p, gen);
+  return at::native::templates::bernoulli_impl_<BernoulliStub, Generator>(self, p, std::move(gen));
 }
 
 // ================================================== LogNormal =======================================================
@@ -206,7 +207,7 @@ struct LogNormalStub {
 };
 
 Tensor& log_normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::log_normal_impl_<LogNormalStub, Generator>(self, mean, std, gen);
+  return at::native::templates::log_normal_impl_<LogNormalStub, Generator>(self, mean, std, std::move(gen));
 }
 
 // ==================================================== Cauchy ========================================================
@@ -219,7 +220,7 @@ struct CauchyStub {
 };
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
-  return at::native::templates::cauchy_impl_<CauchyStub, Generator>(self, median, sigma, gen);
+  return at::native::templates::cauchy_impl_<CauchyStub, Generator>(self, median, sigma, std::move(gen));
 }
 
 // ================================================== Exponential =====================================================
@@ -232,7 +233,7 @@ struct ExponentialStub {
 };
 
 Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  return at::native::templates::exponential_impl_<ExponentialStub, Generator>(self, lambda, gen);
+  return at::native::templates::exponential_impl_<ExponentialStub, Generator>(self, lambda, std::move(gen));
 }
 
 // =================================================== Geometric ======================================================
@@ -245,7 +246,7 @@ struct GeometricStub {
 };
 
 Tensor& geometric_(Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::native::templates::geometric_impl_<GeometricStub, Generator>(self, p, gen);
+  return at::native::templates::geometric_impl_<GeometricStub, Generator>(self, p, std::move(gen));
 }
 
 // ==================================================== Uniform =======================================================
@@ -265,11 +266,11 @@ struct UniformMeta {
 };
 
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
-  return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
+  return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, std::move(gen));
 }
 
 Tensor& uniform_meta_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
-  return at::native::templates::uniform_impl_<UniformMeta, Generator>(self, from, to, gen);
+  return at::native::templates::uniform_impl_<UniformMeta, Generator>(self, from, to, std::move(gen));
 }
 
 // ==================================================== Normal ========================================================
@@ -290,71 +291,71 @@ struct NormalMeta {
 
 // inplace
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
+  return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, std::move(gen));
 }
 
 Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl_<NormalMeta, Generator>(self, mean, std, gen);
+  return at::native::templates::normal_impl_<NormalMeta, Generator>(self, mean, std, std::move(gen));
 }
 
 // out tensor float
 Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, std::move(gen));
 }
 
 Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, std::move(gen));
 }
 
 // out float tensor
 Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, std::move(gen));
 }
 
 Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, std::move(gen));
 
 }
 
 // out tensor tensor
 Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, std::move(gen));
 }
 
 Tensor& normal_out_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, std::move(gen));
 }
 
 // functional tensor float
 Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, std::move(gen));
 }
 
 Tensor normal_meta(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, std::move(gen));
 }
 
 // functional float tensor
 Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, std::move(gen));
 }
 
 Tensor normal_meta(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, std::move(gen));
 }
 
 // functional tensor tensor
 Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, std::move(gen));
 }
 
 Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, std::move(gen));
 }
 
 // functional variant, only used by the functionalization pass.
 Tensor normal_functional(const Tensor& self, double mean, double std, c10::optional<at::Generator> generator) {
-  return self.clone().normal_(mean, std, generator);
+  return self.clone().normal_(mean, std, std::move(generator));
 }
 
 // ==================================================== Random ========================================================
@@ -367,7 +368,7 @@ struct RandomStub {
 };
 
 Tensor& random_(Tensor& self, c10::optional<Generator> gen) {
-  return at::native::templates::random_impl<RandomStub, Generator>(self, gen);
+  return at::native::templates::random_impl<RandomStub, Generator>(self, std::move(gen));
 }
 
 template<typename RNG>
@@ -390,11 +391,11 @@ struct RandomFromToMeta {
 };
 
 Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
-  return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
+  return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, std::move(gen));
 }
 
 Tensor& random_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
-  return random_(self, 0, to, gen);
+  return random_(self, 0, to, std::move(gen));
 }
 
 Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
@@ -403,11 +404,11 @@ Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
 }
 
 Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
-  return at::native::templates::random_from_to_impl<RandomFromToMeta, Generator>(self, from, to, gen);
+  return at::native::templates::random_from_to_impl<RandomFromToMeta, Generator>(self, from, to, std::move(gen));
 }
 
 Tensor& random_meta_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
-  return random_meta_(self, 0, to, gen);
+  return random_meta_(self, 0, to, std::move(gen));
 }
 
 // ====================================================================================================================
@@ -636,7 +637,7 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, gen);
+    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
@@ -663,7 +664,7 @@ Tensor multinomial(
     bool with_replacement,
     c10::optional<Generator> gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
-  native::multinomial_out(self, n_sample, with_replacement, gen, result);
+  native::multinomial_out(self, n_sample, with_replacement, std::move(gen), result);
   return result;
 }
 
