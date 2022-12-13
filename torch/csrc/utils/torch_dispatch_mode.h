@@ -42,10 +42,10 @@ struct StashTorchDispatchStackGuard {
   }
 
   ~StashTorchDispatchStackGuard() {
-    //PyObject *type, *value, *traceback;
-    //PyErr_Fetch(&type, &value, &traceback);
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
-    //PyErr_Restore(type, value, traceback);
+    PyErr_Restore(type, value, traceback);
   }
 
  private:
