@@ -13,7 +13,6 @@ from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
-import numpy
 import sympy
 from sympy import Expr, Integer
 
@@ -2041,9 +2040,9 @@ class ComputedBuffer(Buffer):
             ]
 
             if reads:
-                stride_lengths = numpy.array(
+                stride_lengths = torch.tensor(
                     [V.graph.sizevars.stride_hints(expr, index_vars) for expr in reads],
-                    dtype=numpy.int64,
+                    dtype=torch.int64,
                 )
                 from .scheduler import pick_loop_order
 
@@ -2166,12 +2165,12 @@ class ComputedBuffer(Buffer):
             priority_idx = []
 
         try:
-            strides = numpy.array(
+            strides = torch.tensor(
                 [
                     V.graph.sizevars.stride_hints(expr, index_vars)
                     for expr in memory_addrs
                 ],
-                dtype=numpy.int64,
+                dtype=torch.int64,
             )
             assert strides.shape == (len(memory_addrs), len(index_vars))
             # consider both layout(strides) and reordering(reordering_reindex)

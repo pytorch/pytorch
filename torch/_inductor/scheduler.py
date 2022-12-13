@@ -8,7 +8,6 @@ import pprint
 import textwrap
 from typing import Dict, List, Optional, Set, Union
 
-import numpy as np
 import sympy
 
 import torch
@@ -516,10 +515,10 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        a_first = np.logical_or(
+        a_first = torch.logical_or(
             stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]
         ).all()
-        b_first = np.logical_or(
+        b_first = torch.logical_or(
             stride_lengths[:, a] == 0, stride_lengths[:, a] > stride_lengths[:, b]
         ).all()
 
