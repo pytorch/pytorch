@@ -300,7 +300,7 @@ class FP32MatMulPattern(Pattern):
 
     @property
     def skip(self):
-        if torch.version.hip:
+        if torch.version.hip is not None:
             has_tf32 = False
         else:
             # Anything less than sm_80 is not Ampere which doesn't support TF32
