@@ -8,7 +8,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
-#include "UpSampleKernelAVXAntialias.h"
+#include <ATen/native/cpu/UpSampleKernelAVXAntialias.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -258,7 +258,7 @@ static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
 }
 
 template <typename scalar_t>
-static inline void basic_loop_aa_single_dim_zero_strides(
+static inline void basic_loop_aa_vertical(
     char** data,
     const int64_t* strides,
     int64_t n,
@@ -276,7 +276,7 @@ static inline void basic_loop_aa_single_dim_zero_strides(
 }
 
 template <>
-inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
+inline void basic_loop_aa_vertical<uint8_t>(
     char** data,
     const int64_t* strides,
     int64_t n,
@@ -313,7 +313,7 @@ inline void basic_loop_aa_single_dim_zero_strides<uint8_t>(
 }
 
 template <typename scalar_t>
-static inline void basic_loop_aa_single_dim_nonzero_strides(
+static inline void basic_loop_aa_horizontal(
     char** data,
     const int64_t* strides,
     int64_t n,
@@ -339,7 +339,7 @@ static inline void basic_loop_aa_single_dim_nonzero_strides(
 }
 
 template <>
-inline void basic_loop_aa_single_dim_nonzero_strides<uint8_t>(
+inline void basic_loop_aa_horizontal<uint8_t>(
     char** data,
     const int64_t* strides,
     int64_t n,
@@ -1337,15 +1337,31 @@ void cpu_upsample_generic_aa(at::TensorIterator& iter, unsigned int weights_prec
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     if (is_horizontal) {
-      // Strides are : X 0 | 8 8 8 0 8
+
+      // Strides are : X 0 | 8 8 8 0 8  (Channels first)
+      // Strides are : X X | 0 0 0 0 0  (Channels last)
       // upsampling data within a contiguous dimension (aka horizontal resampling)
-      basic_loop_aa_single_dim_nonzero_strides<scalar_t>(
-          data, strides, n, weights_precision);
+      if ((strides[0] == sizeof(scalar_t)) && (strides[1] == sizeof(scalar_t)) &&
+          is_zero_stride<3 + 2>(&strides[2])) {
+        // channels last case
+        basic_loop_aa_horizontal<scalar_t>(
+            data, strides, n, weights_precision);
+      } else {
+        basic_loop_aa_horizontal<scalar_t>(
+            data, strides, n, weights_precision);
+      }
     } else {
-      // Strides are : X Y | 0 0 0 0 0
+      // Strides are : X Y | 0 0 0 0 0 (Channels first)
+      // Strides are : X X | 0 0 0 0 0 (Channels last)
       // upsampling data between contiguous dimensions (aka vertical resampling)
-      basic_loop_aa_single_dim_zero_strides<scalar_t>(
-          data, strides, n, weights_precision);
+      if ((strides[0] == sizeof(scalar_t)) && (strides[1] == sizeof(scalar_t)) &&
+          is_zero_stride<3 + 2>(&strides[2])) {
+        basic_loop_aa_vertical<scalar_t>(
+            data, strides, n, weights_precision);
+      } else {
+        basic_loop_aa_vertical<scalar_t>(
+            data, strides, n, weights_precision);
+      }
     }
   };
 
@@ -1641,9 +1657,8 @@ void upsample_bilinear2d_kernel_impl(
       separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
         output, input, align_corners, {scales_h, scales_w},
         /*antialias=*/false);
-    #endif  // CPU_CAPABILITY_AVX2  
-  } 
-  else {
+    #endif  // CPU_CAPABILITY_AVX2
+  } else {
     upsample_bilinear2d_kernel_impl_float(output, input, align_corners, scales_h, scales_w);
   }
 }
@@ -1721,8 +1736,8 @@ void upsample_bicubic2d_kernel_impl(
       separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
         output, input, align_corners, {scales_h, scales_w},
         /*antialias=*/false);
-    #endif  // CPU_CAPABILITY_AVX2  
-  } 
+    #endif  // CPU_CAPABILITY_AVX2
+  }
   else {
     upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
       output, input, align_corners, {scales_h, scales_w});

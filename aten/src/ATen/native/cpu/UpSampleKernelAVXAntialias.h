@@ -37,7 +37,7 @@ void unpack_rgb(
   auto packed_stride = is_channels_last ? 1 : num_pixels;
   auto packed_increment = is_channels_last ? num_channels : 1;
 
-  for (const auto i : c10::irange(num_pixels)) {
+  for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
       unpacked[j] = packed[j * packed_stride];
     }
@@ -58,7 +58,7 @@ void pack_rgb(
   auto num_channels = packed_tensor.size(0);
   auto packed_stride = is_channels_last ? 1 : num_pixels;
   auto packed_increment = is_channels_last ? num_channels : 1;
-  for (const auto i : c10::irange(num_pixels)) {
+  for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
       packed[j * packed_stride] = unpacked[j];
     }
