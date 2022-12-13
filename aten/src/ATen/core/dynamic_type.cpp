@@ -243,11 +243,13 @@ TypePtr DynamicType::fallback() const {
       return ListType::create(arguments_.elems[0].ty->fallback());
     case Tag::Tuple: {
       std::vector<TypePtr> fallbacks;
+      fallbacks.reserve(arguments_.elems.size());
       for (const auto& elem : arguments_.elems) {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
         std::vector<c10::string_view> fields;
+        fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           fields.emplace_back(*elem.label);
         }
