@@ -393,7 +393,13 @@ class SizeVarAllocator(object):
         return stride_vars
 
     def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-        """Convert an indexing expression back into strides"""
+        """Convert an indexing expression back into strides
+
+        NOTE: This is only valid if the index is a standard strided offset
+        calculation. e.g. 10 * ModularIndexing(i0 + 1, 1, 2) would give a
+        stride of -10 because the index wraps around after the first element
+
+        """
         strides = []
         index = self.simplify(index)
         # remove any offset
