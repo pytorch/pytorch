@@ -723,7 +723,6 @@ struct HelperInterpBase {
     for (j = 0; j < xsize; j++) {
       if (total_w != 0.0) {
         wt_ptr[j] /= total_w;
-        // std::cout << "wt_ptr[j] = " << wt_ptr[j] << std::endl;
       }
     }
     for (; j < max_interp_size; j++) {
@@ -1628,7 +1627,6 @@ void upsample_bilinear2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-        // std::cout << "LOLOL " << std::endl;
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
       if (input.size(1) <= 4) {
@@ -1709,7 +1707,6 @@ void upsample_bicubic2d_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-        // std::cout << "LOLOL " << std::endl;
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
       if (input.size(1) <= 4) {
