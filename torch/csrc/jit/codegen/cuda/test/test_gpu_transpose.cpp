@@ -335,9 +335,6 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleOutput_CUDA) {
  * t1
  */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -997,9 +994,6 @@ TEST_F(NVFuserTest, FusionScheduleTransposeSmallInnerSize3_CUDA) {
 
 // x->sin->transpose->cos->y
 TEST_F(NVFuserTest, FusionScheduleTranspose2DSmallInnerSize_CUDA) {
-#ifdef FBCODE_CAFFE2
-  GTEST_SKIP() << "OOM on V100 32gb";
-#endif
   std::array<std::vector<int64_t>, 2> shapes{
       std::vector<int64_t>{1024 * 1024 * 128, 2},
       std::vector<int64_t>{2, 1024 * 1024 * 128}};
