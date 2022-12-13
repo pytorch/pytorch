@@ -3573,7 +3573,6 @@
 
 - func: max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    CompositeImplicitAutograd: max_pool2d
     MPS: mps_max_pool2d_backward
   autogen: max_pool2d_backward.out
 
