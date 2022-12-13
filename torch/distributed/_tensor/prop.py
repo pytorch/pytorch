@@ -62,3 +62,35 @@ class ShardingPropagator(object):
             )
         else:
             return output_sharding
+
+
+class _CachingPropagator(ShardingPropagator):
+    """
+    A sharding propagator that caches the propagation results.
+    This is currently experimental for Tensor Parallel usage.
+    """
+
+    def __init__(self, op_to_rules=None) -> None:
+        super().__init__()
+        if op_to_rules is not None:
+            self.op_to_rules = op_to_rules
+
+        # cache table for sharding propagation results, we might need to
+        # limit the size of the cache table in the future
+        self.cached_prop_results: Dict[OpSchema, OutputSharding] = {}
+
+    def propagate_op_sharding(
+        self, op_overload: torch._ops.OpOverload, op_schema: OpSchema
+    ) -> OutputSharding:
+        """
+        Propagate the sharding for an operator given the op_schema.
+        Cache the propagation results to avoid running propagation again.
+        """
+        if op_schema in self.cached_prop_results:
+            return self.cached_prop_results[op_schema]
+        else:
+            # call DTensor's propagate_op_sharding to get the prop result
+            output_sharding = super().propagate_op_sharding(op_overload, op_schema)
+            # update cached table
+            self.cached_prop_results[op_schema] = output_sharding
+            return output_sharding
