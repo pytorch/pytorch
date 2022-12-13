@@ -431,7 +431,7 @@ void IterDomainGraph::build(Fusion* fusion) {
             // might not be a compute at leaf domain of `p_tv`, but it actually
             // has an equivalent compute at leaf domain. For that case, we map
             // the equivalent compute at leaf domain.
-            for (int i = 0; i < int(p_tv->getComputeAtPosition()); i++) {
+            for (unsigned int i = 0; i < p_tv->getComputeAtPosition(); i++) {
               auto id = p_tv->axis(i);
               if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
                 loop_nodes_.mapEntries(c_id, id);
