@@ -21,6 +21,17 @@ class TestFunctionSchema(TestCase):
         schema_without_out = parse_schema('any.not_out(Tensor self, Tensor b) -> Tensor')
         self.assertFalse(schema_without_out.arguments[-1].is_out)
 
+    def test_hash_schema(self):
+        schema1 = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        schema2 = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertEqual(hash(schema1), hash(schema2))
+
+        schema3 = parse_schema('any.not_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertNotEqual(hash(schema2), hash(schema3))
+
+        schema4 = parse_schema('foo(Tensor self, *, int a, Tensor(a!) out) -> Tensor(a!)')
+        self.assertNotEqual(hash(schema2), hash(schema4))
+
     def test_backward_compatible_structure(self):
         old_schema = parse_schema('any.over(Tensor self, *, Tensor b) -> Tensor')
         # BC: A new schema without changes.
