@@ -277,10 +277,13 @@ def prelu_backward(
         cur_weight = cur_weight.unsqueeze(-1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = torch.where(self > 0, 0.0, self * grad_output)
-    out = weight_grad_collector.sum_to_size(cur_weight.shape)
+    if len(self.shape) == 0:
+        out = weight_grad_collector.view(cur_weight.shape)
+    else:
+        out = weight_grad_collector.sum_to_size(cur_weight.shape)
     while out.dim() > weight.dim():
         out = out.squeeze(-1)
-    return (input_grad, out)
+    return (input_grad.view_as(self), out)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
@@ -1523,9 +1526,10 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
+    if device is None and dtype is None and memory_format is None:
+        return x.clone()
     dtype_converted = False
-    if device is not None and device != x.get_device():
+    if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
