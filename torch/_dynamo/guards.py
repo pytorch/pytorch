@@ -434,7 +434,7 @@ class CheckFunctionManager:
         f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
-        guards = output_graph.guards
+        guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
