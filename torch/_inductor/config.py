@@ -4,6 +4,12 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
