@@ -177,7 +177,8 @@ uint32_t* ImagingResampleInner(
     int xout,
     int yout,
     bool align_corners,
-    const scale_type& scales) {
+    const scale_type& scales,
+    bool antialias) {
   int need_horizontal, need_vertical;
 
   uint32_t* unpacked_output_p = nullptr;
@@ -196,7 +197,8 @@ uint32_t* ImagingResampleInner(
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2]);
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*antialias=*/antialias);
 
     unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
     ImagingResampleHorizontal_8bpc(
@@ -221,7 +223,8 @@ uint32_t* ImagingResampleInner(
             /*ndims=*/4,
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
-            /*opt_scale=*/scales[interp_dim - 2]);
+            /*opt_scale=*/scales[interp_dim - 2],
+            /*antialias=*/antialias);
 
     unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
     ImagingResampleVertical_8bpc(
@@ -248,7 +251,8 @@ void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& input,
     const at::Tensor& output,
     bool align_corners,
-    const scale_type& scales) {
+    const scale_type& scales,
+    bool antialias) {
   auto batch_size = input.size(0);
   auto xin = input.size(3);
   auto yin = input.size(2);
@@ -266,7 +270,7 @@ void upsample_avx_bilinear_or_bicubic(
         input.is_contiguous(at::MemoryFormat::ChannelsLast));
 
     uint32_t* unpacked_output_p = ImagingResampleInner<scale_type, F>(
-        unpacked_input_p, xin, yin, xout, yout, align_corners, scales);
+        unpacked_input_p, xin, yin, xout, yout, align_corners, scales, antialias);
 
     pack_rgb(
         (const uint8_t*)unpacked_output_p,
