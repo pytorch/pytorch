@@ -19,6 +19,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -601,6 +603,9 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
+
+    adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
+
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {

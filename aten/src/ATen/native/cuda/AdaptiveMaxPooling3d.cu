@@ -314,7 +314,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   checkAllSameGPU(
       __func__, {output_arg, indices_arg, input_arg});
-  if (input.numel() == 0) {
+  if (input.numel() == 0 || output.numel() == 0) {
     return;
   }
 
