@@ -455,7 +455,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
     def test_state_dict_root_fully_shard(self):
         """
         Tests that the full state dict saved from a module with ``fully_shard``
-        applied at the global root matches that of an equivalent local module.
+        applied to the global root matches that of an equivalent local module.
         """
         local_model = CompositeParamModel(device=torch.device("cuda"))
         composable_module = copy.deepcopy(local_model)
@@ -468,7 +468,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
     def test_state_dict_submodule_fully_shard(self):
         """
         Tests that the full state dict saved from a module with ``fully_shard``
-        applied at the global root matches that of an equivalent local module.
+        applied on submodules matches that of an equivalent local module.
         """
         local_model = CompositeParamModel(device=torch.device("cuda"))
         composable_module = copy.deepcopy(local_model)
