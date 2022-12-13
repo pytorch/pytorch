@@ -564,7 +564,7 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
 void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  self_impl->mutate_view_meta(meta);
+  self_impl->mutate_view_meta(std::move(meta));
 }
 
 // Note [Propagating strides in the functionalization pass]
@@ -612,7 +612,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
   for (uint64_t idx = 0; idx < num_arguments; ++idx) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      auto t = ivalue.toTensor();
+      const auto& t = ivalue.toTensor();
       if (t.defined()) {
         TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t),
           "The composite op functionalization fallback expects its inputs all not to be functional tensors");
@@ -659,7 +659,7 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
   for (const auto idx : c10::irange(num_returns)) {
     const auto& ivalue = returns[idx];
     if (ivalue.isTensor()) {
-      auto t = ivalue.toTensor();
+      const auto& t = ivalue.toTensor();
       if (!t.defined()) continue;
       at::functionalization::impl::sync(t);
       auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
