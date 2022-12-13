@@ -16,11 +16,12 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import NamedTuple, Optional, Union
+from typing import Dict, NamedTuple, Optional, Union
 
 import torch
 import torch.cuda.nccl
 import torch.distributed as c10d
+import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -883,7 +884,8 @@ def _run_test_with_mt_pg(self, timeout, world_size, callback):
         print(f"Rank {rank} raised:")
         for line in traceback.format_exception(*exc_info):
             sys.stdout.write(line)
-    self.assertEqual([], failed_ranks, "Some ranks failed")
+    if failed_ranks:
+        raise failed_ranks[0][1][1]  # re-throw the first exception
 
 
 def spawn_threads_and_init_comms(
@@ -953,3 +955,26 @@ class MultiThreadedTestCase(TestCase):
     @property
     def world_size(self) -> int:
         raise RuntimeError("world size not implemented")
+
+
+class SaveForwardInputsModule(nn.Module):
+    def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
+        super().__init__()
+        self.l = nn.Linear(100, 100)
+        self.forward_inputs = forward_inputs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.forward_inputs[self] = x
+        return self.l(x)
+
+
+class SaveForwardInputsModel(nn.Module):
+    def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
+        super().__init__()
+        self.c1 = SaveForwardInputsModule(forward_inputs)
+        self.c2 = SaveForwardInputsModule(forward_inputs)
+        self.forward_inputs = forward_inputs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.forward_inputs[self] = x
+        return self.c2(self.c1(x))

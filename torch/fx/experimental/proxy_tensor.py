@@ -654,9 +654,17 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
+        arg_count = 0
+
         def wrap_fake(x):
+            nonlocal arg_count
             if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
+                # TODO: it would be nice to line these up with the names
+                # FX will choose for the placeholders, but we don't
+                # actually know what the names will be at this point yet
+                sname = f"input{arg_count}"
+                arg_count += 1
+                return fake_tensor_mode.from_tensor(x, sname=sname)  # type: ignore[attr-defined]
 
             return x
 

@@ -13,6 +13,7 @@
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
 #include <limits>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -898,7 +899,7 @@ at::Tensor conv1d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv2d(
@@ -925,7 +926,7 @@ at::Tensor conv2d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0}}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv3d(
@@ -944,7 +945,7 @@ at::Tensor conv3d(
   } else {
     output = at::convolution(input, weight, bias, stride, padding, dilation, false, {{0, 0, 0}}, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 
@@ -1045,7 +1046,7 @@ at::Tensor conv1d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv2d(
@@ -1061,7 +1062,7 @@ at::Tensor conv2d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv3d(
@@ -1077,7 +1078,7 @@ at::Tensor conv3d(
   } else {
     output = at::_convolution_mode(input, weight, bias, stride, std::move(padding), dilation, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose1d(
@@ -1098,7 +1099,7 @@ at::Tensor conv_transpose1d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose2d(
@@ -1119,7 +1120,7 @@ at::Tensor conv_transpose2d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor conv_transpose3d(
@@ -1140,7 +1141,7 @@ at::Tensor conv_transpose3d(
     output = at::convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
   }
-  return is_batched ? output : output.squeeze(0);
+  return is_batched ? std::move(output) : output.squeeze(0);
 }
 
 at::Tensor convolution(

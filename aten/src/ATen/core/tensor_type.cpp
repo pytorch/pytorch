@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type.h>
 
+#include <utility>
+
 namespace c10 {
 
 namespace {
@@ -416,7 +418,7 @@ VaryingShape<int64_t> TensorType::strides() const {
       ss[*s.stride_index_] = *s.stride_;
     }
   }
-  return VaryingShape<int64_t>(ss);
+  return VaryingShape<int64_t>(std::move(ss));
 }
 
 TensorType::TensorType(

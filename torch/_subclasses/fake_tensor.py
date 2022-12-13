@@ -205,7 +205,14 @@ class FakeTensorConverter(object):
         self.tensor_memo[th] = v
 
     def from_real_tensor(
-        self, fake_mode, t, make_constant=False, shape_env=None, ignore_subclass=False
+        self,
+        fake_mode,
+        t,
+        make_constant=False,
+        shape_env=None,
+        ignore_subclass=False,
+        *,
+        sname=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -238,6 +245,7 @@ class FakeTensorConverter(object):
             shape_env=shape_env,
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
+            sname=sname,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -273,6 +281,7 @@ class FakeTensorConverter(object):
         make_constant=False,
         shape_env=None,
         ignore_subclass=False,
+        sname=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -280,6 +289,7 @@ class FakeTensorConverter(object):
             make_constant,
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
+            sname=sname,
         )
 
 
@@ -1001,13 +1011,23 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, static_shapes=False, ignore_subclass=False):
+    def from_tensor(
+        self,
+        tensor,
+        static_shapes=False,
+        ignore_subclass=False,
+        sname: Optional[str] = None,
+    ):
         if static_shapes:
             return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass
+                self, tensor, ignore_subclass=ignore_subclass, sname=sname
             )
         return self.fake_tensor_converter(
-            self, tensor, shape_env=self.shape_env, ignore_subclass=ignore_subclass
+            self,
+            tensor,
+            shape_env=self.shape_env,
+            ignore_subclass=ignore_subclass,
+            sname=sname,
         )
 
 
