@@ -2,7 +2,7 @@
 from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import prod
 from torch.distributed._tensor.placement_types import DTensorSpec
 

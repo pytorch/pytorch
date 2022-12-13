@@ -5,7 +5,7 @@ from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tupl
 import torch
 from torch import Tensor
 from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,

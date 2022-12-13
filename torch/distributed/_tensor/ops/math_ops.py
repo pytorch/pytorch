@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast, Optional, Sequence
 
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule, reduction_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
@@ -46,7 +45,7 @@ sum_ops = [
     "aten.sum.dim_IntList",
 ]
 for sum_op in sum_ops:
-    DTensor._op_to_rules[sum_op] = sum_rule
+    register_prop_rule(sum_op)(sum_rule)
 
 
 @register_prop_rule("aten._softmax.default")
@@ -96,7 +95,7 @@ mean_ops = [
 ]
 
 for mean_op in mean_ops:
-    DTensor._op_to_rules[mean_op] = mean_rule
+    register_prop_rule(mean_op)(mean_rule)
 
 
 def var_rule(op_schema: OpSchema) -> OutputSharding:
@@ -122,7 +121,7 @@ var_ops = [
 ]
 
 for var_op in var_ops:
-    DTensor._op_to_rules[var_op] = var_rule
+    register_prop_rule(var_op)(var_rule)
 
 
 @register_prop_rule("aten.var.correction")

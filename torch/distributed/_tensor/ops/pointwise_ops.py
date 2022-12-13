@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import cast
 
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import (
     linear_pointwise_rule,
     pointwise_rule,
@@ -369,11 +368,11 @@ pointwise_ops = [
 
 
 for op in linear_pointwise_ops:
-    DTensor._op_to_rules[op] = linear_pointwise_rule
+    register_prop_rule(op)(linear_pointwise_rule)
 
 
 for op in pointwise_ops:
-    DTensor._op_to_rules[op] = pointwise_rule
+    register_prop_rule(op)(pointwise_rule)
 
 
 @register_prop_rule("aten.native_dropout.default")

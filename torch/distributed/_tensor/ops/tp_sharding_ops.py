@@ -6,7 +6,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.ops.utils import register_impl, unwrap_single_placement
-from torch.distributed._tensor.utils import unwrap_local_tensor
 
 """
 The ops below were quickly hacked and needed to be polished down the road.
@@ -14,6 +13,10 @@ Although they come with unit tests already, the logic is directly borrowed
 from ShardedTensor. We need to also make it work for all placement types
 of DTensor and all corner cases for sharded distributed tensor.
 """
+
+
+def unwrap_local_tensor(e: DTensor) -> torch.Tensor:
+    return e._local_tensor if isinstance(e, DTensor) else e
 
 
 @register_impl("aten.cat.default")

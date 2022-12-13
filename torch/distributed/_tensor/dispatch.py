@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, cast, Dict, Optional, Tuple, Union
+from typing import Callable, cast, Dict, Tuple, Union
 
 import torch
 
@@ -8,12 +8,11 @@ from torch.distributed._tensor.op_schema import (
     ArgsType,
     KwargsType,
     OpSchema,
-    OutputSharding,
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import redistribute_dtensor
-from torch.distributed._tensor.utils import unwrap_local_tensor
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
@@ -28,6 +27,7 @@ _ENABLE_FALLBACK = False
 Print information on ops input shape and sharding for debugging purposes.
 """
 _DEBUG_VERBOSE = False
+
 
 def unwrap_schema(e: object) -> object:
     return e._spec if isinstance(e, dtensor.DTensor) else e
@@ -105,85 +105,11 @@ _CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]]
 }
 
 
-def propagate_input_sharding(
-    op_call: torch._ops.OpOverload,
-    args: Tuple[object, ...],
-    kwargs: Dict[str, object],
-    op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]],
-) -> Tuple[OpSchema, bool, Optional[OutputSharding]]:
-    # unwrap the args/kwargs schema
-    args_schema = tree_map(unwrap_schema, args)
-    kwargs_schema = tree_map(unwrap_schema, kwargs)
-
-    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
-
-    if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
-        print(f"{op_call}({op_schema})")
-        local_shapes = tree_map(
-            lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
-            args,
-        )
-        print(f"    local shapes: {local_shapes}")
-
-    op_key = str(op_call)
-    sharding_prop_func = op_to_rules.get(op_key, None)
-
-    if sharding_prop_func is None:
-        # step 1. If there's not even one sharding rule
-        # implemented for the operator, we fall back to
-        # local tensor compute, this is wront currently
-        # we will change the behavior to reshard to full
-        # replicate and do the computatation
-        if not _ENABLE_FALLBACK:
-            raise NotImplementedError(
-                f"Operator {op_key} does not have a DistributedTensor rule registered."
-            )
-        else:
-            return op_schema, False, None
-
-    # step 2. there's sharding propagation rule, run
-    # sharding propagation to get output sharding
-    try:
-        output_sharding = sharding_prop_func(op_schema)
-    except Exception as e:
-        raise RuntimeError(
-            f"Sharding propagation failed on op {op_key}.\n"
-            f"Input schema: {op_schema}.\n"
-            f"Error: {e}"
-        ) from e
-
-    # step 3. if can't get output_spec from sharding
-    # propagation (i.e. no rules apply for input
-    # placements), we do auto redistribute on inputs
-    # to get an eligble input, which we will pick a
-    # target schema base on the redistribute cost
-    # TODO: implement full auto distribute with a
-    # simple cost estimation model
-    if output_sharding.output_spec is None:
-        # do auto distributed/boxing here
-        if output_sharding.schema_suggestions is not None:
-            # pick the first suggestion for now,
-            target_schema = output_sharding.schema_suggestions[0]
-            # run sharding propagation again with target schema
-            output_sharding = sharding_prop_func(target_schema)
-
-            return target_schema, True, output_sharding
-
-        else:
-            raise RuntimeError(
-                f"Sharding propagation failed on op {op_key}!"
-                f"Input schema: {op_schema}."
-                f"Failed reason: {output_sharding.failed_reason}"
-            )
-    else:
-        return op_schema, False, output_sharding
-
-
 def operator_dispatch(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
-    op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]],
+    sharding_propagator: ShardingPropagator,
     custom_dispatch_ops: Dict[str, Callable[..., object]],
 ) -> object:
     # first we need to lift some private aten aliases to public calls
@@ -196,29 +122,54 @@ def operator_dispatch(
         # dispatch to user defined custom distributed tensor ops
         return custom_dispatch_ops[str(op_call)](*args, **kwargs)
 
-    target_schema, redistribute, output_sharding = propagate_input_sharding(
-        op_call, args, kwargs, op_to_rules
-    )
+    # unwrap the args/kwargs schema
+    args_schema = tree_map(unwrap_schema, args)
+    kwargs_schema = tree_map(unwrap_schema, kwargs)
 
-    if output_sharding is None:
-        # default to local tensor ops, this is wrong
-        # but we use it now to enable more tensor point-wise ops
-        # TODO: delete this and use replicate (all_gather) as
-        # the default fallback.
-        tensor_args = tree_map(unwrap_local_tensor, args)
-        tensor_kwargs = tree_map(unwrap_local_tensor, kwargs)
-        local_results = op_call(*tensor_args, **tensor_kwargs)
-        return wrap(local_results, target_schema.args_spec[0])
+    op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
+
+    if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
+        print(f"OpSchema({op_schema})")
+        local_shapes = tree_map(
+            lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
+            args,
+        )
+        print(f"    local shapes: {local_shapes}")
+
+    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    needs_redistribute = False
+    target_schema = op_schema
+
+    if output_sharding.output_spec is None:
+        if output_sharding.schema_suggestions is None:
+            raise RuntimeError(
+                f"Sharding propagation failed on op {op_call}!"
+                f"Input schema: {op_schema}."
+                f"Failed reason: {output_sharding.failed_reason}"
+            )
+        else:
+            needs_redistribute = True
+            # we do auto redistribute on inputs if necessary
+            # to get an eligble input, which we will pick a
+            # target schema base on the redistribute cost.
+            # For now we simply pick the first suggestion.
+            # TODO: implement full auto distribute with a
+            # simple cost estimation model
+            target_schema = output_sharding.schema_suggestions[0]
+            # run sharding propagation again with target schema
+            output_sharding = sharding_propagator.propagate_op_sharding(
+                op_call, target_schema
+            )
 
     local_tensor_args = pack_args_kwargs_with_local_tensor(
         args,
         target_schema.args_schema,
-        redistribute_with_schema=redistribute,
+        redistribute_with_schema=needs_redistribute,
     )
     local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
         kwargs,
         target_schema.kwargs_schema,
-        redistribute_with_schema=redistribute,
+        redistribute_with_schema=needs_redistribute,
     )
 
     # run local op computation with potentially modified args/kwargs
