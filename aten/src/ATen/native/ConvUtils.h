@@ -336,13 +336,15 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
 }
 
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
     return false;
   }
+
+  auto input_memory_format = input.suggest_memory_format();
+  auto weight_memory_format = weight.suggest_memory_format();
 
   bool can_use_miopen_channels_last_2d = (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
