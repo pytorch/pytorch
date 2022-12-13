@@ -190,8 +190,11 @@ class Checkpointable(ABC, Generic[T]):
         pass
 
 
-class GuardsCheckpointState(NamedTuple):
+class GuardsCheckpointState:
     dynamo_guards: Set[Guard] = set()
+
+    def __init__(self, dynamo_guards):
+        self.dynamo_guards = dynamo_guards
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
@@ -199,7 +202,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards: Set[Guard] = set()
 
     def copy_graphstate(self):
-        return GuardsCheckpointState(dynamo_guards=set(self.dynamo_guards))
+        return GuardsCheckpointState(set(self.dynamo_guards))
 
     def restore_graphstate(self, state):
         assert isinstance(state, GuardsCheckpointState)

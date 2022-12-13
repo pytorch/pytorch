@@ -258,9 +258,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
+        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
-            self.tracing_context.guards_context.copy_graphstate(),
+            guards_graph_state,
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
