@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -312,7 +312,7 @@ class WrapperCodeGen(CodeGen):
             self.write_get_cuda_stream
         )
 
-    @functools.lru_cache(None)
+    @cache_on_self
     def get_output_refs(self):
         return [x.codegen_reference() for x in V.graph.graph_outputs]
 
@@ -562,7 +562,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
 
-    @functools.lru_cache(None)
+    @cache_on_self
     def get_output_refs(self):
         def has_cpp_codegen_func(x):
             return hasattr(x, "cpp_wrapper_codegen_reference") and callable(
