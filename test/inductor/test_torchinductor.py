@@ -1481,7 +1481,9 @@ class CommonTemplate:
                 super(Model, self).__init__()
 
             def forward(self, attention_scores):
-                extended_attention_mask = torch.ones(8, 1, 1, 512)
+                extended_attention_mask = torch.ones(
+                    8, 1, 1, 512, device=attention_scores.device
+                )
                 attention_scores = attention_scores + extended_attention_mask
 
                 return attention_scores
