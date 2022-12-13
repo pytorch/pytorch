@@ -76,10 +76,19 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.is_stack_trace_overridden():
-            proxy.node.meta = fx_traceback.get_current_meta()
-            stacks = fx_traceback.format_stack()
-            proxy.node.stack_trace = '\n'.join(reversed(stacks))
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            # Explicitly set the stack_trace and nn_module_stack on the node.meta
+            # If other meta fields are needed, they can be added here
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                proxy.node.stack_trace = stack_trace
+
+            nn_module_stack = current_meta.get("nn_module_stack")
+            if nn_module_stack:
+                proxy.node.meta["nn_module_stack"] = nn_module_stack
+
         elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
