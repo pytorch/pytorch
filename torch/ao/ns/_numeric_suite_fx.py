@@ -479,9 +479,9 @@ def add_loggers(
     Instrument model A and model B with loggers.
 
     Args:
-        model_name_a: string name of model A to use in results
+        name_a: string name of model A to use in results
         model_a: model A
-        model_name_b: string name of model B to use in results
+        name_b: string name of model B to use in results
         model_b: model B
         logger_cls: class of Logger to use
         base_name_to_sets_of_related_ops: optional override of subgraph base nodes, subject to change
@@ -635,9 +635,9 @@ def add_shadow_loggers(
     Instrument model A and model B with shadow loggers.
 
     Args:
-        model_name_a: string name of model A to use in results
+        name_a: string name of model A to use in results
         model_a: model A
-        model_name_b: string name of model B to use in results
+        name_b: string name of model B to use in results
         model_b: model B
         logger_cls: class of Logger to use
         should_log_inputs: whether to log inputs

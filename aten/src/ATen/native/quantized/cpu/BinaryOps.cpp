@@ -22,6 +22,7 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -441,7 +442,7 @@ Tensor qadd_scalar_out(Tensor qa, const Scalar& b, Tensor out) {
 // all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
-  return qadd_scalar(qa, b.item());
+  return qadd_scalar(std::move(qa), b.item());
 }
 
 // `torch.jit.trace` will trace Scalar as Tensor
@@ -449,7 +450,7 @@ Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
 // all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
-  return qadd_scalar_out(qa, b.item(), out);
+  return qadd_scalar_out(std::move(qa), b.item(), std::move(out));
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
@@ -483,7 +484,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }  // namespace
 
 Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
-  return qadd<false>(qa, qb, scale, zero_point);
+  return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 
 }}  // namespace at::native
