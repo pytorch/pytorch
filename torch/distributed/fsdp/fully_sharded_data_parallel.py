@@ -1144,6 +1144,57 @@ class FullyShardedDataParallel(nn.Module):
             )
 
     @staticmethod
+    def _optim_state_dict_impl(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        optim_state_dict: Dict[str, Any],
+        optim_input: Optional[
+            Union[
+                List[Dict[str, Any]],
+                Iterable[torch.nn.Parameter],
+            ]
+        ] = None,
+        rank0_only: bool = True,
+        group: Optional[dist.ProcessGroup] = None,
+        full_state_dict: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        The internal API that is used by all the optim_state_dict implementations.
+        """
+        if full_state_dict:
+            FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
+                model, True, rank0_only
+            )
+            FullyShardedDataParallel._warn_optim_input(optim_input)
+            using_optim_input = FullyShardedDataParallel._is_using_optim_input(
+                optim_input,
+                optim,
+            )
+        else:
+            use_optim_input = False
+            assert optim_input is None and not rank0_only
+            FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
+                model, False, False
+            )
+
+        use_orig_params = False
+        for module in FullyShardedDataParallel.fsdp_modules(model):
+            use_orig_params = module._use_orig_params
+            break
+
+        return _optim_state_dict(
+            model=model,
+            optim=optim,
+            optim_state_dict=optim_state_dict,
+            optim_input=optim_input,
+            rank0_only=rank0_only,
+            shard_state=not full_state_dict,
+            group=group,
+            using_optim_input=using_optim_input,
+            use_orig_params=use_orig_params,
+        )
+
+    @staticmethod
     def full_optim_state_dict(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -1202,27 +1253,14 @@ class FullyShardedDataParallel(nn.Module):
             :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=True``,
             then nonzero ranks return an empty :class:`dict`.
         """
-        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
-            model, True, rank0_only
-        )
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input,
-            optim,
-        )
-        use_orig_params: bool = False
-        for module in FullyShardedDataParallel.fsdp_modules(model):
-            use_orig_params = module._use_orig_params
-            break
-        return _optim_state_dict(
+        return _optim_state_dict_impl(
             model=model,
             optim=optim,
+            optim_state_dict=optim.state_dict(),
             optim_input=optim_input,
             rank0_only=rank0_only,
-            shard_state=False,
             group=group,
-            using_optim_input=using_optim_input,
-            use_orig_params=use_orig_params,
+            full_state_dict=True,
         )
 
     @staticmethod
@@ -1242,17 +1280,14 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: The returned state dict contains ``ShardedTensor`` and
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
-        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(
-            model, False, False
-        )
-        return _optim_state_dict(
+        return _optim_state_dict_impl(
             model=model,
             optim=optim,
-            optim_input=None,
-            rank0_only=False,
-            shard_state=True,
+            optim_state_dict=optim.state_dict(),
+            optim_input=optim_input,
+            rank0_only=rank0_only,
             group=group,
-            using_optim_input=False,
+            full_state_dict=True,
         )
 
     @staticmethod
@@ -1643,6 +1678,21 @@ class FullyShardedDataParallel(nn.Module):
             return new_osd
         return new_osd  # should never reach here
 
+    def _optim_state_dict_post_hook(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        optim_state_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return _optim_state_dict_impl(
+            model=model,
+            optim=optim,
+            optim_state_dict=optim_state_dict,
+            optim_input=None,
+            rank0_only=False,
+            group=None,
+            full_state_dict=True,
+        )
+
     @staticmethod
     def _optim_state_dict(
         model: torch.nn.Module,
@@ -1675,6 +1725,15 @@ class FullyShardedDataParallel(nn.Module):
         """
         return FullyShardedDataParallel.full_optim_state_dict(
             model, optim, rank0_only=False, group=group
+        )
+
+    def _load_optim_state_dict_pre_hook(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        optim_state_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return FullyShardedDataParallel.shard_full_optim_state_dict(
+            optim_state_dict, model=model, optim=optim
         )
 
     @staticmethod
