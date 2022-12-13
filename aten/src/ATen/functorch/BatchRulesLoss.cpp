@@ -59,7 +59,7 @@ Tensor binary_cross_entropy_plumbing(
     const Tensor& self, const Tensor& target,
     const optional<Tensor>& weight, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "binary_cross_entropy_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(target, cur_level)
@@ -99,7 +99,7 @@ Tensor binary_cross_entropy_backward_plumbing(
     const Tensor& grad, const Tensor& input, const Tensor& target,
     const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "binary_cross_entropy_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad, input, target, weight_opt}, cur_level)) {
@@ -258,7 +258,7 @@ at::Tensor nll_loss_backward_decomposition(
 
   Tensor weight_;
   if (weight && weight->defined()) {
-    auto self_ = self;
+    const auto& self_ = self;
     auto shape = weight->sizes();
     VmapDimVector new_shape(self_.dim(), 1);
     new_shape[channel_dim] = shape[0];

@@ -16,13 +16,17 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _is_fsdp_flattened,
 )
+from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    SaveForwardInputsModel,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
@@ -405,6 +409,39 @@ class TestFSDPRuntime(FSDPTest):
             self.assertEqual(len(composable_fqns), len(wrapped_fqns))
             for composable_fqn, wrapped_fqn in zip(composable_fqns, wrapped_fqns):
                 self.assertTrue(composable_fqn.endswith(wrapped_fqn))
+
+
+class TestMixedPrecision(FSDPTest):
+
+    @property
+    def world_size(self):
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_float16_on_one_submodule(self):
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(param_dtype=torch.float16)
+
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False,
+        ).cuda()
+        c1, c2 = model.c1, model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on one submodule and float32 on everything else
+        model.c2 = fully_shard(model.c2, mixed_precision=float16)
+        fsdp = fully_shard(model)
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "cannot assign 'torch.cuda.FloatTensor' as parameter 'weight'",
+        ):
+            # FIXME: fully_shard() does not support nested wrapping yet.
+            fsdp(x).sum().backward()
+
+            self.assertEqual(forward_inputs[model].dtype, torch.float32)
+            self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+            self.assertEqual(forward_inputs[c2].dtype, torch.float16)
 
 
 if __name__ == "__main__":
