@@ -13,6 +13,7 @@ from torch._functorch.vmap import (
     _broadcast_to_and_flatten,
     _create_batched_inputs,
 )
+from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import NamedTuple
 
 # autograd.Function technically runs before the regular PyTorch dispatcher.
@@ -80,6 +81,7 @@ custom_function_call = CustomFunctionPyOperator()
 # To "set up the autograd graph", we generate a _SingleLevelFunction
 # and apply it.
 @custom_function_call.py_impl(TransformType.Grad)
+@custom_function_call.py_impl(TransformType.Jvp)
 def custom_function_call_grad(interpreter, autograd_function, *operands):
     maybe_interpreter = interpreter
     level = maybe_interpreter.level()
@@ -95,7 +97,10 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
                 torch.Tensor,
                 lambda x: _unwrap_for_grad(x, level),
                 operands)
-            with torch.enable_grad(), maybe_interpreter.lower():
+            # Both enable_grad() and _set_fwd_grad_enabled() are necessary no matter
+            # the transform. _SingleLevelFunction will turn off both fwd and bwd
+            # gradient computation and we need to turn it back on here.
+            with torch.enable_grad(), _set_fwd_grad_enabled(True), maybe_interpreter.lower():
                 output = custom_function_call(autograd_function, *unwrapped_operands)
 
             return pytree.tree_map_only(
@@ -108,9 +113,16 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
             ctx.mark_dirty = mark_dirty_error
             return autograd_function.setup_context(ctx, outputs, *operands)
 
+        # backward is only used if the transform is TransformType.Grad
         @staticmethod
         def backward(ctx, *grads):
             result = autograd_function.backward(ctx, *grads)
+            return result
+
+        # jvp is only used if the transform is TransformType.Jvp
+        @staticmethod
+        def jvp(ctx, *tangents):
+            result = autograd_function.jvp(ctx, *tangents)
             return result
 
     with enable_autograd_function():
@@ -231,11 +243,6 @@ def wrap_batched(args, bdims, level):
     assert flat_bdims is not None
     result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
     return result
-
-
-@custom_function_call.py_impl(TransformType.Jvp)
-def custom_function_call_jvp(interpreter, autograd_function, *operands):
-    raise RuntimeError("NYI: jvp rule for custom_function_call")
 
 
 @custom_function_call.py_impl(TransformType.Functionalize)
