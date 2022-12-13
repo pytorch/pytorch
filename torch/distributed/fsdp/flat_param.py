@@ -169,7 +169,7 @@ class FlatParameter(nn.Parameter):
             depend on its existence in the future.
         _comm_module_prefix (str): Module name prefix starting from ``module``
             to ``comm_module`` as passed to :class:`FlatParamHandle`, including
-            a trailing '.'.
+            a trailing '.' if this is not the empty string.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
 
