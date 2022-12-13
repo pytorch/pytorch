@@ -645,7 +645,9 @@ def _pre_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    fsdp_state: _FSDPState = module
+    state = _get_module_fsdp_state(module)
+    assert state is not None, "state_dict_hook get a module without _FSDPState"
+    fsdp_state = cast(_FSDPState, state)
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,

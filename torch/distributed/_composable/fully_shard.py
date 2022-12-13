@@ -52,7 +52,9 @@ def fully_shard(
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
-    state = _init_process_group_state(state, process_group, ShardingStrategy.FULL_SHARD, policy)
+    state = _init_process_group_state(
+        state, process_group, ShardingStrategy.FULL_SHARD, policy
+    )
     limit_all_gathers = True
     use_orig_params = True
     backward_prefetch_limit = 1
@@ -84,6 +86,9 @@ def fully_shard(
     _register_post_forward_hooks(state, modules)
     _register_root_pre_forward_hook(state, module)  # prepend last
     for submodule in module.modules():
-        if state._ignored_modules is not None and submodule not in state._ignored_modules:
+        if (
+            state._ignored_modules is not None
+            and submodule not in state._ignored_modules
+        ):
             _insert_module_state(submodule, state)
     return module
