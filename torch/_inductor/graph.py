@@ -97,6 +97,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
+        self.scheduler = None
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
@@ -272,6 +273,7 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
+                log.exception("Error from lowering")
                 raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
