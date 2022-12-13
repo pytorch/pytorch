@@ -11,12 +11,10 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import (
     spawn_threads_and_init_comms,
-    MultiThreadedTestCase
+    MultiThreadedTestCase,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    skip_unless_torch_gpu,
-)
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -129,7 +127,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
-    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(DEFAULT_WORLD_SIZE)
     def test_random_seed_consistency(self):
         device = f"cuda:{self.rank}"
         self_tensor = torch.rand(3, 3, device=device)
