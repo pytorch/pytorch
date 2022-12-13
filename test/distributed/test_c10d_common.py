@@ -1633,6 +1633,17 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_allgather_into_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            output_tensor = torch.cat(out_tensors, dim=0)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, output_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_reduce_scatter_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             in_tensors = [tensor.clone() + i for i in range(group.size())]
