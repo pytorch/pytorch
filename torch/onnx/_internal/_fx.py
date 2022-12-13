@@ -18,6 +18,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
 from torch.onnx._internal import jit_utils, registration
+from torch.utils._pytree import tree_flatten
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -265,7 +266,6 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     "Unknown call_function target: {}".format(node.target)
                 )
         elif node.op == "output":
-
             def register_outputs(
                 ts_outputs: Union[torch._C.Value, Tuple[torch._C.Value, ...]]
             ):
@@ -282,7 +282,10 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 ts_value_or_ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
                 register_outputs(ts_value_or_ts_value_tuple)
             else:
-                for arg in node.args[0]:
+                # ONNX can represent collection types (e.g., dictionary, tuple of tuple of
+                # tensor, etc), we flatten the collection and register each element as output.
+                flat_args, _ = tree_flatten(node.args[0])
+                for arg in flat_args:
                     assert isinstance(
                         arg, torch.fx.Node
                     ), f"ts_output must be a torch.fx.Node, not {type(arg)}"
