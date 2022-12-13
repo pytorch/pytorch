@@ -335,6 +335,11 @@ class TORCH_API LazyGraphExecutor {
   // Waits for this SyncTensorCollection's device barrier and acquire the lock.
   virtual void TensorCollectionBarrier(SyncTensorCollection* coll);
 
+  // One can override to insert your own profiler.
+  virtual PostOrderData RunPostOrder(
+      const std::vector<Value>& ir_values,
+      SyncTensorCollection* coll);
+
  private:
   struct CompilationResult {
     BackendDevice device;
@@ -365,10 +370,6 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<size_t> indices,
       std::vector<Value>& ir_values,
       std::vector<BackendDataPtr>& tensor_data_vec);
-
-  PostOrderData RunPostOrder(
-      const std::vector<Value>& ir_values,
-      SyncTensorCollection* coll);
 
   std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,
