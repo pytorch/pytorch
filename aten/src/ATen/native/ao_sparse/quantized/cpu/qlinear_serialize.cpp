@@ -5,6 +5,8 @@
 #endif
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+
+#include <utility>
 #endif
 
 namespace ao {
@@ -190,7 +192,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_.begin() +
             output_channels_, // Don't go to the end because of padding
         w_zero_points_compact.data_ptr<int8_t>(),
-        subtract_128);
+        std::move(subtract_128));
   } else {
     TORCH_CHECK(false, "Unsupported quantization scheme.");
   }

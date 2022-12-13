@@ -1,7 +1,7 @@
 #include <ATen/core/Tensor.h>
-#include <ATen/BatchedTensorImpl.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/VmapTransforms.h>
+#include <ATen/LegacyVmapTransforms.h>
 
 namespace at { namespace native {
 
