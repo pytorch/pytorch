@@ -1000,6 +1000,20 @@ Custom API Example::
   mq = torch.ao.quantization.quantize_fx.convert_fx(
       mp, convert_custom_config=convert_custom_config_dict)
 
+Deciding Which Quantization Techniques to Use in Your Use Case
+--------------------------------------------------------------
+
+As we've described above, there are 2 different quantization modes (Eager and Fx) each which can be used
+to apply 3 different quantization techniques (static and dynamic quantization as well as QAT). It can be difficult
+to decide for any given use case and so this section will focus on how to decide which decisions to make when deciding how to apply quantization to your model.
+
+The first question is whether to use Eager Mode Quantization of Fx Graph Mode Quantization. In general, this boils down to whether your model is (or can be made) Fx traceable.
+ The Fx quantization APIs are generally easier to use, have more features and have more active development.
+
+
+
+
+
 Best Practices
 --------------
 
@@ -1012,17 +1026,20 @@ you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.q
 Frequently Asked Questions
 --------------------------
 
-1. How can I do quantized inference on GPU?:
+How can I do quantized inference on GPU?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
    We don't have official GPU support yet, but this is an area of active development, you can find more information
    `here <https://github.com/pytorch/pytorch/issues/87395>`_
 
-2. Where can I get ONNX support for my quantized model?:
+Where can I get ONNX support for my quantized model?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
    You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
    or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
 
-3. How can I use quantization with LSTM's?:
+How can I use quantization with LSTM's
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
    LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
    Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782>`_
