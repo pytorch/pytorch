@@ -1,10 +1,10 @@
 import copy
+import inspect
 import itertools
 import operator
 from typing import Callable, Dict, Tuple, Union
 
 import functorch
-import inspect
 import onnx
 
 import torch
@@ -117,16 +117,13 @@ def _retrieve_or_wrap_scalar_as_constant(
     elif ts_value is None:
         ts_value = g.op("prim::Constant")
         ts_value.setType(torch._C.OptionalType.ofTensor())
-    elif isinstance(ts_value, list) and all(
-        isinstance(val, int) for val in ts_value
-    ):
+    elif isinstance(ts_value, list) and all(isinstance(val, int) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
-    elif isinstance(ts_value, list) and all(
-        isinstance(val, float) for val in ts_value
-    ):
+    elif isinstance(ts_value, list) and all(isinstance(val, float) for val in ts_value):
         ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
     elif isinstance(ts_value, torch.dtype):
         from torch.onnx import _type_utils
+
         ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
         raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
@@ -165,6 +162,7 @@ def _fill_tensor_types(ts_values, expected_values):
     flat_expected_values, _ = tree_flatten(expected_values)
     for ts_value, expected_value in zip(flat_ts_values, flat_expected_values):
         ts_value.setType(torch._C.TensorType.create_from_tensor(expected_value))
+
 
 def _export_fx_to_ts(fx_module_with_metadata):
     # TODO(wechi): To get rid of TorchScript dependency,
@@ -260,7 +258,10 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     )
                     # Map FX inputs to ONNX inputs and fill optional inputs with default values.
                     ts_args = _wrap_fx_args_as_ts_args(
-                        graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
+                        graph_context,
+                        fx_module_with_metadata,
+                        node,
+                        fx_name_to_ts_value,
                     )
                     v = symbolic_fn(graph_context, *ts_args)
                     assert (
@@ -274,6 +275,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     "Unknown call_function target: {}".format(node.target)
                 )
         elif node.op == "output":
+
             def register_outputs(
                 ts_outputs: Union[torch._C.Value, Tuple[torch._C.Value, ...]]
             ):
@@ -401,7 +403,12 @@ def _export(
     return model_proto
 
 
-def export(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True, **kwargs):
+def export(
+    fn: Union[torch.nn.Module, Callable],
+    *args,
+    use_binary_format: bool = True,
+    **kwargs,
+):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -417,14 +424,16 @@ def export(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool 
     # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
     # to _export.
     return _export(
-            graph_module,
-            *args,
-            decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
-            use_binary_format=use_binary_format,
-        )
+        graph_module,
+        *args,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        use_binary_format=use_binary_format,
+    )
 
 
-def export_without_kwargs(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True):
+def export_without_kwargs(
+    fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True
+):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -432,12 +441,14 @@ def export_without_kwargs(fn: Union[torch.nn.Module, Callable], *args, use_binar
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
-    graph_module = make_fx(fn, decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(*args)
+    graph_module = make_fx(fn, decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(
+        *args
+    )
     # Export FX graph to ONNX ModelProto.
     #
     return _export(
-            graph_module,
-            *args,
-            decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
-            use_binary_format=use_binary_format,
-        )
+        graph_module,
+        *args,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        use_binary_format=use_binary_format,
+    )
