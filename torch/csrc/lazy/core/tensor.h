@@ -42,7 +42,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     Data(BackendDevice device)
         : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
-    ~Data();
+    virtual ~Data();
 
     BackendDataPtr handle;
     Value ir_value;
@@ -68,6 +68,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // TODO(alanwaketan): This is a temporarily change to make XLA LTC migration
   // easier. Restore it back to delete.
   LazyTensor() = default;
+
+  virtual ~LazyTensor() = default;
 
   size_t generation() const {
     return data()->generation;

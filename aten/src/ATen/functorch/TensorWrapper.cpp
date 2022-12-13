@@ -58,19 +58,22 @@ void dumpTensorCout(const Tensor& tensor) {
   std::cout << std::endl;
 }
 
-c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, bool should_be_alive) {
+c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
   auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
       DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
-  if (should_be_alive) {
-    return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, getLifeHandleForLevel(level));
-  } else {
-    return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, std::make_shared<bool>(false));
-  }
+  return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, life_handle);
 }
 
-Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable) {
+// use makeTensorWrapper instead to avoid potential footguns:
+// unsafeMakeTensorWrapper doesn't check that level and life_handle
+// refer to the same interpreter
+static Tensor unsafeMakeTensorWrapper(
+    const Tensor& tensor,
+    int64_t level,
+    bool is_immutable,
+    const std::shared_ptr<bool>& life_handle) {
   auto wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     TORCH_INTERNAL_ASSERT(wrapped->level() < level);
@@ -80,11 +83,29 @@ Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable)
       DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
-  auto life_handle = getLifeHandleForLevel(level);
-  auto result = at::detail::make_tensor<TensorWrapper>(key_set, tensor, level, std::move(life_handle), is_immutable);
+  auto result = at::detail::make_tensor<TensorWrapper>(
+      key_set, tensor, level, life_handle, is_immutable);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
   return result;
 }
+
+Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable) {
+  auto life_handle = getLifeHandleForLevel(level);
+  return unsafeMakeTensorWrapper(
+      tensor,
+      level,
+      is_immutable,
+      getLifeHandleForLevel(level));
+}
+
+Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& interpreter, bool is_immutable) {
+  return unsafeMakeTensorWrapper(
+      tensor,
+      interpreter.level(),
+      is_immutable,
+      interpreter.is_alive_ptr());
+}
+
 
 bool TensorWrapper::is_alive() const {
   return *is_alive_;
@@ -93,7 +114,7 @@ bool TensorWrapper::is_alive() const {
 c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
-  auto dest_impl = makeTensorWrapperPtr(value(), level_, is_alive());
+  auto dest_impl = makeTensorWrapperPtr(value(), level_, is_alive_);
   dest_impl->set_version_counter(version_counter);
 
   // TODO: is this even right?
@@ -104,7 +125,7 @@ c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
 c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  auto dest_impl = makeTensorWrapperPtr(value(), level_, is_alive());
+  auto dest_impl = makeTensorWrapperPtr(value(), level_, is_alive_);
   dest_impl->set_version_counter(version_counter);
 
   // TODO: is this even right?
