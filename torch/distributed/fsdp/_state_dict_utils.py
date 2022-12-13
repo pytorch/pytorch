@@ -706,6 +706,7 @@ def _post_load_state_dict_hook(
     _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
 
 
+@no_type_check
 def _register_state_dict_pre_hooks(state: _FSDPState) -> None:
     """Registers the pre-save state dict hooks."""
     if not _is_composable(state):
@@ -719,6 +720,7 @@ def _register_state_dict_pre_hooks(state: _FSDPState) -> None:
         )
 
 
+@no_type_check
 def _register_state_dict_hooks(state: _FSDPState) -> None:
     """Registers the post-save state dict hooks."""
     if not _is_composable(state):
@@ -730,6 +732,7 @@ def _register_state_dict_hooks(state: _FSDPState) -> None:
         )
 
 
+@no_type_check
 def _register_load_state_dict_pre_hooks(state: _FSDPState) -> None:
     """Registers the pre-load state dict hooks."""
     if not _is_composable(state):
@@ -743,6 +746,7 @@ def _register_load_state_dict_pre_hooks(state: _FSDPState) -> None:
         )
 
 
+@no_type_check
 def _register_load_state_dict_post_hooks(state: _FSDPState) -> None:
     """Registers the post-load state dict hooks."""
     if not _is_composable(state):
