@@ -12,9 +12,11 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     spawn_threads_and_init_comms,
     MultiThreadedTestCase
-
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    skip_unless_torch_gpu,
+)
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -127,9 +129,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
             dist.all_reduce(output, op=ReduceOp.MAX)
 
+    @skip_unless_torch_gpu
     def test_random_seed_consistency(self):
-        rng = torch.Generator()  # TODO: we need to hide this instantiation from test
-        self_tensor = torch.rand(3, 3, generator=rng)  # TODO: we need to hide generator=rng from test
+        device = f"cuda:{self.rank}"
+        self_tensor = torch.rand(3, 3, device=device)
         rank_0_tensor = self_tensor.clone()
         dist.broadcast(rank_0_tensor, src=0)
         self.assertEqual(rank_0_tensor, self_tensor)
