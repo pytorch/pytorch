@@ -1939,7 +1939,7 @@ def meta__scaled_dot_product_efficient(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
-    logsumexp_dim = math.ceil(query.size(2) / 32) * 32 if compute_log_sumexp else 0
+    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
         (B, num_heads, logsumexp_dim),
         dtype=torch.float,
