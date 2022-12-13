@@ -1697,7 +1697,9 @@ class FullyShardedDataParallel(nn.Module):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
-                the default process group. (Default: ``None``)
+            group (dist.ProcessGroup): Model's process group across which parameters
+                are sharded or ``None`` if using the default process group. (
+                Default: ``None``)
 
         Returns:
             Dict[str, Any]: A :class:`dict` containing the optimizer state for
@@ -1731,8 +1733,9 @@ class FullyShardedDataParallel(nn.Module):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
-            group (dist.ProcessGroup): Model's process group or ``None`` if using
-                the default process group. (Default: ``None``)
+            group (dist.ProcessGroup): Model's process group across which parameters
+                are sharded or ``None`` if using the default process group. (
+                Default: ``None``)
         """
         optim_state_dict = FullyShardedDataParallel.shard_full_optim_state_dict(
             state_dict, model=model, optim=optim
