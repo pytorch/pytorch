@@ -14,13 +14,13 @@ endif()
 # --- project
 
 set(NVFUSER_ROOT ${PROJECT_SOURCE_DIR})
-set(NVFUSER_SRCS)
-set(NVFUSER_SRCS_DIR "${NVFUSER_ROOT}")
-set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
+set(NVFUSER_SRCS_DIR "${NVFUSER_ROOT}/csrc")
+set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 # --- build nvfuser_codegen library
 
+set(NVFUSER_SRCS)
 set(NVFUSER_CODEGEN ${PROJECT_NAME}_codegen)
 list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/arith.cpp
@@ -153,8 +153,7 @@ if(NOT MSVC)
   target_compile_options(${NVFUSER_CODEGEN} PRIVATE -Wno-unused-variable)
 endif()
 target_include_directories(${NVFUSER_CODEGEN}
-                           #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
-                           PRIVATE ${TORCH_ROOT}) # replace this one with nvfuser_srcs_dir?!
+                           PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -164,13 +163,13 @@ if(BUILD_PYTHON)
   set(NVFUSER "${PROJECT_NAME}")
   #find_package(pybind11 REQUIRED)
 
-  set(NVFUSER_SRCS)
-  list(APPEND NVFUSER_SRCS
+  set(NVFUSER_PYTHON_SRCS)
+  list(APPEND NVFUSER_PYTHON_SRCS
       ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
       ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_extension.cpp
   )
 
-  add_library(${NVFUSER} MODULE ${NVFUSER_SRCS})
+  add_library(${NVFUSER} MODULE ${NVFUSER_PYTHON_SRCS})
   if(NOT USE_ROCM)
     target_compile_options(${NVFUSER} PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
     # NB: This must be target_compile_definitions, not target_compile_options,
@@ -189,8 +188,7 @@ if(BUILD_PYTHON)
   target_link_libraries(${NVFUSER} PRIVATE ${NVFUSER_CODEGEN})
   target_link_libraries(${NVFUSER} PRIVATE torch torch_python ${TORCHLIB_FLAVOR})
   target_link_libraries(${NVFUSER} PRIVATE pybind::pybind11)
-  target_include_directories(${NVFUSER}
-                         PRIVATE ${TORCH_ROOT})
+  target_include_directories(${NVFUSER} PRIVATE ${TORCH_ROOT})
   target_compile_definitions(${NVFUSER} PRIVATE EXTENSION_NAME=_C)
   target_compile_options(${NVFUSER} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
@@ -211,7 +209,7 @@ if(BUILD_PYTHON)
     message(STATUS "somehow this is happening")
     set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
-  install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION "${TORCH_ROOT}/nvfuser")
+  install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
 # --- generate runtime files
@@ -285,9 +283,9 @@ target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/inclu
 if(USE_CUDA)
   set(NVFUSER_TESTS "${PROJECT_NAME}_tests")
   set(JIT_TEST_SRCS)
-  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
-  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
-  list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_record.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
+  list(APPEND JIT_TEST_SRCS ${NVFUSER_SRCS_DIR}/python_frontend/test/test_nvfuser_fusion_record.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu1.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu2.cpp)
   list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu3.cpp)
