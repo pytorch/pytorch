@@ -2,8 +2,9 @@ import dataclasses
 import enum
 import logging
 import weakref
+from abc import ABC
 from contextlib import contextmanager
-from typing import Callable, List, NamedTuple, Optional, Set
+from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
 # TODO(voz): Stolen pattern, not sure why this is the case,
 # but mypy complains.
@@ -178,9 +179,31 @@ class Guard:
         self.obj_weakref = obj_weakref
 
 
-class GuardsContext:
+T = TypeVar("T")
+
+
+class Checkpointable(ABC):
+    def copy_graphstate(self) -> Generic[T]:
+        pass
+
+    def restore_graphstate(self, state: Generic[T]):
+        pass
+
+
+class GuardsCheckpointState(NamedTuple):
+    dynamo_guards: Set[Guard] = set()
+
+
+class GuardsContext(Checkpointable):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+
+    def copy_graphstate(self):
+        return GuardsCheckpointState(dynamo_guards=set(self.dynamo_guards))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, GuardsCheckpointState)
+        self.dynamo_guards = state.dynamo_guards
 
 
 _CURRENT_TRACING_CONTEXT = None

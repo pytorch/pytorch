@@ -25,7 +25,13 @@ from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
-from torch._guards import Guard, tracing, TracingContext
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    tracing,
+    TracingContext,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -70,7 +76,7 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
-    guards: Set[Guard]
+    guards_tate: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
@@ -164,7 +170,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer):
+class OutputGraph(fx.Tracer, Checkpointable):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -249,7 +255,7 @@ class OutputGraph(fx.Tracer):
         assert self.nn_modules is not None
         state = OutputGraphState(
             list(self.graphargs),
-            set(self.guards),
+            self.tracing_context.guards_context.copy_graphstate(),
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
@@ -262,28 +268,13 @@ class OutputGraph(fx.Tracer):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
-            # TODO(voz): Unify checkpointing arch, do checkpointing right
-            # instead of restore graphstate having to write to the context.
-            #
-            # A note on long term direction:
-            # The checkpointing system should know how to restore anything correctly, and not ride on
-            # output graph. Instead, it should be a relatively generic system that can demarcate generations
-            # and do save() to snapshot the current state and increment the generation count, or restore()
-            # to go back to a prior generation. The application of state onto existing structures
-            # should be a detail of registrants with the system, and the system should be vaguely ignorant of
-            # how dependent objects are restored.
-            #
-            # Ex: OutputGraph would register values with the checkpointing system, and when the system calls
-            # restore(), it would do the equivalent of this fn. TracingContext would get hit at the same exact time
-            # with restore(), and so would also restore the guards, allowing dynamo to just make sure the relationship
-            # is preserved, instead of having to handle restoration across systems by brindging from OutputGraph
-            # to TracingContext as we do today.
-            self.tracing_context.guards_context.dynamo_guards,
+            guards_state,
             self.nn_modules,
             self.side_effects,
             self.timestamp,
             self.name_to_input,
         ) = state
+        self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):

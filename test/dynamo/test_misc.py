@@ -3131,7 +3131,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Assure that the saved state is valid
         self.assertEqual(state.timestamp, 4)
-        self.assertEqual(state.guards, guards)
 
         # Ensure that the guards reflect the expected state
         self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
