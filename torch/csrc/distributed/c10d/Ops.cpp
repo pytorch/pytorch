@@ -89,11 +89,13 @@ allgather_(
           output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> _allgather_base_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  auto work = process_group->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
 c10::intrusive_ptr<Work> allgather_coalesced_(
@@ -397,12 +399,12 @@ c10::intrusive_ptr<Work> _allgather_base(
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::_allgather_base_", "")
-                       .typed<c10::intrusive_ptr<Work>(
+                       .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                            at::Tensor&,
                            at::Tensor&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
-  return op.call(output_tensor, input_tensor, process_group);
+  return std::get<1>(op.call(output_tensor, input_tensor, process_group));
 }
 
 c10::intrusive_ptr<Work> allgather_coalesced(
@@ -868,18 +870,22 @@ allgather_cuda_(
           output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> _allgather_base_cpu_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  auto work = process_group->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
-c10::intrusive_ptr<Work> _allgather_base_cuda_(
+std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cuda_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  auto work = process_group->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
 c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
