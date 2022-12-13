@@ -2,6 +2,7 @@
 
 import torch
 import torch.fx as fx
+from torch.fx import symbolic_trace
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.infra.pass_manager import (
     _topological_sort_passes,
@@ -9,6 +10,7 @@ from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
 )
+from torch.fx.passes.utils.common import compare_graphs
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -232,3 +234,18 @@ class TestPassManager(TestCase):
         error_msg = "pass_fail.*ReplaceAddWithMulPass.*replace_mul_with_div_pass.*ReplaceDivWithSubPass.*replace_sub_with_add_pass"
         with self.assertRaisesRegex(Exception, error_msg):
             pm(traced_m)
+
+    def test_match_non_used_placeholder(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x
+
+        m = MyModule()
+        graph_module: torch.fx.GraphModule = symbolic_trace(m)
+        is_matched = compare_graphs(
+            graph_module.graph, graph_module.graph
+        )
+        self.assertTrue(is_matched)

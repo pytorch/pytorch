@@ -72,7 +72,7 @@ class SubgraphMatcher:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
 
         for node in pattern.nodes:
-            if node.op != "output":
+            if node.op != "output" and node.op != "placeholder":
                 assert len(node.users) > 0, \
                        "SubgraphMatcher cannot be initialized with an pattern with dead code"
 
