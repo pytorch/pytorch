@@ -1,29 +1,28 @@
 from typing import Callable, Dict
 
-import torch
+from torch._ops import OpOverload
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 
 
 class ShardingPropagator(object):
     def __init__(self) -> None:
-        self.op_to_rules: Dict[str, Callable[[OpSchema], OutputSharding]] = {}
+        self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
 
     def register_sharding_prop_rule(
-        self, op_key: str, rule_func: Callable[[OpSchema], OutputSharding]
+        self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
     ):
         """
         Register a sharding propagation rule for an operator.
         """
-        self.op_to_rules[op_key] = rule_func
+        self.op_to_rules[op_overload] = rule_func
 
     def propagate_op_sharding(
-        self, op_overload: torch._ops.OpOverload, op_schema: OpSchema
+        self, op_overload: OpOverload, op_schema: OpSchema
     ) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        op_key = str(op_overload)
-        sharding_prop_func = self.op_to_rules.get(op_key, None)
+        sharding_prop_func = self.op_to_rules.get(op_overload, None)
 
         if sharding_prop_func is None:
             # step 1. If there's not even one sharding rule
@@ -32,7 +31,7 @@ class ShardingPropagator(object):
             # we will change the behavior to reshard to full
             # replicate and do the computatation
             raise NotImplementedError(
-                f"Operator {op_key} does not have a DistributedTensor rule registered."
+                f"Operator {op_overload} does not have a DistributedTensor rule registered."
             )
 
         # step 2. there's sharding propagation rule, run
@@ -80,7 +79,7 @@ class _CachingPropagator(ShardingPropagator):
         self.cached_prop_results: Dict[OpSchema, OutputSharding] = {}
 
     def propagate_op_sharding(
-        self, op_overload: torch._ops.OpOverload, op_schema: OpSchema
+        self, op_overload: OpOverload, op_schema: OpSchema
     ) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.

@@ -2,6 +2,7 @@
 from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
+
 from torch.distributed._tensor.api import (
     _Partial,
     DTensorSpec,
@@ -13,6 +14,8 @@ from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import register_prop_rule
 
+
+aten = torch.ops.aten
 
 # NOTE: the default propagation rule should apply for
 # any operator that does not return a DTensor, i.e.
@@ -42,9 +45,10 @@ def prop_create_like(op_schema: OpSchema) -> OutputSharding:
     return OutputSharding(output_spec=output_spec)
 
 
-# some tensor ops should not support shard, i.e. local_scalar_dense
-# shouldn't work for shard as it requires numel == 1
+@register_prop_rule(aten._local_scalar_dense.default)
 def no_shard_prop_rule(op_schema: OpSchema) -> OutputSharding:
+    # some tensor ops should not support shard, i.e. local_scalar_dense
+    # shouldn't work for shard as it requires numel == 1
     # by default prop the first arg spec
     tensor_spec = op_schema.args_spec[0]
     for placement in tensor_spec.placements:
@@ -77,31 +81,29 @@ def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
 
 
 default_prop_ops = [
-    "aten._to_copy.default",
-    "aten.clone.default",
-    "aten.contiguous.default",
-    "aten.copy_.default",
-    "aten.detach.default",
-    "aten.is_same_size.default",
-    "aten.new_empty_strided.default",
+    aten._to_copy.default,
+    aten.clone.default,
+    aten.contiguous.default,
+    aten.copy_.default,
+    aten.detach.default,
+    aten.is_same_size.default,
+    aten.new_empty_strided.default,
 ]
 
 create_like_ops = [
-    "aten.empty_like.default",
-    "aten.fill_.Scalar",
-    "aten.full_like.default",
-    "aten.ones_like.default",
-    "aten.zero_.default",
-    "aten.zeros_like.default",
+    aten.empty_like.default,
+    aten.fill_.Scalar,
+    aten.full_like.default,
+    aten.ones_like.default,
+    aten.zero_.default,
+    aten.zeros_like.default,
 ]
 
 new_factory_ops = [
-    "aten.new_full.default",
-    "aten.new_ones.default",
-    "aten.new_zeros.default",
+    aten.new_full.default,
+    aten.new_ones.default,
+    aten.new_zeros.default,
 ]
-
-no_shard_prop_ops = ["aten._local_scalar_dense.default"]
 
 for op in default_prop_ops:
     register_prop_rule(op)(default_prop_rule)
@@ -109,14 +111,11 @@ for op in default_prop_ops:
 for op in create_like_ops:
     register_prop_rule(op)(prop_create_like)
 
-for op in no_shard_prop_ops:
-    register_prop_rule(op)(no_shard_prop_rule)
-
 for op in new_factory_ops:
     register_prop_rule(op)(new_factory_rule)
 
 
-@register_prop_rule("aten.bucketize.Tensor")
+@register_prop_rule(aten.bucketize.Tensor)
 def prop_bucketize(op_schema: OpSchema) -> OutputSharding:
     """
     Point-wise on the first input (just propagate input sharding).
@@ -199,7 +198,7 @@ def _prop_all_but_dim(
     return out
 
 
-@register_prop_rule("aten.slice.Tensor")
+@register_prop_rule(aten.slice.Tensor)
 def prop_slice(op_schema: OpSchema) -> OutputSharding:
     """NOTE: can be further optimized (right now it replicates before slicing on a sharded dimension)"""
     defaults = (None, 0, None, None, 1)
@@ -240,7 +239,7 @@ def prop_slice(op_schema: OpSchema) -> OutputSharding:
     return _prop_all_but_dim(op_schema, dim=dim, out_shape=out_shape)
 
 
-@register_prop_rule("aten.slice_scatter.default")
+@register_prop_rule(aten.slice_scatter.default)
 def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
@@ -310,7 +309,7 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
         )
 
 
-@register_prop_rule("aten.index_select.default")
+@register_prop_rule(aten.index_select.default)
 def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     values_spec, dim, indices_spec = op_schema.args_schema
 
@@ -341,7 +340,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     return result
 
 
-@register_prop_rule("aten.index.Tensor")
+@register_prop_rule(aten.index.Tensor)
 def prop_index(op_schema: OpSchema) -> OutputSharding:
     """
     Expect replicated on the first input; _mostly_ pointwise on the second input.
