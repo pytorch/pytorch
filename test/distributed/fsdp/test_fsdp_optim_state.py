@@ -533,7 +533,7 @@ class TestFSDPOptimState(FSDPTest):
     ) -> None:
         if rank0_only and state_dict_type == StateDictType.SHARDED_STATE_DICT:
             return  # not supported
-        NUM_ITERS = 2
+        NUM_ITERS = 3
         model1, optim1, optim_input = self._init_nested_model(
             wrap=True,
             use_multiple_param_groups=use_multiple_param_groups,
@@ -653,6 +653,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -673,6 +674,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -687,6 +689,7 @@ class TestFSDPOptimState(FSDPTest):
             halve_world_size=True,
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=False,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -710,6 +713,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -730,6 +734,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -744,6 +749,7 @@ class TestFSDPOptimState(FSDPTest):
             halve_world_size=True,
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=False,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -758,6 +764,7 @@ class TestFSDPOptimState(FSDPTest):
             use_diff_optim_inputs=False,
             use_optim_input=False,
             wrap_alt=True,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -771,6 +778,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
             use_optim_input=False,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -784,6 +792,7 @@ class TestFSDPOptimState(FSDPTest):
             use_diff_optim_inputs=False,
             use_optim_input=False,
             wrap_alt=True,
+            num_iters=1,
             fsdp_kwargs={"use_orig_params": True},
         )
 
@@ -795,6 +804,7 @@ class TestFSDPOptimState(FSDPTest):
         osd_comm_method: _OSDCommMethod,
         use_diff_optim_inputs: bool,
         use_optim_input: bool,
+        num_iters: int,
         **new_model_kwargs,
     ):
         """
@@ -809,7 +819,6 @@ class TestFSDPOptimState(FSDPTest):
         halved-world-size model's local optimizer state dict, meaning that the
         former could have equivalently been loaded into the local optimizer.
         """
-        NUM_ITERS = 3
         initializer = self._model_class[model_class]
         if osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
             osd_method = FSDP._optim_state_dict
@@ -823,7 +832,7 @@ class TestFSDPOptimState(FSDPTest):
             wrap=True,
             use_multiple_param_groups=use_multiple_param_groups,
         )
-        self._step_model(model1, optim1, num_iters=NUM_ITERS)
+        self._step_model(model1, optim1, num_iters=num_iters)
         fsdp_osd1 = (
             osd_method(model1, optim1, optim_input1)
             if use_optim_input
@@ -847,7 +856,7 @@ class TestFSDPOptimState(FSDPTest):
             use_diff_optim_inputs=use_diff_optim_inputs,
             **new_model_kwargs,  # specify `wrap_alt` to change wrapping
         )
-        self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        self._step_model(model2, optim2, num_iters=num_iters)
         fsdp_osd2 = (
             osd_method(model2, optim2, optim_input2, group=new_group)
             if use_optim_input
@@ -952,7 +961,7 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         if osd_comm_method != _OSDCommMethod.FLATTEN_SHARDED_OSD:
             optim2.load_state_dict(sharded_osd1)
-            self._step_model(model2, optim2, num_iters=NUM_ITERS)
+            self._step_model(model2, optim2, num_iters=num_iters)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
