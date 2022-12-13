@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from unittest import skip
 
 import torch
-import torch.distributed as dist
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -22,7 +21,10 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
-from torch.testing._internal.common_distributed import MultiThreadedTestCase, DEFAULT_WORLD_SIZE
+from torch.testing._internal.common_distributed import (
+    MultiThreadedTestCase, 
+    DEFAULT_WORLD_SIZE,
+)
 
 def no_op():
     return None
