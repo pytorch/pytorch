@@ -31,7 +31,7 @@ from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
-from .guards import Guard, GuardBuilder, TensorReference
+from .guards import Guard, GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
@@ -206,7 +206,6 @@ class OutputGraph(fx.Tracer):
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking

@@ -5140,6 +5140,17 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        def test_load_same_bool_tensor_twice(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a, b):
+                x = torch.masked_fill(a, b, -33.0)
+                y = torch.masked_fill(a, b, -33.0)
+                return x, y
+
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8).to(torch.bool)
+            fn(value, mask)
+
         def test_cpu_vec_cosim(self):
             cpp_vec_op_list = []
             cpp_op_list = []
