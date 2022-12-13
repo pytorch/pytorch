@@ -730,10 +730,23 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
+  MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
+  MPSDataType maskDataType = getMPSScalarType(b_mask->scalar_type());
+  // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
+  // The issue is fixed in macOS Ventura (13.0)
+  if (!MPSDevice::getInstance()->macOS_13_0_or_newer()) {
+     if (self.scalar_type() == kBool) {
+      inputDataType = MPSDataTypeInt8;
+     }
+     if (mask.scalar_type() == kBool) {
+      maskDataType = MPSDataTypeInt8;
+     }
+  }
+
   MPSStream* stream = getCurrentMPSStream();
   MPSScalar valueScalar = getMPSScalar(value, value.type());
   @autoreleasepool {
-    string key = "masked_fill" + getTensorsStringKey({self, *b_mask}) + getMPSTypeString(value.type());
+    string key = "masked_fill" + getTensorsStringKey({self, *b_mask}) + ":" + getMPSTypeString(value.type());
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
       cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
@@ -744,20 +757,11 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *b_mask);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
+          MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, maskDataType, getMPSShape(*b_mask));
           MPSGraphTensor* valueTensor = mpsGraphScalarPlaceHolder(mpsGraph, value);
 
           MPSDataType valueType = getMPSScalarType(value.type());
-          MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
-
-          // constantWithScalar doesn't like Bool constants getting created so
-          // mapping them to int8.
-          // Starting with macOS 13.0, this cast is not needed anymore
-          if (valueType == MPSDataTypeBool && !MPSDevice::getInstance()->macOS_13_0_or_newer()) {
-            valueType = MPSDataTypeInt8;
-          }
-
           MPSGraphTensor* castValueTensor = valueTensor;
           if (valueType != inputDataType) {
             castValueTensor = [mpsGraph castTensor:valueTensor
@@ -779,8 +783,10 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
       });
     }
 
-    Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder maskPlaceholder   = Placeholder(cachedGraph->maskTensor_, *b_mask);
+    Placeholder selfPlaceholder   = Placeholder(
+      cachedGraph->inputTensor_, self, /*mpsShape*/nullptr, /*gatherTensorData=*/true, inputDataType);
+    Placeholder maskPlaceholder   = Placeholder(
+      cachedGraph->maskTensor_, *b_mask, /*mpsShape*/nullptr, /*gatherTensorData=*/true, maskDataType);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, self);
 
     // Create dictionary of inputs and outputs
@@ -795,7 +801,6 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
