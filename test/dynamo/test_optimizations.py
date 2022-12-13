@@ -121,6 +121,38 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
+        self.assertEqual(r1.size(), r2.size())
+        self.assertEqual(r1.stride(), r2.stride())
+        self.assertEqual(r1.dtype, r2.dtype)
+
+        self.assertEqual(r1.size(), r3.size())
+        self.assertEqual(r1.stride(), r3.stride())
+        self.assertEqual(r1.dtype, r3.dtype)
+
+    def test_example_inputs_runtime_use(self):
+        def fn(a, bc, d):
+            b, c = bc
+            return a / d - b / c
+
+        def compiler_fn(graph, example_inputs):
+            def fwd(*args):
+                nonlocal r1
+                r = graph.forward(*args)
+                r1 = r[0]
+                return r
+
+            return fwd
+
+        a = torch.empty(2).fill_(1)
+        b = torch.empty(2).fill_(2)
+        c = torch.empty(2).fill_(3)
+        d = 4
+        r1 = None
+        r2 = fn(a, (b, c), d)
+        opt_fn = torch._dynamo.optimize_assert(compiler_fn)(fn)
+        r3 = opt_fn(a, (b, c), d)
+
+        self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
