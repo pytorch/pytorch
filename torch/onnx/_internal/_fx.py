@@ -160,6 +160,12 @@ def _wrap_fx_args_as_ts_args(g, root, node, fx_name_to_ts_value):
     )
 
 
+def _fill_tensor_types(ts_values, expected_values):
+    flat_ts_values, _ = tree_flatten(ts_values)
+    flat_expected_values, _ = tree_flatten(expected_values)
+    for ts_value, expected_value in zip(flat_ts_values, flat_expected_values):
+        ts_value.setType(torch._C.TensorType.create_from_tensor(expected_value))
+
 def _export_fx_to_ts(fx_module_with_metadata):
     # TODO(wechi): To get rid of TorchScript dependency,
     # "g" should just be onnx.GraphProto or an equivalent
@@ -223,6 +229,8 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 assert (
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
+                # Assign type and shape obtained from FakeTensorProp.
+                _fill_tensor_types(v, node.meta["val"])
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -282,7 +290,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 ts_value_or_ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
                 register_outputs(ts_value_or_ts_value_tuple)
             else:
-                # ONNX can represent collection types (e.g., dictionary, tuple of tuple of
+                # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
                 # tensor, etc), we flatten the collection and register each element as output.
                 flat_args, _ = tree_flatten(node.args[0])
                 for arg in flat_args:
@@ -353,8 +361,7 @@ def _export(
         # Use default decomposition table.
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
-    #decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
-    decomposed_module = module #functorch.make_fx(module, decomposition_table)(*args)
+    decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
 
     # Use this mode to
     # 1. convert nn.Parameter's in nn.Module to FakeTensor

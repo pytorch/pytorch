@@ -7,7 +7,6 @@ from torch import _dynamo as torchdynamo
 # Define the model repo
 model_name = "sshleifer/tiny-gpt2"
 
-
 def test_gpt2_one_shot(model_name):
     # Download pytorch model
     model = AutoModel.from_pretrained(model_name)
@@ -25,7 +24,7 @@ def test_gpt2_one_shot(model_name):
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
     onnx_model = export_without_kwargs(model, input_ids, attention_mask, use_binary_format=False)
-    print(onnx.helper.printable_graph(onnx_model.graph))
+    onnx.checker.check_model(onnx_model)
 
 
 def test_gpt2_auto_regressive(model_name):
