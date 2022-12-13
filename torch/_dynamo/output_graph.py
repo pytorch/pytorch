@@ -7,20 +7,32 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from typing_extensions import Protocol
 
 import torch.nn
 from torch import fx
+from torch._guards import Guard
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
-from .guards import Guard, GuardBuilder, TensorReference
+from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
@@ -56,6 +68,29 @@ class CompiledFn(Protocol):
 CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
+class OutputGraphState(NamedTuple):
+    graphargs: List[GraphArg]
+    guards: Set[Guard]
+    nn_modules: Optional[Dict[str, torch.nn.Module]]
+    side_effects: SideEffects
+    timestamp: int
+    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
+
+    def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
+        for k in self._fields:
+            if k == "side_effects":
+                r = self.side_effects.diff(other.side_effects)
+                if r is not None:
+                    return r
+                continue
+
+            sv = getattr(self, k)
+            ov = getattr(other, k)
+            if sv != ov:
+                return f"{prefix}{k} mismatch: {sv} != {ov}"
+        return None
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -79,7 +114,7 @@ def _get_gen_rand_values_fn(random_calls):
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict):
+    def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
         super(FakeRootModule, self).__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
@@ -88,21 +123,10 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-def wrap_compiler_fn(compiler_fn: CompilerFn) -> CompilerFn:
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
-
-
 class WrapperBackend:
-    def __init__(self, backend: CompilerFn):
+    def __init__(self, backend: CompilerFn, original_example_inputs):
         self.backend: CompilerFn = backend
+        self.original_example_inputs = original_example_inputs
 
     @property
     def example_inputs(self):
@@ -111,7 +135,6 @@ class WrapperBackend:
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
 
         self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
@@ -158,6 +181,14 @@ class OutputGraph(fx.Tracer):
 
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        # Although we prune unused graphargs before sending graphs to
+        # compilers, we may have legitimately triggered shape guards
+        # on "unused" inputs that we must keep track of.  So after
+        # remove_unused_graphargs is called, orig_graphargs and
+        # graphargs no longer alias; orig_graphargs is the original
+        # graphargs, and graphargs is the pruned list.  Guard creation
+        # should use original graphargs.
+        self.orig_graphargs: List[GraphArg] = self.graphargs
         self.guards: Set[Guard] = set()
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
@@ -173,6 +204,9 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        self._current_tx: List[InstructionTranslatorBase] = []
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
@@ -181,7 +215,6 @@ class OutputGraph(fx.Tracer):
             str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
         ] = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
@@ -198,20 +231,31 @@ class OutputGraph(fx.Tracer):
     def fake_mode(self):
         return self.root_tx.fake_mode
 
-    def copy_graphstate(self):
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        return self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
+
+    def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        state = (
+        state = OutputGraphState(
             list(self.graphargs),
             set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
+            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
 
-    def restore_graphstate(self, state):
+    def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
@@ -219,8 +263,10 @@ class OutputGraph(fx.Tracer):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
+            self.name_to_input,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
+        removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
             if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
@@ -229,6 +275,8 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
+                removed_nodes += 1
+        log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -368,6 +416,8 @@ class OutputGraph(fx.Tracer):
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
+
+        log.debug(f"COMPILING GRAPH due to {reason}")
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -516,10 +566,15 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= logging.INFO and config.output_code:
+                graph_str = (
+                    gm.print_readable()
+                    if config.output_graph_code
+                    else format_graph_tabular(gm.graph)
+                )
                 log.log(
-                    logging.CODE,  # type: ignore[attr-defined]
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    logging.INFO,
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(
@@ -541,15 +596,63 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
+            # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
-                compiler_fn = wrap_compiler_fn(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+                compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
+
+            # NOTE: [Real Tensors in Accuracy Evaluation]
+            #
+            # Today, tensors are passed to backends as fake at compile time. See the .fake_example_inputs()
+            # call to compiler_fn below. At runtime, backends use real tensors.
+            #
+            # This should be a strong invariant we hold across all backends,
+            # and generally, it is. However, for accuracy evaluation, we need real tensors at compile time,
+            # for now, due to the unfortunate setup described below.
+            #
+            # Due to the nature of how we invoke comparison as a backend in two different ways:
+            #
+            # (1) Less bad, but still worth rewriting, WrapperBackend above, which takes
+            # real inputs for its ctor. see the config.verify_correctnes above.
+            #
+            # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
+            # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
+            # by the fact that the minifier will spawn new processes during minification. As such, we have
+            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
+            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
+            #
+            # The longer term PoR is to:
+            # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
+            # correctness and accuracy logic, so as not to have two different ways of doing the same thing.
+            #
+            # (B) Refactor minifier accuracy backend to do its comparison fully at runtime, so as not to need to
+            # pass real tensors to it at compile time.
+            is_top_level_minifying = (
+                config.repro_after is not None and config.repro_level == 4
+            )
+            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
+                compiled_fn = compiler_fn(gm, self.example_inputs())
+            else:
+                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
+
+    def fake_example_inputs(self) -> List[torch.Tensor]:
+        result = []
+        for arg in self.graphargs:
+            example = arg.get_fake_examples()
+            if example is not None:
+                result.extend(example)
+            else:
+                # Fallback, in case fake_tensor was not set
+                # Particularly for graph args that are not tensors
+                result.extend(arg.get_examples())
+        return result
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
@@ -576,12 +679,14 @@ class OutputGraph(fx.Tracer):
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:
+                log.debug(f"REMOVE UNUSED GRAPHARG {arg.source.name()}")
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
+        # NB: self.orig_graphargs is the original graphargs
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
@@ -625,14 +730,13 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
-        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
