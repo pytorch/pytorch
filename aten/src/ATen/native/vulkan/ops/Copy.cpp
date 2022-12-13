@@ -18,10 +18,15 @@ void memcpy_to_mapping(const Tensor& src, api::MemoryMap& dst_mapping) {
     memcpy_to_mapping_impl<c10::Half>(src, dst_mapping);
   } else if (src.dtype() == c10::kQUInt8) {
     memcpy_to_mapping_impl<c10::quint8>(src, dst_mapping);
+  } else if (src.dtype() == c10::kQInt8) {
+    memcpy_to_mapping_impl<c10::qint8>(src, dst_mapping);
+  } else if (src.dtype() == c10::kQInt32) {
+    memcpy_to_mapping_impl<c10::qint32>(src, dst_mapping);
   } else {
     TORCH_CHECK(
         false,
-        "Invalid Data Type: expected c10::QUint8, at::kHalf or at::Float but got ",
+        "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
+        " at::kHalf or at::Float but got ",
         src.dtype());
   }
 }
@@ -33,10 +38,15 @@ void memcpy_from_mapping(api::MemoryMap& src_mapping, Tensor& dst) {
     memcpy_from_mapping_impl<c10::Half>(src_mapping, dst);
   } else if (dst.dtype() == c10::kQUInt8) {
     memcpy_from_mapping_impl<c10::quint8>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kQInt8) {
+    memcpy_from_mapping_impl<c10::qint8>(src_mapping, dst);
+  } else if (dst.dtype() == c10::kQInt32) {
+    memcpy_from_mapping_impl<c10::qint32>(src_mapping, dst);
   } else {
     TORCH_CHECK(
         false,
-        "Invalid Data Type: expected c10::QUint8, at::kHalf or Float but got ",
+        "Invalid Data Type: expected c10::kQInt32, c10::kQInt8, c10::kQUInt8,",
+        " at::kHalf or at::Float but got ",
         dst.dtype());
   }
 }
@@ -163,6 +173,9 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
 }
 
 void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
+  TORCH_CHECK(
+      !src.is_quantized(),
+      "Copy of vulkan quantized tensors to cpu is currently disabled!");
   api::Context* const context = api::context();
 
   // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
