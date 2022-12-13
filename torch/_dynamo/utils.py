@@ -25,7 +25,13 @@ from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch import fx
@@ -286,30 +292,36 @@ def is_typing(value):
 
 
 def is_numpy_int_type(value):
-    return istype(
-        value,
-        (
-            np.int8,
-            np.int16,
-            np.int32,
-            np.int64,
-            np.uint8,
-            np.uint16,
-            np.uint32,
-            np.uint64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        )
+    else:
+        return False
 
 
 def is_numpy_float_type(value):
-    return istype(
-        value,
-        (
-            np.float16,
-            np.float32,
-            np.float64,
-        ),
-    )
+    if HAS_NUMPY:
+        return istype(
+            value,
+            (
+                np.float16,
+                np.float32,
+                np.float64,
+            ),
+        )
+    else:
+        return False
 
 
 def istensor(obj):

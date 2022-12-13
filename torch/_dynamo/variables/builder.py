@@ -11,7 +11,14 @@ import types
 from abc import ABCMeta
 from typing import Any, Optional, Union
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
+
 from functorch.experimental.ops import PyOperator
 
 import torch
@@ -478,7 +485,9 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, (int, float, np.number)):
+        elif isinstance(value, (int, float)) or (
+            HAS_NUMPY and (isinstance(value, np.number))
+        ):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -675,7 +684,7 @@ class VariableBuilder:
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
-            if isinstance(value, np.number):
+            if HAS_NUMPY and isinstance(value, np.number):
                 unspec_var = wrap_fx_proxy_cls(
                     UnspecializedNumpyVariable,
                     tx=self.tx,

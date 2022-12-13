@@ -7,7 +7,13 @@ import operator
 import types
 from typing import Dict, List
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import torch
 from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
@@ -433,7 +439,7 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_res = min(a.raw_value, raw_b)
 
-                if isinstance(raw_res, np.number):
+                if HAS_NUMPY and isinstance(raw_res, np.number):
                     return variables.UnspecializedNumpyVariable.from_tensor_variable(
                         result, raw_res
                     )

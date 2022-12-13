@@ -9,7 +9,13 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import numpy as np
+try:
+    import numpy as np
+
+    HAS_NUMPY = True
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
+    HAS_NUMPY = False
 
 import sympy
 
@@ -169,24 +175,8 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        assert istype(
-            val,
+        np_types = (
             (
-                int,
-                float,
-                bool,
-                type(None),
-                str,
-                type,
-                list,
-                tuple,
-                set,
-                slice,
-                frozenset,
-                range,
-                torch.Size,
-                torch.device,
-                torch.dtype,
                 np.int8,
                 np.int16,
                 np.int32,
@@ -195,8 +185,33 @@ class GuardBuilder(GuardBuilderBase):
                 np.uint16,
                 np.uint32,
                 np.uint64,
-            ),
+            )
+            if HAS_NUMPY
+            else ()
+        )
+
+        type_options = (
+            int,
+            float,
+            bool,
+            type(None),
+            str,
+            type,
+            list,
+            tuple,
+            set,
+            slice,
+            frozenset,
+            range,
+            torch.Size,
+            torch.device,
+            torch.dtype,
+        ) + np_types
+        assert istype(
+            val,
+            type_options,
         ), t.__name__
+
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it
             code = [f"str({ref}) == {str(val)!r}"]
