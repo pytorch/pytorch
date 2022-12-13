@@ -412,7 +412,6 @@ class TestFSDPRuntime(FSDPTest):
 
 
 class TestMixedPrecision(FSDPTest):
-
     @property
     def world_size(self):
         return 2
@@ -423,7 +422,8 @@ class TestMixedPrecision(FSDPTest):
         float16 = MixedPrecision(param_dtype=torch.float16)
 
         model = SaveForwardInputsModel(
-            forward_inputs=forward_inputs, cast_forward_inputs=False,
+            forward_inputs=forward_inputs,
+            cast_forward_inputs=False,
         ).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
@@ -442,6 +442,36 @@ class TestMixedPrecision(FSDPTest):
             self.assertEqual(forward_inputs[model].dtype, torch.float32)
             self.assertEqual(forward_inputs[c1].dtype, torch.float32)
             self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+
+
+class TestFSDPModelCheckpointing(FSDPTest):
+    """Tests composable FSDP model checkpointing."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_parity(self):
+        """
+        Tests that the full state dict saved from a module with ``fully_shard``
+        applied matches that of an equivalent local module.
+        """
+        local_model = CompositeParamModel(device=torch.device("cuda"))
+        composable_module = copy.deepcopy(local_model)
+        fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        sd_local = local_model.state_dict()
+        sd = composable_module.state_dict()
+        # Check that all keys match
+        for k1, k2 in zip(sd.keys(), sd_local.keys()):
+            self.assertEqual(k1, k2)
+        # Check that all values match
+        for v1, v2 in zip(sd.values(), sd_local.values()):
+            self.assertEqual(v1.shape, v2.shape)
+        # Check that all keys and values are aligned
+        for (k1, v1), (k2, v2) in zip(sd.items(), sd_local.items()):
+            self.assertEqual(k1, k2)
+            self.assertEqual(v1, v2)
 
 
 if __name__ == "__main__":
