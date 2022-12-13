@@ -83,6 +83,7 @@ from ._optim_utils import (
 )
 from ._state_dict_utils import (
     _post_load_state_dict_hook,
+    _pre_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
@@ -408,6 +409,7 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
+        self.register_state_dict_pre_hook(_pre_state_dict_hook)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True
@@ -518,32 +520,15 @@ class FullyShardedDataParallel(nn.Module):
 
         return ret
 
-    def _mixed_precision_enabled_for_params(self) -> bool:
-        """
-        Whether user explicitly enabled mixed precision for
-        parameters or not.
-        """
-        return self.mixed_precision.param_dtype is not None
-
     def _mixed_precision_enabled_for_buffers(self) -> bool:
         """
-        Whether user explicitly enabled mixed precision for
-        buffers or not.
+        Returns if the user explicitly enabled buffer mixed precision.
+
+        NOTE: Unlike parameters and gradient reduction, buffer mixed precision
+        is applied at the FSDP instance level, not the ``FlatParameter`` level,
+        which may be different for the composable code path.
         """
         return self.mixed_precision.buffer_dtype is not None
-
-    def _mixed_precision_enabled_for_reduce(self) -> bool:
-        """
-        Whether user explicitly enabled mixed precision for
-        gradient reduction or not.
-        """
-        return self.mixed_precision.reduce_dtype is not None
-
-    def _mixed_precision_keep_low_precision_grads(self) -> bool:
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.keep_low_precision_grads
-        )
 
     def _low_precision_hook_enabled(self) -> bool:
         """
@@ -687,10 +672,6 @@ class FullyShardedDataParallel(nn.Module):
                     module, prev_state_dict_type, prev_state_dict_config
                 )
 
-    def state_dict(self, *args, **kwargs):
-        _lazy_init(self, self)
-        return super().state_dict(*args, **kwargs)
-
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Runs the forward pass for the wrapped module, inserting FSDP-specific
@@ -699,12 +680,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
+            _root_pre_forward(self, self, unused)
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
-            _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, unused
+            args, kwargs = _pre_forward(
+                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
                 p_assert(

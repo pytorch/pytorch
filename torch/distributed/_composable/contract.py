@@ -19,6 +19,15 @@ class _State:
 
 
 STATE_KEY = _StateKey()
+REGISTRY_KEY = _StateKey()
+
+
+# TODO: we can add additional info to RegistryItem to share across APIs. E.g.,
+# we can add args and kwargs here, and then we can detect whether fully_shard
+# is combined with reentrant activation checkpointing and error out with a clear
+# message.
+class RegistryItem:
+    pass
 
 
 def contract(func):
@@ -58,20 +67,36 @@ def contract(func):
     """
 
     def wrapper(module: nn.Module, *args, **kwargs) -> Optional[nn.Module]:
-        # install states specific to the wrapped ``func``
-        default_all_state: Dict[Callable, _State] = {}
+        # get existing global states
+        default_all_state: Dict[Callable, _State] = OrderedDict()
         all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
             STATE_KEY, default_all_state
         )
         assert isinstance(
             all_state, dict
         ), "Distributed composable API states corrupted"
-        assert func not in all_state, (
-            "Each distinct composable distributed API can only be applied to a "
-            f"module once. {func} has already been applied to the following "
-            f"module.\n{module}"
+
+        # get global registry
+        default_registry: Dict[str, RegistryItem] = OrderedDict()
+        registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
+            REGISTRY_KEY, default_registry
         )
+
+        assert isinstance(
+            registry, dict
+        ), "Distributed composable API registry corrupted"
+
+        # make sure the API func has not been applied to the input module yet.
+        assert func not in all_state and func.__name__ not in registry, (
+            "Each distinct composable distributed API can only be applied to a "
+            f"module once. {func.__name__} has already been applied to the "
+            f"following module.\n{module}"
+        )
+
+        # install states specific to the wrapped ``func``
         all_state.setdefault(func, _State())
+        # register ``func`` in the global registry by name
+        registry.setdefault(func.__name__, RegistryItem())
 
         orig_named_params = OrderedDict(module.named_parameters())
         orig_named_buffers = OrderedDict(
@@ -121,9 +146,7 @@ def contract(func):
                     f"New FQNs: {new_only}"
                 )
 
-        check_fqn(
-            list(orig_named_params.keys()), list(new_named_params.keys())
-        )
+        check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
         check_fqn(
             list(orig_named_buffers.keys()), list(new_named_buffers.keys())
         )
@@ -150,3 +173,12 @@ def contract(func):
     wrapper.state = get_state  # type: ignore[attr-defined]
 
     return wrapper
+
+
+def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
+    r"""
+    Get an ``OrderedDict`` of composable APIs that have been applied to the
+    ``module``, indexed by the API name.
+    """
+    default_registry: Dict[str, RegistryItem] = OrderedDict()
+    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
