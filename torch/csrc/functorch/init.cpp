@@ -234,14 +234,6 @@ RandomnessType get_randomness_enum(const std::string& randomness) {
   }
 }
 
-void set_fwd_grad_enabled(bool enabled) {
-  c10::AutogradState::get_tls_state().set_fw_grad_mode(enabled);
-}
-
-bool get_fwd_grad_enabled() {
-  return c10::AutogradState::get_tls_state().get_fw_grad_mode();
-}
-
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
@@ -257,7 +249,8 @@ int64_t _grad_decrement_nesting() {
 
 int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
-  bool prev_fwd_grad_mode = get_fwd_grad_enabled();
+  bool prev_fwd_grad_mode =
+      c10::AutogradState::get_tls_state().get_fw_grad_mode();
   return initAndPushDynamicLayer(
       TransformType::Jvp,
       c10::nullopt,
@@ -479,8 +472,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
   m.def("dump_dls", &dump_dls);
   m.def("dump_local_tls", &dump_local_tls);
-  m.def("set_fwd_grad_enabled", &set_fwd_grad_enabled);
-  m.def("get_fwd_grad_enabled", &get_fwd_grad_enabled);
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
