@@ -332,7 +332,7 @@ class TORCH_API LazyGraphExecutor {
 
   void ResetTrimCounter() const;
 
-  // Waits for this SyncTensorCollection's device barrier and acuire the lock.
+  // Waits for this SyncTensorCollection's device barrier and acquire the lock.
   virtual void TensorCollectionBarrier(SyncTensorCollection* coll);
 
  private:
