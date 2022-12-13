@@ -190,10 +190,24 @@ class ModularIndexing(sympy.Function):
 
         if isinstance(base, sympy.Add):
             new_terms = []
+            all_positive = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
-                    new_terms.append(term)
-            if len(new_terms) != len(base.args):
+                    if (isinstance(term, sympy.Integer) and term < 0) or (
+                        isinstance(term, sympy.Mul)
+                        and isinstance(term.args[0], sympy.Integer)
+                        and term.args[0] < 0
+                    ):
+                        # workaround for https://github.com/openai/triton/issues/619,
+                        # if there are negative terms, // produces wrong result
+                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # this optimization would become valid
+                        all_positive = False
+                        break
+                    else:
+                        new_terms.append(term)
+
+            if len(new_terms) != len(base.args) and all_positive:
                 return ModularIndexing(sum(new_terms), divisor, modulus)
 
         if isinstance(base, IndexingDiv):
@@ -2487,9 +2501,7 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            if isinstance(
-                x.get_layout(), FlexibleLayout
-            ) and is_stride_order_storage_and_layout(x, order):
+            if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
                     x, freeze=True, want_contiguous=False, stride_order=order

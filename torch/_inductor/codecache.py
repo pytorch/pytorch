@@ -110,6 +110,9 @@ def cpp_compiler_search(search):
                 # according to https://anaconda.org/conda-forge/gxx/
                 if sys.platform != "linux":
                     continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
+                    continue
                 from filelock import FileLock
 
                 lock_dir = get_lock_dir()
@@ -326,7 +329,7 @@ def get_warning_all_flag(warning_all=True):
 
 
 def cpp_flags():
-    return "-std=c++14 -Wno-unused-variable"
+    return "-std=c++17 -Wno-unused-variable"
 
 
 def optimization_flags():
@@ -432,7 +435,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
