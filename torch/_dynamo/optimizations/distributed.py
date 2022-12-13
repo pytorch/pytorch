@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
-import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
 from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
