@@ -50,6 +50,7 @@ inline c10::Storage to_meta(const c10::Storage& t) {
 
 
 inline Tensor to_meta(const Tensor& t) {
+    if (!t.defined()) return t;
     return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
