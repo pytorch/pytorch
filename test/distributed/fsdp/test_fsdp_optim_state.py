@@ -52,6 +52,7 @@ class _OSDCommMethod(Enum):
     BROADCAST_OBJECT_LIST = auto()
     SCATTER_FULL_OSD = auto()
     FLATTEN_SHARDED_OSD = auto()
+    OPTIM_STATE_DICT = auto()
 
 
 class _ModelClass(Enum):
@@ -554,10 +555,7 @@ class TestFSDPOptimState(FSDPTest):
                     rank0_only=rank0_only,
                 )
         else:
-            if use_optim_input:
-                fsdp_osd = FSDP.sharded_optim_state_dict(model1, optim1, optim_input)
-            else:
-                fsdp_osd = FSDP.sharded_optim_state_dict(model1, optim1)
+            fsdp_osd = FSDP.sharded_optim_state_dict(model1, optim1)
         # Non-target ranks get an empty state dict
         if rank0_only and self.rank != 0:
             self.assertEqual(len(fsdp_osd), 0)
@@ -655,6 +653,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -675,6 +674,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -689,6 +689,7 @@ class TestFSDPOptimState(FSDPTest):
             halve_world_size=True,
             osd_comm_method=_OSDCommMethod.BROADCAST_OBJECT_LIST,
             use_diff_optim_inputs=False,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -712,6 +713,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -732,6 +734,7 @@ class TestFSDPOptimState(FSDPTest):
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=use_diff_optim_inputs,
             wrap_alt=wrap_alt,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -746,35 +749,51 @@ class TestFSDPOptimState(FSDPTest):
             halve_world_size=True,
             osd_comm_method=_OSDCommMethod.SCATTER_FULL_OSD,
             use_diff_optim_inputs=False,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_flatten_sharded_optim_state_dict_nested(self):
+    def test_flatten_sharded_optim_state_dict_nested(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         nested model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.NESTED,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
+            use_optim_input=False,
             wrap_alt=True,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)
     def test_flatten_sharded_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`flatten_sharded_optim_state_dict` for an FSDP-root
         transformer model."""
-        self.run_subtests(
-            {"use_optim_input": [False, True]},
-            self._test_load_optim_state,
+        self._test_load_optim_state(
             _ModelClass.TRANSFORMER,
             use_multiple_param_groups=False,
             halve_world_size=False,
             osd_comm_method=_OSDCommMethod.FLATTEN_SHARDED_OSD,
             use_diff_optim_inputs=False,
+            use_optim_input=False,
+            num_iters=3,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def _test_use_orig_params(self) -> None:
+        """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
+        self._test_load_optim_state(
+            _ModelClass.NESTED,
+            use_multiple_param_groups=False,
+            halve_world_size=False,
+            osd_comm_method=_OSDCommMethod.OPTIM_STATE_DICT,
+            use_diff_optim_inputs=False,
+            use_optim_input=False,
+            wrap_alt=True,
+            num_iters=1,
+            fsdp_kwargs={"use_orig_params": True},
         )
 
     def _test_load_optim_state(
@@ -785,6 +804,7 @@ class TestFSDPOptimState(FSDPTest):
         osd_comm_method: _OSDCommMethod,
         use_diff_optim_inputs: bool,
         use_optim_input: bool,
+        num_iters: int,
         **new_model_kwargs,
     ):
         """
@@ -799,20 +819,20 @@ class TestFSDPOptimState(FSDPTest):
         halved-world-size model's local optimizer state dict, meaning that the
         former could have equivalently been loaded into the local optimizer.
         """
-        NUM_ITERS = 3
         initializer = self._model_class[model_class]
-        osd_method = (
-            FSDP.sharded_optim_state_dict
-            if osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD
-            else FSDP.full_optim_state_dict
-        )
+        if osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
+            osd_method = FSDP._optim_state_dict
+        elif osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD:
+            osd_method = FSDP.sharded_optim_state_dict
+        else:
+            osd_method = FSDP.full_optim_state_dict
 
         # First, run a wrapped model with full world size for a few iterations
         model1, optim1, optim_input1 = initializer(
             wrap=True,
             use_multiple_param_groups=use_multiple_param_groups,
         )
-        self._step_model(model1, optim1, num_iters=NUM_ITERS)
+        self._step_model(model1, optim1, num_iters=num_iters)
         fsdp_osd1 = (
             osd_method(model1, optim1, optim_input1)
             if use_optim_input
@@ -836,7 +856,7 @@ class TestFSDPOptimState(FSDPTest):
             use_diff_optim_inputs=use_diff_optim_inputs,
             **new_model_kwargs,  # specify `wrap_alt` to change wrapping
         )
-        self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        self._step_model(model2, optim2, num_iters=num_iters)
         fsdp_osd2 = (
             osd_method(model2, optim2, optim_input2, group=new_group)
             if use_optim_input
@@ -896,32 +916,19 @@ class TestFSDPOptimState(FSDPTest):
             self._check_state_device(sharded_osd1, on_gpu=True)
             self._check_state_device(sharded_osd2, on_gpu=True)
         elif osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD:
-            sharded_osd1 = (
-                FSDP.flatten_sharded_optim_state_dict(
-                    fsdp_osd1,
-                    model2,
-                    optim_input=optim_input2,
-                )
-                if use_optim_input
-                else FSDP.flatten_sharded_optim_state_dict(
-                    fsdp_osd1,
-                    model2,
-                    optim=optim2,
-                )
+            sharded_osd1 = FSDP.flatten_sharded_optim_state_dict(
+                fsdp_osd1,
+                model2,
+                optim=optim2,
             )
-            sharded_osd2 = (
-                FSDP.flatten_sharded_optim_state_dict(
-                    fsdp_osd2,
-                    model2,
-                    optim_input=optim_input2,
-                )
-                if use_optim_input
-                else FSDP.flatten_sharded_optim_state_dict(
-                    fsdp_osd2,
-                    model2,
-                    optim=optim2,
-                )
+            sharded_osd2 = FSDP.flatten_sharded_optim_state_dict(
+                fsdp_osd2,
+                model2,
+                optim=optim2,
             )
+        elif osd_comm_method == _OSDCommMethod.OPTIM_STATE_DICT:
+            sharded_osd1 = FSDP._load_optim_state_dict(fsdp_osd1, model2, optim2)
+            sharded_osd2 = FSDP._load_optim_state_dict(fsdp_osd2, model2, optim2)
 
         # As a sanity check, check that sharding the second model's full/sharded
         # optimizer state dict according to itself is equivalent to its local
@@ -954,7 +961,7 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         if osd_comm_method != _OSDCommMethod.FLATTEN_SHARDED_OSD:
             optim2.load_state_dict(sharded_osd1)
-            self._step_model(model2, optim2, num_iters=NUM_ITERS)
+            self._step_model(model2, optim2, num_iters=num_iters)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
@@ -981,8 +988,12 @@ class TestFSDPOptimState(FSDPTest):
         to save CI cost since it call into the same subroutine
         :meth:`_flatten_optim_state_dict`.
         """
+        if state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            use_optim_input = [False]
+        else:
+            use_optim_input = [False, True]
         self.run_subtests(
-            {"use_optim_input": [False, True]},
+            {"use_optim_input": use_optim_input},
             self._test_shard_full_optim_state_dict_unmanaged_params,
             state_dict_type=state_dict_type,
             add_to_fsdp_module=add_to_fsdp_module,
@@ -1006,11 +1017,7 @@ class TestFSDPOptimState(FSDPTest):
                 else FSDP.full_optim_state_dict(model, optim, rank0_only=False)
             )  # save on all ranks to avoid having to broadcast from rank 0
         else:
-            fsdp_osd = (
-                FSDP.sharded_optim_state_dict(model, optim, optim_input)
-                if use_optim_input
-                else FSDP.sharded_optim_state_dict(model, optim)
-            )
+            fsdp_osd = FSDP.sharded_optim_state_dict(model, optim)
         # Create a new model with the same structure but additional unmanaged
         # parameters, representing the model for which we want to load
         device = torch.device("cuda")
@@ -1044,15 +1051,7 @@ class TestFSDPOptimState(FSDPTest):
                         )
                     )
                 else:
-                    (
-                        FSDP.flatten_sharded_optim_state_dict(
-                            fsdp_osd, model, optim_input=optim_input
-                        )
-                        if use_optim_input
-                        else FSDP.flatten_sharded_optim_state_dict(
-                            fsdp_osd, model, optim=optim
-                        )
-                    )
+                    FSDP.flatten_sharded_optim_state_dict(fsdp_osd, model, optim=optim)
         else:
             # If we add the unmanaged parameters to a module not wrapped with
             # FSDP, then we simply ignore them without erroring to enable
@@ -1067,14 +1066,8 @@ class TestFSDPOptimState(FSDPTest):
                     else FSDP.shard_full_optim_state_dict(fsdp_osd, model, optim=optim)
                 )
             else:
-                flattened_osd = (
-                    FSDP.flatten_sharded_optim_state_dict(
-                        fsdp_osd, model, optim_input=optim_input
-                    )
-                    if use_optim_input
-                    else FSDP.flatten_sharded_optim_state_dict(
-                        fsdp_osd, model, optim=optim
-                    )
+                flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+                    fsdp_osd, model, optim=optim
                 )
             # Add entries for the unmanaged parameters to be able to load
             for unmanaged_param in unmanaged_params:
@@ -1098,8 +1091,12 @@ class TestFSDPOptimState(FSDPTest):
         parameter IDs by checking that a wrapped model (i.e. with FSDP modules)
         can rekey its optimizer state dict to match that of an equivalent
         non-wrapped model (i.e. without FSDP modules)."""
+        if state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            use_optim_input = [False]
+        else:
+            use_optim_input = [False, True]
         self.run_subtests(
-            {"use_optim_input": [False, True]},
+            {"use_optim_input": use_optim_input},
             self._test_rekey_optim_state_dict_to_ids,
             state_dict_type=state_dict_type,
             use_multiple_param_groups=use_multiple_param_groups,
@@ -1129,11 +1126,7 @@ class TestFSDPOptimState(FSDPTest):
             # have the full state dict
             fsdp_osd = self._broadcast_full_osd(fsdp_osd)
         else:
-            fsdp_osd = (
-                FSDP.sharded_optim_state_dict(model1, optim1, optim_input1)
-                if use_optim_input
-                else FSDP.sharded_optim_state_dict(model1, optim1)
-            )
+            fsdp_osd = FSDP.sharded_optim_state_dict(model1, optim1)
         # Run a non-wrapped model for a few iterations
         model2, optim2, optim_input2 = self._init_nested_model(
             wrap=False,
@@ -1266,7 +1259,10 @@ class TestFSDPOptimState(FSDPTest):
 
         def should_check_method(method_name: str):
             # Check every method since they all accept `optim_input`
-            return True
+            return method_name not in (
+                "sharded_optim_state_dict",
+                "flatten_sharded_optim_state_dict",
+            )
 
         def get_warning_context():
             warning_regex = "`optim_input` argument is deprecated"
@@ -1286,7 +1282,11 @@ class TestFSDPOptimState(FSDPTest):
         def should_check_method(method_name: str):
             # Skip `rekey_optim_state_dict` since that does not depend on
             # `use_orig_params=True`
-            return method_name != "rekey_optim_state_dict"
+            return method_name not in (
+                "rekey_optim_state_dict",
+                "full_optim_state_dict",
+                "shard_full_optim_state_dict",
+            )
 
         def get_error_context():
             error_regex = "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
@@ -1324,7 +1324,6 @@ class TestFSDPOptimState(FSDPTest):
                 fsdp_osd = FSDP.sharded_optim_state_dict(
                     wrapped_model,
                     wrapped_optim,
-                    optim_input=wrapped_optim_input,
                 )
         if "fsdp_osd" not in locals():
             fsdp_osd = {}  # may not be defined due to previous method erroring
@@ -1333,7 +1332,6 @@ class TestFSDPOptimState(FSDPTest):
                 FSDP.flatten_sharded_optim_state_dict(
                     fsdp_osd,
                     wrapped_model,
-                    optim_input=wrapped_optim_input,
                 )
         # Full optim state dict
         if should_check_method_fn("full_optim_state_dict"):
@@ -1426,7 +1424,9 @@ class TestFSDPOptimState(FSDPTest):
             flattened_osd = FSDP.shard_full_optim_state_dict(fsdp_osd, fsdp_model)
         elif state_dict_type == StateDictType.SHARDED_STATE_DICT:
             fsdp_osd = FSDP.sharded_optim_state_dict(fsdp_model, optim)
-            flattened_osd = FSDP.flatten_sharded_optim_state_dict(fsdp_osd, fsdp_model)
+            flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+                fsdp_osd, fsdp_model, optim
+            )
         optim.load_state_dict(flattened_osd)
         # `__setstate__()` will check the 0th parameter to see if "step" is
         # represented as a tensor or float, so it is imperative that its state

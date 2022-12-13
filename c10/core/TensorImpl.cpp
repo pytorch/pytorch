@@ -240,7 +240,7 @@ bool_is_contiguous _compute_contiguous(
   T z = 1;
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-    const auto size_d = sizes[d];
+    const auto& size_d = sizes[d];
     if (size_d != 1) {
       if (strides[d] == z) {
         z *= size_d;
@@ -288,7 +288,7 @@ bool_is_channels_last_contiguous _compute_channels_last_contiguous_2d(
     case 4: {
       T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes[d];
+        const auto& size_d = sizes[d];
         if (size_d != 1) {
           if (strides[d] != expected) {
             return bool_is_channels_last_contiguous(false);
@@ -325,7 +325,7 @@ bool_is_channels_last_3d_contiguous _compute_channels_last_contiguous_3d(
     case 5: {
       T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes[d];
+        const auto& size_d = sizes[d];
         if (size_d != 1) {
           if (strides[d] != expected) {
             return bool_is_channels_last_3d_contiguous(false);
@@ -394,7 +394,7 @@ bool_is_non_overlapping_and_dense _compute_non_overlapping_and_dense(
   });
   T require_stride = 1;
   for (const auto i : c10::irange(dim)) {
-    const auto size_perm_i = sizes[perm[i]];
+    const auto& size_perm_i = sizes[perm[i]];
     if (size_perm_i < 2) {
       return bool_is_non_overlapping_and_dense(true);
     }
@@ -970,8 +970,8 @@ void TensorImpl::ShareExternalPointer(
 void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
   dst.clear();
   dst.reserve(src.size());
-  for (size_t i = 0; i < src.size(); i++) {
-    dst.emplace_back(src[i].clone());
+  for (const auto& i : src) {
+    dst.emplace_back(i.clone());
   }
 }
 

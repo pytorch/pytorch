@@ -57,7 +57,7 @@ from .pattern_utils import (
 
 from .match_utils import (
     _MatchResultWithQConfig,
-    find_matches,
+    _find_matches,
 )
 
 from ..utils import _parent_name
@@ -1527,7 +1527,7 @@ def prepare(
     standalone_module_classes = list(prepare_custom_config.standalone_module_classes.keys())
 
     custom_module_classes = get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-    matches_without_qconfig = find_matches(
+    matches_without_qconfig = _find_matches(
         model.graph, modules, pattern_to_quantize_handler, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
 

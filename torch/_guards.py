@@ -1,7 +1,15 @@
 import dataclasses
 import enum
+import logging
 import weakref
-from typing import Callable, List, Optional
+from typing import Callable, List, NamedTuple, Optional
+
+# TODO(voz): Stolen pattern, not sure why this is the case,
+# but mypy complains.
+try:
+    import sympy  # type: ignore[import]
+except ImportError:
+    logging.warning("No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -50,6 +58,11 @@ There is value in keeping this GuardBuilderBase empty to keep layering clean.
 
 class GuardBuilderBase:
     pass
+
+
+class ShapeGuard(NamedTuple):
+    expr: sympy.Expr
+    stack: str
 
 
 @dataclasses.dataclass
