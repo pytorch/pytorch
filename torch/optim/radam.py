@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
 from typing import List, Optional
 
 __all__ = ["RAdam", "radam"]
@@ -253,10 +253,10 @@ def _single_tensor_radam(
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
 
-        bias_correction1 = 1 - beta1**step
-        bias_correction2 = 1 - beta2**step
+        bias_correction1 = 1 - beta1 ** step
+        bias_correction2 = 1 - beta2 ** step
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -271,7 +271,7 @@ def _single_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
+        rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
         if rho_t > 5.0:
             # Compute the variance rectification term and update parameters accordingly
@@ -318,13 +318,11 @@ def _multi_tensor_radam(
     # maximum length of the approximated SMA
     rho_inf = 2 / (1 - beta2) - 1
     # compute the length of the approximated SMA
-    rho_t_list = [
-        rho_inf - 2 * step.item() * (beta2 ** step.item()) / (1 - beta2 ** step.item())
-        for step in state_steps
-    ]
+    rho_t_list = [rho_inf - 2 * _get_value(step) * (beta2 ** _get_value(step)) /
+                  (1 - beta2 ** _get_value(step)) for step in state_steps]
 
-    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+    bias_correction1 = [1 - beta1 ** _get_value(step) for step in state_steps]
+    bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
@@ -336,7 +334,7 @@ def _multi_tensor_radam(
     torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
 
     rect = [
-        math.sqrt(
+        _dispatch_sqrt(
             (rho_t - 4)
             * (rho_t - 2)
             * rho_inf
@@ -349,16 +347,12 @@ def _multi_tensor_radam(
     unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
     exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-    bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+    bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
     denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
-    step_size = [(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)]
+    step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
+
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
 
-    denom = [
-        torch.ones_like(exp_av, memory_format=torch.preserve_format)
-        for exp_av in exp_avgs
-    ]
-    step_size = [
-        (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
-    ]
+    denom = [torch.ones_like(exp_av, memory_format=torch.preserve_format) for exp_av in exp_avgs]
+    step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)

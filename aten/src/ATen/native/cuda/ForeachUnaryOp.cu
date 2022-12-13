@@ -209,10 +209,10 @@ OP(floating_complex_half_bfloat16, tanh, Tanh);
 OP(floating_complex_half_bfloat16, log, Log);
 OP(floating_complex_half_bfloat16, log10, Log10);
 OP(floating_complex_half_bfloat16, log2, Log2);
+OP(floating_complex_half_bfloat16, log1p, Log1p);
 OP(floating_complex_half_bfloat16, cos, Cos);
 OP(floating_complex_half_bfloat16, sqrt, Sqrt);
 
-OP(floating_half_bfloat16, log1p, Log1p);
 OP(floating_half_bfloat16, erf, Erf);
 
 //

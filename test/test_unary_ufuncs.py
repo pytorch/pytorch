@@ -1095,7 +1095,6 @@ class TestUnaryUfuncs(TestCase):
         )
 
     @dtypes(torch.complex64, torch.complex128)
-    @onlyCPU
     def test_log1p_complex(self, device, dtype):
         # The output values here were obtained using arbitrary precision math (mpmath)
         # and double checked with WolframAlpha.

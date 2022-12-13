@@ -7,7 +7,7 @@ The runner integrates with models from TorchBenchmark, HuggingFace and TIMM suit
 
 The infrastructure allows us to specify a loss function. For torchbench models, we use .sum().backward() call in place of the native loss function. For TIMM models, we use a CrossEntropy loss. And HF models contain a loss function inside the model itself, so we don't need any special loss computation handling.
 
-Training benchmarks approximate training by running the model forward, computing loss and then running backward. We entirely skip the optimizer step today.
+Training benchmarks approximate training by running the model forward, computing loss, running backward, and then the optimizer (SGD). Note: the optimizer is currently not compiled by Torchdynamo.
 
 Inference benchmarks and Training benchmarks measure correctness by comparing dynamo and eager model outputs given fixed inputs and seeds.
 
