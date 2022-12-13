@@ -340,7 +340,7 @@ def _safe_zero_index(x):
 
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
            chunk_size: Optional[int] = None,
-           _preallocate_and_copy = False):
+           _preallocate_and_copy=False):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using reverse mode autodiff
@@ -512,8 +512,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # The intermediate chunked calculation are only
             # scoped at this function level.
             for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
-                                                                 flat_output_numels,
-                                                                 chunk_size=chunk_size)):
+                                                                                flat_output_numels,
+                                                                                chunk_size=chunk_size)):
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
                 chunked_result = vmap(vjp_fn)(basis)
                 flat_results, _ = tree_flatten(chunked_result)
