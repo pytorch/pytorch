@@ -227,6 +227,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   // instructions
   std::vector<mobile::serialization::Instruction> instruction_vector;
+  instruction_vector.reserve(code.instructions_.size());
   for (const auto& inst : code.instructions_) {
     instruction_vector.emplace_back(inst.op, inst.N, inst.X);
   }
