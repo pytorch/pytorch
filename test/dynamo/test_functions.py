@@ -695,6 +695,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires distributed package"
+    )
     @make_test
     def test_distributed_is_initialized(x):
         if torch.distributed.is_initialized():
