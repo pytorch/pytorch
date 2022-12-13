@@ -82,10 +82,10 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
 )
 from ._state_dict_utils import (
-    _post_load_state_dict_hook,
-    _pre_state_dict_hook,
-    _post_state_dict_hook,
-    _pre_load_state_dict_hook,
+    _register_load_state_dict_post_hooks,
+    _register_load_state_dict_pre_hooks,
+    _register_state_dict_hooks,
+    _register_state_dict_pre_hooks,
 )
 from ._unshard_param_utils import (
     _deregister_orig_params,
@@ -344,7 +344,9 @@ class FullyShardedDataParallel(nn.Module):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        _init_process_group_state(self, process_group, sharding_strategy, auto_wrap_policy)
+        _init_process_group_state(
+            self, process_group, sharding_strategy, auto_wrap_policy
+        )
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -409,12 +411,10 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
-        self.register_state_dict_pre_hook(_pre_state_dict_hook)
-        self._register_state_dict_hook(_post_state_dict_hook)
-        self._register_load_state_dict_pre_hook(
-            _pre_load_state_dict_hook, with_module=True
-        )
-        self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
+        _register_state_dict_pre_hooks(self)
+        _register_state_dict_hooks(self)
+        _register_load_state_dict_pre_hooks(self)
+        _register_load_state_dict_post_hooks(self)
 
     @property
     def module(self) -> nn.Module:

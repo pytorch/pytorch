@@ -60,7 +60,7 @@ class TORCH_API LazyGraphExecutor {
   // gets turned into device data. If wait is true, the sync operation will be
   // run synchronously. The devices argument, if not empty, tells the devices
   // which should be partecipating into the replicated computation.
-  void SyncLiveTensorsGraph(
+  virtual void SyncLiveTensorsGraph(
       const BackendDevice* device,
       c10::ArrayRef<std::string> devices,
       bool wait);
@@ -311,22 +311,13 @@ class TORCH_API LazyGraphExecutor {
     std::map<BackendDevice, DeviceContext*> device_contexts_;
   };
 
-  void ResetTrimCounter() const;
-
- private:
-  struct CompilationResult {
-    BackendDevice device;
-    size_t emitted_nodes = 0;
-    ComputationPtr computation;
-    std::vector<BackendDataPtr> parameters_data;
-  };
-
   struct Async {
     Async(
         SyncTensorCollection* coll,
         std::vector<BackendDataPtr> parameters_data,
         std::vector<BackendDataPtr> tensors_data,
         ComputationCache::TypePtr cached_computation);
+    virtual ~Async() = default;
 
     void Wait();
 
@@ -339,14 +330,29 @@ class TORCH_API LazyGraphExecutor {
     std::vector<BackendDataPtr> tensors_data;
   };
 
+  void ResetTrimCounter() const;
+
+  // Waits for this SyncTensorCollection's device barrier and acquire the lock.
+  virtual void TensorCollectionBarrier(SyncTensorCollection* coll);
+
+  // One can override to insert your own profiler.
+  virtual PostOrderData RunPostOrder(
+      const std::vector<Value>& ir_values,
+      SyncTensorCollection* coll);
+
+ private:
+  struct CompilationResult {
+    BackendDevice device;
+    size_t emitted_nodes = 0;
+    ComputationPtr computation;
+    std::vector<BackendDataPtr> parameters_data;
+  };
+
   virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensorPtr>& tensors,
       const SyncTensorsConfig& config);
-
-  // Waits for this SyncTensorCollection's device barrier and acuire the lock.
-  void TensorCollectionBarrier(SyncTensorCollection* coll);
 
   std::vector<Value> CollectRoots(
       const std::vector<LazyTensorPtr>& tensors,
@@ -364,10 +370,6 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<size_t> indices,
       std::vector<Value>& ir_values,
       std::vector<BackendDataPtr>& tensor_data_vec);
-
-  PostOrderData RunPostOrder(
-      const std::vector<Value>& ir_values,
-      SyncTensorCollection* coll);
 
   std::shared_ptr<Async> TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,

@@ -1200,6 +1200,7 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
 
 std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
   std::vector<WorkerInfo> workerInfos;
+  workerInfos.reserve(workerNameToInfo_.size());
   for (auto& item : workerNameToInfo_) {
     workerInfos.emplace_back(item.second);
   }
