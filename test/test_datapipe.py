@@ -2740,7 +2740,7 @@ class TestSharding(TestCase):
         numbers_dp = dp.iter.IterableWrapper(range(13))
         sharded_dp = numbers_dp.sharding_filter()
         sharded_dp = sharded_dp.sharding_filter()
-        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
             torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 0)
 
         # Raises Error when sharding on both data source and branch
@@ -2748,7 +2748,7 @@ class TestSharding(TestCase):
         dp1, dp2 = numbers_dp.fork(2)
         sharded_dp = dp1.sharding_filter()
         zip_dp = dp2.zip(sharded_dp)
-        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
             torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
 
         # Raises Error when multiple sharding on the branch and end
@@ -2756,7 +2756,7 @@ class TestSharding(TestCase):
         dp1, dp2 = numbers_dp.fork(2)
         sharded_dp = dp1.sharding_filter()
         zip_dp = dp2.zip(sharded_dp).sharding_filter()
-        with self.assertRaisesRegex(RuntimeError, "Dynamic sharding can be only"):
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
             torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
 
         # Single sharding_filter on data source

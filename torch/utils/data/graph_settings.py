@@ -48,8 +48,8 @@ def apply_sharding(datapipe: DataPipe,
             if hasattr(dp, 'is_shardable') and dp.is_shardable():
                 if hasattr(dp, 'apply_sharding'):
                     if prev_applied is not None:
-                        raise RuntimeError("Dynamic sharding can be only applied once per branch of DataPipe graph. "
-                                           f"Already applied to {prev_applied} while trying to apply to {dp}")
+                        raise RuntimeError("Sharding twice on a single pipeline is likely unintended and will cause data loss. "
+                                           f"Sharding already applied to {prev_applied} while trying to apply to {dp}")
                     dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
                     applied = dp
             if applied is None:
