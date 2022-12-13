@@ -11,7 +11,8 @@ namespace impl {
 struct C10_API TorchDispatchModeTLS {
   static void push_onto_stack(std::shared_ptr<c10::ModePyObjTrampoline> mode);
   static const std::shared_ptr<c10::ModePyObjTrampoline> pop_stack();
-  static const std::shared_ptr<c10::ModePyObjTrampoline>& get_stack_at(int64_t idx);
+  static const std::shared_ptr<c10::ModePyObjTrampoline>& get_stack_at(
+      int64_t idx);
   static int64_t stack_len();
 
   static const TorchDispatchModeTLS& get_state();

@@ -2,8 +2,6 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
-#include <iostream>
-
 namespace c10 {
 namespace impl {
 
@@ -20,9 +18,10 @@ void TorchDispatchModeTLS::push_onto_stack(
   torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
-const std::shared_ptr<c10::ModePyObjTrampoline> TorchDispatchModeTLS::pop_stack() {
+const std::shared_ptr<c10::ModePyObjTrampoline> TorchDispatchModeTLS::
+    pop_stack() {
   TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() > 0,
+      torchDispatchModeState.stack_.size() > 0,
       "trying to pop from empty mode stack");
   const std::shared_ptr<c10::ModePyObjTrampoline> out =
       torchDispatchModeState.stack_.back();
@@ -37,8 +36,8 @@ const std::shared_ptr<c10::ModePyObjTrampoline> TorchDispatchModeTLS::pop_stack(
   return out;
 }
 
-const std::shared_ptr<c10::ModePyObjTrampoline>& TorchDispatchModeTLS::get_stack_at(
-    int64_t idx) {
+const std::shared_ptr<c10::ModePyObjTrampoline>& TorchDispatchModeTLS::
+    get_stack_at(int64_t idx) {
   TORCH_CHECK(
       idx < static_cast<int64_t>(torchDispatchModeState.stack_.size()),
       "Tried to get stack at idx that's too big");
@@ -54,12 +53,14 @@ const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
 }
 
 void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
-//  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state : torchDispatchModeState.stack_) {
-//    state->mode_state_pop_trampoline();
-//  }
-//  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state : state.stack_) {
-//    state->mode_state_push_trampoline();
-//  }
+  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state :
+  torchDispatchModeState.stack_) {
+    state->mode_state_pop_trampoline();
+  }
+  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state :
+  state.stack_) {
+    state->mode_state_push_trampoline();
+  }
   torchDispatchModeState = state;
 
   if (torchDispatchModeState.stack_.size() == 0) {

@@ -14,7 +14,15 @@ struct StashTorchDispatchModeGuard {
   }
 
   ~StashTorchDispatchModeGuard() {
+    // since we're in the destructor, there might be active exceptions.
+    // This temporarily removes them in order to update the state of the mode
+    // before putting it back on the stack
+
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::push_onto_stack(std::move(saved_mode_));
+    PyErr_Restore(type, value, traceback);
   }
 
   const std::shared_ptr<c10::ModePyObjTrampoline>& get_cur_mode() {
@@ -34,7 +42,10 @@ struct StashTorchDispatchStackGuard {
   }
 
   ~StashTorchDispatchStackGuard() {
+    //PyObject *type, *value, *traceback;
+    //PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
+    //PyErr_Restore(type, value, traceback);
   }
 
  private:

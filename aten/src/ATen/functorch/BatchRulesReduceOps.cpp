@@ -72,7 +72,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "boxed_reduction_batch_rule");
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
@@ -412,7 +412,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED(_softmax);
   REDUCTION_BOXED(sort);
   REDUCTION_BOXED_ARGS(sort.stable, 2);
-  REDUCTION_BOXED(argsort);
   REDUCTION_BOXED(std_mean.correction);
   m.impl("sum", sum_decomp);
   REDUCTION_BOXED(sum.dim_IntList);

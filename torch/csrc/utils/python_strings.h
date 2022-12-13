@@ -6,7 +6,6 @@
 #include <stdexcept>
 #include <string>
 
-#include <iostream>
 // Utilities for handling Python strings. Note that PyString, when defined, is
 // the same as PyBytes.
 

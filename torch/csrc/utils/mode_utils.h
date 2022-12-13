@@ -11,14 +11,7 @@ struct ConcreteModePyObjTrampoline : virtual c10::ModePyObjTrampoline {
   void mode_state_push_trampoline() const override {
     PyObject* mode_obj = this->ptr(getPyInterpreter());
     const char* check_mode_push_name = "check_mode_state_push";
-
-    // if the guard is the one pushing the mode, there might be active exceptions.
-    // This temporarily removes them in order to check before putting the mode
-    // back on the stack
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject *type, *value, *traceback;
-    PyErr_Fetch(&type, &value, &traceback);
+    py::gil_scoped_acquire acquire;
 
     py::object run_function =
         PyObject_FastGetAttrString(mode_obj, check_mode_push_name);
@@ -31,12 +24,12 @@ struct ConcreteModePyObjTrampoline : virtual c10::ModePyObjTrampoline {
     if (ret.ptr() == nullptr) {
       throw python_error();
     }
-    PyErr_Restore(type, value, traceback);
   }
 
   void mode_state_pop_trampoline() const override {
     const char* check_mode_pop_name = "check_mode_state_pop";
     PyObject* mode_obj = this->ptr(getPyInterpreter());
+    py::gil_scoped_acquire acquire;
 
     const auto run_function =
         PyObject_FastGetAttrString(mode_obj, check_mode_pop_name);
