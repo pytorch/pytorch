@@ -1,9 +1,8 @@
 import triton
 
 import torch
-from .. import config as inductor_config
 from ..ir import FixedLayout
-from ..lowering import expand, lowerings, register_lowering
+from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -11,7 +10,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..virtualized import V
-from .mm import acc_type, mm_grid, mm_options, use_triton_template
+from .mm import mm_grid, mm_options, use_triton_template
 
 aten = torch.ops.aten
 

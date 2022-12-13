@@ -40,7 +40,7 @@ namespace {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (t.defined() && at::functionalization::impl::isFunctionalTensor(t)) {
           any_functional_inputs = true;
           at::functionalization::impl::sync(t);
@@ -81,7 +81,7 @@ namespace {
     for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor() && should_wrap_outputs) {
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (!t.defined()) continue;
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;

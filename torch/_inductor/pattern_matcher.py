@@ -96,7 +96,7 @@ class PatternExpr:
     """
 
     def _match(self, node: torch.fx.Node, outputs) -> Union[Match, FailedMatch]:
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def match(self, node: torch.fx.Node) -> Union[Match, FailedMatch]:
         try:
