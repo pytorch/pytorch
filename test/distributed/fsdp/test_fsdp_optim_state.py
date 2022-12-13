@@ -533,7 +533,7 @@ class TestFSDPOptimState(FSDPTest):
     ) -> None:
         if rank0_only and state_dict_type == StateDictType.SHARDED_STATE_DICT:
             return  # not supported
-        NUM_ITERS = 3
+        NUM_ITERS = 2
         model1, optim1, optim_input = self._init_nested_model(
             wrap=True,
             use_multiple_param_groups=use_multiple_param_groups,
