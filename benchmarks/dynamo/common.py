@@ -100,6 +100,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -114,7 +115,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
-    "AllenaiLongformerBase",
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
