@@ -1,7 +1,6 @@
 import torch
 import torch.fx
 import traceback
-import contextlib
 
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
@@ -115,22 +114,22 @@ class ShapeProp(torch.fx.Interpreter):
     """
     def __init__(self, gm, fake_mode=None):
         super().__init__(gm)
-        if fake_mode:
-            self.fake_mode = fake_mode
+        if fake_mode is not None:
             from torch._dynamo.utils import deepcopy_to_fake_tensor
             # Note:
             # We need fake execution cause the inputs are fake, however, we cannot fakify the module
             # - because we need to write to the tensor_meta of the real module. So we fakify to
-            # produce a result (L130 below), to extract tensor meta, and then keep going.
+            # produce a result (L131 below), to extract tensor meta, and then keep going.
             #
             # If we were to fakify, we would write to the wrong node, and then downstream fusion
             # would be missing the tensor_meta.
             #
             # See torch/_inductor/overrides.py for where this is called upstream of fusion.
             self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
+            self.fake_mode = fake_mode
         else:
-            self.fake_mode = None
             self.fake_module = None
+            self.fake_mode = None
 
         self.real_module = self.module
 
@@ -141,7 +140,11 @@ class ShapeProp(torch.fx.Interpreter):
                 # call_module and get_attr.
                 self.module = self.fake_module
             try:
-                result = super().run_node(n)
+                if self.fake_mode is not None:
+                    with self.fake_mode:
+                        result = super().run_node(n)
+                else:
+                    result = super().run_node(n)
             finally:
                 self.module = self.real_module
         except Exception as e:
@@ -179,6 +182,4 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        ctx = self.fake_mode if self.fake_mode is not None else contextlib.nullcontext()
-        with ctx:
-            return super().run(*args)
+        return super().run(*args)
