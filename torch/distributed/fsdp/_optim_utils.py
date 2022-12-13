@@ -1078,7 +1078,7 @@ def _is_zero_dim_tensor(x: Any) -> bool:
     return torch.is_tensor(x) and x.dim() == 0
 
 
-def _check_rank_missing_keys(
+def _check_missing_keys_on_rank(
     r0_optim_state_keys: List[_OptimStateKey],
     optim_state_key_to_param_id: Dict[_OptimStateKey, int],
     param_id_to_param: List[nn.Parameter],
@@ -1170,7 +1170,7 @@ def _map_param_id_to_optim_keys(
         dist.broadcast_object_list(key_obj_list, src=0, group=group)
         assert key_obj_list[0] is not None
         all_optim_state_keys = key_obj_list[0]
-        _check_rank_missing_keys(
+        _check_missing_keys_on_rank(
             all_optim_state_keys, optim_state_key_to_param_id, param_id_to_param, group
         )
 
@@ -1267,7 +1267,13 @@ def _optim_state_dict(
     # all-gathers across ranks
     for optim_state_key in all_optim_state_keys:
         param_id = optim_state_key_to_param_id.get(optim_state_key, -1)
-        assert param_id >= 0 or (optim_state_key.is_fsdp_managed and use_orig_params)
+        assert param_id >= 0 or (optim_state_key.is_fsdp_managed and use_orig_params), (
+            "If use_orig_params is False, we must be able to find the "
+            "corresponding param id. If use_orig_params is True, some FSDP "
+            "managedparameters may not exist in the local shard, so the lookup "
+            "can return -1. Both assert conditions failed, some unexpected "
+            "corner case happens."
+        )
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
             # they share the same FSDPParamInfo. So the first unflat_param_name
@@ -1368,6 +1374,9 @@ def _gather_orig_param_state(
     This API should only be used when ``use_orig_params`` is True.
     """
     fsdp_state = fsdp_param_info.state
+    assert fsdp_state._use_orig_params, (
+        "_gather_orig_param_state only support use_orig_params=True case"
+    )
     flat_param = fsdp_param_info.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
     if (
