@@ -1,15 +1,15 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/enum_type.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
 #include <iostream>
+#include <utility>
 
 namespace std {
 template<>
@@ -298,7 +298,7 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   auto map_key = std::make_tuple(identifier, key, value);
   std::lock_guard<std::mutex> lock(mutex);
   if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
-    TypePtr t = DictType::create(key, value);
+    TypePtr t = DictType::create(std::move(key), std::move(value));
     containerTypePtrs.emplace(map_key, std::move(t));
   }
   return containerTypePtrs[map_key];
@@ -738,7 +738,7 @@ TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& 
       /*arguments=*/std::move(arguments),
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
-      field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+      field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
 c10::optional<std::vector<c10::string_view>> TupleType::names() const {

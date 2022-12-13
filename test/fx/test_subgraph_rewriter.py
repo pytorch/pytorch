@@ -819,17 +819,22 @@ class TestSubgraphRewriter(JitTestCase):
                 return False
             return True
 
-        def num_repalcement_node_found(traced):
-            return sum(1 for node in traced.graph.nodes if node.target == torch.mul)
+        def check_replacement_nodes(self, traced, matches):
+            replacement_nodes_in_graph = [node for node in traced.graph.nodes if node.target == torch.mul]
+            replacement_nodes_in_res = [r for m in matches for r in m.replacements]
+            self.assertEqual(len(replacement_nodes_in_graph), len(replacement_nodes_in_res))
+            self.assertEqual(replacement_nodes_in_graph, replacement_nodes_in_res)
+            return len(replacement_nodes_in_graph)
 
         # match without filter, should find 2 match
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern(
+        matches = subgraph_rewriter.replace_pattern_with_filters(
             traced,
             BinaryOpScalarReLUPattern,
-            BinaryOpScalarReLUReplacement)
+            BinaryOpScalarReLUReplacement,
+            None)
         self.assertEqual(len(matches), 2)
-        self.assertEqual(num_repalcement_node_found(traced), 2)
+        self.assertEqual(check_replacement_nodes(self, traced, matches), 2)
 
         # match with filter, should find 1 match
         traced = symbolic_trace(M())
@@ -839,7 +844,7 @@ class TestSubgraphRewriter(JitTestCase):
             BinaryOpScalarReLUReplacement,
             [second_input_is_scalar])
         self.assertEqual(len(matches), 1)
-        self.assertEqual(num_repalcement_node_found(traced), 1)
+        self.assertEqual(check_replacement_nodes(self, traced, matches), 1)
 
     def test_matching_pattern_with_list_type_arg(self):
         class M(torch.nn.Module):
