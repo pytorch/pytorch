@@ -44,7 +44,7 @@ inline c10::Storage to_meta(const c10::Storage& t) {
         t.nbytes(),
         allocator->allocate(t.nbytes()),
         allocator,
-        /*resizeable=*/true);
+        /*resizeable=*/t.resizable());
     return c10::Storage(storage_impl);
 }
 
