@@ -2,16 +2,13 @@ import triton
 
 import torch
 
-from ..ir import FixedLayout
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    realize_inputs,
     TritonTemplate,
 )
 
-from ..virtualized import V
 from .mm import addmm_epilogue, mm_args, mm_configs, mm_options, use_triton_template
 
 aten = torch.ops.aten
