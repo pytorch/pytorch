@@ -339,7 +339,8 @@ def _safe_zero_index(x):
 
 
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
-           chunk_size: Optional[int] = None):
+           chunk_size: Optional[int] = None,
+           _preallocate_and_copy = False):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using reverse mode autodiff
@@ -477,7 +478,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
 
-        def compute_jacobian():
+        def compute_jacobian_stacked():
             # Helper function to compute chunked Jacobian
             # The intermediate chunked calculation are only
             # scoped at this function level.
@@ -504,7 +505,31 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
             return flat_results
 
-        flat_jacobians_per_input = compute_jacobian()
+        def compute_jacobian_preallocate_and_copy():
+            out_vec_size = sum(flat_output_numels)
+            stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
+                                                                 flat_output_numels,
+                                                                 chunk_size=chunk_size)):
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+                chunked_result = vmap(vjp_fn)(basis)
+                flat_results, _ = tree_flatten(chunked_result)
+                # chunked_results.append(flat_results)
+                if chunk_size is None or chunk_size >= out_vec_size:
+                    return flat_results
+
+                for r, sr in zip(flat_results, stacked_results):
+                    sr[idx * chunk_size: (idx + 1) * chunk_size].copy_(r)
+
+            return stacked_results
+
+        if _preallocate_and_copy:
+            flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
+        else:
+            flat_jacobians_per_input = compute_jacobian_stacked()
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.

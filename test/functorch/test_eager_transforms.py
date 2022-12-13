@@ -1717,7 +1717,8 @@ class TestJac(TestCase):
         out_val = out(x, y, z)
         self.assertEqual(out_val, expected_out)
 
-    def test_chunk_jacrev(self, device):
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev(self, device, _preallocate_and_copy):
         x = torch.randn(10, 2, device=device)
         y = torch.randn(1, 2, device=device)
 
@@ -1726,7 +1727,9 @@ class TestJac(TestCase):
 
         for chunk_size in [1, 2, 3, 4, 7, 10]:
             expected = functorch.jacrev(f, argnums=(0, 1))(x, y)
-            actual = functorch.jacrev(f, argnums=(0, 1), chunk_size=chunk_size)(x, y)
+            actual = functorch.jacrev(f, argnums=(0, 1),
+                                      chunk_size=chunk_size,
+                                      _preallocate_and_copy=_preallocate_and_copy)(x, y)
             self.assertEqual(actual, expected)
 
 
