@@ -43,6 +43,11 @@ from .utils import (
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
 )
+from .verification import (
+    find_mismatch,
+    GraphInfo,
+    VerificationOptions,
+)
 
 __all__ = [
     # Modules
@@ -68,6 +73,9 @@ __all__ = [
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
+    # Public classes
+    "GraphInfo",
+    "VerificationOptions",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -77,6 +85,7 @@ __all__ = [
     "unregister_custom_op_symbolic",
     "disable_log",
     "enable_log",
+    "find_mismatch",
     # Errors
     "CheckerError",  # Backwards compatibility
 ]

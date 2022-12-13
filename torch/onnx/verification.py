@@ -681,6 +681,9 @@ def _onnx_graph_from_aten_graph(
     do_constant_folding = export_options.do_constant_folding
     opset_version = export_options.opset_version or _constants.ONNX_DEFAULT_OPSET
 
+    GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
+
     do_constant_folding = utils._decide_constant_folding(
         do_constant_folding, operator_export_type, training
     )
@@ -1612,6 +1615,24 @@ class GraphInfo:
     def verify_export(
         self, options: VerificationOptions
     ) -> Tuple[Optional[AssertionError], torch.Graph, _OutputsType, _OutputsType]:
+        """
+        Verify the export from TorchScript IR graph to ONNX.
+
+        Export the TorchScript IR graph to ONNX, with the inputs, parameters and export
+        options recorded in this object. Then verify the exported ONNX graph against
+        the original TorchScript IR graph under the provided verification options.
+
+        Args:
+            options: The verification options.
+
+        Returns:
+            error: The AssertionError raised during the verification. Returns None if no
+                error is raised.
+            onnx_graph: The exported ONNX graph in TorchScript IR format.
+            onnx_outs: The outputs from running exported ONNX model under the onnx
+                backend in `options`.
+            pt_outs: The outputs from running the TorchScript IR graph.
+        """
         return verify_aten_graph(
             self.graph,
             input_args=self.input_args,
@@ -1625,6 +1646,16 @@ class GraphInfo:
         self,
         options: Optional[VerificationOptions] = None,
     ):
+        """
+        Find all mismatches between the TorchScript IR graph and the exported onnx model.
+
+        Binary searches the model graph to find the minimal subgraph that exhibits the
+        mismatch. A `GraphInfo` object is created for each subgraph, recording the test
+        inputs and export options, as well as the validation results.
+
+        Args:
+            options: The verification options.
+        """
         self.clear()
 
         if options is None:
@@ -1731,18 +1762,82 @@ def find_mismatch(
     options: Optional[VerificationOptions] = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
-    TODO: Fill in docstring.
 
     Experimental. The API is subject to change.
+
+    This tool helps debug the mismatch between the original PyTorch model and exported
+    ONNX model. It binary searches the model graph to find the minimal subgraph that
+    exhibits the mismatch.
 
     Args:
         model: The model to be exported.
         input_args: The input arguments to the model.
+        do_constant_folding: Same as `do_constant_folding` in :func:`torch.onnx.export`.
+        training: Same as `training` in :func:`torch.onnx.export`.
+        opset_version: Same as `opset_version` in :func:`torch.onnx.export`.
+        keep_initializers_as_inputs: Same as `keep_initializers_as_inputs` in :func:`torch.onnx.export`.
+        verbose: Same as `verbose` in :func:`torch.onnx.export`.
+        options: The options for the mismatch verification.
 
     Returns:
         A GraphInfo object that contains the mismatch information.
 
     Example::
+
+        >>> import torch
+        >>> opset_version = 15
+        >>> # Define a custom symbolic function for aten::relu.
+        >>> # The custom symbolic function is incorrect, which will result in mismatches.
+        >>> def incorrect_relu_symbolic_function(g, self):
+        ...     return self
+        >>> torch.onnx.register_custom_op_symbolic(
+        ...     "aten::relu",
+        ...     incorrect_relu_symbolic_function,
+        ...     opset_version=opset_version,
+        ... )
+        >>> class Model(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.layers = torch.nn.Sequential(
+        ...             torch.nn.Linear(3, 4),
+        ...             torch.nn.ReLU(),
+        ...             torch.nn.Linear(4, 5),
+        ...             torch.nn.ReLU(),
+        ...             torch.nn.Linear(5, 6),
+        ...         )
+        ...     def forward(self, x):
+        ...         return self.layers(x)
+        >>> graph_info = torch.onnx.find_mismatch(
+        ...     Model(),
+        ...     (torch.randn(2, 3),),
+        ...     opset_version=opset_version,
+        ... )
+        ===================== Mismatch info for graph partition : ======================
+        ================================ Mismatch error ================================
+        Tensor-likes are not close!
+
+        Mismatched elements: 12 / 12 (100.0%)
+        Greatest absolute difference: 0.3058328777551651 at index (1, 2) (up to 1e-07 allowed)
+        Greatest relative difference: 12.117157606919632 at index (1, 5) (up to 0.001 allowed)
+        ==================================== Tree: =====================================
+        5 X   __2 X    __1 ✓
+        id:  |  id: 0 |  id: 00
+             |        |
+             |        |__1 X (aten::relu)
+             |           id: 01
+             |
+             |__3 X    __1 ✓
+                id: 1 |  id: 10
+                      |
+                      |__2 X     __1 X (aten::relu)
+                         id: 11 |  id: 110
+                                |
+                                |__1 ✓
+                                   id: 111
+        =========================== Mismatch leaf subgraphs: ===========================
+        ['01', '110']
+        ============================= Mismatch node kinds: =============================
+        {'aten::relu': 2}
 
     """
     if options is None:
