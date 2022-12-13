@@ -1,6 +1,7 @@
+import math
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ["AdamW", "adamw"]
@@ -355,14 +356,14 @@ def _single_tensor_adamw(
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = _get_value(step_t)
+            step = step_t.item()
 
-            bias_correction1 = 1 - beta1 ** step
-            bias_correction2 = 1 - beta2 ** step
+            bias_correction1 = 1 - beta1**step
+            bias_correction2 = 1 - beta2**step
 
             step_size = lr / bias_correction1
 
-            bias_correction2_sqrt = _dispatch_sqrt(bias_correction2)
+            bias_correction2_sqrt = math.sqrt(bias_correction2)
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
@@ -469,12 +470,12 @@ def _multi_tensor_adamw(
 
         torch._foreach_addcdiv_(params, exp_avgs, denom)
     else:
-        bias_correction1 = [1 - beta1 ** _get_value(step) for step in state_steps]
-        bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
+        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
 
-        step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
+        step_size = [(lr / bc) * -1 for bc in bias_correction1]
 
-        bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+        bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now

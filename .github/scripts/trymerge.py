@@ -71,7 +71,6 @@ fragment PRCheckSuites on CheckSuiteConnection {
         workflow {
           name
         }
-        url
       }
       checkRuns(first: 50) {
         nodes {
@@ -85,6 +84,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
         }
       }
       conclusion
+      url
     }
     cursor
   }
@@ -525,7 +525,7 @@ def add_workflow_conclusions(
                 conclusions[workflow_name] = WorkflowCheckState(
                     name=workflow_name,
                     status=workflow_conclusion,
-                    url=workflow_run["url"])
+                    url=node["url"])
             has_failing_check = False
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
@@ -550,7 +550,7 @@ def add_workflow_conclusions(
                 conclusions[workflow_name] = WorkflowCheckState(
                     name=workflow_name,
                     status="FAILURE",
-                    url=workflow_run["url"])
+                    url=node["url"])
 
     add_conclusions(checksuites["edges"])
     while bool(checksuites["pageInfo"]["hasNextPage"]):

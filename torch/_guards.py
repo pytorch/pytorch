@@ -1,15 +1,7 @@
 import dataclasses
 import enum
-import logging
+from typing import Callable, List, Optional
 import weakref
-from typing import Callable, List, NamedTuple, Optional
-
-# TODO(voz): Stolen pattern, not sure why this is the case,
-# but mypy complains.
-try:
-    import sympy  # type: ignore[import]
-except ImportError:
-    logging.warning("No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -17,7 +9,6 @@ torch._guards is the definitional source of truth for general purpose guard stru
 An important thing to keep in mind here is the preservation of layering. There should be no dynamo notions,
 and no guard installation notions here.
 """
-
 
 class GuardSource(enum.Enum):
     LOCAL = 0
@@ -41,7 +32,6 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
-
 """
 Base class for a "GuardBuilder" role.
 
@@ -50,19 +40,12 @@ confusing, as its not a builder, but for the sake of avoiding a lot of renames a
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
-on GuardSource's select function.
+on GuardSource's select function. 
 
 There is value in keeping this GuardBuilderBase empty to keep layering clean.
 """
-
-
 class GuardBuilderBase:
     pass
-
-
-class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: str
 
 
 @dataclasses.dataclass
