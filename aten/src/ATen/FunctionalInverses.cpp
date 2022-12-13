@@ -26,7 +26,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_v
   }
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes, bool reapply_views) {
+Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
   auto result = self;
 
   int64_t nDims = sizes.size();
@@ -42,7 +42,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef sizes, bool reapply_vi
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, IntArrayRef sizes, bool reapply_views) {
+Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, c10::SymIntArrayRef sizes, bool reapply_views) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
@@ -208,11 +208,11 @@ Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, con
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
-    return unsqueeze_copy_to(mutated_view, base.sizes(), reapply_views);
+    return unsqueeze_copy_to(mutated_view, base.sym_sizes(), reapply_views);
 }
 
 Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
-    return unsqueeze_copy_to(mutated_view, dim, base.sizes(), reapply_views);
+    return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
 }
 
 Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
