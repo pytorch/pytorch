@@ -750,7 +750,7 @@ class TorchPyOperator(VariableTracker):
                 # equal
                 comparable_state = state._replace(
                     output=state.output._replace(
-                        guard_state=GuardsCheckpointState(),
+                        guard_state=GuardsCheckpointState(set()),
                         nn_modules=None,
                         # Timestamp is monotonically increasing so we don't
                         # care about divergence

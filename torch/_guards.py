@@ -196,6 +196,15 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
 
+    def diff(self, other):
+        r = self.dynamo_guards.difference(other.dynamo_guards)
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
