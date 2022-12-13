@@ -448,11 +448,15 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             def forward(self, x):
                 return torch.clamp(x, min=-0.5, max=0.5)
 
+        # Copy of mocked method must be saved to prevent
+        # max recursion depth while trying to run original instance method
+        original_get_function_group = registration.registry.get_function_group
+
         def break_is_registered_op_api(name):
             fake_missing_symbolics = {"aten::clamp"}
             if name in fake_missing_symbolics:
                 return None
-            return registration.registry.get_function_group(name)
+            return original_get_function_group(name)
 
         # Force missing symbolic for well-known op using a mock
         onnx_model = export_to_onnx(
@@ -462,6 +466,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 unittest.mock.patch(
                     "torch.onnx._internal.registration.registry.get_function_group",
                     side_effect=break_is_registered_op_api,
+                    # wraps=registration.registry.get_function_group
                 )
             ],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,

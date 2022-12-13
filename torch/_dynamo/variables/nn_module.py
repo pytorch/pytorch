@@ -164,7 +164,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = str(type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -346,6 +346,12 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "keys":
+            assert not (args or kwargs)
+            result = []
+            for name in module.keys():
+                result.append(ConstantVariable(name, **options))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
