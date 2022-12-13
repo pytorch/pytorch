@@ -23,7 +23,7 @@ from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 from .. import config, eval_frame
-from ..utils import clone_inputs, count_calls, counters
+from ..utils import clone_inputs, counters
 from .backends import BACKENDS
 from .normalize import normalize_ir
 
@@ -41,11 +41,6 @@ def aot_autograd(**kwargs):
         # TODO: stop monkeypatching here (without even cleaning up, UGH!)
         functorch.compile.config.use_functionalize = True
         functorch.compile.config.use_fake_tensor = True
-
-        force_compile_tiny_graphs = kwargs.pop("force_compile_tiny_graphs", False)
-
-        if count_calls(gm.graph) < 2 and not force_compile_tiny_graphs:
-            return gm  # no point for tiny graphs
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
@@ -75,11 +70,14 @@ def aot_autograd(**kwargs):
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
 
+        from torch._inductor.debug import enable_aot_logging
+
         try:
             # NB: NOT cloned!
-            cg = aot_module_simplified(gm, example_inputs, **kwargs)
-            counters["aot_autograd"]["ok"] += 1
-            return eval_frame.disable(cg)
+            with enable_aot_logging():
+                cg = aot_module_simplified(gm, example_inputs, **kwargs)
+                counters["aot_autograd"]["ok"] += 1
+                return eval_frame.disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
