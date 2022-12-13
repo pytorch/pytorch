@@ -83,6 +83,7 @@ from ._optim_utils import (
 )
 from ._state_dict_utils import (
     _post_load_state_dict_hook,
+    _pre_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
@@ -191,7 +192,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
             This is the process group used for collective communications and
             the one over which the model is sharded. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD`` or ``ShardingStrategy._HYBRID_SHARD_ZERO2``, users can
+            ``ShardingStrategy.HYBRID_SHARD`` users can
             pass in a tuple of process groups representing the groups to shard and replicate across,
             respectively.
         sharding_strategy (Optional[ShardingStrategy]):
@@ -408,6 +409,7 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
+        self.register_state_dict_pre_hook(_pre_state_dict_hook)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True
@@ -687,10 +689,6 @@ class FullyShardedDataParallel(nn.Module):
                     module, prev_state_dict_type, prev_state_dict_config
                 )
 
-    def state_dict(self, *args, **kwargs):
-        _lazy_init(self, self)
-        return super().state_dict(*args, **kwargs)
-
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Runs the forward pass for the wrapped module, inserting FSDP-specific
@@ -699,12 +697,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
+            _root_pre_forward(self, self, unused)
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
-            _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, unused
+            args, kwargs = _pre_forward(
+                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
                 p_assert(
