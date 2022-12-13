@@ -13,6 +13,9 @@ from ._common_operator_config_utils import (
 )
 from .backend_config import BackendConfig, DTypeConfig
 
+__all__ = [
+    "get_fbgemm_backend_config",
+]
 
 # ===================
 # |  DTYPE CONFIGS  |
@@ -108,7 +111,3 @@ def get_fbgemm_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
         .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
         .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
-
-__all__ = [
-    "get_fbgemm_backend_config",
-]

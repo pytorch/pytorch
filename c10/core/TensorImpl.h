@@ -692,6 +692,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sym_sizes();
   }
 
+  template <typename T>
+  ArrayRef<T> generic_strides() {
+    return _generic_strides(identity<T>());
+  }
+
+  ArrayRef<int64_t> _generic_strides(identity<int64_t>) {
+    return strides();
+  }
+  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) {
+    return sym_strides();
+  }
+
+  template <typename T>
+  T generic_storage_offset() {
+    return _generic_storage_offset(identity<T>());
+  }
+
+  int64_t _generic_storage_offset(identity<int64_t>) {
+    return storage_offset();
+  }
+  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) {
+    return sym_storage_offset();
+  }
+
   /**
    * The number of elements in a tensor.
    *
@@ -1604,6 +1628,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       c10::SymIntArrayRef sizes,
       c10::SymIntArrayRef strides,
       c10::optional<c10::SymInt> storage_offset = c10::nullopt);
+  // This is renamed to avoid breaking overload BC
+  void generic_set_sizes_contiguous(c10::SymIntArrayRef sizes);
+  void generic_set_sizes_contiguous(c10::IntArrayRef sizes) {
+    set_sizes_contiguous(sizes);
+  }
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
@@ -2311,6 +2340,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     data_type_ = data_type;
   }
 
+  void empty_tensor_restride_symint(MemoryFormat memory_format);
+
   /**
    * Set the strides of the tensor to match memory_format
    *
@@ -2318,9 +2349,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * memory contiguous
    */
   void empty_tensor_restride(MemoryFormat memory_format) {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "empty_tensor_restride() called on tensor with symbolic shape")
+    if (has_symbolic_sizes_strides_) {
+      empty_tensor_restride_symint(memory_format);
+      return;
+    }
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(
         compute_numel() == numel_,

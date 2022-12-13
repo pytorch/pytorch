@@ -602,7 +602,14 @@ class TestMin(TestCase):
         t = torch.rand(3)[d]
         self.assertRaises(TypeError, lambda: t.order(wrong=3))
 
-
+    def test_big_split(self):
+        total = 0
+        l = []
+        while total < 6400:
+            l.append(torch.randint(2, 10, (1,)).item())
+            total += l[-1]
+        x = torch.randn(total, 1)
+        x.split(l, 0)
 
 skip_functorch_only = ['test_time_mm_fuse', 'test_attn_cuda']
 class TestMinFunctorchOnly(TestMin):
