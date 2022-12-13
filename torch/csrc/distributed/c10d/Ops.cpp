@@ -1018,8 +1018,8 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cpu_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
   auto work = process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
+      output_tensors,
+      input_tensors,
       AllToAllOptions{std::chrono::milliseconds(timeout)});
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
@@ -1031,8 +1031,8 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
   auto work = process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
+      output_tensors,
+      input_tensors,
       AllToAllOptions{std::chrono::milliseconds(timeout)});
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
