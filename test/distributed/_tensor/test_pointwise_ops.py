@@ -22,7 +22,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
 from torch.testing._internal.common_distributed import (
-    MultiThreadedTestCase, 
+    MultiThreadedTestCase,
     DEFAULT_WORLD_SIZE,
 )
 
@@ -132,7 +132,8 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         collected_result = deepcopy_convert_from_dtensor(dist_result)
 
-        self.assertEqual(reference_result, collected_result)
+        if self.rank == 0:
+            self.assertEqual(reference_result, collected_result)
 
     # TODO: We need to add CPU tests for ops in the future.
     def _run_sharded_elementwise_ops(
@@ -150,7 +151,7 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         input_tensor = torch.randn(
             *input_size,
-            device=self.device,
+            device=self.device_type,
             requires_grad=True,
         )
 
@@ -163,7 +164,6 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
             kwargs=kwargs,
         )
 
-    @skip_unless_torch_gpu
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -238,13 +238,13 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         grad_output = torch.rand(
             input_size,
-            device=self.device,
+            device=self.device_type,
             requires_grad=True,
         )
         mask = (
             torch.rand(
                 input_size,
-                device=self.device,
+                device=self.device_type,
                 requires_grad=False,
             )
             < 0.8
