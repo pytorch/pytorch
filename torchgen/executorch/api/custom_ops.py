@@ -39,7 +39,7 @@ class ComputeNativeFunctionStub:
                         for a in f.func.arguments.flat_non_out
                         if a.type == f.func.returns[0].type
                     ),
-                    None,
+                    "",
                 )
             if not ret_name:
                 raise Exception(f"Can't handle this return type {f.func}")
@@ -69,7 +69,7 @@ def gen_custom_ops(
     backend_indices: Dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
     rocm: bool,
-):
+) -> None:
 
     dispatch_key = DispatchKey.CPU
     backend_index = backend_indices[dispatch_key]
