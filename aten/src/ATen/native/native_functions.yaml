@@ -1833,6 +1833,10 @@
   dispatch:
     CPU, CUDA: cumprod_out
 
+- func: _mkl_linear(Tensor X, Tensor MKL_W, Tensor ORI_W, Tensor? B, int batch_size) -> Tensor
+  dispatch:
+    MkldnnCPU, CPU: mkl_linear
+
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method

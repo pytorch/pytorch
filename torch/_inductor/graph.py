@@ -170,7 +170,12 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(buffer, ir.ExternKernel):
             if not isinstance(
                 buffer,
-                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+                (
+                    ir.MatrixMultiply,
+                    ir.BatchMatrixMultiply,
+                    ir.MatrixMultiplyAdd,
+                    ir.MKLPackedLinear,
+                ),
             ):
                 self.disable_cpp_wrapper("ExternKernel")
 
