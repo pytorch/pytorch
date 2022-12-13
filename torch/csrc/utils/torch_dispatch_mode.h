@@ -1,6 +1,8 @@
 #pragma once
 
+#include <c10/core/ModePyObjTrampoline.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <torch/csrc/utils/mode_utils.h>
 
 namespace torch {
 namespace torch_dispatch_mode {
@@ -12,15 +14,23 @@ struct StashTorchDispatchModeGuard {
   }
 
   ~StashTorchDispatchModeGuard() {
+    // since we're in the destructor, there might be active exceptions.
+    // This temporarily removes them in order to update the state of the mode
+    // before putting it back on the stack
+
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::push_onto_stack(std::move(saved_mode_));
+    PyErr_Restore(type, value, traceback);
   }
 
-  const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
+  const std::shared_ptr<c10::ModePyObjTrampoline>& get_cur_mode() {
     return saved_mode_;
   }
 
  private:
-  std::shared_ptr<at::SafePyObject> saved_mode_;
+  std::shared_ptr<c10::ModePyObjTrampoline> saved_mode_;
 };
 
 struct StashTorchDispatchStackGuard {
@@ -32,7 +42,10 @@ struct StashTorchDispatchStackGuard {
   }
 
   ~StashTorchDispatchStackGuard() {
+    PyObject *type, *value, *traceback;
+    PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
+    PyErr_Restore(type, value, traceback);
   }
 
  private:

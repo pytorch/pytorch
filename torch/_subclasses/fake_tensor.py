@@ -543,6 +543,11 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
 
+    # DEBUG_MODE on FakeTensor enables a debug mode.
+    # Today, this mode only records fake tensor creation stack traces,
+    # But in the future will add more.
+    DEBUG_MODE = False
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
