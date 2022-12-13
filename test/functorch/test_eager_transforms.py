@@ -1087,6 +1087,32 @@ class TestAutogradFunction(TestCase):
 
         grad(h, argnums=(0, 1))(x, grad_y)
 
+    @_set_autograd_function_extension_enabled()
+    def test_grad_fn_name(self, device):
+        names = []
+
+        class FooBar(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.clone()
+
+            @staticmethod
+            def setup_context(ctx, inputs, outputs):
+                return
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def f(x):
+            y = FooBar.apply(x)
+            names.append(type(y.grad_fn).__name__)
+            return y
+
+        x = torch.tensor(1.)
+        grad(f)(x)
+        self.assertEqual(names, ['FooBarGeneratedBackward'])
+
 
 class TestAutogradFunctionVmapAPI(TestCase):
     @_set_autograd_function_extension_enabled()
