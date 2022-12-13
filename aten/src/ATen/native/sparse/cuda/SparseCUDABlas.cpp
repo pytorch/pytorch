@@ -164,7 +164,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
+    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     &bufferSize           /* output */
   ));
 
@@ -178,7 +178,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
+    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     dataPtr.get()         /* external buffer */
   ));
 
