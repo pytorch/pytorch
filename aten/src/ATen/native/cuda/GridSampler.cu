@@ -55,8 +55,8 @@ namespace {
       const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
-      accscalar_t x = grid.data[grid_offset];
-      accscalar_t y = grid.data[grid_offset + grid_sCoor];
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
 
       accscalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
       accscalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
@@ -190,13 +190,13 @@ namespace {
       const index_t grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z co-ordinates from grid
-      accscalar_t ix = grid.data[grid_offset];
-      accscalar_t iy = grid.data[grid_offset + grid_sCoor];
-      accscalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
+      scalar_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
-      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
-      iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners);
+      accscalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+      accscalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+      accscalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get corner pixel values from (x, y, z)
