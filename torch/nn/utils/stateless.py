@@ -1,6 +1,6 @@
 import warnings
 import contextlib
-from typing import Any, Callable, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -103,8 +103,8 @@ def _apply_func_submodules(
 def functional_call(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
-    args: Tuple,
-    kwargs : Dict[str, Any] = None,
+    args: Union[Any, Tuple],
+    kwargs: Dict[str, Any] = None,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -132,7 +132,7 @@ def functional_call(
         module (torch.nn.Module): the module to call
         parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
             the module call.
-        args (tuple): arguments to be passed to the module call
+        args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
 
     Returns:
