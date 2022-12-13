@@ -27,7 +27,7 @@ from torch.ao.quantization.quantize_fx import (
 from torch.ao.quantization.fx.quantize_handler import DefaultNodeQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
-    is_match,
+    _is_match,
     MatchAllNode,
 )
 
@@ -711,7 +711,7 @@ class TestQuantizeFx(QuantizationTestCase):
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
-                self.assertTrue(is_match(modules, n, pattern))
+                self.assertTrue(_is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):
         class M(torch.nn.Module):
@@ -727,7 +727,7 @@ class TestQuantizeFx(QuantizationTestCase):
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
             if n.op == "call_function" and n.target == operator.getitem:
-                self.assertTrue(is_match(modules, n, pattern))
+                self.assertTrue(_is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
         class Tmp(torch.nn.Module):
