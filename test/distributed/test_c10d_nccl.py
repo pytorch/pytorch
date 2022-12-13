@@ -2908,9 +2908,21 @@ class CompilerTest(test_c10d_common.CompilerTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_allgather_into_tensor_work_wait_gpu(self):
+        self._test_allgather_into_tensor_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_work_wait_gpu(self):
         self._test_reduce_scatter_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_work_wait_gpu(self):
+        self._test_reduce_scatter_tensor_work_wait(
+            torch.ones(4, 4, device=self.rank) * self.rank
         )
 
     @skip_if_lt_x_gpu(2)
@@ -2922,6 +2934,12 @@ class CompilerTest(test_c10d_common.CompilerTest):
     @skip_if_lt_x_gpu(2)
     def test_scatter_work_wait_gpu(self):
         self._test_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_alltoall_work_wait_gpu(self):
+        self._test_alltoall_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
