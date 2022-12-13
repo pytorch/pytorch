@@ -39,50 +39,65 @@ struct TORCH_API Slice final {
  public:
   // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
   Slice(
-      c10::optional<int64_t> start_index = c10::nullopt,
-      c10::optional<int64_t> stop_index = c10::nullopt,
-      c10::optional<int64_t> step_index = c10::nullopt) {
+      c10::optional<c10::SymInt> start_index = c10::nullopt,
+      c10::optional<c10::SymInt> stop_index = c10::nullopt,
+      c10::optional<c10::SymInt> step_index = c10::nullopt) {
     if (!step_index.has_value()) {
-      step_ = 1;
+      step_ = c10::SymInt(1);
     } else {
       step_ = step_index.value();
-      TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
-
-      // Here step might be -INDEX_MAX-1; in this case we replace it
-      // with -INDEX_MAX.  This doesn't affect the semantics, and it
-      // guards against later undefined behaviour resulting from code that
-      // does "step = -step" as part of a slice reversal.
-      if (step_ < -INDEX_MAX)
-        step_ = -INDEX_MAX;
+      if (!step_.is_symbolic()) {
+        TORCH_CHECK_VALUE(step_.expect_int() != 0, "slice step cannot be zero");
+        // Here step might be -INDEX_MAX-1; in this case we replace it
+        // with -INDEX_MAX.  This doesn't affect the semantics, and it
+        // guards against later undefined behaviour resulting from code that
+        // does "step = -step" as part of a slice reversal.
+        if (step_.expect_int() < -INDEX_MAX) {
+          step_ = c10::SymInt(-INDEX_MAX);
+        }
+      }
     }
     if (!start_index.has_value()) {
-      start_ = step_ < 0 ? INDEX_MAX : 0;
+      TORCH_CHECK_VALUE(!step_.is_symbolic(), "slice step cannot be symbolic");
+
+      if (step_.expect_int() < 0) {
+        start_ = c10::SymInt(INDEX_MAX);
+      } else {
+        start_ = c10::SymInt(0);
+      }
+
     } else {
       start_ = start_index.value();
     }
     if (!stop_index.has_value()) {
-      stop_ = step_ < 0 ? INDEX_MIN : INDEX_MAX;
+      TORCH_CHECK_VALUE(!step_.is_symbolic(), "slice step cannot be symbolic");
+
+      if (step_.expect_int() < 0) {
+        stop_ = c10::SymInt(INDEX_MIN);
+      } else {
+        stop_ = c10::SymInt(INDEX_MAX);
+      }
     } else {
       stop_ = stop_index.value();
     }
   }
 
-  inline int64_t start() const {
+  inline c10::SymInt start() const {
     return start_;
   }
 
-  inline int64_t stop() const {
+  inline c10::SymInt stop() const {
     return stop_;
   }
 
-  inline int64_t step() const {
+  inline c10::SymInt step() const {
     return step_;
   }
 
  private:
-  int64_t start_;
-  int64_t stop_;
-  int64_t step_;
+  c10::SymInt start_;
+  c10::SymInt stop_;
+  c10::SymInt step_;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
@@ -213,14 +228,14 @@ namespace impl {
 static inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
-    int64_t start,
-    int64_t stop,
-    int64_t step,
+    c10::SymInt start,
+    c10::SymInt stop,
+    c10::SymInt step,
     bool disable_slice_optimization,
     const at::Device& self_device,
     const c10::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
-  TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
+  TORCH_CHECK_VALUE(step.expect_int() > 0, "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
@@ -235,7 +250,7 @@ static inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice(dim, start, stop, step);
+  return self.slice_symint(dim, start, stop, step);
 }
 
 static inline Tensor applySelect(
