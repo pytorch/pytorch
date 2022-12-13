@@ -27,12 +27,10 @@ def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_RUNTIME_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch._assert
@@ -42,12 +40,10 @@ def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_ACCURACY_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch.add
