@@ -27,8 +27,8 @@ void SizesAndStrides::resizeSlowPath(
     if (isInline()) {
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       int64_t* tempStorage =
+          // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
           static_cast<int64_t*>(malloc(storageBytes(newSize)));
       TORCH_CHECK(
           tempStorage,
