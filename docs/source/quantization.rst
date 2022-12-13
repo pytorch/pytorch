@@ -1001,7 +1001,7 @@ Custom API Example::
       mp, convert_custom_config=convert_custom_config_dict)
 
 Deciding Which Quantization Techniques to Use for Your Use Case
---------------------------------------------------------------
+---------------------------------------------------------------
 
 As we've described above, the quantization codebase equips users with a number of tools and options to quantize their models. These include
 
@@ -1065,7 +1065,7 @@ qparams change `dynamically` to get the best accuracy on each run.
 
 
 Thus the choice between dynamic and static quantization has two components. Firstly, whether the op supports dynamic quantization and second, how the choice trades off performance and accuracy.
-For the first component, you can see the operator coverage tables for `Eager Mode <https://pytorch.org/docs/stable/quantization.html#eager-mode-quantization>`_ and `Fx Graph Mode Quantization<https://pytorch.org/docs/stable/quantization.html#quantization-flow-support>`_
+For the first component, you can see the operator coverage table for eager mode `Eager Mode Quantization`_ (above that link) and fx `Operator Support`_.
 For the second component, the general recommendation tends to be to try static quantization first, and if that doesn't work, try dynamic quantization or, you could go back and try QAT.
 quantization parameters.
 
@@ -1090,17 +1090,15 @@ Symmetric Quantization vs Affine Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Although this is mentioned a few times in the docs, in general this consideration can be ignored since
 the quantized ops tend to have very specific types of support and these considerations are lumped in with the different default qconfigs in
-`qconfig.py<https://github.com/pytorch/pytorch/blob/df569367ef444dc9831ef0dde3bc611bcabcfbf9/torch/ao/quantization/qconfig.py#L50>`_. In pracitce, symmetric quantization means that the values that the quantized format can represent must be centered at zero.
+`qconfig.py <https://github.com/pytorch/pytorch/blob/df569367ef444dc9831ef0dde3bc611bcabcfbf9/torch/ao/quantization/qconfig.py#L50>`_. In pracitce, symmetric quantization means that the values that the quantized format can represent must be centered at zero.
 Affine Quantization doesn't have this restriction. This can be seen with how the qparams are calculated in the
-`MinMaxObserver<https://pytorch.org/docs/master/generated/torch.quantization.observer.MinMaxObserver.html?highlight=minmaxobserver#minmaxobserver>`_.
-Our recommendation is to not worry about this and pick your qconfig based on other considerations.
+`MinMaxObserver <https://pytorch.org/docs/master/generated/torch.quantization.observer.MinMaxObserver.html?highlight=minmaxobserver#minmaxobserver>`_.
+Our recommendation is to not worry about this and pick your qconfig based on the other considerations described above.
 
 Additional Resources
 ^^^^^^^^^^^^^^^^^^^^
-* This blog post includes some considerations about when dynamic vs static quantization tends to work best `Introduction to Quantization on PyTorch
-<https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_
-* This blog post walks through how the different quantization techniques work in practice `Practical Quantization in PyTorch
-<https://pytorch.org/blog/quantization-in-practice/>`_
+* This blog post includes some considerations about when dynamic vs static quantization tends to work best `Introduction to Quantization on PyTorch <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_
+* This blog post walks through how the different quantization techniques work in practice `Practical Quantization in PyTorch <https://pytorch.org/blog/quantization-in-practice/>`_.
 
 Best Practices
 --------------
