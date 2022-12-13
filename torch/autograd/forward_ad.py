@@ -1,4 +1,3 @@
-import contextlib
 import torch
 import os
 import sys
@@ -198,6 +197,3 @@ class _set_fwd_grad_enabled(_DecoratorContextManager):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_fwd_grad_enabled(self.prev)
-
-    def clone(self):
-        return self.__class__(self.mode)
