@@ -45,6 +45,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
 
             table[op_overload] = op_overload_packet._qualified_op_name
 
+    table[torch.ops.prims.convert_element_type.default] = "prim::convert_element_type"
     return table
 
 
@@ -119,6 +120,9 @@ def _retrieve_or_wrap_scalar_as_constant(
         isinstance(val, (float, int)) for val in ts_value
     ):
         pass
+    elif isinstance(ts_value, torch.dtype):
+        from torch.onnx import _type_utils
+        ts_value = _type_utils.JitScalarType.from_dtype(ts_value)
     else:
         raise RuntimeError(f"Unexpected type of fx_node_arg: {type(fx_node_arg)}")
     return ts_value

@@ -4068,6 +4068,13 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+@_onnx_symbolic("prim::convert_element_type")
+@_beartype.beartype
+def convert_element_type(g: jit_utils.GraphContext, self, *args):
+    dtype = symbolic_helper._get_const(args[0], "i", "dtype")
+    return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
+
+
 @_onnx_symbolic("aten::to")
 @_beartype.beartype
 def to(g: jit_utils.GraphContext, self, *args):
