@@ -294,13 +294,9 @@ inline Layout flip_compressed_layout(Layout layout) {
   }
 }
 
-inline at::OptionalIntArrayRef getBlockSize(Tensor const& self) {
-  if (self.layout() == at::kSparseBsr || self.layout() == at::kSparseBsc) {
-    int64_t n_batch = numBatchDimensions(self);
-    return self.values().sizes().slice(n_batch + 1, 2);
-  } else {
-    return c10::nullopt;
-  }
+inline DimVector getBlockSize(Tensor const& self) {
+  int64_t n_batch = numBatchDimensions(self);
+  return at::DimVector(self.values().sizes().slice(n_batch + 1, 2));
 }
 
 inline at::OptionalSymIntArrayRef getSymIntBlockSize(Tensor const& self) {
