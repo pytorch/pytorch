@@ -152,9 +152,8 @@ class SGD(Optimizer):
             params_with_grad = []
             d_p_list = []
             momentum_buffer_list = []
-            has_sparse_grad = False
 
-            self._init_group(group, params_with_grad, d_p_list, momentum_buffer_list)
+            has_sparse_grad = self._init_group(group, params_with_grad, d_p_list, momentum_buffer_list)
 
             sgd(params_with_grad,
                 d_p_list,

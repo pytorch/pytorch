@@ -764,6 +764,17 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward
             )
 
+        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+
+        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
+            multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__}"
+            if hasattr(opt_mod, multi_tensor_fn_name):
+                setattr(
+                    opt_mod,
+                    multi_tensor_fn_name,
+                    disable(getattr(opt_mod, multi_tensor_fn_name)),
+                )
+
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             if opt in excluded_opts:
