@@ -2,7 +2,6 @@ import torch
 from torch._ops import PyOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_autograd_function
-from torch.autograd.function import _SingleLevelFunction
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -90,7 +89,7 @@ def custom_function_call_grad(interpreter, autograd_function, *operands):
     # but in theory functorch users shouldn't be peeking at the grad_fn.
     # We should try to generate a better name for this.
     # https://github.com/pytorch/pytorch/issues/90224
-    class Generated(_SingleLevelFunction):
+    class Generated(torch.autograd.function._SingleLevelFunction):
         @staticmethod
         def forward(*operands):
             unwrapped_operands = pytree.tree_map_only(
