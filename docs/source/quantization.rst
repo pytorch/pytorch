@@ -1000,19 +1000,107 @@ Custom API Example::
   mq = torch.ao.quantization.quantize_fx.convert_fx(
       mp, convert_custom_config=convert_custom_config_dict)
 
-Deciding Which Quantization Techniques to Use in Your Use Case
+Deciding Which Quantization Techniques to Use for Your Use Case
 --------------------------------------------------------------
 
-As we've described above, there are 2 different quantization modes (Eager and Fx) each which can be used
-to apply 3 different quantization techniques (static and dynamic quantization as well as QAT). It can be difficult
-to decide for any given use case and so this section will focus on how to decide which decisions to make when deciding how to apply quantization to your model.
+As we've described above, the quantization codebase equips users with a number of tools and options to quantize their models. These include
 
-The first question is whether to use Eager Mode Quantization of Fx Graph Mode Quantization. In general, this boils down to whether your model is (or can be made) Fx traceable.
- The Fx quantization APIs are generally easier to use, have more features and have more active development.
+* The choice of quantization mode
+  * Eager Mode Quantization (Eager Mode)
+  * Fx Graph Mode Quantization (Fx)
+
+* When/How to apply quantization
+  * Post Training Quantization (PTQ)
+  * Quantization Aware Training (QAT)
+
+* Quantized Ops Type
+  * Dynamic Quantization
+  * Static Quantization
+  * Weight Only Quantization
+
+* QScheme
+  * per_tensor_affine
+  * per_tensor_symmmetric
+  * per_channel_affine
+  * per_channel_symmetric
+
+Beyond this, the various quantization ops, modes and flows can be mixed and
+matched to different layers in the model leading to a truly staggering number of options. Given the difficulty of navigating this
+decision space, this section will focus on how to decide which flows and techniques to use in your particular use case.
+
+Eager Mode Quantization vs Fx Graph Mode Quantization:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The first question is whether to use Eager Mode or Fx. Both modes largely attempt to do
+the same thing, but obtain certain structural information about the model in different ways. Eager Mode requires
+the user to manually specify where to add transitions between quantized and non-quantized dtypes, whereas Fx
+traces the model in order to learn the model's structure and automatically determine where to place these transitions.
+
+In general, which you should use mostly boils down to 2 things, feature availability and ease of use, both of which lean in
+favor of Fx . The Fx Quantization APIs are generally easier to use, have more features and have more
+active development, the downside is that Fx requires the model to be Fx symbolically traceable in order to work.
+
+Thus, if you try to apply one of the Fx Quantization examples above to your use case, and it works, you've solved your first
+question, if not, you're likely to be better off using Eager Mode unless you want to invest the time to make your model symbolically
+traceable (which can be significant). Information of Fx Symbolic Traceability can be found here: `Limitations of Symbolic Tracing <https://docs-preview.pytorch.org/76223/fx.html#limitations-of-symbolic-tracing>`_
+
+Post Training Quantization vs Quantization Aware Training:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+PTQ and QAT can be thought of as whether to apply quantization to your model either A) after it's fully trained,
+or B) during training. In both cases the same transformations are applied to get from normal ops to quantized ops, the main difference is
+whether the weights were trained specifically to handle quantization (QAT) or not (PTQ). PTQ tends to be significantly easier to set up
+and is cheaper computationally so using that first is generally the best option. If you find that PTQ results in heavy loss/accuracy degredation then QAT
+can be used to try to ameliorate this drop. Note: QAT tends to work best when applied as a fine-tuning phase after normal model training rather than
+from the very beginning.
+
+Static Quantization vs Dynamic Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The choice between static and dynamically quantized ops is the most difficult to decide because of the tradeoffs involved.
+Without going into too much detail, quantized tensors represent fp32 tensors using int8 values and a set of qparams, namely scale and zero_point.
+for any given fp32 tensor, we can usually create a reasonable accurate quantized tensor if we are free to choose the best qparams. For static
+quantization, the qparams are `static`, i.e. they are like weights, they do not change from one input to the next. For dynamic quantization, the
+qparams change `dynamically` to get the best accuracy on each run.
 
 
+Thus the choice between dynamic and static quantization has two components. Firstly, whether the op supports dynamic quantization and second, how the choice trades off performance and accuracy.
+For the first component, you can see the operator coverage tables for `Eager Mode <https://pytorch.org/docs/stable/quantization.html#eager-mode-quantization>`_ and `Fx Graph Mode Quantization<https://pytorch.org/docs/stable/quantization.html#quantization-flow-support>`_
+For the second component, the general recommendation tends to be to try static quantization first, and if that doesn't work, try dynamic quantization or, you could go back and try QAT.
+quantization parameters.
 
+Weight Only Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^
 
+Whereas static and dynamic quantization both quantize the weights and activations and use a special quantized op,
+weight only quantization doesn't change the activation and doesn't change the op. Thus weight only quantization tends to be limited
+to using ops that don't care whether the weight is quantized or not. This tends to make the question of whether to use weight only quantization fairly simple
+if you have something like embeddings that will work with quantized and non-quantized weights, go ahead and use it, otherwise ignore it.
+
+Per Channel Quantization vs Per Tensor Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+As described above, quantized tensors represent fp32 values using int8 values and qparams, namely a scale and a zeropoint.
+For per channel quantized tensors, each channel gets its own scale and zeropoint, for per tensor, the whole tensor only gets a single scale and zeropoint.
+It should be noted that per channel quantization can only be applied to weights, activations can be be per channel quantized.
+In practice per channel quantization makes the quantized representation significantly more accurate and only trades off for a small amount of performance.
+However, only **conv1d()**, **conv2d()**,
+**conv3d()** and **linear()** support per channel, so if your op/backend supports per tensor quantization, its recommended to use it, otherwise use per tensor
+
+Symmetric Quantization vs Affine Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Although this is mentioned a few times in the docs, in general this consideration can be ignored since
+the quantized ops tend to have very specific types of support and these considerations are lumped in with the different default qconfigs in
+`qconfig.py<https://github.com/pytorch/pytorch/blob/df569367ef444dc9831ef0dde3bc611bcabcfbf9/torch/ao/quantization/qconfig.py#L50>`_. In pracitce, symmetric quantization means that the values that the quantized format can represent must be centered at zero.
+Affine Quantization doesn't have this restriction. This can be seen with how the qparams are calculated in the
+`MinMaxObserver<https://pytorch.org/docs/master/generated/torch.quantization.observer.MinMaxObserver.html?highlight=minmaxobserver#minmaxobserver>`_.
+Our recommendation is to not worry about this and pick your qconfig based on other considerations.
+
+Additional Resources
+^^^^^^^^^^^^^^^^^^^^
+* This blog post includes some considerations about when dynamic vs static quantization tends to work best `Introduction to Quantization on PyTorch
+<https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_
+* This blog post walks through how the different quantization techniques work in practice `Practical Quantization in PyTorch
+<https://pytorch.org/blog/quantization-in-practice/>`_
 
 Best Practices
 --------------
