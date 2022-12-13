@@ -2689,8 +2689,8 @@ class TestSharding(TestCase):
 
         actual = list(dp)
         expected = [17, 47, 77]
-        self.assertEquals(expected, actual)
-        self.assertEquals(3, len(dp))
+        self.assertEqual(expected, actual)
+        self.assertEqual(3, len(dp))
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)

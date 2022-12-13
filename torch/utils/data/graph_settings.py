@@ -36,18 +36,29 @@ def apply_sharding(datapipe: DataPipe,
                    num_of_instances: int,
                    instance_id: int,
                    sharding_group=SHARDING_PRIORITIES.DEFAULT) -> DataPipe:
+    r"""
+    Apply dynamic sharding over the ``sharding_filter`` DataPipe that has a method ``apply_sharding``.
+    RuntimeError will be raised when multiple ``sharding_filter`` are presented in the same branch.
+    """
     graph = traverse_dps(datapipe)
-    all_pipes = get_all_graph_pipes(graph)
-    already_applied_to = None
-    for pipe in all_pipes:
-        if hasattr(pipe, 'is_shardable'):
-            if pipe.is_shardable():
-                if hasattr(pipe, 'apply_sharding'):
-                    if already_applied_to is not None:
-                        raise RuntimeError('This implementation of sharding can be only applied once per instance of DataPipeline.',
-                                           'Already applied to', already_applied_to, 'while trying to apply to', pipe)
-                    pipe.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
-                    already_applied_to = pipe
+    cache: Set[int] = set()
+
+    def _helper(graph, applied_datapipe=None):
+        for dp_id, (dp, sub_graph) in graph.items():
+            if dp_id in cache:
+                continue
+            cache.add(dp_id)
+            if hasattr(dp, 'is_shardable') and dp.is_shardable():
+                if hasattr(dp, 'apply_sharding'):
+                    if applied_datapipe:
+                        raise RuntimeError("This implementation of sharding can be only applied once per branch of DataPipe graph. "
+                                           f"Already applied to {applied_datapipe} while trying to apply to {dp}")
+                    dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
+                    applied_datapipe = dp
+            _helper(sub_graph, applied_datapipe)
+
+    _helper(graph)
+
     return datapipe
 
 
