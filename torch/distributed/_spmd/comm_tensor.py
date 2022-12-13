@@ -91,6 +91,7 @@ class CommTensor(torch.Tensor):
     _supported_comms: List[str] = [
         "allreduce_",
         "allgather_",
+        "alltoall_",
         "broadcast_",
         "reduce_scatter_",
         "scatter_",
