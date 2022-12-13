@@ -725,6 +725,7 @@ def _register_all_state_dict_hooks(state: _FSDPState):
         )
 
 
+@no_type_check
 def _register_state_dict_hooks_base(
     state: _FSDPState,
     hook_registration_fn_name: str,
@@ -734,11 +735,11 @@ def _register_state_dict_hooks_base(
     """Registers ``hook`` using ``hook_registration_fn``."""
     hook_with_state = functools.partial(hook, state)
     if not _is_composable(state):
-        state.getattr(hook_registration_fn_name)(
+        getattr(state, hook_registration_fn_name)(
             hook_with_state, **hook_registration_fn_kwargs
         )
     else:
         for handle in state._handles:
-            handle._comm_module.getattr(hook_registration_fn_name)(
+            getattr(handle._comm_module, hook_registration_fn_name)(
                 hook_with_state, **hook_registration_fn_kwargs
             )
