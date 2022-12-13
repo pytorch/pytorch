@@ -4,6 +4,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import contract
+from torch.distributed._composable_state import _get_module_state, _insert_module_state
+from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
@@ -34,7 +36,7 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.fsdp.wrap import _FSDPPolicy
 
 
-@contract
+@contract(state_cls=_FSDPState)
 def fully_shard(
     module: nn.Module,
     *,
@@ -93,4 +95,10 @@ def fully_shard(
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
     _register_root_pre_forward_hook(state, module)  # prepend last
+    for submodule in module.modules():
+        if (
+            submodule not in state._ignored_modules
+            and _get_module_state(submodule) is None
+        ):
+            _insert_module_state(submodule, state)
     return module

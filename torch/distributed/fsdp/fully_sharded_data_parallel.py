@@ -28,6 +28,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
+    _FSDPState,
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -112,7 +113,7 @@ class OptimStateKeyType(Enum):
     PARAM_ID = auto()
 
 
-class FullyShardedDataParallel(nn.Module):
+class FullyShardedDataParallel(nn.Module, _FSDPState):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
