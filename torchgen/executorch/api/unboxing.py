@@ -43,6 +43,8 @@ class Unboxing:
     }
     """
 
+    # this is a callable that converts a JIT argument, into its C++ type.
+    # Translates (type, mutability, binds) to NamedCType. E.g., torchgen.api.cpp.argumenttype_type.
     argument_type_gen: Callable[
         [
             Type,
@@ -140,7 +142,6 @@ class Unboxing:
             t.elem, elem_name
         )
 
-        # pyre-fixme[16]: `Enum` has no attribute `Tensor`.
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Tensor:
             code.extend(
                 f"""
@@ -150,10 +151,7 @@ class Unboxing:
                 )
             )
         elif isinstance(t.elem, BaseType) and (
-            # pyre-fixme[16]: `Enum` has no attribute `int`.
-            t.elem.name == BaseTy.int
-            # pyre-fixme[16]: `Enum` has no attribute `SymInt`.
-            or t.elem.name == BaseTy.SymInt
+            t.elem.name == BaseTy.int or t.elem.name == BaseTy.SymInt
         ):
             code.extend(
                 f"""
@@ -162,7 +160,6 @@ class Unboxing:
                     "\n"
                 )
             )
-        # pyre-fixme[16]: `Enum` has no attribute `float`.
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.float:
             code.extend(
                 f"""
@@ -171,7 +168,6 @@ class Unboxing:
                     "\n"
                 )
             )
-        # pyre-fixme[16]: `Enum` has no attribute `bool`.
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool:
             # handle list type with size, e.g., bool[4]
             code.extend(
