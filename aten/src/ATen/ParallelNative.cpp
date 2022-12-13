@@ -12,6 +12,7 @@
 #endif // C10_MOBILE
 
 #include <atomic>
+#include <utility>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -179,7 +180,7 @@ void invoke_parallel(
     }
   };
   state.remaining = num_tasks;
-  _run_with_pool(task, num_tasks);
+  _run_with_pool(std::move(task), num_tasks);
 
   // Wait for all tasks to finish.
   {
@@ -277,7 +278,7 @@ bool in_parallel_region() {
 void intraop_launch(std::function<void()> func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(func);
+    _get_intraop_pool().run(std::move(func));
   } else {
     // execute inline if we're in parallel region
     func();

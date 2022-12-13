@@ -323,6 +323,8 @@ class WrapperCodeGen(CodeGen):
             """
         )
         with self.wrapper_call.indent():
+            if config.triton.debug_sync_graph:
+                self.wrapper_call.writeline("torch.cuda.synchronize()")
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -469,6 +471,8 @@ class WrapperCodeGen(CodeGen):
                     self.wrapper_call.writeline(line)
 
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            if config.triton.debug_sync_graph:
+                self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
 
         with result.indent():

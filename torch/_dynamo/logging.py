@@ -57,7 +57,20 @@ def init_logging(log_level, log_file_name=None):
             for logger in get_loggers():
                 logger.addHandler(log_file)
 
-    set_loggers_level(log_level)
+        if bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
+            from .utils import get_debug_dir
+
+            log_level = logging.DEBUG
+            log_path = os.path.join(get_debug_dir(), "torchdynamo")
+            if not os.path.exists(log_path):
+                os.makedirs(log_path)
+
+            log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+            log_file.setLevel(logging.DEBUG)
+            logger = logging.getLogger("torch._dynamo")
+            logger.addHandler(log_file)
+
+        set_loggers_level(log_level)
 
 
 # Creates a logging function that logs a message with a step # prepended.
