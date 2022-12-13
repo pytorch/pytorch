@@ -2995,6 +2995,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_is_compiling(self):
+        def f():
+            if torch._dynamo.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+        self.assertEqual(opt_f(), torch.ones(2, 2))
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -3056,6 +3068,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 guard_failure[0],
                 "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
+
+    def test_call_parent_non_class_methods_from_child(self):
+        class A(object):
+            def add(self, x):
+                return x + 10
+
+            def mul(self, x):
+                return x * 0.1
+
+        class B(A):
+            def add(self, x):
+                return x + 20
+
+            def mul(self, x):
+                return x * 0.2
+
+        class C(B):
+            def add(self, x):
+                y = A.add(self, x)
+                z = B.mul(self, y)
+                return z + 30
+
+        x = torch.rand(4)
+        fn = C().add
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc1(torch.autograd.Function):
