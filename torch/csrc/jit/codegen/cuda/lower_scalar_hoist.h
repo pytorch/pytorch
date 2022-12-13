@@ -52,6 +52,11 @@ class TORCH_CUDA_CU_API CommonScalarMap {
   //! allocation.
   std::vector<Val*> getHoistedScalars(kir::ForLoop* loop) const;
 
+  //! Initialize the common_scalar_map_ with lowered exprs. If some scalar is
+  //! already computed in these lowered exprs and is recomputed in indexing or
+  //! predicate math, then we should reuse these existing computation.
+  void initialize(const std::vector<Expr*> exprs);
+
  private:
   //! This is the underlying implementation of the public hoistScalar, with some
   //! additional arguments and return values.

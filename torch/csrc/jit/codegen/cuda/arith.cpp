@@ -623,6 +623,9 @@ TensorView* full(
     const std::vector<Val*>& shape,
     Val* fill_value,
     DataType dtype) {
+  if (fill_value->getDataType() != dtype) {
+    fill_value = castOp(dtype, fill_value);
+  }
   auto n = shape.size();
   auto out = TensorViewBuilder()
                  .ndims(n)
@@ -630,7 +633,7 @@ TensorView* full(
                  .contiguity(std::vector<bool>(n, true))
                  .shape(shape)
                  .build();
-  IrBuilder::create<FullOp>(out, fill_value, dtype);
+  IrBuilder::create<FullOp>(out, fill_value);
   return out;
 }
 
@@ -686,17 +689,32 @@ TensorView* arange(Val* start, Val* end, DataType dtype) {
 
 TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
   if (isIntegralType(dtype)) {
-    start = castOp(DataType::Int, start);
-    end = castOp(DataType::Int, end);
-    step = castOp(DataType::Int, step);
+    if (start->getDataType() != DataType::Int) {
+      start = castOp(DataType::Int, start);
+    }
+    if (end->getDataType() != DataType::Int) {
+      end = castOp(DataType::Int, end);
+    }
+    if (step->getDataType() != DataType::Int) {
+      step = castOp(DataType::Int, step);
+    }
   } else if (isFloatingPointType(dtype)) {
-    start = castOp(DataType::Double, start);
-    end = castOp(DataType::Double, end);
-    step = castOp(DataType::Double, step);
+    if (start->getDataType() != DataType::Double) {
+      start = castOp(DataType::Double, start);
+    }
+    if (end->getDataType() != DataType::Double) {
+      end = castOp(DataType::Double, end);
+    }
+    if (step->getDataType() != DataType::Double) {
+      step = castOp(DataType::Double, step);
+    }
   }
   // Make sure no negative value is passed to ceilDiv as the device
   // implementation of ceilDiv assumes positive inputs
-  auto size = castOp(DataType::Int, ceilDiv(abs(sub(end, start)), abs(step)));
+  auto size = ceilDiv(abs(sub(end, start)), abs(step));
+  if (size->getDataType() != DataType::Int) {
+    size = castOp(DataType::Int, size);
+  }
   auto out = TensorViewBuilder()
                  .ndims(1)
                  .dtype(dtype)
@@ -1397,9 +1415,12 @@ TensorView* maybeFullInsteadOfReduction(
       TensorDomain* td = IrBuilder::create<TensorDomain>(
           new_root, TensorDomain::getContiguousContiguity(new_root));
 
-      dtype = dtype == DataType::Null ? tv->getDataType().value() : dtype;
+      dtype = (dtype == DataType::Null ? tv->getDataType().value() : dtype);
       auto output = IrBuilder::create<TensorView>(td, dtype);
-      IrBuilder::create<FullOp>(output, init, dtype);
+      if (init->getDataType() != dtype) {
+        init = castOp(dtype, init);
+      }
+      IrBuilder::create<FullOp>(output, init);
       return output;
     }
   }

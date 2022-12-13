@@ -110,18 +110,18 @@ struct ExprSortPayload : public PolymorphicBase {
 // Groups together expressions which create a expr group
 class ExprGroup {
  public:
-  ExprGroup() : payload_(std::make_unique<ExprSortPayload>()) {}
-
-  ExprGroup(Expr* expr) : payload_(std::make_unique<ExprSortPayload>()) {
-    exprs_.push_back(expr);
-  }
+  explicit ExprGroup(bool is_scalar_only)
+      : payload_(std::make_unique<ExprSortPayload>()),
+        is_scalar_only_(is_scalar_only) {}
 
   ExprGroup(const ExprGroup& other)
-      : payload_(new ExprSortPayload(*(other.payload_))) {}
+      : payload_(new ExprSortPayload(*(other.payload_))),
+        is_scalar_only_(other.is_scalar_only_) {}
 
   ExprGroup& operator=(const ExprGroup& other) {
     *payload_ = *other.payload_;
     exprs_ = other.exprs_;
+    is_scalar_only_ = other.is_scalar_only_;
     return *this;
   }
 
@@ -136,7 +136,11 @@ class ExprGroup {
   // level, and merged neighbors of neighbors level. If fallback_mode_enabled
   // will return the inverse set of ExprGroups that are proven to be safe
   // merges.
+  // We prefer merging scalar exprs with scalar exprs and tensor exprs with
+  // tensor exprs. Merging scalar exprs with tensor exprs are allowed but not
+  // preferred.
   std::vector<ExprGroup*> getMergeCandidates(
+      bool preferred_merge_only,
       bool fallback_mode_enabled = false);
 
   std::unique_ptr<ExprSortPayload>& payload() {
@@ -187,6 +191,10 @@ class ExprGroup {
     return exprs_;
   }
 
+  bool isScalarOnly() const {
+    return is_scalar_only_;
+  }
+
   std::string toString() const;
 
  private:
@@ -216,6 +224,9 @@ class ExprGroup {
 
   // Stateful traversal information
   std::unique_ptr<ExprSortPayload> payload_;
+
+  // If this group contains only scalar expressions
+  bool is_scalar_only_ = false;
 };
 
 // This class sorts expressions guarantees two things, 1) Tensors are produced
@@ -255,7 +266,7 @@ class ExprSegmentationSorter {
 
  private:
   // Allocate an empty expr group and return it
-  ExprGroup* makeEmptyGroup();
+  ExprGroup* makeEmptyGroup(bool is_scalar_only);
 
   // Allocate an expr group with the provided expr and return it. Also requires
   // information on if this expression is a terminating expression (none of its
@@ -299,6 +310,9 @@ class ExprSegmentationSorter {
   // Disconnect the edges connecting group to the rest of the graph, and return
   // all the edges that were disconnected
   std::unordered_set<ExprGroupConnections*> disconnectGroup(ExprGroup* group);
+
+  // Add (g1, g2) to the pending "to merge" list.
+  void setToMerge(ExprGroup* g1, ExprGroup* g2);
 
  private:
   // Track how many groups we have from iteration to iteration so we can track
@@ -366,7 +380,7 @@ std::string ExprGroup::toString() const {
 
 std::vector<ExprGroup*> ExprGroup::getNeighbors() {
   std::vector<ExprGroup*> neighbors;
-  for (auto inp : producer_edges_) {
+  for (auto inp : producerEdges()) {
     neighbors.push_back(inp->from);
   }
   for (auto out : consumerEdges()) {
@@ -376,6 +390,7 @@ std::vector<ExprGroup*> ExprGroup::getNeighbors() {
 }
 
 std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
+    bool preferred_merge_only,
     bool fallback_mode_enabled) {
   std::vector<ExprGroup*> neighbors = getNeighbors();
 
@@ -472,7 +487,10 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
   for (const auto i : c10::irange(neighbors.size())) {
     if ((can_merge.at(i) && !fallback_mode_enabled) ||
         (!can_merge.at(i) && fallback_mode_enabled)) {
-      merge_candidates.push_back(neighbors.at(i));
+      auto neighbor = neighbors.at(i);
+      if (isScalarOnly() == neighbor->isScalarOnly() || !preferred_merge_only) {
+        merge_candidates.push_back(neighbor);
+      }
     }
   }
   return merge_candidates;
@@ -541,15 +559,16 @@ void ExprSegmentationSorter::resetLevels() {
   TORCH_INTERNAL_ASSERT(next_to_visit.empty(), "Error in graph, is not a DAG.");
 }
 
-ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
-  groups_.push_back(std::make_unique<ExprGroup>());
+ExprGroup* ExprSegmentationSorter::makeEmptyGroup(bool is_scalar_only) {
+  groups_.push_back(std::make_unique<ExprGroup>(is_scalar_only));
   return groups_.back().get();
 }
 
 ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
     Expr* expr,
     bool terminating_expr) {
-  auto group = makeEmptyGroup();
+  bool is_scalar_expr = lower_utils::isScalarExpr(expr);
+  auto group = makeEmptyGroup(is_scalar_expr);
   group->exprs().push_back(expr);
   if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
@@ -728,6 +747,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
           concrete_id_dependencies, GpuLower::current()->caMap()));
   return merged_domain;
 }
+
 } // namespace
 
 // Disconect group from neighbors, and return edges that were disconnected
@@ -762,7 +782,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   const auto consumer = sg1 == producer ? sg2 : sg1;
 
   // Make the new joined node
-  auto joined_groups = makeEmptyGroup();
+  auto joined_groups =
+      makeEmptyGroup(sg1->isScalarOnly() && sg2->isScalarOnly());
 
   TORCH_INTERNAL_ASSERT(
       producer != nullptr,
@@ -1263,6 +1284,16 @@ bool ExprSegmentationSorter::testStillDag(ExprGroup* sg1, ExprGroup* sg2) {
   return true;
 }
 
+void ExprSegmentationSorter::setToMerge(ExprGroup* g1, ExprGroup* g2) {
+  to_merge_.emplace_back(std::make_pair(g1, g2));
+
+  g1->payload()->merged = true;
+  g1->payload()->merge_with = g2;
+
+  g2->payload()->merged = true;
+  g2->payload()->merge_with = g1;
+}
+
 void ExprSegmentationSorter::sort() {
   // Need this for initialization of the DAG that is processed
   std::unordered_map<Expr*, ExprGroup*> expr2group;
@@ -1326,31 +1357,35 @@ void ExprSegmentationSorter::sort() {
         resetTraversal();
         resetLevels();
 
-        for (auto& group : groups_) {
-          if (group->payload()->merged) {
-            continue;
-          }
-          auto candidates = group->getMergeCandidates(fallback_mode_enabled_);
-          if (candidates.empty()) {
-            continue;
+        for (bool preferred_merge_only : {true, false}) {
+          for (auto& group : groups_) {
+            if (group->payload()->merged) {
+              continue;
+            }
+            auto candidates = group->getMergeCandidates(
+                preferred_merge_only, fallback_mode_enabled_);
+            if (candidates.empty()) {
+              continue;
+            }
+
+            auto candidate_it = candidates.begin();
+            while (candidate_it != candidates.end() &&
+                   !supportedMerge(group.get(), *candidate_it)) {
+              candidate_it++;
+            }
+            if (candidate_it == candidates.end()) {
+              continue;
+            }
+
+            setToMerge(group.get(), *candidate_it);
           }
 
-          auto candidate_it = candidates.begin();
-          while (candidate_it != candidates.end() &&
-                 !supportedMerge(group.get(), *candidate_it)) {
-            candidate_it++;
+          if (to_merge_.size() > 0) {
+            // We break the preferred_merge_only loop here to ensure that we
+            // only consider non-preferred merge when there is no more
+            // preferred merge opportunities.
+            break;
           }
-          if (candidate_it == candidates.end()) {
-            continue;
-          }
-
-          to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
-
-          group->payload()->merged = true;
-          group->payload()->merge_with = *candidate_it;
-
-          (*candidate_it)->payload()->merged = true;
-          (*candidate_it)->payload()->merge_with = group.get();
         }
 
         if (to_merge_.empty()) {
@@ -1370,46 +1405,51 @@ void ExprSegmentationSorter::sort() {
       resetTraversal();
       resetLevels();
 
-      for (auto& group : groups_) {
-        if (group->payload()->merged) {
-          continue;
-        }
-        // Get merge candidates that weren't proven safe to merge with default
-        // algorithm.
-        auto candidates = group->getMergeCandidates(fallback_mode_enabled_);
-        if (candidates.empty()) {
-          continue;
-        }
+      for (bool preferred_merge_only : {true, false}) {
+        for (auto& group : groups_) {
+          if (group->payload()->merged) {
+            continue;
+          }
+          // Get merge candidates that weren't proven safe to merge with
+          // default algorithm.
+          auto candidates = group->getMergeCandidates(
+              preferred_merge_only, fallback_mode_enabled_);
+          if (candidates.empty()) {
+            continue;
+          }
 
-        auto candidate_it = candidates.begin();
+          auto candidate_it = candidates.begin();
 
-        while (candidate_it != candidates.end()) {
-          while (candidate_it != candidates.end() &&
-                 !supportedMerge(group.get(), *candidate_it)) {
+          while (candidate_it != candidates.end()) {
+            while (candidate_it != candidates.end() &&
+                   !supportedMerge(group.get(), *candidate_it)) {
+              candidate_it++;
+            }
+
+            if (candidate_it == candidates.end()) {
+              break;
+            }
+
+            if (testStillDag(group.get(), *candidate_it)) {
+              // Mark in same style as default algorithm for convenience even
+              // though we will only merge once with the fallback
+              setToMerge(group.get(), *candidate_it);
+              break;
+            }
+
             candidate_it++;
           }
 
-          if (candidate_it == candidates.end()) {
+          if (to_merge_.size() > 0) {
+            // break the groups_ loop
             break;
           }
-
-          if (testStillDag(group.get(), *candidate_it)) {
-            // Mark in same style as default algorithm for convenience even
-            // though we will only merge once with the fallback
-            to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
-
-            group->payload()->merged = true;
-            group->payload()->merge_with = *candidate_it;
-
-            (*candidate_it)->payload()->merged = true;
-            (*candidate_it)->payload()->merge_with = group.get();
-            break;
-          }
-
-          candidate_it++;
         }
 
         if (to_merge_.size() > 0) {
+          // We break the preferred_merge_only loop here to ensure that we
+          // only consider non-preferred merge when there is no more
+          // preferred merge opportunities.
           break;
         }
       }
@@ -1428,11 +1468,29 @@ void ExprSegmentationSorter::sort() {
 }
 
 std::vector<Expr*> ExprSegmentationSorter::getExprs() const {
-  std::vector<Expr*> exprs;
+  // At this stage, there is no data dependency between different groups, so we
+  // can interleave their exprs. We choose to put scalar expressions that does
+  // not has any tensor dependency at the beginning, so that scalar hoisting can
+  // reuse these computation for indexing/predicates.
+  std::vector<Expr*>
+      scalar_exprs_without_tv_dep; // Scalar expressions at the beginning does
+                                   // not depend on any tensor.
+  std::vector<Expr*> remaining_exprs; // Tensor expressions or scalar
+                                      // expressions that has tensor dependency.
   for (auto& group : groups_) {
-    exprs.insert(exprs.end(), group->exprs().begin(), group->exprs().end());
+    std::vector<Expr*>* active_exprs = &scalar_exprs_without_tv_dep;
+    for (auto expr : group->exprs()) {
+      if (!lower_utils::isScalarExpr(expr)) {
+        active_exprs = &remaining_exprs;
+      }
+      active_exprs->emplace_back(expr);
+    }
   }
-  return exprs;
+  scalar_exprs_without_tv_dep.insert(
+      scalar_exprs_without_tv_dep.end(),
+      remaining_exprs.begin(),
+      remaining_exprs.end());
+  return scalar_exprs_without_tv_dep;
 }
 
 } // namespace

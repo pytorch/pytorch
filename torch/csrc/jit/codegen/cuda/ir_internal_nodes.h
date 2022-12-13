@@ -34,16 +34,12 @@ class TORCH_CUDA_CU_API FullOp : public Expr {
  public:
   using Expr::Expr;
 
-  FullOp(IrBuilderPasskey, Val* out, Val* fill_value, DataType dtype);
+  FullOp(IrBuilderPasskey, Val* out, Val* fill_value);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "FullOp";
-  }
-
-  DataType dtype() const {
-    return attribute(0)->as<Attribute<DataType>>()->value;
   }
 
   Val* getFillValue() const {

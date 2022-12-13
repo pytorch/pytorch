@@ -1225,28 +1225,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
 }
 )";
 
-  const std::string actual_kernel =
-      "\n" + codegen::generateCudaKernel(GpuLower(fusion.get()).kernel());
-  if (expected_kernel.size() != actual_kernel.size() ||
-      expected_kernel.compare(actual_kernel) != 0) {
-    std::cerr
-        << " Codegen mismatch, codegen possibly changed, or is incorrect. "
-        << " \n ========= EXPECTED ========= \n"
-        << expected_kernel << "\n========= ACTUAL ========== \n"
-        << actual_kernel << "\n=================" << std::endl;
-    auto it = std::mismatch(
-        expected_kernel.begin(),
-        expected_kernel.end(),
-        actual_kernel.begin(),
-        actual_kernel.end());
-    std::string actual_mismatched_snippet(it.second, actual_kernel.end());
-    actual_mismatched_snippet = actual_mismatched_snippet.substr(0, 10);
-    std::string expected_mismatched_snippet(it.first, expected_kernel.end());
-    expected_mismatched_snippet = expected_mismatched_snippet.substr(0, 10);
-    std::cerr << "First mismatch found at: " << actual_mismatched_snippet
-              << ", expected: " << expected_mismatched_snippet << std::endl;
-    TORCH_CHECK(false);
-  }
+  assertCUDAKernel(fusion.get(), expected_kernel);
 
   FusionExecutor fe;
   fe.compileFusion(fusion.get(), {input1, input2}, lparams);

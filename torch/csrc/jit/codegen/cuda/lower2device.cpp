@@ -396,6 +396,8 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_unrolled_loops =
       UnrollPass::runPass(fusion_, exprs_double_buffered);
 
+  commonScalarMap().initialize(exprs_unrolled_loops);
+
   dumpExprsIfEnabled(
       exprs_unrolled_loops, "Before processMisalignedVectorization");
   const auto exprs_unrolled_mv_loops =

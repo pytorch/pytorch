@@ -302,7 +302,7 @@ void IrPrinter::handle(const FullOp* fop) {
     }
     handle(fop->input(i));
   }
-  os_ << ", " << fop->dtype() << ")";
+  os_ << ")";
 
   indent_size_--;
 

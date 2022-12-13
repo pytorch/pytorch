@@ -723,6 +723,26 @@ bool supportInlinePredicate(Expr* expr) {
   return false;
 }
 
+bool isScalarExpr(Expr* expr) {
+  if (expr->inputs().empty() || expr->outputs().empty()) {
+    // For expressions that does not have input/output, they are usually lowered
+    // expressions like CpAsyncWait. We don't consider these as scalar
+    // expressions.
+    return false;
+  }
+  for (auto inp : expr->inputs()) {
+    if (!inp->isScalar()) {
+      return false;
+    }
+  }
+  for (auto out : expr->outputs()) {
+    if (!out->isScalar()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace lower_utils
 
 } // namespace cuda

@@ -1722,6 +1722,64 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionIndexHoist3_CUDA) {
+  if (isOptionDisabled(DisableOption::IndexHoist)) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto input = makeContigTensor(2);
+  fusion->addInput(input);
+  auto sin_input = sin(input);
+  auto numel = mul(input->axis(0)->extent(), input->axis(1)->extent());
+  auto output = add(sin_input, numel);
+  fusion->addOutput(output);
+
+  for (auto tv : {output, sin_input}) {
+    tv->merge(0);
+    tv->split(0, 256);
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDx);
+  }
+  inlineMost();
+
+  const auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::arange(10000, options).view({100, 100});
+  at::Tensor t1 = t0.sin() + 10000;
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get(), {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  const std::string expected_kernel = R"(
+__global__ void CUDAGeneratedKernel(Tensor<float, 2> T0, Tensor<float, 2> T2) {
+  int64_t i38;
+  i38 = (256 * ((nvfuser_index_t)blockIdx.x)) + ((nvfuser_index_t)threadIdx.x);
+  int64_t i7;
+  i7 = T0.size[0] * T0.size[1];
+  bool b71;
+  b71 = i38 < i7;
+  float f8;
+  f8 = (float)(i7);
+  float T1[1];
+  if (b71) {
+    T1[0]
+       = sinf(T0[i38]);
+  }
+  if (b71) {
+    T2[i38]
+      = T1[0]
+      + f8;
+  }
+}
+)";
+
+  assertCUDAKernel(fusion.get(), expected_kernel);
+
+  testValidate(fusion.get(), cg_outputs, {t0}, {t1}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionTestGridComm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

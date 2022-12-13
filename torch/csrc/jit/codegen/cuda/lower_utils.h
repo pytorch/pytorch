@@ -264,6 +264,9 @@ BasicAllocInfo getAllocInformation(
 //!  as an inline argument.
 bool supportInlinePredicate(Expr* expr);
 
+//! Test if an expression is a scalar expression.
+bool isScalarExpr(Expr* expr);
+
 } // namespace lower_utils
 
 } // namespace cuda

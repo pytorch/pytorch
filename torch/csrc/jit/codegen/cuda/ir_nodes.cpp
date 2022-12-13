@@ -78,11 +78,7 @@ template class Scalar<int64_t>;
 template class Scalar<double>;
 template class Scalar<std::complex<double>>;
 
-FullOp::FullOp(
-    IrBuilderPasskey passkey,
-    Val* out,
-    Val* fill_value,
-    DataType dtype)
+FullOp::FullOp(IrBuilderPasskey passkey, Val* out, Val* fill_value)
     : Expr(passkey) {
   if (out->isA<TensorView>()) {
     auto tv_root = out->as<TensorView>()->getRootDomain();
@@ -92,8 +88,6 @@ FullOp::FullOp(
   }
   addInput(fill_value);
   addOutput(out);
-  addAttribute(
-      IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(FullOp)

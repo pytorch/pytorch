@@ -266,6 +266,36 @@ std::vector<Val*> CommonScalarMap::getHoistedScalars(kir::ForLoop* loop) const {
   return result;
 }
 
+void CommonScalarMap::initialize(const std::vector<Expr*> exprs) {
+  // We only hoist scalars not depending on tensors. In lowered expressions, all
+  // these scalars are computed in top level scope.
+  TORCH_INTERNAL_ASSERT(
+      common_scalar_map_.empty(),
+      "CommonScalarMap used before initialization.");
+  for (auto expr : exprs) {
+    if (lower_utils::isScalarExpr(expr) && expr->outputs().size() == 1) {
+      common_scalar_map_[nullptr].emplace_back(expr->output(0));
+    } else if (ir_utils::isTvOp(expr)) {
+      // We only try to reuse scalar expressions placed at the beginning of the
+      // top level scope. For example, if I have
+      // i1 = i0 + 1
+      // i2 = T0.size[0] * T0.size[1]
+      // i3 = address(T0)
+      // i4 = i3 + 1
+      // ....
+      // Then we only consider `i1 = i0 + 1` and `i2 = T0.size[0] * T0.size[1]`
+      // as valid reuse-opportunity. The barrier between valid and invalid is
+      // the first tensor operation. The reason why we have this barrier is
+      // because the `reorderExprsForComputeAt` always place scalar expressions
+      // at the beginning if possible. If a scalar expression is placed after a
+      // tensor expression, then this scalar operation must have dependency on
+      // some tensor. For this case, we just giveup reusing because this helps
+      // us to keep the analysis simple.
+      break;
+    }
+  }
+}
+
 namespace {
 
 // Check if the given `value` is already allocated (and computed in full) or
