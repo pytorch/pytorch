@@ -8,7 +8,7 @@ import torch
 from typing import List, Any
 from functools import wraps
 import unittest
-from torch.testing._internal.common_utils skipIfTorchDynamo
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
 from torch.testing._internal.common_utils import \
