@@ -355,6 +355,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
+        chunk_size (None or int): maximum size for chunked computation
+            of Jacobian. Default: None (means compute with 1 chunk).
 
     Returns:
         Returns a function that takes in the same inputs as :attr:`func` and
@@ -594,6 +596,9 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     #
     # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
     # for context behind this function.
+    # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
+    #       one huge basis matrix. `chunk_size` dictates the maximum size of the
+    #       basis matrix along dim=0.
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
     assert chunk_size is None or chunk_size > 0
@@ -602,7 +607,7 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
         n_chunks = total_numel // chunk_size
         numels = [chunk_size] * n_chunks
         numels.append(total_numel % chunk_size)
-    else:
+    else:  # chunk_size is None or chunk_size >= total_numel
         chunk_size = total_numel
         numels = [total_numel]
 
