@@ -1,12 +1,10 @@
 name: inductor
 
 on:
-  schedule:
-    - cron: 45 1,5,9,13,17,21 * * *
   push:
     tags:
       - ciflow/inductor/*
-      - ciflow/periodic/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:
