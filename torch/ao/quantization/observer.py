@@ -1154,7 +1154,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 min_val.numel() == 1 and max_val.numel() == 1
             ), "histogram min/max values must be scalar."
             torch.histc(
-                x, self.bins, min=int(min_val), max=int(max_val), out=self.histogram
+                x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
             )
         else:
             new_min, new_max = torch.aminmax(x)
@@ -1173,7 +1173,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 combined_min.numel() == 1 and combined_max.numel() == 1
             ), "histogram min/max values must be scalar."
             combined_histogram = torch.histc(
-                x, self.bins, min=int(combined_min), max=int(combined_max)
+                x, self.bins, min=combined_min, max=combined_max  # type: ignore[arg-type]
             )
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
