@@ -1000,25 +1000,29 @@ Custom API Example::
   mq = torch.ao.quantization.quantize_fx.convert_fx(
       mp, convert_custom_config=convert_custom_config_dict)
 
-Deciding Which Quantization Techniques to Use for Your Use Case
----------------------------------------------------------------
+Deciding Which Quantization Tools to Use for Your Use Case
+----------------------------------------------------------
 
 As we've described above, the quantization codebase equips users with a number of tools and options to quantize their models. These include
 
 * The choice of quantization mode
+
   * Eager Mode Quantization (Eager Mode)
   * Fx Graph Mode Quantization (Fx)
 
 * When/How to apply quantization
+
   * Post Training Quantization (PTQ)
   * Quantization Aware Training (QAT)
 
 * Quantized Ops Type
+
   * Dynamic Quantization
   * Static Quantization
   * Weight Only Quantization
 
 * QScheme
+
   * per_tensor_affine
   * per_tensor_symmmetric
   * per_channel_affine
@@ -1037,7 +1041,7 @@ the user to manually specify where to add transitions between quantized and non-
 traces the model in order to learn the model's structure and automatically determine where to place these transitions.
 
 In general, which you should use mostly boils down to 2 things, feature availability and ease of use, both of which lean in
-favor of Fx . The Fx Quantization APIs are generally easier to use, have more features and have more
+favor of Fx. The Fx Quantization APIs are generally easier to use, have more features and have more
 active development, the downside is that Fx requires the model to be Fx symbolically traceable in order to work.
 
 Thus, if you try to apply one of the Fx Quantization examples above to your use case, and it works, you've solved your first
@@ -1065,9 +1069,13 @@ qparams change `dynamically` to get the best accuracy on each run.
 
 
 Thus the choice between dynamic and static quantization has two components. Firstly, whether the op supports dynamic quantization and second, how the choice trades off performance and accuracy.
-For the first component, you can see the operator coverage table for eager mode `Eager Mode Quantization`_ (above that link) and fx `Operator Support`_.
+For the first component, you can see the operator coverage table for eager mode `Eager Mode Quantization`_ (above that link) and Fx `Operator Support`_.
 For the second component, the general recommendation tends to be to try static quantization first, and if that doesn't work, try dynamic quantization or, you could go back and try QAT.
 quantization parameters.
+
+It should also be noted that static quantization works best when you have a long string of statically quantizable ops in a row. If each quantizable op is surrounded by non-quantizable ops, then
+the constant switching between quantized and non-quantized tensors can significantly erode the performance improvements. While static quantization will still run faster than dynamic quantization,
+the difference is less while the accuracy difference would remain the same.
 
 Weight Only Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1079,6 +1087,7 @@ if you have something like embeddings that will work with quantized and non-quan
 
 Per Channel Quantization vs Per Tensor Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 As described above, quantized tensors represent fp32 values using int8 values and qparams, namely a scale and a zeropoint.
 For per channel quantized tensors, each channel gets its own scale and zeropoint, for per tensor, the whole tensor only gets a single scale and zeropoint.
 It should be noted that per channel quantization can only be applied to weights, activations can be be per channel quantized.
@@ -1088,6 +1097,7 @@ However, only **conv1d()**, **conv2d()**,
 
 Symmetric Quantization vs Affine Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Although this is mentioned a few times in the docs, in general this consideration can be ignored since
 the quantized ops tend to have very specific types of support and these considerations are lumped in with the different default qconfigs in
 `qconfig.py <https://github.com/pytorch/pytorch/blob/df569367ef444dc9831ef0dde3bc611bcabcfbf9/torch/ao/quantization/qconfig.py#L50>`_. In pracitce, symmetric quantization means that the values that the quantized format can represent must be centered at zero.
