@@ -302,7 +302,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   // reshape back
   auto output = at::stack(input_unbind, 0);
-  auto new_sizes = std::vector<int64_t>(orig_sizes);
+  auto new_sizes = std::vector<int64_t>(std::move(orig_sizes));
   new_sizes[0] = -1;
   output = output.view(new_sizes);
   output = output.transpose(0, dim);
