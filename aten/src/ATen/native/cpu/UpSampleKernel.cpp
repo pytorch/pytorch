@@ -1631,27 +1631,22 @@ void upsample_bilinear2d_kernel_impl(
         // std::cout << "LOLOL " << std::endl;
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
-      if ((input[0][0][0][0].item<uint8_t>() == 1) && input.size(1) <= 4) {
-        // std::cout << "AAAA " << std::endl;
-        input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
+      if (input.size(1) <= 4) {
         upsample_avx_bilinear_or_bicubic<scale_t, HelperInterpLinear>(input,
           output, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       } else {
-        // std::cout << "BBBB" << std::endl;
         separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
           output, input, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       }
     #else  // CPU_CAPABILITY_AVX2
-        // std::cout << "CCCCC " << std::endl;
       separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
         output, input, align_corners, {scales_h, scales_w},
         /*antialias=*/false);
     #endif  // CPU_CAPABILITY_AVX2  
   } 
   else {
-        // std::cout << "DDDD " << std::endl;
     upsample_bilinear2d_kernel_impl_float(output, input, align_corners, scales_h, scales_w);
   }
 }
@@ -1664,10 +1659,7 @@ void maybe_dispatch_to_avx_for_bilinear_or_bicubic_aa(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
-  // Don't worry about the weird "== 1" check, it's just a hack to check the AVX implem against the fallback. It will be removed
-  // TODO: add more assumptions as needed
-  if ((input[0][0][0][0].item<uint8_t>() == 1) && (input.dtype() == at::kByte) && (input.size(1) <= 4)) {
-    input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
+  if (input.dtype() == at::kByte && input.size(1) <= 4) {
     upsample_avx_bilinear_or_bicubic<scale_t, F>(
       input, output, align_corners, {scales_h, scales_w},
       /*antialias=*/true);
@@ -1720,27 +1712,22 @@ void upsample_bicubic2d_kernel_impl(
         // std::cout << "LOLOL " << std::endl;
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
-      if ((input[0][0][0][0].item<uint8_t>() == 1) && input.size(1) <= 4) {
-        // std::cout << "AAAA " << std::endl;
-        input[0][0][0][0] = 0; // TODO: remove this atrocity !!!
+      if (input.size(1) <= 4) {
         upsample_avx_bilinear_or_bicubic<scale_t, HelperInterpCubic>(input,
           output, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       } else {
-        // std::cout << "BBBB" << std::endl;
         separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
           output, input, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       }
     #else  // CPU_CAPABILITY_AVX2
-        // std::cout << "CCCCC " << std::endl;
       separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
         output, input, align_corners, {scales_h, scales_w},
         /*antialias=*/false);
     #endif  // CPU_CAPABILITY_AVX2  
   } 
   else {
-        // std::cout << "DDDD " << std::endl;
     upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
       output, input, align_corners, {scales_h, scales_w});
   }
