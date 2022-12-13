@@ -87,8 +87,7 @@ def _push_mode(mode):
 
 
 def _pop_mode():
-    mode = _pop_torch_dispatch_stack()
-    return mode
+    return _pop_torch_dispatch_stack()
 
 
 @contextlib.contextmanager

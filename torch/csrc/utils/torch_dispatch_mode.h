@@ -42,6 +42,11 @@ struct StashTorchDispatchStackGuard {
   }
 
   ~StashTorchDispatchStackGuard() {
+    // since we're in the destructor, there might be active exceptions.
+    // This temporarily removes them in order to update the state of modes
+    // on the stack before putting them back
+
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject *type, *value, *traceback;
     PyErr_Fetch(&type, &value, &traceback);
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));

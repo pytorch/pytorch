@@ -2,10 +2,11 @@
 
 #include <c10/core/SafePyObject.h>
 
-// this is really just a light wrapper around a SafePyObject but it lets us
-// declare it in the torch namespace and use it in c10
-
 namespace c10 {
+
+// this is basically just a light wrapper around a SafePyObject that also has
+// some way of declaring a push and pop trampoline. This lets us write those
+// methods in the torch namespace where we have access to pybind
 struct C10_API ModePyObjTrampoline {
  public:
   ModePyObjTrampoline(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
