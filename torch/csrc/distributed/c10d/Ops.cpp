@@ -161,17 +161,17 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
       output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> alltoall_(
-    at::TensorList output_tensors,
-    at::TensorList input_tensors,
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
+  auto work = process_group->alltoall(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllToAllOptions{std::chrono::milliseconds(timeout)});
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors, work);
 }
 
 c10::intrusive_ptr<Work> alltoall_base_(
@@ -528,18 +528,19 @@ c10::intrusive_ptr<Work> scatter(
 
 c10::intrusive_ptr<Work> alltoall(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    at::TensorList output_tensors,
-    at::TensorList input_tensors,
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const AllToAllOptions& opts) {
-  static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("c10d::alltoall_", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
-                           at::TensorList,
-                           at::TensorList,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           int64_t)>();
-  return op.call(
-      output_tensors, input_tensors, process_group, opts.timeout.count());
+  static auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("c10d::alltoall_", "")
+          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+              const std::vector<at::Tensor>&,
+              const std::vector<at::Tensor>&,
+              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+              int64_t)>();
+  return std::get<1>(op.call(
+      output_tensors, input_tensors, process_group, opts.timeout.count()));
 }
 
 c10::intrusive_ptr<Work> alltoall_base(
@@ -1011,30 +1012,30 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cuda_(
       output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> alltoall_cpu_(
-    at::TensorList output_tensors,
-    at::TensorList input_tensors,
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cpu_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
+  auto work = process_group->alltoall(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllToAllOptions{std::chrono::milliseconds(timeout)});
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> alltoall_cuda_(
-    at::TensorList output_tensors,
-    at::TensorList input_tensors,
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cuda_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
-  auto output_tensors_vec = output_tensors.vec();
-  auto input_tensors_vec = input_tensors.vec();
-  return process_group->alltoall(
-      output_tensors_vec,
-      input_tensors_vec,
+  auto work = process_group->alltoall(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllToAllOptions{std::chrono::milliseconds(timeout)});
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors, work);
 }
 
 c10::intrusive_ptr<Work> alltoall_base_cpu_(
