@@ -3998,10 +3998,21 @@ torch.cuda.synchronize()
 
         N, D_in, H, D_out = 640, 4096, 2048, 1024
 
+        class MyMLP(torch.nn.Module):
+            def __init__(self, D_in: int, H: int, D_out: int):
+                super().__init__()
+                self.net_1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
+                                                 torch.nn.Dropout(p=0.1)).cuda()
+                self.net_2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
+                                                 torch.nn.Dropout(p=0.2)).cuda()
+
+            def forward(self, input_dict: dict):
+                x = input_dict['x']
+                return self.net_2(self.net_1(x))
+
         models = []
         for _ in range(2):
-            model_section1 = torch.nn.Sequential(torch.nn.Linear(D_in, H),
-                                                 torch.nn.Dropout(p=0.1)).cuda()
+            model_section1 = MyMLP(D_in, H, H).cuda()
             model_section2 = torch.nn.Sequential(torch.nn.Linear(H, D_out),
                                                  torch.nn.Dropout(p=0.2)).cuda()
             models.append(torch.nn.Sequential(model_section1, model_section2))
@@ -4026,7 +4037,7 @@ torch.cuda.synchronize()
         with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
             model_graphed[0], model_graphed[1], relu_graphed, loss_fn_graphed = \
                 torch.cuda.make_graphed_callables((model_graphed[0], model_graphed[1], relu_control, loss_fn_control),
-                                                  ((x,), (h,), (y_pred,), (y_pred, y)))
+                                                  (({'x': x},), (h,), (y_pred,), (y_pred, y)))
 
         real_inputs = [torch.rand_like(x) for _ in range(10)]
         real_targets = [torch.rand_like(y) for _ in range(10)]
@@ -4042,7 +4053,7 @@ torch.cuda.synchronize()
             for data, target in zip(real_inputs, real_targets):
                 opt.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(with_amp, cache_enabled=cache_enabled):
-                    y_pred = m(data)
+                    y_pred = m({'x': data})
                     y_pred = relu(y_pred)
                     loss = loss_fn(y_pred, target)
                     loss.backward()
@@ -4054,7 +4065,7 @@ torch.cuda.synchronize()
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
         model_control.eval()
-        self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
+        self.assertEqual(model_graphed({'x': real_inputs[0]}), model_control({'x': real_inputs[0]}))
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
