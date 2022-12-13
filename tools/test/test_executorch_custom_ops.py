@@ -1,6 +1,6 @@
 import unittest
 
-from typing import Dict
+from typing import Any, Dict
 
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
 
@@ -26,7 +26,7 @@ class TestComputeNativeFunctionStub(unittest.TestCase):
     """
 
     def _test_function_schema_generates_correct_kernel(
-        self, obj: Dict[str, object], expected: str
+        self, obj: Dict[str, Any], expected: str
     ) -> None:
         func = _get_native_function_from_yaml(obj)
 
