@@ -176,6 +176,9 @@ def prepare_pt2e(
         current_scope = list(renamed_stack.items())[-1]
         node_name_to_scope[n.name] = current_scope
 
+    # TODO: check qconfig_mapping to make sure conv and bn are both configured
+    # to be quantized before fusion
+    # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
     model = prepare(
         model,
