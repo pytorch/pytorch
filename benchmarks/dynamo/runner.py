@@ -274,15 +274,15 @@ def parse_args():
         default=None,
         help="number of threads to use for eager and inductor.",
     )
-    launcher_group = parser.add_argument_group("launcher Parameters")
+    launcher_group = parser.add_argument_group("CPU Launcher Parameters")
     launcher_group.add_argument(
-        "--enable_launcher",
+        "--enable_cpu_launcher",
         action="store_true",
         default=False,
         help="Use torch.backends.xeon.run_cpu to get the peak performance on Intel(R) Xeon(R) Scalable Processors.",
     )
     launcher_group.add_argument(
-        "--launcher_args",
+        "--cpu_launcher_args",
         type=str,
         default="",
         help="Provide the args of torch.backends.xeon.run_cpu. "
@@ -350,8 +350,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
                     launcher_cmd = "python"
-                    if args.enable_launcher:
-                        launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.launcher_args}"
+                    if args.enable_cpu_launcher:
+                        launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
                     skip_tests_str = get_skip_tests(suite)

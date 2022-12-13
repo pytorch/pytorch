@@ -890,8 +890,7 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training:
-            assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
+        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1943,6 +1942,7 @@ def run(runner, args, original_dir=None):
                     backends.ipex_bf16, nopython=args.nopython
                 )
             else:
+                assert args.float32, "IPEX only supports fp32 and bf16 for now."
                 optimize_ctx = torch._dynamo.optimize(
                     backends.ipex_fp32, nopython=args.nopython
                 )
