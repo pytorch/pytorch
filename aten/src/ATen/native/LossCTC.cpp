@@ -36,6 +36,7 @@
 #endif
 
 #include <type_traits>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -472,7 +473,7 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return is_batched ? res : res.squeeze(0);
+  return is_batched ? std::move(res) : res.squeeze(0);
 }
 
 } // namespace

@@ -39,7 +39,7 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
-        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None)
+        return HandleConfig(HandleShardingStrategy.FULL_SHARD, False, None, None, False)
 
     def _get_transformer(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
@@ -147,6 +147,7 @@ class TestFlattenParams(FSDPTest):
             FlatParamHandle(
                 [],
                 module,
+                module,
                 torch.device("cuda"),
                 self._get_default_config(),
                 self.process_group,
@@ -218,6 +219,7 @@ class TestFlattenParams(FSDPTest):
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
+            module,
             module,
             torch.device("cuda"),
             self._get_default_config(),
@@ -319,6 +321,7 @@ class TestFlattenParams(FSDPTest):
         params_to_flatten = list(module.parameters())
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
+            module,
             module,
             torch.device("cuda"),
             self._get_default_config(),

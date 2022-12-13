@@ -6,8 +6,6 @@ from functools import partial
 from importlib import import_module
 from typing import Set
 
-from functorch._src.compilers import debug_nop
-
 from functorch.compile import (
     aot_module_simplified,
     min_cut_rematerialization_partition,
@@ -16,6 +14,8 @@ from functorch.compile import (
 )
 
 import torch
+
+from torch._functorch.compilers import debug_nop
 from torch.fx import GraphModule
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -23,8 +23,7 @@ from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 from .. import config, eval_frame
-from ..utils import clone_inputs, count_calls, counters
-from .analysis import has_mutation
+from ..utils import clone_inputs, counters
 from .backends import BACKENDS
 from .normalize import normalize_ir
 
@@ -42,11 +41,6 @@ def aot_autograd(**kwargs):
         # TODO: stop monkeypatching here (without even cleaning up, UGH!)
         functorch.compile.config.use_functionalize = True
         functorch.compile.config.use_fake_tensor = True
-
-        force_compile_tiny_graphs = kwargs.pop("force_compile_tiny_graphs", False)
-
-        if count_calls(gm.graph) < 2 and not force_compile_tiny_graphs:
-            return gm  # no point for tiny graphs
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
@@ -76,11 +70,14 @@ def aot_autograd(**kwargs):
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
 
+        from torch._inductor.debug import enable_aot_logging
+
         try:
             # NB: NOT cloned!
-            cg = aot_module_simplified(gm, example_inputs, **kwargs)
-            counters["aot_autograd"]["ok"] += 1
-            return eval_frame.disable(cg)
+            with enable_aot_logging():
+                cg = aot_module_simplified(gm, example_inputs, **kwargs)
+                counters["aot_autograd"]["ok"] += 1
+                return eval_frame.disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
@@ -107,48 +104,12 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
             log.warning(msg)
         return False
 
-    import functorch.compile
-
     # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
             return raise_or_warn("LSTM")
 
-    # 2) Mutation in the graph
-    mutated = False
-    try:
-        if not torch.is_inference_mode_enabled():
-            if functorch.compile.config.use_functionalize:
-                # There are two problematic classes we still exclude for now with
-                # functionalization:
-                #   - data mutation of inputs (fixed when we stop recording the
-                #   copy_ directly into the graph)
-                #   - metadata mutation of inputs (fixed if we do an extra partition
-                #   to avoid AotAutograd on the mutated inputs, or if we some how
-                #   get custom autograd function to reflect metadata changes to the
-                #   original tensor)
-                mutated = has_mutation(gm, example_inputs, inputs_only=True)
-            else:
-                mutated = has_mutation(gm, example_inputs)
-        else:
-            log.info(
-                "inference_mode enabled. TorchDynamo could not check for mutation."
-            )
-    except NotImplementedError as e:
-        if "SparseTensorImpl" not in str(e):
-            # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
-            # So, there is a chance that we could call Aot Autograd when it is
-            # unsafe.
-            # The exception is fairly guarded with string check, so any other
-            # mutation analysis bugs will raise exceptions and will be caught.
-            raise e
-        pass
-
-    # TODO: delete the logic for this later.
-    # Now that aot autograd supports aliasing and mutation, we don't need it.
-    # if mutated:
-    # return raise_or_warn("mutation")
-
+    # 2) Mutation in the graphs are now always handled by AOT Autograd.
     return True
 
 

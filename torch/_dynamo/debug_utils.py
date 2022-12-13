@@ -364,7 +364,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
     except OSError as e:
         log.exception(e)
-        raise NotImplementedError("Could not write to {minified_repro_path}")
+        raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -502,7 +502,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from functorch._src.aot_autograd import make_boxed_func
+    from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
@@ -529,7 +529,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
@@ -557,7 +557,19 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
-    res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    try:
+        res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return True.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph."
+            )
+        )
+        return True
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
     return passing
@@ -731,11 +743,27 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 
 
 def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
-    compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    try:
+        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+    except Exception as e:
+        # This means that the the minified graph is bad/exposes a different problem.
+        # As we are checking accuracy here, lets log the exception and return False.
+        log.warning(
+            (
+                "While minifying the program in accuracy minification mode,"
+                "ran into a runtime exception which is likely an unrelated issue."
+                " Skipping this graph"
+            )
+        )
+        return False
+
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
 
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
+
+# Please see NOTE: [Real Tensors in Accuracy Evaluation]
+MINIFIER_SPAWNED = False
 
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
@@ -807,6 +835,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
+torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = BACKENDS["{minifier_backend}"]
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
@@ -842,7 +871,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -859,7 +888,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(

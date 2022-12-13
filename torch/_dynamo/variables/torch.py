@@ -3,11 +3,13 @@ import logging
 import math
 import re
 import types
+from collections import OrderedDict
 from typing import Dict, List
 
 import numpy
 
 import torch._C
+import torch.fx
 import torch.nn
 import torch.onnx.operators
 
@@ -27,7 +29,6 @@ from ..utils import (
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, NullContextVariable
-from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -324,7 +325,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -357,7 +357,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=example_value,
                 **options,
@@ -376,9 +375,23 @@ class TorchVariable(VariableTracker):
                     "call_method",
                     "numel",
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
+            )
+        elif (
+            self.value == torch.addcdiv
+            and len(args) == 3
+            and "value" in kwargs
+            and len(kwargs) == 1
+        ):
+            # decompose addcdiv into constituent ops, prevents a graph break due to converting
+            # value to a scalar
+            result = TorchVariable(torch.div, **options).call_function(tx, args[1:], {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return TorchVariable(torch.add, **options).call_function(
+                tx, [args[0], result], {}
             )
         else:
             any_symints_or_symfloats = any(
@@ -434,7 +447,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     fn_,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -506,7 +518,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -572,7 +583,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ],
                         {},
                     ),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -628,72 +638,30 @@ class TorchPyOperator(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ListVariable, TensorVariable, UserFunctionVariable
+        from . import (
+            ListVariable,
+            NestedUserFunctionVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
         from .builder import wrap_fx_proxy
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
 
-        def unwrap_real(arg):
-            if isinstance(arg, TensorVariable):
-                return arg.get_real_value()
-            if isinstance(arg, UserFunctionVariable):
-                return arg.fn
-            if isinstance(arg, NNModuleVariable):
-                return tx.output.get_submodule(arg.module_key)
-            if arg.has_unpack_var_sequence(tx):
-                return [
-                    unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
-                ]
-            return arg
-
-        def make_attr(name, proxy_args=None):
+        def make_attr(name):
             node = tx.output.create_proxy(
                 "get_attr",
                 name,
-                tuple(proxy_args) if proxy_args else tuple(),
+                (),
                 {},
             )
             return node
 
-        # Get values
-        u_args = [unwrap_real(arg) for arg in args]
-
-        def unwrap_proxy(arg):
-            try:
-                if isinstance(arg, TensorVariable):
-                    return arg.as_proxy()
-                if isinstance(arg, NNModuleVariable):
-                    name = arg.module_key
-                    mod = unwrap_real(arg)
-                    options = VariableTracker.propagate(self, args, kwargs.values())
-                    tx.output.register_attr_or_module(
-                        mod,
-                        name,
-                        name,
-                        source=NNModuleSource(
-                            GetItemSource(self.source, arg.module_key)
-                        ),
-                        **options,
-                    )
-                    return make_attr(name)
-                if arg.has_unpack_var_sequence(tx):
-                    return [
-                        unwrap_proxy(arg_inner)
-                        for arg_inner in arg.unpack_var_sequence(tx)
-                    ]
-                return arg.as_proxy()
-            except NotImplementedError:
-                return arg
-
-        def register_as_subgraph(fn, name, args):
-            from .. import export
-
-            gm, guards = export(fn, *args)
-
+        def add_subgraph(name, gm):
             next_name = None
             i = 0
             while not next_name:
-                candidate = f"name_{i}"
+                candidate = f"cond_{name}_{i}"
                 if candidate in tx.output.nn_modules:
                     i += 1
                 else:
@@ -703,39 +671,143 @@ class TorchPyOperator(VariableTracker):
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
             tx.output.register_attr_or_module(gm, next_name, source=src)
-            return next_name, gm, guards
+            return next_name
 
-        # Get args as proxies
-        p_args = [unwrap_proxy(arg) for arg in args]
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-            from .. import config
 
-            assert len(p_args) == 4
-            assert type(args[0]) is TensorVariable  # predicate
-            assert type(p_args[1]) is UserFunctionVariable  # true_fn
-            assert type(p_args[2]) is UserFunctionVariable  # false_fn
-            assert type(args[3]) is ListVariable  # args
+            assert len(args) == 4
+            assert type(args[0]) is TensorVariable, str(type(args[0]))  # predicate
+            assert isinstance(
+                args[1], (UserFunctionVariable, NestedUserFunctionVariable)
+            ), str(
+                type(args[1])
+            )  # true_fn
+            assert isinstance(
+                args[2], (UserFunctionVariable, NestedUserFunctionVariable)
+            ), str(
+                type(args[2])
+            )  # false_fn
+            assert type(args[3]) is ListVariable, str(type(args[3]))  # args
 
-            node_args = [unwrap_real(x) for x in args[3].unpack_var_sequence(tx)]
-            proxy_args = [unwrap_proxy(x) for x in args[3].unpack_var_sequence(tx)]
-            true_name, true_graph, true_guards = register_as_subgraph(
-                p_args[1].get_function(), "true", node_args
+            # Our strategy for tracing the true/false branches of cond
+            # are to checkpoint our graphstate, run the true branch,
+            # roll it back to the checkpoint, and run the false
+            # branch, and then merge the graphstates.  Well, perhaps
+            # "merge" is too strong a word: we mostly assert that
+            # the resulting graphstates have to be the same.
+            #
+            # We only permit guards to diverge (we union the guards from
+            # both branches).  In particular, this means that side
+            # effects are NOT permitted inside true/false branches; this
+            # would be difficult to implement, because of the path
+            # explosion problem.
+
+            graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
+
+            sub_args = args[3].unpack_var_sequence(tx)
+
+            def speculate_branch(branch):
+                # Setup the subgraph we're going to capture into
+                tx.output.graph = torch.fx.Graph()
+                tx.output.graphargs = []
+                tx.output.name_to_input.clear()
+
+                # One argument to graph per sub_args
+                for a in sub_args:
+                    assert isinstance(a, TensorVariable)
+                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    # NB: we don't bother populating graphargs, as
+                    # they won't actually get used by anything
+
+                # NB: 0 is predicate
+                ix = 1 if branch else 2
+
+                output = args[ix].call_function(tx, sub_args, {})
+
+                # Register output to graph
+                # Modeled off of compile_and_call_fx_graph
+                # TODO: support non single Tensor output
+                assert isinstance(output, TensorVariable)
+                tx.output.guards.update(output.guards)
+                tx.output.create_node(
+                    "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                )
+
+                tx.output.side_effects.prune_dead_object_new(tx)
+                state = tx.copy_graphstate()
+
+                guards = state.output.guards
+                nn_modules = state.output.nn_modules
+
+                # Nub out bits of state that we don't require to be
+                # equal
+                comparable_state = state._replace(
+                    output=state.output._replace(
+                        guards=set(),
+                        nn_modules=None,
+                        # Timestamp is monotonically increasing so we don't
+                        # care about divergence
+                        timestamp=0,
+                        # Meh (problem is the nodes don't compare equal;
+                        # maybe nub out outputs only)
+                        name_to_input=OrderedDict(),
+                    )
+                )
+
+                graph = tx.output.graph
+                tx.output.graph = graph_checkpoint
+                tx.restore_graphstate(checkpoint)
+
+                return output, graph, guards, nn_modules, comparable_state
+
+            (
+                true_r,
+                true_graph,
+                true_guards,
+                true_nn_modules,
+                true_cmp,
+            ) = speculate_branch(True)
+            (
+                false_r,
+                false_graph,
+                false_guards,
+                false_nn_modules,
+                false_cmp,
+            ) = speculate_branch(False)
+
+            if true_cmp != false_cmp:
+                unimplemented(true_cmp.diff(false_cmp))
+
+            # Add guards
+            tx.output.guards |= false_guards
+            tx.output.guards |= true_guards
+
+            true_name = add_subgraph(
+                "true", torch.fx.GraphModule(true_nn_modules, true_graph)
             )
-            false_name, false_graph, false_guards = register_as_subgraph(
-                p_args[2].get_function(), "false", node_args
+            false_name = add_subgraph(
+                "false", torch.fx.GraphModule(false_nn_modules, false_graph)
             )
 
-            if config.enforce_cond_guards_match:
-                assert (
-                    true_guards == false_guards
-                ), "Guards for true and false path must be equal."
+            # Apply side effects (guaranteed to be equal)
+            tx.output.side_effects = true_cmp.output.side_effects
 
-            true_node = make_attr(true_name, proxy_args)
-            false_node = make_attr(false_name, proxy_args)
-            p_args[1] = true_node
-            p_args[2] = false_node
+            true_node = make_attr(true_name)
+            false_node = make_attr(false_name)
+
+            p_args = (
+                args[0].as_proxy(),
+                true_node,
+                false_node,
+                tuple(a.as_proxy() for a in sub_args),
+            )
+            # TODO: assert that the true/false return values are
+            # consistent
+            example_value = true_r.as_proxy().node.meta["example_value"]
+        else:
+            unimplemented(f"PyOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -745,7 +817,6 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
-                current_tx=tx,
             ),
-            example_value=self.value(*u_args),
+            example_value=example_value,
         )
