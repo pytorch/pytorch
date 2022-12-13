@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -115,6 +114,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
+    "AllenaiLongformerBase",
     "BlenderbotForCausalLM",  # OOM
     "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
