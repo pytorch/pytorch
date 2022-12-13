@@ -144,11 +144,12 @@ else()
     )
 endif()
 
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR})
 if(NOT USE_ROCM)
-  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR} ${CUDA_NVRTC_LIB} torch::nvtoolsext)
+  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${CUDA_NVRTC_LIB} torch::nvtoolsext)
   target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${CUDA_INCLUDE_DIRS})
 else()
-  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch ${TORCHLIB_FLAVOR} ${ROCM_HIPRTC_LIB})
+  target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${ROCM_HIPRTC_LIB})
   target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${Caffe2_HIP_INCLUDE})
 endif()
 if(NOT MSVC)
@@ -181,10 +182,11 @@ if(BUILD_PYTHON)
   else()
     target_compile_options(${NVFUSER} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
     target_compile_definitions(${NVFUSER} PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
-    target_compile_definitions(${NVFUSER_CODEGEN} PRIVATE
+    target_compile_definitions(${NVFUSER} PRIVATE
       USE_ROCM
       __HIP_PLATFORM_HCC__
       )
+    target_include_directories(${NVFUSER_CODEGEN} PRIVATE ${Caffe2_HIP_INCLUDE})
   endif()
 
   target_link_libraries(${NVFUSER} PRIVATE ${NVFUSER_CODEGEN})

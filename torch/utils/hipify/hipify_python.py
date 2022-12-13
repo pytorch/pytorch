@@ -592,6 +592,8 @@ def is_out_of_place(rel_filepath):
     assert(not os.path.isabs(rel_filepath))
     if rel_filepath.startswith("torch/"):
         return False
+    if rel_filepath.startswith("nvfuser/"):
+        return False
     if rel_filepath.startswith("tools/autograd/templates/"):
         return False
     return True
@@ -605,6 +607,8 @@ def is_pytorch_file(rel_filepath):
             return False
         return True
     if rel_filepath.startswith("torch/"):
+        return True
+    if rel_filepath.startswith("nvfuser/"):
         return True
     if rel_filepath.startswith("tools/autograd/templates/"):
         return True
