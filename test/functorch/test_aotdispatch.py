@@ -345,6 +345,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
+    # Test for bug occurring at the intersection of fake tensors & functionalization.
+    @patch("torch._functorch.config.use_dynamic_shapes", True)
+    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_squeeze_mutation(self):
+        def f(a):
+            b = a.clone().squeeze(-1)
+            b.add_(1.)
+            return a + b
+
+        inp = [torch.randn(3, 1, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
     def test_input_mutation_simple(self):
         def f(a):
             a.mul_(2)
