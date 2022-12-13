@@ -3099,7 +3099,7 @@ Tensor prelu_backward_weight_jvp(
     }
   }
   const auto dw = dw_full.sum(reduction_dims);
-  return dw;
+  return dw.view_as(w);
 }
 
 Tensor gelu_double_backward(
