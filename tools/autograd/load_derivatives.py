@@ -774,11 +774,11 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
             },
         ),
-        # replace self.blocksize() with self_blocksize_opt
+        # replace self.sym_blocksize() with self_sym_blocksize_opt
         (
-            r"{}.blocksize\(\)",
+            r"{}.sym_blocksize\(\)",
             {
-                "suffix": "_self_blocksize_opt",
+                "suffix": "_self_sym_blocksize_opt",
                 "nctype": lambda name: NamedCType(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
