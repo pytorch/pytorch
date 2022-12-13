@@ -76,7 +76,7 @@ CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
-    guards_tate: GuardsCheckpointState
+    guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
