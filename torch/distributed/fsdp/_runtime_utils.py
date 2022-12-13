@@ -578,6 +578,8 @@ def _post_backward_hook(
         _prefetch_handles(state, handles_key)
 
         if not state._sync_gradients:
+            if handle._use_orig_params:
+                handle._use_unsharded_grad_views()
             return
 
         # Wait for all ops in the current stream (e.g. gradient
