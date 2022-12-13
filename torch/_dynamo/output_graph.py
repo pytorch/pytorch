@@ -96,6 +96,11 @@ class OutputGraphState(NamedTuple):
                 return f"{prefix}{k} mismatch: {sv} != {ov}"
         return None
 
+    # Back compat .guards api
+    @property
+    def guards(self):
+        return self.guard_state.dynamo_guards
+
 
 @functools.lru_cache(None)
 def _step_logger():

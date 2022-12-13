@@ -12,6 +12,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -745,7 +746,7 @@ class TorchPyOperator(VariableTracker):
                 # equal
                 comparable_state = state._replace(
                     output=state.output._replace(
-                        guards=set(),
+                        guard_state=GuardsCheckpointState(),
                         nn_modules=None,
                         # Timestamp is monotonically increasing so we don't
                         # care about divergence
