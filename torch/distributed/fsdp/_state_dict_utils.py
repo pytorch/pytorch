@@ -1,3 +1,4 @@
+import functools
 import math
 import warnings
 from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
@@ -18,8 +19,8 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _FSDPState,
-    _get_module_fsdp_state,
     _has_fsdp_params,
+    _is_composable,
     _module_handles,
     clean_tensor_name,
     FSDP_PREFIX,
@@ -130,6 +131,7 @@ def _common_pre_state_dict_hook(
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
         _clear_grads_if_needed(_all_handles(fsdp_state))
+
 
 def _common_unshard_pre_state_dict_hook(
     module: nn.Module,
@@ -610,6 +612,7 @@ def _sharded_pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -620,9 +623,6 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    state = _get_module_fsdp_state(module)
-    assert state is not None, "state_dict_hook get a module without _FSDPState"
-    fsdp_state = cast(_FSDPState, state)
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -633,46 +633,47 @@ def _post_state_dict_hook(
     )
     return processed_state_dict
 
+
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     *args,
     **kwargs,
 ) -> None:
     """
-    _pre_state_dict_hook() is called before the state_dict() of this
-    FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
-    what postprocessing will be done.
+    This is called before the core state dict saving logic of ``module``.
+    ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
+    be done.
     """
-    state = _get_module_fsdp_state(module)
-    assert state is not None, "state_dict_hook get a module without _FSDPState"
-    fsdp_state = cast(_FSDPState, state)
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
         StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
     }
     _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
-        fsdp_state, module, *args, **kwargs,
+        fsdp_state,
+        module,
+        *args,
+        **kwargs,
     )
+
 
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
+    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
     *args: Any,
 ) -> None:
     """
-    ``_pre_state_dict_hook` is called before ``module._load_from_state_dict()``
-    is called. ``fsdp_state._state_dict_type`` is used to decide what preprocessing
-    will be done.
+    This is called before ``module._load_from_state_dict()``.
+    ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
+    be done.
     """
-    state = _get_module_fsdp_state(module)
-    assert state is not None, "state_dict_hook get a module without _FSDPState"
-    fsdp_state = cast(_FSDPState, state)
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -689,10 +690,11 @@ def _pre_load_state_dict_hook(
 
 @no_type_check
 @torch.no_grad()
-def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
-    state = _get_module_fsdp_state(module)
-    assert state is not None, "state_dict_hook get a module without _FSDPState"
-    fsdp_state = cast(_FSDPState, state)
+def _post_load_state_dict_hook(
+    fsdp_state: _FSDPState,
+    module: nn.Module,
+    *args: Any,
+) -> None:
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
@@ -702,3 +704,57 @@ def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
     # Dispatch into state_dict type specific implementation of post-hook for
     # loading state_dict.
     _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+
+
+@no_type_check
+def _register_state_dict_pre_hooks(state: _FSDPState) -> None:
+    """Registers the pre-save state dict hooks."""
+    if not _is_composable(state):
+        state.register_state_dict_pre_hook(
+            functools.partial(_pre_state_dict_hook, state)
+        )
+        return
+    for handle in state._handles:
+        handle._comm_module.register_state_dict_pre_hook(
+            functools.partial(_pre_state_dict_hook, state)
+        )
+
+
+@no_type_check
+def _register_state_dict_hooks(state: _FSDPState) -> None:
+    """Registers the post-save state dict hooks."""
+    if not _is_composable(state):
+        state._register_state_dict_hook(functools.partial(_post_state_dict_hook, state))
+        return
+    for handle in state._handles:
+        handle._comm_module._register_state_dict_hook(
+            functools.partial(_post_state_dict_hook, state)
+        )
+
+
+@no_type_check
+def _register_load_state_dict_pre_hooks(state: _FSDPState) -> None:
+    """Registers the pre-load state dict hooks."""
+    if not _is_composable(state):
+        state._register_load_state_dict_pre_hook(
+            functools.partial(_pre_load_state_dict_hook, state), with_module=True
+        )
+        return
+    for handle in state._handles:
+        handle._comm_module._register_load_state_dict_pre_hook(
+            functools.partial(_pre_load_state_dict_hook, state), with_module=True
+        )
+
+
+@no_type_check
+def _register_load_state_dict_post_hooks(state: _FSDPState) -> None:
+    """Registers the post-load state dict hooks."""
+    if not _is_composable(state):
+        state.register_load_state_dict_post_hook(
+            functools.partial(_post_load_state_dict_hook, state)
+        )
+        return
+    for handle in state._handles:
+        handle._comm_module.register_load_state_dict_post_hook(
+            functools.partial(_post_load_state_dict_hook, state)
+        )

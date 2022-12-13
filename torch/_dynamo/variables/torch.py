@@ -53,6 +53,19 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
     torch._shape_as_tensor,
 ]
 
+constant_fold_functions = [
+    torch._assert,
+    torch._utils._get_device_index,
+    torch.cuda.is_available,
+    torch.device,
+    torch.distributed.is_available,
+    torch.finfo,
+    torch.iinfo,
+    torch.is_floating_point,
+    torch.nn.functional._Reduction.get_enum,
+]
+if torch.distributed.is_available():
+    constant_fold_functions.append(torch.distributed.is_initialized)
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -158,16 +171,7 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def can_constant_fold_through(self):
-        if self.value in (
-            torch._assert,
-            torch.device,
-            torch.finfo,
-            torch.iinfo,
-            torch.is_floating_point,
-            torch.cuda.is_available,
-            torch.nn.functional._Reduction.get_enum,
-            torch._utils._get_device_index,
-        ):
+        if self.value in constant_fold_functions:
             return True
         return getattr(self.value, "__module__", None) == "math"
 

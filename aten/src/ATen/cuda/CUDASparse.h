@@ -10,6 +10,21 @@
 #define AT_USE_CUSPARSE_GENERIC_API() 0
 #endif
 
+// cuSparse Generic API descriptor pointers were changed to const in CUDA 12.0
+#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && \
+    (CUSPARSE_VERSION < 12000)
+#define AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() 1
+#else
+#define AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() 0
+#endif
+
+#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && \
+    (CUSPARSE_VERSION >= 12000)
+#define AT_USE_CUSPARSE_CONST_DESCRIPTORS() 1
+#else
+#define AT_USE_CUSPARSE_CONST_DESCRIPTORS() 0
+#endif
+
 // hipSparse Generic API ROCm 5.2
 #if defined(USE_ROCM) && ROCM_VERSION >= 50200
 #define AT_USE_HIPSPARSE_GENERIC_52_API() 1
