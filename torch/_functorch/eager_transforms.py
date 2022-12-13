@@ -475,30 +475,42 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
 
-        chunked_results = []
-        for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
-                                                             flat_output_numels,
-                                                             chunk_size=chunk_size):
-            basis = tree_unflatten(flat_basis_chunk, output_spec)
-            chunked_result = vmap(vjp_fn)(basis)
-            flat_results, _ = tree_flatten(chunked_result)
-            chunked_results.append(flat_results)
+        def compute_jacobian():
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            chunked_results = []
+            for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
+                                                                 flat_output_numels,
+                                                                 chunk_size=chunk_size):
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+                chunked_result = vmap(vjp_fn)(basis)
+                flat_results, _ = tree_flatten(chunked_result)
+                chunked_results.append(flat_results)
 
-        # Concatenate chunks.
-        flat_results = []
-        # Iterate and concat the jacobians of different
-        # inputs.
-        for idx in range(len(flat_primals)):
-            r = tuple(map(lambda r_: r_[idx], chunked_results))
-            flat_results.append(torch.cat(r, 0))
+            if len(chunked_results) == 1:
+                # Short-circuit if we used a single chunk
+                return chunked_results[0]
+
+            # Concatenate chunks.
+            flat_results = []
+            # Iterate and concat the jacobians of different
+            # inputs.
+            for idx in range(len(flat_primals)):
+                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                flat_results.append(torch.cat(r, 0))
+
+            return flat_results
+
+        flat_jacobians_per_input = compute_jacobian()
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
-        flat_results = [result.split(flat_output_numels, dim=0) for result in flat_results]
+        flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
         flat_input_flat_output = [
             tuple(split.view(out.shape + primal.shape)
                   for split, out in zip(splits, flat_output))
-            for splits, primal in zip(flat_results, flat_primals)
+            for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
 
         # Step 3: Right now, `jacobian` is a List[List[Tensor]].
@@ -586,7 +598,7 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     assert len(tensors) > 0
     assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
-    if chunk_size:
+    if chunk_size and chunk_size < total_numel:
         n_chunks = total_numel // chunk_size
         numels = [chunk_size] * n_chunks
         numels.append(total_numel % chunk_size)
