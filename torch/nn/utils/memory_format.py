@@ -41,9 +41,9 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         immediately before a convolution.
 
     Args:
-        module (nn.Module): ``nn.Conv2d`` & ``nn.ConvTranspose2d``  or container
+        module (nn.Module): ``nn.Conv2d`` & ``nn.ConvTranspose2d`` or container
                             ``nn.Module``
-        format: user specified ``memory_format``,
+        memory_format: user specified ``memory_format``,
             e.g. ``torch.channels_last`` or ``torch.contiguous_format``
 
     Returns:
