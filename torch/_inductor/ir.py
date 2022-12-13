@@ -3349,53 +3349,6 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-# Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
-def _conv_input_size(
-    output_size, weight_size, padding, output_padding, stride, dilation, groups
-):
-    assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
-    dim = len(output_size)
-    assert dim > 2, "Expect input dim > 2"
-
-    BATCH_DIM = 0
-    WEIGHT_INPUT_CHANNELS_DIM = 1
-    input_size = []
-    input_size.append(output_size[BATCH_DIM])
-    input_size.append(weight_size[WEIGHT_INPUT_CHANNELS_DIM] * groups)
-    for d in range(2, dim):
-        kernel = (weight_size[d] - 1) * dilation[d - 2] + 1
-        input_size_d = (
-            (output_size[d] - 1) * stride[d - 2]
-            - (padding[d - 2] * 2)
-            + kernel
-            + output_padding[d - 2]
-        )
-        input_size.append(input_size_d)
-    return input_size
-
-
-# The size of prepacked_weight is the prepacked size.
-#   Groups > 1:  [g*o, i/g, ...]
-#   Groups == 1: [o, i, ...]
-# Returns original weight size in [i, o, ...]
-def _original_deconv_weight_size(
-    prepacked_weight,
-    groups,
-):
-    prepacked_weight_size = prepacked_weight.size()
-    dim = len(prepacked_weight_size)
-    assert dim > 2, "Expect weight dim > 2"
-    if groups > 1:
-        weight_size = []
-        weight_size.append(prepacked_weight_size[1] * groups)
-        weight_size.append(prepacked_weight_size[0] / groups)
-        for d in range(2, dim):
-            weight_size.append(prepacked_weight_size[d])
-    else:
-        weight_size = prepacked_weight.transpose(0, 1).size()
-    return weight_size
-
-
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -3415,6 +3368,52 @@ def _prepare_convolution_fusion_create(
     function only supports the CPU device since conv post-op fusion kernel is only
     supported on CPU right now.
     """
+
+    # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
+    def _conv_input_size(
+        output_size, weight_size, padding, output_padding, stride, dilation, groups
+    ):
+        assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
+        dim = len(output_size)
+        assert dim > 2, "Expect input dim > 2"
+
+        BATCH_DIM = 0
+        WEIGHT_INPUT_CHANNELS_DIM = 1
+        input_size = []
+        input_size.append(output_size[BATCH_DIM])
+        input_size.append(weight_size[WEIGHT_INPUT_CHANNELS_DIM] * groups)
+        for d in range(2, dim):
+            kernel = (weight_size[d] - 1) * dilation[d - 2] + 1
+            input_size_d = (
+                (output_size[d] - 1) * stride[d - 2]
+                - (padding[d - 2] * 2)
+                + kernel
+                + output_padding[d - 2]
+            )
+            input_size.append(input_size_d)
+        return input_size
+
+    # The size of prepacked_weight is the prepacked weight size of deconv:
+    #   Groups > 1:  [g*o, i/g, ...]
+    #   Groups == 1: [o, i, ...]
+    # Returns original weight size in [i, o, ...]
+    def _original_deconv_weight_size(
+        prepacked_weight,
+        groups,
+    ):
+        prepacked_weight_size = prepacked_weight.size()
+        dim = len(prepacked_weight_size)
+        assert dim > 2, "Expect weight dim > 2"
+        if groups > 1:
+            weight_size = []
+            weight_size.append(prepacked_weight_size[1] * groups)
+            weight_size.append(prepacked_weight_size[0] / groups)
+            for d in range(2, dim):
+                weight_size.append(prepacked_weight_size[d])
+        else:
+            weight_size = prepacked_weight.transpose(0, 1).size()
+        return weight_size
+
     stride = tuple(stride_)
     padding = tuple(padding_)
     dilation = tuple(dilation_)
