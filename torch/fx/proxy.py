@@ -77,6 +77,7 @@ class TracerBase:
 
         # Optionally set stack trace on the created Node for debugging purposes
         if fx_traceback.is_stack_trace_overridden():
+            proxy.node.meta = fx_traceback.get_current_meta()
             stacks = fx_traceback.format_stack()
             proxy.node.stack_trace = '\n'.join(reversed(stacks))
         elif self.record_stack_traces:

@@ -452,21 +452,13 @@ class CodeGen(object):
 
                         lines = node.stack_trace.strip().split('\n')
                         idx = 0
-                        context_lines = []
                         while idx < len(lines):
                             line = lines[idx].strip()
                             if line.startswith('File '):
                                 break
-
-                            # Skip printing module stack
-                            if not line.startswith("Module stack"):
-                                context_lines.append(line)
                             idx += 1
 
                         summary_lines = []
-                        if context_lines:
-                            summary_lines.append(', '.join(context_lines))
-
                         if idx + 1 < len(lines):
                             matches = pattern.match(lines[idx].strip())
                             if matches:
