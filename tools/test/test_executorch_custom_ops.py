@@ -1,6 +1,7 @@
 import unittest
 
 from typing import Dict
+
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
 
 from torchgen.model import Location, NativeFunction
@@ -23,6 +24,7 @@ class TestComputeNativeFunctionStub(unittest.TestCase):
     GH CI job doesn't build torch before running tools unit tests, hence
     manually adding these parametrized tests.
     """
+
     def _test_function_schema_generates_correct_kernel(self, obj, expected) -> None:
         func = _get_native_function_from_yaml(obj)
 
@@ -33,10 +35,8 @@ class TestComputeNativeFunctionStub(unittest.TestCase):
             expected,
         )
 
-    def test_function_schema_generates_correct_kernel_tensor_out(self):
-        obj = {
-            "func": "custom::foo.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)"
-        }
+    def test_function_schema_generates_correct_kernel_tensor_out(self) -> None:
+        obj = {"func": "custom::foo.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)"}
         expected = """
 at::Tensor & wrapper_out_foo_out(const at::Tensor & self, at::Tensor & out) {
     return out;
@@ -44,7 +44,7 @@ at::Tensor & wrapper_out_foo_out(const at::Tensor & self, at::Tensor & out) {
     """
         self._test_function_schema_generates_correct_kernel(obj, expected)
 
-    def test_function_schema_generates_correct_kernel_no_out(self):
+    def test_function_schema_generates_correct_kernel_no_out(self) -> None:
         obj = {"func": "custom::foo.Tensor(Tensor self) -> Tensor"}
         expected = """
 at::Tensor wrapper_Tensor_foo(const at::Tensor & self) {
@@ -53,7 +53,7 @@ at::Tensor wrapper_Tensor_foo(const at::Tensor & self) {
     """
         self._test_function_schema_generates_correct_kernel(obj, expected)
 
-    def test_function_schema_generates_correct_kernel_no_return(self):
+    def test_function_schema_generates_correct_kernel_no_return(self) -> None:
         obj = {"func": "custom::foo(Tensor self, *, Tensor(a!)[] out) -> ()"}
         expected = f"""
 void wrapper__foo_out(const at::Tensor & self, at::TensorList out) {{

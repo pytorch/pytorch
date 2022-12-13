@@ -13,9 +13,9 @@ from torchgen import dest
 from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignatureGroup
 from torchgen.context import method_with_native_function, with_native_function_and_index
-from torchgen.executorch.api import cpp as et_cpp
+from torchgen.executorch.api import et_cpp
 from torchgen.executorch.api.custom_ops import gen_custom_ops
-from torchgen.executorch.api.types import CppSignature
+from torchgen.executorch.api.types import ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
     get_custom_build_selector,
@@ -43,7 +43,7 @@ from torchgen.utils import (
 
 
 def static_dispatch(
-    sig: CppSignature,
+    sig: ExecutorchCppSignature,
     f: NativeFunction,
     backend_indices: List[BackendIndex],
 ) -> str:
@@ -110,7 +110,7 @@ TORCH_API inline {sig.decl()} {{
             """
 
         else:
-            sig = CppSignature.from_native_function(f)
+            sig = ExecutorchCppSignature.from_native_function(f)
             return static_dispatch(
                 sig,
                 f,
@@ -136,7 +136,7 @@ class ComputeCodegenUnboxedKernels:
             argument_type_gen = aten_cpp.argumenttype_type
             return_type_gen = aten_cpp.returns_type
         else:
-            sig = CppSignature.from_native_function(f)
+            sig = ExecutorchCppSignature.from_native_function(f)
             argument_type_gen = et_cpp.argumenttype_type
             return_type_gen = et_cpp.returns_type
         # parse arguments into C++ code
@@ -210,7 +210,7 @@ def compute_native_function_declaration(
     g: Union[NativeFunctionsGroup, NativeFunction], backend_index: BackendIndex
 ) -> List[str]:
     assert isinstance(g, NativeFunction)
-    sig = CppSignature.from_native_function(f=g)
+    sig = ExecutorchCppSignature.from_native_function(f=g)
     metadata = backend_index.get_kernel(g)
     if metadata is None:
         return []
