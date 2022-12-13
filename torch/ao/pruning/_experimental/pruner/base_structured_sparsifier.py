@@ -7,8 +7,8 @@ from torch.nn.utils import parametrize
 from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
 
 from torch.ao.pruning import BaseSparsifier
-from .parametrization import FakeStructuredSparsity, BiasHook
-from .match_utils import apply_match
+from .parametrization import FakeStructuredSparsity, BiasHook, module_contains_param
+from .match_utils import apply_match, MatchAllNode
 from .prune_functions import (
     prune_linear,
     prune_linear_linear,
@@ -19,6 +19,7 @@ from .prune_functions import (
     prune_conv2d_activation_pool_conv2d,
     prune_conv2d_pool_activation_conv2d,
     prune_conv2d_pool_flatten_linear,
+    prune_lstm_linear,
 )
 
 
@@ -26,6 +27,7 @@ def _get_supported_structured_pruning_modules():
     SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
         nn.Linear,
         nn.Conv2d,
+        nn.LSTM
     }
     return SUPPORTED_STRUCTURED_PRUNING_MODULES
 
@@ -99,6 +101,7 @@ def _get_default_structured_pruning_patterns() -> Dict[
         # conv2d -> conv2d
         (nn.Conv2d, "output"): prune_conv2d,
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
+        (nn.LSTM, MatchAllNode, nn.Linear): prune_lstm_linear,
     }
 
     for activation in chain(
@@ -222,8 +225,6 @@ class BaseStructuredSparsifier(BaseSparsifier):
         r"""This function will attach the FakeStructuredSparsity parameterizations
         and BiasHooks at the appropriate points in the model.
         """
-        self.bias_handles = []
-
         for config in self.groups:
             module = config["module"]
             tensor_name = config["tensor_name"]
@@ -236,19 +237,23 @@ class BaseStructuredSparsifier(BaseSparsifier):
             )
             self.state[config["tensor_fqn"]]["mask"] = mask
             parametrize.register_parametrization(
-                module, tensor_name, parametrization(mask)
+                module, tensor_name, parametrization(mask),
+                unsafe=True
             )
-            prune_bias = config.get("prune_bias", True)
-            if module.bias is not None:
-                module.register_parameter("_bias", nn.Parameter(module.bias.detach()))
-                module.bias = None
-                module.prune_bias = prune_bias
 
-            self.bias_handles.append(
+            # if linear / conv, we add in bias hooks
+            if isinstance(module, (nn.Linear, nn.Conv2d)):
+                print(module)
+                prune_bias = config.get("prune_bias", True)
+                if module.bias is not None:
+                    module.register_parameter("_bias", nn.Parameter(module.bias.detach()))
+                    module.bias = None
+                    module.prune_bias = prune_bias
+
                 module.register_forward_hook(
                     BiasHook(module.parametrizations.weight[0], prune_bias)
                 )
-            )
+
 
     def prune(self) -> None:
         r"""
@@ -276,10 +281,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 if (
                     first_module is not None
                     and parametrize.is_parametrized(first_module)
-                    and isinstance(
-                        first_module.parametrizations["weight"][0],
-                        FakeStructuredSparsity,
-                    )
+                    and module_contains_param(first_module, FakeStructuredSparsity)
                 ):
                     convert_block = []
                     for node in matched:

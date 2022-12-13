@@ -11,7 +11,6 @@ from torch.nn.utils.parametrize import ParametrizationList
 from .parametrization import FakeStructuredSparsity, BiasHook
 
 
-# BIAS PROPOGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
         bias_hooks = []
@@ -356,4 +355,48 @@ def prune_conv2d_pool_flatten_linear(
             linear.in_features = weight_parameterizations.original.shape[1]
         else:
             linear.weight = nn.Parameter(linear.weight[:, flattened_mask])
+            linear.in_features = linear.weight.shape[1]
+
+def prune_lstm_linear(lstm, getitem, linear):
+    mask = lstm.parametrizations.weight_ih_l0[0].mask
+
+    with torch.no_grad():
+        parametrize.remove_parametrizations(lstm, "weight_ih_l0", leave_parametrized=True)
+        parametrize.remove_parametrizations(lstm, "bias_ih_l0", leave_parametrized=True)
+        lstm.weight_ih_l0 = nn.Parameter(lstm.weight_ih_l0[mask])
+        lstm.bias_ih_l0 = nn.Parameter(lstm.bias_ih_l0[mask])
+
+    mask = lstm.parametrizations.weight_hh_l0[0].mask
+    with torch.no_grad():
+        parametrize.remove_parametrizations(lstm, "weight_hh_l0", leave_parametrized=True)
+        parametrize.remove_parametrizations(lstm, "bias_hh_l0", leave_parametrized=True)
+        # splitting out hidden-hidden masks
+        W_hi, W_hf, W_hg, W_ho = torch.split(lstm.weight_hh_l0, lstm.hidden_size)
+        M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)
+
+        # resize each individual weight separately
+        W_hi = W_hi[M_hi][:, M_hi]
+        W_hf = W_hf[M_hf][:, M_hf]
+        W_hg = W_hg[M_hg][:, M_hg]
+        W_ho = W_ho[M_ho][:, M_ho]
+
+        # concat, use this as new weight
+        new_weight = torch.cat((W_hi, W_hf, W_hg, W_ho))
+        lstm.weight_hh_l0 = nn.Parameter(new_weight)
+        lstm.bias_hh_l0 = nn.Parameter(lstm.bias_hh_l0[mask])
+
+    lstm.hidden_size = M_hi.sum()
+    with torch.no_grad():
+        if parametrize.is_parametrized(linear):
+            parametrization_dict = cast(nn.ModuleDict, linear.parametrizations)
+            weight_parameterizations = cast(
+                ParametrizationList, parametrization_dict.weight
+            )
+
+            weight_parameterizations.original = nn.Parameter(
+                weight_parameterizations.original[:, M_ho]
+            )
+            linear.in_features = weight_parameterizations.original.shape[1]
+        else:
+            linear.weight = nn.Parameter(linear.weight[:, M_ho])
             linear.in_features = linear.weight.shape[1]
