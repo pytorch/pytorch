@@ -2284,8 +2284,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    Meta: resize__symint
-    CPU: resize_
+    CPU, Meta: resize_
     CUDA: resize_cuda_
     MPS: resize_mps_
     QuantizedCPU: quantized_resize_cpu_
@@ -13699,7 +13698,6 @@
   variants: function
   autogen: _scaled_dot_product_attention.out
 
-# This aten function is kept so that we can test the choice function from Python
 - func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> int
   dispatch:
     CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp

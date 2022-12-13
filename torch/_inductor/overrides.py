@@ -718,12 +718,6 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     computation_node.padding, str
                 ):
                     continue
-                # TODO: support more conv+binary+unary fusion.
-                if type(computation_node) in [
-                    ConvBinary2d,
-                    ConvBinaryInplace2d,
-                ] and type(unary_node) not in [nn.ReLU]:
-                    continue
                 # only fuse for linear when the dtype is bf16
                 if type(computation_node) in [nn.Linear] and not is_bfloat16_module(
                     computation_node

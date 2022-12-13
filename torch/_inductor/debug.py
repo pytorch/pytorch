@@ -182,6 +182,7 @@ def enable_aot_logging():
     # and the log level of the file logger to DEBUG
 
     stack = contextlib.ExitStack()
+    stack.enter_context(patch("functorch.compile.config.debug_fake_cross_ref", True))
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
     stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
     stack.enter_context(patch("functorch.compile.config.debug_joint", True))
@@ -279,11 +280,6 @@ class DebugContext:
             dynamo_utils.init_logging()
 
         if config.debug:
-
-            def reset_log_level(level):
-                dynamo_config.log_level = level
-
-            self._stack.callback(reset_log_level, dynamo_config.log_level)
             dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))

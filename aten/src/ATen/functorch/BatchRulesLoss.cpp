@@ -258,7 +258,7 @@ at::Tensor nll_loss_backward_decomposition(
 
   Tensor weight_;
   if (weight && weight->defined()) {
-    const auto& self_ = self;
+    auto self_ = self;
     auto shape = weight->sizes();
     VmapDimVector new_shape(self_.dim(), 1);
     new_shape[channel_dim] = shape[0];

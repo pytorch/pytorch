@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ["Adagrad", "adagrad"]
@@ -257,7 +257,7 @@ def _single_tensor_adagrad(
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
-        step = _get_value(step_t)
+        step = step_t.item()
         grad = grad if not maximize else -grad
 
         if weight_decay != 0:
@@ -273,6 +273,7 @@ def _single_tensor_adagrad(
             grad = grad.coalesce()  # the update is non-linear so indices must be unique
             grad_indices = grad._indices()
             grad_values = grad._values()
+            size = grad.size()
 
             state_sum.add_(_make_sparse(grad, grad_indices, grad_values.pow(2)))
             std = state_sum.sparse_mask(grad)

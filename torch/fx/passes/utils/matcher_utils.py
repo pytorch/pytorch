@@ -79,6 +79,8 @@ class SubgraphMatcher:
         # TODO: assert pattern is a connected graph
 
         self.pattern_placeholder_nodes = [n for n in pattern.nodes if n.op == "placeholder"]
+        self.unused_pattern_placeholder_nodes = [placeholder_node for placeholder_node in self.pattern_placeholder_nodes if len(placeholder_node.users) == 0]
+
         output_node = next(iter(reversed(pattern.nodes)))
         # nodes returned by outputs
         self.pattern_returning_nodes: List[Node] = output_node.all_input_nodes
@@ -304,6 +306,19 @@ class SubgraphMatcher:
                 match = copy.copy(saved_match)
 
         match = InternalMatch(anchors=self.pattern_anchors)
+
+        # For the unused place holders, if the number of them are the same between pattern and graph,
+        # it's considered as a match and we will add them to the match.nodes_map.
+        graph_placeholder_nodes = [n for n in graph.nodes if n.op == "placeholder"]
+        unused_graph_placeholder_nodes = [placeholder_node for placeholder_node in graph_placeholder_nodes if len(placeholder_node.users) == 0]
+
+        if len(self.unused_pattern_placeholder_nodes) == len(unused_graph_placeholder_nodes):
+            for i in range(len(unused_graph_placeholder_nodes)):
+                match.nodes_map[self.unused_pattern_placeholder_nodes[i]] = unused_graph_placeholder_nodes[i]
+        else:
+            logger.info(f"the number of unused places holders are not the same between pattern \
+             ({len(self.unused_pattern_placeholder_nodes)}) and graph ({len(unused_graph_placeholder_nodes)}).")
+        logger.info(f"match: {match}, match_candidates_list: {match_candidates_list}")
         if match_candidates_list:
             backtracking(0, match)
 

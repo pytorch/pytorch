@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
@@ -423,15 +423,12 @@ def forward(self, x_1):
         def f(a, b):
             return torch.allclose(a, b)
 
-        def test_f():
-            make_fx(f, tracing_mode=self.tracing_mode)(
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent",
+            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
                 torch.zeros(3), torch.zeros(3)
             )
-
-        if self.tracing_mode == "symbolic":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        )
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -457,7 +454,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2])
             blowup = val.repeat(1000)
-            return bool(blowup.sum().item() == 2)
+            return blowup.sum().item()
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -468,7 +465,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2.0])
             val.normal_()
-            return bool(val.item() == 2.1)
+            return val.item()
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -801,18 +798,6 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
 
-    def test_resize_from_zero(self):
-        def f(x, y):
-            x.resize_(y.size(0))
-
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, x_1, y_1):
-    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
-    return None""")
-
-
     def test_unary(self):
         def f(x):
             assert x.shape[0] < 20
@@ -849,18 +834,6 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
-
-    def test_item(self):
-        def f(a):
-            r = a.item()
-            return r * a
-
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(1)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1)
-    mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
-    return mul""")
 
 
     def test_neg_shape(self):

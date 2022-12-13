@@ -204,20 +204,6 @@ struct type_caster<c10::DispatchKey>
 };
 
 template <>
-struct TORCH_PYTHON_API type_caster<c10::Scalar> {
- public:
-  PYBIND11_TYPE_CASTER(
-      c10::Scalar,
-      _("Union[Number, torch.SymInt, torch.SymFloat]"));
-  bool load(py::handle src, bool);
-
-  static py::handle cast(
-      const c10::Scalar& si,
-      return_value_policy /* policy */,
-      handle /* parent */);
-};
-
-template <>
 struct TORCH_PYTHON_API type_caster<c10::SymInt> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymInt, _("Union[int, torch.SymInt]"));

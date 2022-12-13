@@ -64,7 +64,7 @@ Tensor computeSoftmax(
   // appropriate position.
   auto move_softmax_dim_index_to_pos = [&](const ParameterList& indices) {
     std::vector<ExprHandle> new_indices;
-    for (const auto& ind : indices) {
+    for (auto ind : indices) {
       new_indices.push_back(ind);
     }
     for (size_t i = softmax_dim; i < indices.size() - 1; ++i) {

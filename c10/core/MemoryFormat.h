@@ -61,9 +61,8 @@ inline std::ostream& operator<<(
 
 // Note: Hardcoded the channel last stride indices here to get better
 // performance
-template <typename T>
-inline std::vector<T> get_channels_last_strides_2d(ArrayRef<T> sizes) {
-  std::vector<T> strides(sizes.size());
+inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
   switch (sizes.size()) {
     case 4:
       strides[1] = 1;
@@ -82,13 +81,8 @@ inline std::vector<T> get_channels_last_strides_2d(ArrayRef<T> sizes) {
   }
 }
 
-inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
-  return get_channels_last_strides_2d<int64_t>(sizes);
-}
-
-template <typename T>
-std::vector<T> get_channels_last_strides_3d(ArrayRef<T> sizes) {
-  std::vector<T> strides(sizes.size());
+inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
   switch (sizes.size()) {
     case 5:
       strides[1] = 1;
@@ -107,10 +101,6 @@ std::vector<T> get_channels_last_strides_3d(ArrayRef<T> sizes) {
       TORCH_INTERNAL_ASSERT(
           false, "ChannelsLast3d doesn't support size ", sizes.size());
   }
-}
-
-inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
-  return get_channels_last_strides_3d<int64_t>(sizes);
 }
 
 // NOTE:

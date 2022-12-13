@@ -1131,9 +1131,6 @@ class Scheduler:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
-            if config.triton.debug_sync_kernel:
-                self.get_backend(device).codegen_sync()
-
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
