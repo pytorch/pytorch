@@ -1475,6 +1475,26 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_shape_prop_torch_ones(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, attention_scores):
+                extended_attention_mask = torch.ones(
+                    8, 1, 1, 512, device=attention_scores.device
+                )
+                attention_scores = attention_scores + extended_attention_mask
+
+                return attention_scores
+
+        mod = Model().eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (torch.randn(8, 12, 512, 512),),
+            )
+
     # For gpu path, there has a accurcy issue,
     @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
