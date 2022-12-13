@@ -81,6 +81,13 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
     def device_type(self) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
 
+    # The reason why we have this function is,
+    # DTensor's device_mesh does not accpet device name
+    # attached with the device number.
+    @property
+    def device(self) -> str:
+        return f"cuda:{self.rank}" if torch.cuda.is_available() else "cpu"
+
     def build_device_mesh(self):
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -141,7 +148,7 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         input_tensor = torch.randn(
             *input_size,
-            device=self.device_type,
+            device=self.device,
             requires_grad=True,
         )
 
@@ -154,6 +161,7 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
             kwargs=kwargs,
         )
 
+    @skip_unless_torch_gpu
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -228,13 +236,13 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
 
         grad_output = torch.rand(
             input_size,
-            device=self.device_type,
+            device=self.device,
             requires_grad=True,
         )
         mask = (
             torch.rand(
                 input_size,
-                device=self.device_type,
+                device=self.device,
                 requires_grad=False,
             )
             < 0.8

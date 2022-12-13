@@ -947,7 +947,7 @@ class MultiThreadedTestCase(TestCase):
             self.perThreadTearDown()
 
     def perThreadSetUp(self):
-        pass
+        super().setUp()  # TestCase.setUp() calls torch.manual_seed()
 
     def perThreadTearDown(self):
         pass
