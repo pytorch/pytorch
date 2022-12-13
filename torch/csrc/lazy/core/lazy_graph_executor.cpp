@@ -48,154 +48,7 @@ bool TensorCompare(const at::Tensor& t1, const at::Tensor& t2) {
              contiguous_t1.numel() * contiguous_t1.itemsize()) == 0;
 }
 
-// The DeviceContextArena holds per device live information and statistics,
-// among which the lazy tensors which are currently alive in the system. This is
-// used to create computation "barriers" in order to flush pending operations
-// and ensure the same computations are created during the training loops.
-class DeviceContextArena {
-  struct DeviceContext {
-    std::mutex lock;
-    std::map<int64_t, std::weak_ptr<LazyTensor::Data>> tensors_data;
-    uint64_t seed = 101;
-    uint64_t running_seed = 101;
-    Value seed_ir_value;
-  };
-
- public:
-  static DeviceContextArena* Get() {
-    static DeviceContextArena* arena = new DeviceContextArena();
-    return arena;
-  }
-
-  void RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
-    DeviceContext* devctx = GetDeviceContext(data->device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    devctx->tensors_data.emplace(data->unique_id, data);
-    TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
-  }
-
-  void UnregisterTensor(LazyTensor::Data* data) {
-    DeviceContext* devctx = GetDeviceContext(data->device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    devctx->tensors_data.erase(data->unique_id);
-    TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
-  }
-
-  std::vector<LazyTensorPtr> GetLiveTensors(const BackendDevice* device) {
-    std::vector<LazyTensorPtr> tensors;
-    auto fn = [&](DeviceContext* devctx) {
-      std::lock_guard<std::mutex> lock(devctx->lock);
-      for (auto& uid_wptr : devctx->tensors_data) {
-        std::shared_ptr<LazyTensor::Data> data = uid_wptr.second.lock();
-        if (data != nullptr) {
-          tensors.push_back(LazyTensor::Create(std::move(data)));
-        }
-      }
-    };
-    ForAllDeviceContexts(fn, device);
-    return tensors;
-  }
-
-  Value GetRngSeed(const BackendDevice& device) {
-    static const at::ScalarType kSeedType = at::ScalarType::Long;
-    static const uint64_t kSeedMul = 214013;
-    static const uint64_t kSeedAdd = 2531011;
-    DeviceContext* devctx = GetDeviceContext(device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    if (!devctx->seed_ir_value) {
-      devctx->seed_ir_value =
-          IrValueFromScalar(MakeIntScalar(devctx->seed), kSeedType, device);
-    }
-    // Keep the running seed as scalar as well, so we can return it directly
-    // without executing graphs.
-    devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
-    // Compose new seeds from the root seed, to avoid creating too many
-    // computation parameters which might overflow the device capacity.
-    Value k = MakeScalar(MakeIntScalar(kSeedMul), kSeedType);
-    Value b = MakeScalar(MakeIntScalar(kSeedAdd), kSeedType);
-    devctx->seed_ir_value = b + k * devctx->seed_ir_value;
-    return devctx->seed_ir_value;
-  }
-
-  uint64_t GetRunningSeed(const BackendDevice& device) {
-    DeviceContext* devctx = GetDeviceContext(device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    return devctx->running_seed;
-  }
-
-  void SetRngSeed(const BackendDevice& device, uint64_t seed) {
-    DeviceContext* devctx = GetDeviceContext(device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    devctx->seed = seed;
-    devctx->running_seed = devctx->seed;
-    devctx->seed_ir_value = Value();
-  }
-
-  void MarkStep(const BackendDevice& device) {
-    DeviceContext* devctx = GetDeviceContext(device);
-    std::lock_guard<std::mutex> lock(devctx->lock);
-    devctx->seed = 1012031 + devctx->seed * 7012063;
-    devctx->running_seed = devctx->seed;
-    devctx->seed_ir_value = Value();
-  }
-
-  std::vector<BackendDevice> GetActiveDevices() {
-    std::vector<BackendDevice> active_devices;
-    std::lock_guard<std::mutex> lock(lock_);
-    active_devices.reserve(device_contexts_.size());
-    for (auto& device_contexts : device_contexts_) {
-      active_devices.push_back(device_contexts.first);
-    }
-    return active_devices;
-  }
-
- private:
-  std::vector<DeviceContext*> GetAllDeviceContexts() {
-    std::vector<DeviceContext*> all_device_contexts;
-    std::lock_guard<std::mutex> lock(lock_);
-    all_device_contexts.reserve(device_contexts_.size());
-    for (auto& device_contexts : device_contexts_) {
-      all_device_contexts.push_back(device_contexts.second);
-    }
-    return all_device_contexts;
-  }
-
-  void ForAllDeviceContexts(
-      const std::function<void(DeviceContext*)>& fn,
-      const BackendDevice* device) {
-    if (device == nullptr) {
-      for (auto devctx : GetAllDeviceContexts()) {
-        fn(devctx);
-      }
-    } else {
-      fn(GetDeviceContext(*device));
-    }
-  }
-
-  DeviceContext* GetDeviceContext(const BackendDevice& device) {
-    std::lock_guard<std::mutex> lock(lock_);
-    auto it = device_contexts_.find(device);
-    if (it == device_contexts_.end()) {
-      it = device_contexts_.emplace(device, new DeviceContext()).first;
-    }
-    return it->second;
-  }
-
-  Value IrValueFromScalar(
-      const at::Scalar& value,
-      at::ScalarType scalar_type,
-      const BackendDevice& device) {
-    at::Tensor tensor =
-        at::scalar_tensor(value, at::TensorOptions(scalar_type));
-    BackendDataPtr device_data = TensorToDataHandle(tensor, device);
-    return MakeDeviceData(std::move(device_data));
-  }
-
-  std::mutex lock_;
-  std::map<BackendDevice, DeviceContext*> device_contexts_;
-};
-
-// Return true if no tensor in the list has an underlying IR (leaf or
+// Return true if any tensor in the list has an underlying IR (leaf or
 // operation).
 bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
   for (const auto& tensor : tensors) {
@@ -208,6 +61,143 @@ bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
 
 std::atomic<LazyGraphExecutor*> lazy_graph_executor_registry;
 } // namespace
+
+auto LazyGraphExecutor::DeviceContextArena::Get()
+    -> LazyGraphExecutor::DeviceContextArena* {
+  static DeviceContextArena* arena = new DeviceContextArena();
+  return arena;
+}
+
+void LazyGraphExecutor::DeviceContextArena::RegisterTensor(
+    std::shared_ptr<LazyTensor::Data> data) {
+  DeviceContext* devctx = GetDeviceContext(data->device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  devctx->tensors_data.emplace(data->unique_id, data);
+}
+
+void LazyGraphExecutor::DeviceContextArena::UnregisterTensor(
+    LazyTensor::Data* data) {
+  DeviceContext* devctx = GetDeviceContext(data->device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  devctx->tensors_data.erase(data->unique_id);
+}
+
+std::vector<LazyTensorPtr> LazyGraphExecutor::DeviceContextArena::
+    GetLiveTensors(const BackendDevice* device) {
+  std::vector<LazyTensorPtr> tensors;
+  auto fn = [&](DeviceContext* devctx) {
+    std::lock_guard<std::mutex> lock(devctx->lock);
+    for (auto& uid_wptr : devctx->tensors_data) {
+      std::shared_ptr<LazyTensor::Data> data = uid_wptr.second.lock();
+      if (data != nullptr) {
+        tensors.push_back(LazyTensor::Create(std::move(data)));
+      }
+    }
+  };
+  ForAllDeviceContexts(fn, device);
+  return tensors;
+}
+
+Value LazyGraphExecutor::DeviceContextArena::GetRngSeed(
+    const BackendDevice& device) {
+  static const at::ScalarType kSeedType = at::ScalarType::Long;
+  static const uint64_t kSeedMul = 214013;
+  static const uint64_t kSeedAdd = 2531011;
+  DeviceContext* devctx = GetDeviceContext(device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  if (!devctx->seed_ir_value) {
+    devctx->seed_ir_value =
+        IrValueFromScalar(MakeIntScalar(devctx->seed), kSeedType, device);
+  }
+  // Keep the running seed as scalar as well, so we can return it directly
+  // without executing graphs.
+  devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
+  // Compose new seeds from the root seed, to avoid creating too many
+  // computation parameters which might overflow the device capacity.
+  Value k = MakeScalar(MakeIntScalar(kSeedMul), kSeedType);
+  Value b = MakeScalar(MakeIntScalar(kSeedAdd), kSeedType);
+  devctx->seed_ir_value = b + k * devctx->seed_ir_value;
+  return devctx->seed_ir_value;
+}
+
+uint64_t LazyGraphExecutor::DeviceContextArena::GetRunningSeed(
+    const BackendDevice& device) {
+  DeviceContext* devctx = GetDeviceContext(device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  return devctx->running_seed;
+}
+
+void LazyGraphExecutor::DeviceContextArena::SetRngSeed(
+    const BackendDevice& device,
+    uint64_t seed) {
+  DeviceContext* devctx = GetDeviceContext(device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  devctx->seed = seed;
+  devctx->running_seed = devctx->seed;
+  devctx->seed_ir_value = Value();
+}
+
+void LazyGraphExecutor::DeviceContextArena::MarkStep(
+    const BackendDevice& device) {
+  DeviceContext* devctx = GetDeviceContext(device);
+  std::lock_guard<std::mutex> lock(devctx->lock);
+  devctx->seed = 1012031 + devctx->seed * 7012063;
+  devctx->running_seed = devctx->seed;
+  devctx->seed_ir_value = Value();
+}
+
+std::vector<BackendDevice> LazyGraphExecutor::DeviceContextArena::
+    GetActiveDevices() {
+  std::vector<BackendDevice> active_devices;
+  std::lock_guard<std::mutex> lock(lock_);
+  active_devices.reserve(device_contexts_.size());
+  for (auto& device_contexts : device_contexts_) {
+    active_devices.push_back(device_contexts.first);
+  }
+  return active_devices;
+}
+
+auto LazyGraphExecutor::DeviceContextArena::GetAllDeviceContexts()
+    -> std::vector<DeviceContext*> {
+  std::vector<DeviceContext*> all_device_contexts;
+  std::lock_guard<std::mutex> lock(lock_);
+  all_device_contexts.reserve(device_contexts_.size());
+  for (auto& device_contexts : device_contexts_) {
+    all_device_contexts.push_back(device_contexts.second);
+  }
+  return all_device_contexts;
+}
+
+void LazyGraphExecutor::DeviceContextArena::ForAllDeviceContexts(
+    const std::function<void(DeviceContext*)>& fn,
+    const BackendDevice* device) {
+  if (device == nullptr) {
+    for (auto devctx : GetAllDeviceContexts()) {
+      fn(devctx);
+    }
+  } else {
+    fn(GetDeviceContext(*device));
+  }
+}
+
+auto LazyGraphExecutor::DeviceContextArena::GetDeviceContext(
+    const BackendDevice& device) -> DeviceContext* {
+  std::lock_guard<std::mutex> lock(lock_);
+  auto it = device_contexts_.find(device);
+  if (it == device_contexts_.end()) {
+    it = device_contexts_.emplace(device, new DeviceContext()).first;
+  }
+  return it->second;
+}
+
+Value LazyGraphExecutor::DeviceContextArena::IrValueFromScalar(
+    const at::Scalar& value,
+    at::ScalarType scalar_type,
+    const BackendDevice& device) {
+  at::Tensor tensor = at::scalar_tensor(value, at::TensorOptions(scalar_type));
+  BackendDataPtr device_data = TensorToDataHandle(tensor, device);
+  return MakeDeviceData(std::move(device_data));
+}
 
 void LazyGraphExecutor::DeviceLocker::Lock() {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -360,10 +350,12 @@ LazyGraphExecutor* LazyGraphExecutor::Get() {
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
   DeviceContextArena::Get()->RegisterTensor(data);
+  TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
 }
 
 void LazyGraphExecutor::UnregisterTensor(LazyTensor::Data* data) {
   DeviceContextArena::Get()->UnregisterTensor(data);
+  TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
 }
 
 Value LazyGraphExecutor::GetRngSeed(const BackendDevice& device) {
