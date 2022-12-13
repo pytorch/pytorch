@@ -1,3 +1,19 @@
+/*
+The Python Imaging Library (PIL) is
+
+    Copyright © 1997-2011 by Secret Labs AB
+    Copyright © 1995-2011 by Fredrik Lundh
+
+Pillow is the friendly PIL fork. It is
+
+    Copyright © 2010-2022 by Alex Clark and contributors
+
+Like PIL, Pillow is licensed under the open source HPND License
+*/
+
+// This code is heavily inspired from PILLOW-SIMD's implementation:
+// https://github.com/uploadcare/pillow-simd/blob/simd/master/src/libImaging/Resample.c
+
 #pragma once
 #ifdef CPU_CAPABILITY_AVX2
 

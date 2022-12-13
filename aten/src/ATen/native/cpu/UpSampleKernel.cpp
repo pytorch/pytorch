@@ -830,7 +830,6 @@ struct HelperInterpBase {
         }
     }
 
-    // Copied from PIL-SIMD, https://github.com/uploadcare/pillow-simd/blob/668aa48d12305b8f093958792a5e4f690c2583d6/src/libImaging/Resample.c
     unsigned int weights_precision = 0;
     for (weights_precision = 0; weights_precision < 22; weights_precision += 1) {
         int next_value = (int) (0.5 + w_max * (1 << (weights_precision + 1)));
@@ -838,7 +837,7 @@ struct HelperInterpBase {
             break;
     }
 
-    // rescale float values to int16, we use the same buffer as PIL-SIMD
+    // rescale float values to int16
     int16_t * data_i16 = (int16_t *) data_f64;
     for (const auto i : c10::irange(weights_f64_size)) {
       double v = data_f64[i];
