@@ -83,13 +83,6 @@ class DistElementwiseOpsTest(MultiThreadedTestCase):
     def device_type(self) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
 
-    # The reason why we have this function is,
-    # DTensor's device_mesh does not accpet device name
-    # attached with the device number.
-    @property
-    def device(self) -> str:
-        return f"cuda:{self.rank}" if torch.cuda.is_available() else "cpu"
-
     def build_device_mesh(self):
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
