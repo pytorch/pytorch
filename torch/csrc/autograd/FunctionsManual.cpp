@@ -6774,11 +6774,8 @@ Tensor to_sparse_backward(const Tensor& grad, const Tensor& self) {
   // Path for strided and nested
   if (self_layout == c10::kStrided) {
     return grad.to_dense();
-  } else if (self_layout == c10::kSparseBsr || self_layout == c10::kSparseBsc) {
-    const auto blocksize = at::sparse_csr::getBlockSize(self);
-    return grad.to_sparse(self_layout, blocksize);
   } else {
-    return grad.to_sparse(self_layout);
+    return grad.to_sparse(self_layout, at::sparse_csr::getBlockSize(self));
   }
 }
 

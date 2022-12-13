@@ -1056,7 +1056,7 @@ void _check_blocksize_matches(
     const std::string& name) {
   if (blocksize_opt.has_value()) {
     const auto blocksize = *blocksize_opt;
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
+    const auto self_blocksize = *at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize,
         name, "(): the provided blocksize does not match the blocksize of the to be converted tensor, ",
         "got (", blocksize[0], ", ", blocksize[1], ") ",
@@ -1145,7 +1145,7 @@ Tensor sparse_compressed_to_flipped(
   const auto sparse_dims = [&]() -> at::DimVector {
     auto sparse_dims = at::DimVector(self.sizes().slice(n_batches, 2));
     if (layout == at::kSparseBsr || layout == at::kSparseBsc) {
-      auto blocksize = at::sparse_csr::getBlockSize(self);
+      auto blocksize = *at::sparse_csr::getBlockSize(self);
       sparse_dims[0] /= blocksize[0];
       sparse_dims[1] /= blocksize[1];
     }
@@ -1643,14 +1643,14 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
 
 Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   if (self.layout() == kSparseBsc) {
-    DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
+    const auto self_blocksize = *at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsr:",
                 "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsr,
                 "[blocksize=", DimVector(blocksize),"] is not implemented.");
     return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsr");
   }
   if (self.layout() == kSparseBsr) {
-    DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
+    const auto self_blocksize = *at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsr:",
                 "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsr,
                 "[blocksize=", blocksize,"] is not implemented.");
@@ -1695,14 +1695,14 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
 
 Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   if (self.layout() == kSparseBsr) {
-    DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
+    const auto self_blocksize = *at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsc:",
                 "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsc,
                 "[blocksize=", blocksize,"] is not implemented.");
     return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsc");
   }
   if (self.layout() == kSparseBsc) {
-    DimVector self_blocksize = at::sparse_csr::getBlockSize(self);
+    const auto self_blocksize = *at::sparse_csr::getBlockSize(self);
     TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsc:",
                 "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsc,
                 "[blocksize=", blocksize,"] is not implemented.");
@@ -1759,7 +1759,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
               "to_sparse: ", self.layout(), " to ", layout_,
               " conversion does not use the specified blocksize ", blocksize.value(), ".");
-  if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
+  if (self.layout() == layout_ && (!blocksize.has_value() || *at::sparse_csr::getBlockSize(self) == *blocksize)) {
     return self;
   }
   switch (layout_) {
@@ -1775,7 +1775,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
     if (blocksize.has_value()) {
       return sparse_compressed_to_sparse_bsr(self, *blocksize);
     } else {
-      DimVector blocksize_ = at::sparse_csr::getBlockSize(self);
+      const auto blocksize_ = *at::sparse_csr::getBlockSize(self);
       TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
                   " conversion requires blocksize specified.");
       return sparse_compressed_to_sparse_bsr(self, blocksize_);
@@ -1784,7 +1784,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
     if (blocksize.has_value()) {
       return sparse_compressed_to_sparse_bsc(self, *blocksize);
     } else {
-      DimVector blocksize_ = at::sparse_csr::getBlockSize(self);
+      const auto blocksize_ = *at::sparse_csr::getBlockSize(self);
       TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
                   " conversion requires blocksize specified.");
       return sparse_compressed_to_sparse_bsc(self, blocksize_);
