@@ -58,7 +58,7 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 TORCH_META_FUNC(_upsample_bicubic2d_aa) (
@@ -97,7 +97,7 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 } // namespace meta
