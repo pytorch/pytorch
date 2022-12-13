@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from typing import List, Optional, Set
 
+import torchgen.api.cpp as aten_cpp
+
 from torchgen.api.types import Binding, CType
 from torchgen.model import FunctionSchema, NativeFunction
 
 
 @dataclass(frozen=True)
-class CppSignature:
+class ExecutorchCppSignature:
     """
     This signature is merely a CppSignature with Executorch types. The inline definition
     of CppSignature is generated in Functions.h and it's used by unboxing functions.
@@ -24,7 +26,7 @@ class CppSignature:
     prefix: str = ""
 
     def arguments(self) -> List[Binding]:
-        return cpp.arguments(
+        return et_cpp.arguments(
             self.func.arguments,
             faithful=True,  # always faithful, out argument at the end
             method=False,  # method not supported
@@ -32,7 +34,7 @@ class CppSignature:
         )
 
     def name(self) -> str:
-        return self.prefix + cpp.name(
+        return self.prefix + aten_cpp.name(
             self.func,
             faithful_name_for_out_overloads=True,
         )
@@ -51,13 +53,15 @@ class CppSignature:
         return f"{self.returns_type().cpp_type()} {name}({args_str})"
 
     def returns_type(self) -> CType:
-        return cpp.returns_type(self.func.returns)
+        return et_cpp.returns_type(self.func.returns)
 
     @staticmethod
-    def from_native_function(f: NativeFunction, *, prefix: str = "") -> "CppSignature":
-        return CppSignature(
+    def from_native_function(
+        f: NativeFunction, *, prefix: str = ""
+    ) -> "ExecutorchCppSignature":
+        return ExecutorchCppSignature(
             func=f.func, prefix=prefix, cpp_no_default_args=f.cpp_no_default_args
         )
 
 
-from torchgen.executorch.api import cpp
+from torchgen.executorch.api import et_cpp

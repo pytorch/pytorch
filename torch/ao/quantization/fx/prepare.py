@@ -1,6 +1,5 @@
 import copy
 import torch
-import operator
 import warnings
 from torch.fx import (
     GraphModule,
@@ -24,16 +23,15 @@ from ..qconfig import (
 from ..qconfig_mapping import (
     QConfigMapping,
 )
-from ..qconfig_mapping_utils import (
-    _get_flattened_qconfig_dict,
-    _update_qconfig_for_qat,
-)
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
     update_qconfig_for_fusion,
+    _get_flattened_qconfig_dict,
+    _update_qconfig_for_qat,
 )
 
-from .quantization_patterns import (
+from .quantize_handler import (
+    _default_root_node_getter,
     _get_pattern_to_quantize_handlers,
     QuantizeHandler,
 )
@@ -241,10 +239,10 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
+    pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
 
-    # TODO: this only works for one input and one output patterns, need to generalize to multiple
-    # inputs/output
-    root_node = _default_root_node_getter(matched_node_pattern)
+    root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
+    root_node = root_node_getter(matched_node_pattern)
     input_node = root_node
     output_node = matched_node_pattern[0]
     for dtype_config in dtype_configs:
@@ -296,12 +294,6 @@ def add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str])
     elif isinstance(matched_node_pattern, (list, tuple)):
         for maybe_node in matched_node_pattern:
             add_matched_node_name_to_set(maybe_node, s)
-
-# this is temporary, will be removed soon
-def _default_root_node_getter(node_pattern):
-    while not isinstance(node_pattern, Node):
-        node_pattern = node_pattern[-1]
-    return node_pattern
 
 def insert_observer(
     node: Node,
@@ -390,15 +382,6 @@ def get_target_activation_dtype_for_node(
             return {
                 "input_activation_dtype": None,
                 "output_activation_dtype": None,
-            }
-
-        # TODO(future PR): consider stopping matching getitem
-        is_getitem = node.op == 'call_function' and \
-            node.target == operator.getitem
-        if is_getitem:
-            return {
-                "input_activation_dtype": (torch.float, False),
-                "output_activation_dtype": (torch.float, False),
             }
 
         # get qconfig to determine the eventual dtype of this node
@@ -929,9 +912,7 @@ def maybe_propagate_dtype_for_node(
 ) -> None:
     """
     Assigns `target_dtype` to `node`, setting `is_dynamic` to False. If `node`
-    is a general tensor shape op
-    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
-    also call this function recursively on
+    is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype_info[node.name]["input_activation_dtype"] = (target_dtype, False)
@@ -1224,14 +1205,10 @@ def insert_observers_for_model(
 
             this_node_dtype_info = node_name_to_target_dtype_info[node.name]
             output_not_a_tensor = this_node_dtype_info is None
-            # TODO(future PR): consider stopping matching getitem
-            is_getitem = node.op == 'call_function' and \
-                node.target == operator.getitem
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                output_not_a_tensor or
-                is_getitem
+                output_not_a_tensor
             ) and (
                 not node.op == 'output'
             )
@@ -1271,10 +1248,9 @@ def insert_observers_for_model(
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
 
-                    # TODO: this only works for sequential fusion right now, extend it
-                    # it to automatically detect all input nodes based on the pattern
-                    # need to change find_matches function to return this information
-                    root_node = _default_root_node_getter(matched_node_pattern)
+                    pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
+                    root_node_getter = pattern_to_root_node_getter.get(pattern, _default_root_node_getter)
+                    root_node = root_node_getter(matched_node_pattern)
                     is_input_node_of_the_pattern = node is root_node
                     if is_input_node_of_the_pattern:
                         # this modifies node inplace

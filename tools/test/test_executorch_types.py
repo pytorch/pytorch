@@ -1,7 +1,6 @@
 import unittest
 
 from torchgen import local
-
 from torchgen.api.types import (
     BaseCType,
     ConstRefCType,
@@ -14,15 +13,8 @@ from torchgen.api.types import (
     VectorCType,
     voidT,
 )
-from torchgen.executorch.api.cpp import argument_type, return_type, returns_type
-
-from torchgen.executorch.api.types import (
-    ArrayRefCType,
-    intArrayRefT,
-    scalarT,
-    tensorListT,
-    tensorT,
-)
+from torchgen.executorch.api.et_cpp import argument_type, return_type, returns_type
+from torchgen.executorch.api.types import ArrayRefCType, scalarT, tensorListT, tensorT
 from torchgen.model import Argument, FunctionSchema, Return
 
 
@@ -51,12 +43,26 @@ class ExecutorchCppTest(unittest.TestCase):
                 "Scalar? scalar",
                 NamedCType("scalar", ConstRefCType(OptionalCType(BaseCType(scalarT)))),
             ),
-            ("int[] size", NamedCType("size", BaseCType(intArrayRefT))),
+            ("int[] size", NamedCType("size", ArrayRefCType(BaseCType(longT)))),
             ("int? dim", NamedCType("dim", OptionalCType(BaseCType(longT)))),
             ("Tensor[] weight", NamedCType("weight", BaseCType(tensorListT))),
             (
                 "Scalar[] spacing",
-                NamedCType("spacing", ArrayRefCType(BaseCType(scalarT))),
+                NamedCType("spacing", ArrayRefCType(ConstRefCType(BaseCType(scalarT)))),
+            ),
+            (
+                "Tensor?[] weight",
+                NamedCType("weight", ArrayRefCType(OptionalCType(BaseCType(tensorT)))),
+            ),
+            (
+                "SymInt[]? output_size",
+                NamedCType(
+                    "output_size", OptionalCType(ArrayRefCType(BaseCType(longT)))
+                ),
+            ),
+            (
+                "int[]? dims",
+                NamedCType("dims", OptionalCType(ArrayRefCType(BaseCType(longT)))),
             ),
         ]
         for d in data:
