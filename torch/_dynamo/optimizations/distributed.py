@@ -140,7 +140,8 @@ class DDPOptimizer:
         and returns its callable.
         """
         fake_mode = fake_mode_from_tensors(example_inputs)
-        assert fake_mode is not None
+        if fake_mode is None:
+            fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)

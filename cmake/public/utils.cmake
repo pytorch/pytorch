@@ -407,7 +407,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 17)
   set(private_compile_options "")
 
   # ---[ Check if warnings should be errors.

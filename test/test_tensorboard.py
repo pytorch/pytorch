@@ -5,8 +5,9 @@ import numpy as np
 import os
 import shutil
 import sys
+import tempfile
 import unittest
-import uuid
+import expecttest
 
 TEST_TENSORBOARD = True
 try:
@@ -59,7 +60,9 @@ class BaseTestCase(TestCase):
         self.temp_dirs = []
 
     def createSummaryWriter(self):
-        temp_dir = str(uuid.uuid4())
+        # Just to get the name of the directory in a writable place. tearDown()
+        # is responsible for clean-ups.
+        temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard").name
         self.temp_dirs.append(temp_dir)
         return SummaryWriter(temp_dir)
 
@@ -286,11 +289,10 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import pathlib
-        p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
-        with SummaryWriter(p) as writer:
-            writer.add_scalar('test', 1)
-        import shutil
-        shutil.rmtree(str(p))
+        with tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib") as d:
+            p = pathlib.Path(d)
+            with SummaryWriter(p) as writer:
+                writer.add_scalar('test', 1)
 
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
@@ -515,11 +517,16 @@ def get_expected_file(function_ptr):
 
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
-    assert os.path.exists(expected_file)
+    assert os.path.exists(expected_file), expected_file
     with open(expected_file, "r") as f:
         return f.read()
 
 def compare_image_proto(actual_proto, function_ptr):
+    if expecttest.ACCEPT:
+        expected_file = get_expected_file(function_ptr)
+        with open(expected_file, 'w') as f:
+            f.write(text_format.MessageToString(actual_proto))
+        return True
     expected_str = read_expected_content(function_ptr)
     expected_proto = Summary()
     text_format.Parse(expected_str, expected_proto)
@@ -537,6 +544,9 @@ def compare_image_proto(actual_proto, function_ptr):
     )
 
 def compare_proto(str_to_compare, function_ptr):
+    if expecttest.ACCEPT:
+        write_proto(str_to_compare, function_ptr)
+        return True
     expected = read_expected_content(function_ptr)
     str_to_compare = str(str_to_compare)
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)

@@ -21,16 +21,18 @@ configure_file(
 # and headers you add
 set(C10_CUDA_SRCS
     CUDACachingAllocator.cpp
+    CUDADeviceAssertionHost.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
+    CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
-    CUDACachingAllocator.cpp
-    CUDAMallocAsyncAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
 )
 set(C10_CUDA_HEADERS
+    CUDACachingAllocator.h
+    CUDADeviceAssertionHost.h
     CUDAException.h
     CUDAFunctions.h
     CUDAGuard.h
@@ -38,7 +40,6 @@ set(C10_CUDA_HEADERS
     CUDAMathCompat.h
     CUDAMiscFunctions.h
     CUDAStream.h
-    CUDACachingAllocator.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )

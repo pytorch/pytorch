@@ -7,15 +7,15 @@ layout(std430) buffer;
 /* Qualifiers: layout - storage - precision - memory */
 
 /*
- * Input Sampler
+ * Output Image
  */
-layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimage3D uImage;
+layout(set = 0, binding = 0, rgba32i) uniform PRECISION restrict writeonly iimage3D uImage;
 
 /*
- * Output Buffer
+ * Input Buffer
  */
 layout(set = 0, binding = 1) buffer PRECISION restrict readonly Buffer {
-  uint data[];
+  int data[];
 }
 uBuffer;
 
@@ -46,26 +46,10 @@ void main() {
   const ivec4 buf_indices =
       base_index + ivec4(0, 1, 2, 3) * uBlock.out_extents.w;
 
-  int shift = (1 << 8) - 1;
-  ivec4 masks;
-  masks.x = shift << 8 * (buf_indices.x % 4);
-  masks.y = shift << 8 * (buf_indices.y % 4);
-  masks.z = shift << 8 * (buf_indices.z % 4);
-  masks.w = shift << 8 * (buf_indices.w % 4);
+  int val_x = uBuffer.data[buf_indices.x];
+  int val_y = uBuffer.data[buf_indices.y];
+  int val_z = uBuffer.data[buf_indices.z];
+  int val_w = uBuffer.data[buf_indices.w];
 
-  uint buf_in_1 = uBuffer.data[buf_indices.x / 4];
-  uint a_v = (buf_in_1 & masks.x) >> 8 * (buf_indices.x % 4);
-
-  uint buf_in_2 = uBuffer.data[buf_indices.y / 4];
-  uint b_v = (buf_in_2 & masks.y) >> 8 * (buf_indices.y % 4);
-
-  uint buf_in_3 = uBuffer.data[buf_indices.z / 4];
-  uint g_v = (buf_in_3 & masks.z) >> 8 * (buf_indices.z % 4);
-
-  uint buf_in_4 = uBuffer.data[buf_indices.w / 4];
-  uint r_v = (buf_in_4 & masks.w) >> 8 * (buf_indices.w % 4);
-
-  uvec4 texel = uvec4(a_v, b_v, g_v, r_v);
-
-  imageStore(uImage, pos, texel);
+  imageStore(uImage, pos, ivec4(val_x, val_y, val_z, val_w));
 }

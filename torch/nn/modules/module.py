@@ -429,6 +429,7 @@ class Module:
     _forward_pre_hooks_with_kwargs: Dict[int, bool]
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
+    _state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
 
@@ -456,6 +457,7 @@ class Module:
         super().__setattr__('_forward_pre_hooks', OrderedDict())
         super().__setattr__('_forward_pre_hooks_with_kwargs', OrderedDict())
         super().__setattr__('_state_dict_hooks', OrderedDict())
+        super().__setattr__('_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
@@ -1560,6 +1562,8 @@ class Module:
             self._forward_hooks_with_kwargs = OrderedDict()
         if '_state_dict_hooks' not in self.__dict__:
             self._state_dict_hooks = OrderedDict()
+        if '_state_dict_pre_hooks' not in self.__dict__:
+            self._state_dict_pre_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
         if '_load_state_dict_post_hooks' not in self.__dict__:
@@ -1668,6 +1672,16 @@ class Module:
         self._state_dict_hooks[handle.id] = hook
         return handle
 
+    def register_state_dict_pre_hook(self, hook):
+        r"""These hooks will be called with arguments: ``self``, ``prefix``,
+        and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
+        hooks can be used to perform pre-processing before the ``state_dict``
+        call is made.
+        """
+        handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
+        self._state_dict_pre_hooks[handle.id] = hook
+        return handle
+
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         r"""Saves module state to `destination` dictionary, containing a state
         of the module, but not its descendants. This is called on every
@@ -1681,6 +1695,9 @@ class Module:
             prefix (str): the prefix for parameters and buffers used in this
                 module
         """
+        for hook in self._state_dict_pre_hooks.values():
+            hook(self, prefix, keep_vars)
+
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()

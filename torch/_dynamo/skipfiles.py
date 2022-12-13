@@ -31,6 +31,7 @@ import weakref
 
 import torch
 
+
 try:
     import torch._prims
 
@@ -47,7 +48,7 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import config
+from . import config, external_utils
 
 """
 A note on skipfiles:
@@ -117,9 +118,11 @@ SKIP_DIRS = [
         _weakrefset,
     )
 ]
+
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
+    external_utils.__file__,  # This is a dynamo file (!)
 }
 
 
@@ -146,10 +149,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    try:
-        module_spec = importlib.util.find_spec(import_name)
-    except Exception:
-        return
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -192,7 +192,6 @@ for _name in (
     "tvm",
     "fx2trt_oss",
     "xarray",
-    "torchrec.distributed",
 ):
     add(_name)
 

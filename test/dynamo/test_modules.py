@@ -479,6 +479,11 @@ class SuperModule(BasicModule):
         return x + 10.0
 
 
+class SuperModule2(BasicModule):
+    def forward(self, x):
+        return BasicModule.forward(self, x)
+
+
 class ComplicatedSuperParent(torch.nn.Module):
     @classmethod
     def custom_add(cls, x):
@@ -524,6 +529,23 @@ class EnumValues(torch.nn.ModuleDict):
         features = [init_features]
         for idx, layer in enumerate(self.values()):
             new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
+class AccessByKeys(torch.nn.ModuleDict):
+    def __init__(
+        self,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for k in self.keys():
+            new_features = self[k](features)
             features.append(new_features)
         return torch.cat(features, 1)
 
@@ -683,6 +705,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_modulelist = make_test(ModuleList())
     test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
+    test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
@@ -691,6 +714,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
+    test_access_by_keys = make_test(AccessByKeys())
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())

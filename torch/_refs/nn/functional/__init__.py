@@ -1059,9 +1059,12 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
         lambda: f"prelu: Expected `weight` to be a scalar or 1D tensor, but got: "
         f"ndim = {weight.ndim}",
     )
-    weight = prims.broadcast_in_dim(
-        weight, a.shape, tuple() if weight.ndim == 0 else (1,)
-    )
+    if a.ndim == 0:
+        weight = weight[0] if weight.ndim == 1 else weight
+    else:
+        weight = prims.broadcast_in_dim(
+            weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
+        )
 
     return refs.where(a > 0, a, a * weight)
 

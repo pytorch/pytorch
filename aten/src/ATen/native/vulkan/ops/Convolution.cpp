@@ -619,7 +619,9 @@ bool weight_valid(const Tensor& weight, const bool quantized) {
       weight.device().type() != c10::DeviceType::Vulkan) {
     return false;
   }
-  if (quantized && weight.scalar_type() != c10::kQUInt8) {
+  if (quantized &&
+      (weight.scalar_type() != c10::kQUInt8 &&
+       weight.scalar_type() != c10::kQInt8)) {
     return false;
   }
 
@@ -992,7 +994,7 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       dilation,
       /* transposed = */ false,
       /* quantized = */ true,
-      /* output_padding_arg = */ {},
+      /* output_padding_arg = */ {0},
       groups,
       output_min,
       output_max));

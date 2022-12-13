@@ -602,6 +602,7 @@ SugaredValuePtr IterableTree::getitem(
     Value* idx,
     TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
+  child_items.reserve(children_.size());
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }

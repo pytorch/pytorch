@@ -2,7 +2,9 @@
 # Owner(s): ["oncall: package/deploy"]
 
 import inspect
+import os
 import platform
+import sys
 from io import BytesIO
 from pathlib import Path
 from textwrap import dedent
@@ -103,6 +105,60 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             import_exclude,
         )
+
+    def test_loaders_that_remap_files_work_ok(self):
+        from importlib.abc import MetaPathFinder
+        from importlib.machinery import SourceFileLoader
+        from importlib.util import spec_from_loader
+
+        class LoaderThatRemapsModuleA(SourceFileLoader):
+            def get_filename(self, name):
+                result = super().get_filename(name)
+                if name == "module_a":
+                    return os.path.join(os.path.dirname(result), "module_a_remapped_path.py")
+                else:
+                    return result
+
+        class FinderThatRemapsModuleA(MetaPathFinder):
+            def find_spec(self, fullname, path, target):
+                """Try to find the original spec for module_a using all the
+                remaining meta_path finders."""
+                if fullname != "module_a":
+                    return None
+                spec = None
+                for finder in sys.meta_path:
+                    if finder is self:
+                        continue
+                    if hasattr(finder, "find_spec"):
+                        spec = finder.find_spec(fullname, path, target=target)
+                    elif hasattr(finder, "load_module"):
+                        spec = spec_from_loader(fullname, finder)
+                    if spec is not None:
+                        break
+                assert spec is not None and isinstance(spec.loader, SourceFileLoader)
+                spec.loader = LoaderThatRemapsModuleA(spec.loader.name, spec.loader.path)
+                return spec
+
+        sys.meta_path.insert(0, FinderThatRemapsModuleA())
+        # clear it from sys.modules so that we use the custom finder next time
+        # it gets imported
+        sys.modules.pop("module_a", None)
+        try:
+            buffer = BytesIO()
+            with PackageExporter(buffer) as he:
+                import module_a
+
+                he.intern("**")
+                he.save_module(module_a.__name__)
+
+
+            buffer.seek(0)
+            hi = PackageImporter(buffer)
+            self.assertTrue("remapped_path" in hi.get_source("module_a"))
+        finally:
+            # pop it again to ensure it does not mess up other tests
+            sys.modules.pop("module_a", None)
+            sys.meta_path.pop(0)
 
     def test_python_version(self):
         """
