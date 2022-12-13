@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/expr_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -186,12 +187,32 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
   return {value, has_tensor_dependency};
 }
 
+namespace {
+
+std::list<ValInfo> getVariablesFromLoops(
+    const std::vector<kir::ForLoop*>& loops) {
+  std::list<ValInfo> variables;
+  for (auto loop : loops) {
+    if (loop->isTrivial()) {
+      if (loop->iter_domain()->isThread()) {
+        variables.push_front({loop->index()});
+      }
+    } else {
+      variables.push_back({loop->index()});
+    }
+  }
+  return variables;
+}
+
+} // namespace
+
 Val* CommonScalarMap::hoistScalar(
     Val* value,
     const std::vector<kir::ForLoop*>& loops) {
   if (isOptionDisabled(DisableOption::IndexHoist)) {
     return value;
   }
+  value = simplifyExpr(value, getVariablesFromLoops(loops));
   std::vector<Val*> seen_subexprs;
   return hoistScalarImpl(
              value,

@@ -1516,7 +1516,7 @@ TensorView* sum(
   if (isFloatingPointType(v1_dtype)) {
     init = IrBuilder::create<Double>(0.0);
   } else if (isComplexType(v1_dtype)) {
-    init = IrBuilder::create<ComplexDouble>(c10::complex<double>(0.0, 0.0));
+    init = IrBuilder::create<ComplexDouble>(std::complex<double>(0.0, 0.0));
   } else if (isIntegralType(v1_dtype)) {
     init = FusionGuard::getCurFusion()->zeroVal();
   } else if (isBooleanType(v1_dtype)) {

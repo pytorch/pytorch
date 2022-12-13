@@ -7,6 +7,7 @@
 #include <c10/macros/Export.h>
 
 #include <array>
+#include <complex>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -90,7 +91,7 @@ TORCH_CUDA_CU_API bool isIntegralType(DataType dtype);
 // Returns if the datatype is an integer type
 TORCH_CUDA_CU_API bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
-bool isComplexType(DataType dtype);
+TORCH_CUDA_CU_API bool isComplexType(DataType dtype);
 // Returns if the datatype is a vector type
 bool isVectorType(DataType dtype);
 // Return the corresponding vector type
@@ -126,6 +127,8 @@ DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Double, double);
 DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Int, int64_t);
 DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Int32, int);
 DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Bool, bool);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::ComplexFloat, std::complex<float>);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::ComplexDouble, std::complex<double>);
 
 #undef DEFINE_DATATYPE_TO_NATIVE_TYPE
 

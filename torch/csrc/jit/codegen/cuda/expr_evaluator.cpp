@@ -179,14 +179,17 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
         known_values_[uop->out()] = *in;
         break;
       case UnaryOpType::Cast:
-        if (uop->out()->getDataType() == DataType::Int) {
+        if (isIntegralType(*uop->out()->getDataType())) {
           known_values_[uop->out()] = EvaluatorValue(in->cast<int64_t>());
-        } else if (uop->out()->getDataType() == DataType::Double) {
+        } else if (isFloatingPointType(*uop->out()->getDataType())) {
           known_values_[uop->out()] = EvaluatorValue(in->cast<double>());
         } else if (uop->out()->getDataType() == DataType::Bool) {
           known_values_[uop->out()] = EvaluatorValue(in->cast<bool>());
         } else {
-          TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "dtype not supported in evaluator: ",
+              *uop->out()->getDataType());
         }
         break;
       case UnaryOpType::Abs:

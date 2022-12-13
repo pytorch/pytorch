@@ -10,6 +10,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <complex>
+
 //! Nodes in here are intended to be "user facing" users in this sense being
 //! those that want to be able to generate CUDA code.
 
@@ -40,7 +42,8 @@ class TORCH_CUDA_CU_API Scalar : public Val {
             (std::is_same<UnderlyingType, bool>::value &&
              isBooleanType(dtype)) ||
             (std::is_floating_point<UnderlyingType>::value &&
-             isFloatingPointType(dtype)),
+             isFloatingPointType(dtype)) ||
+            (c10::is_complex<UnderlyingType>::value && isComplexType(dtype)),
         "Invalid data type: ",
         dtype);
   }
@@ -55,7 +58,8 @@ class TORCH_CUDA_CU_API Scalar : public Val {
             (std::is_same<UnderlyingType, bool>::value &&
              isBooleanType(dtype)) ||
             (std::is_floating_point<UnderlyingType>::value &&
-             isFloatingPointType(dtype)),
+             isFloatingPointType(dtype)) ||
+            (c10::is_complex<UnderlyingType>::value && isComplexType(dtype)),
         "Invalid data type: ",
         dtype);
   }
@@ -96,41 +100,7 @@ class TORCH_CUDA_CU_API Scalar : public Val {
 using Bool = Scalar<bool>;
 using Int = Scalar<int64_t>;
 using Double = Scalar<double>;
-
-//! An c10::complex<double> value. This value can be a symbolic value (defined
-//! after the kernel is compiled) or a constant value (inlined into the kernel
-//! definition).
-class TORCH_CUDA_CU_API ComplexDouble : public Val {
- public:
-  using ScalarType = c10::complex<double>;
-
-  ComplexDouble(IrBuilderPasskey passkey);
-
-  explicit ComplexDouble(IrBuilderPasskey passkey, ScalarType value);
-
-  explicit ComplexDouble(
-      IrBuilderPasskey passkey,
-      c10::optional<ScalarType> value);
-
-  ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner);
-
-  NVFUSER_DECLARE_CLONE
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const final {
-    return maybe_value_.has_value();
-  }
-  c10::optional<ScalarType> value() const {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const c10::optional<ScalarType> maybe_value_;
-};
+using ComplexDouble = Scalar<std::complex<double>>;
 
 //! Mode during propagation of computeAt, standard will throw an error if
 //! computeAt position provided can't be satisfied, best effort will lower the

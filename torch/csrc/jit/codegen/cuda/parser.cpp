@@ -17,6 +17,7 @@
 
 #include <c10/util/CallOnce.h>
 
+#include <complex>
 #include <unordered_map>
 #include <utility>
 
@@ -3574,7 +3575,8 @@ class IrParser {
             static_cast<c10::TypePtr>(ComplexType::get()))) {
       CgValue cg_val = nullptr;
       if (auto ival = constant_as<c10::complex<double>>(val)) {
-        cg_val = IrBuilder::create<ComplexDouble>(ival.value());
+        cg_val = IrBuilder::create<ComplexDouble>(
+            static_cast<std::complex<double>>(ival.value()));
       } else {
         cg_val = IrBuilder::create<ComplexDouble>();
       }

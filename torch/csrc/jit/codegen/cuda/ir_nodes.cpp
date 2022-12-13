@@ -14,6 +14,7 @@
 
 #include <c10/util/irange.h>
 
+#include <complex>
 #include <sstream>
 
 namespace torch {
@@ -75,38 +76,7 @@ bool areEqualScalars(Val* v1, Val* v2) {
 template class Scalar<bool>;
 template class Scalar<int64_t>;
 template class Scalar<double>;
-
-ComplexDouble::ComplexDouble(IrBuilderPasskey passkey)
-    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
-      maybe_value_{c10::nullopt} {}
-
-ComplexDouble::ComplexDouble(IrBuilderPasskey passkey, ScalarType value)
-    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
-      maybe_value_{value} {}
-
-ComplexDouble::ComplexDouble(
-    IrBuilderPasskey passkey,
-    c10::optional<ScalarType> value)
-    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
-      maybe_value_{value} {}
-
-ComplexDouble::ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-NVFUSER_DEFINE_CLONE(ComplexDouble)
-
-bool ComplexDouble::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<ComplexDouble>()) {
-    return false;
-  }
-  const auto other_complex = other->as<ComplexDouble>();
-  if (isConst() && other_complex->isConst())
-    return *value() == *(other_complex->value());
-  return false;
-}
+template class Scalar<std::complex<double>>;
 
 FullOp::FullOp(
     IrBuilderPasskey passkey,

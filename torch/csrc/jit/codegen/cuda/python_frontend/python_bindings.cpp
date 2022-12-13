@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_record.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <complex>
 #include <iostream>
 #include <tuple>
 
@@ -291,9 +292,8 @@ void initNvFuserPythonBindings(PyObject* module) {
             nvfuser::Scalar out = self.defineScalar();
             self.defineRecord(
                 new nvfuser::
-                    ConstantRecord<Nvf::ComplexDouble, c10::complex<double>>(
-                        {self.recordingState(out())},
-                        static_cast<c10::complex<double>>(val)));
+                    ConstantRecord<Nvf::ComplexDouble, std::complex<double>>(
+                        {self.recordingState(out())}, val));
             return out;
           },
           py::return_value_policy::reference)

@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_container.h>
 
+#include <complex>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -20,9 +22,13 @@ Val* IrBuilder::newScalar(DataType dtype) {
       return IrBuilder::create<Double>(dtype);
     case DataType::Int:
     case DataType::Int32:
+    case DataType::Index:
       return IrBuilder::create<Int>(dtype);
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return IrBuilder::create<ComplexDouble>(dtype);
     default:
-      TORCH_CHECK(false, "Unexpected data type");
+      TORCH_CHECK(false, "Unexpected data type: ", dtype);
   }
 }
 

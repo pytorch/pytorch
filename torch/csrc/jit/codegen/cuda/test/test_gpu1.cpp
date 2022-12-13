@@ -46,6 +46,7 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <algorithm>
+#include <complex>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -699,7 +700,7 @@ TEST_F(NVFuserTest, FusionScalarTypePromote_CUDA) {
   Double* d = IrBuilder::create<Double>(4.f);
   Int* i = IrBuilder::create<Int>(3);
   ComplexDouble* c =
-      IrBuilder::create<ComplexDouble>(c10::complex<double>(1, 2));
+      IrBuilder::create<ComplexDouble>(std::complex<double>(1, 2));
 
   TORCH_CHECK(add(b, b)->getDataType() == DataType::Bool);
   TORCH_CHECK(add(b, d)->getDataType() == DataType::Double);
@@ -1199,17 +1200,17 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  int64_t i51;
-  i51 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i51 < T0.size[0])) {
+  int64_t i56;
+  i56 = (128 * ((nvfuser_index_t)blockIdx.x)) + ((nvfuser_index_t)threadIdx.x);
+  if ((i56 < T0.size[0])) {
     float T5[1];
     T5[0] = 0;
     T5[0]
-       = T1[i51];
+       = T1[i56];
     float T4[1];
     T4[0] = 0;
     T4[0]
-       = T0[i51];
+       = T0[i56];
     float T2[1];
     T2[0]
       = T4[0]
@@ -1218,7 +1219,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
     T6[0]
       = T2[0]
       * T4[0];
-    T3[i51]
+    T3[i56]
        = T6[0];
   }
 }
@@ -1452,7 +1453,7 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  c10::complex<double> scalar1(2.0, 3.0);
+  std::complex<double> scalar1(2.0, 3.0);
   TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar1));
   TensorView* tv3 = add(tv0, tv2);
 
@@ -1489,7 +1490,7 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
   fe.compileFusion(&fusion, {input1, input2});
   fe.runFusion({input1, input2}, {output});
 
-  at::Tensor tv2_ref = input2 + scalar1;
+  at::Tensor tv2_ref = input2 + static_cast<c10::complex<double>>(scalar1);
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));

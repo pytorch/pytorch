@@ -578,11 +578,11 @@ class TORCH_CUDA_CU_API Expr : public Statement {
     return ExprPasskey();
   }
 
+  std::vector<Statement*> attributes_;
+
  private:
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
-  std::vector<Statement*> attributes_;
-
   kir::Predicate* predicate_ = nullptr;
 
   // Only used for reduction-related expressions

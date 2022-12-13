@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <algorithm>
+#include <complex>
 
 namespace nvfuser {
 
@@ -907,6 +908,20 @@ struct CastOpRecord : RecordFunctor {
   Nvf::DataType dtype_;
 };
 
+namespace {
+
+template <typename T>
+inline bool __toBool(T x) {
+  return static_cast<bool>(x);
+}
+
+template <>
+inline bool __toBool<std::complex<double>>(std::complex<double> x) {
+  return x != std::complex<double>(0, 0);
+}
+
+} // namespace
+
 //! Specialized Record Functor for recording FusionDefinition constant state.
 
 template <typename ExprType, typename ValueType>
@@ -948,7 +963,8 @@ struct ConstantRecord : RecordFunctor {
   virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
     if (std::is_same<ValueType, bool>::value) {
-      os << (value_ ? "True" : "False");
+      bool value = __toBool(value_);
+      os << (value ? "True" : "False");
     } else {
       os << std::showpoint << value_;
     }

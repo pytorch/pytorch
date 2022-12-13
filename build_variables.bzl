@@ -673,6 +673,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/contiguity.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
+    "torch/csrc/jit/codegen/cuda/expr_simplifier.cpp",
     "torch/csrc/jit/codegen/cuda/executor.cpp",
     "torch/csrc/jit/codegen/cuda/executor_kernel_arg.cpp",
     "torch/csrc/jit/codegen/cuda/executor_launch_params.cpp",

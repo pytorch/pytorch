@@ -5,6 +5,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+#include <complex>
 #include <unordered_map>
 
 // dispatch.h prevents the need from adding manual dispatch in every class that
@@ -66,7 +67,7 @@ class Scalar;
 using Bool = Scalar<bool>;
 using Double = Scalar<double>;
 using Int = Scalar<int64_t>;
-class ComplexDouble;
+using ComplexDouble = Scalar<std::complex<double>>;
 class NamedScalar;
 
 // Exprs
