@@ -269,7 +269,7 @@ class TestGradAcc(FSDPTest):
             ShardingStrategy.NO_SHARD,
         ],
     )
-    @parametrize("use_orig_params", [True])
+    @parametrize("use_orig_params", [False, True])
     def test_grad_acc(
         self,
         configs: _GradAccConfigs,
