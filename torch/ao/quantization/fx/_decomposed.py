@@ -185,7 +185,7 @@ def choose_qparams_tensor(
         quant_min: int,
         quant_max: int,
         dtype: torch.dtype
-) -> Tuple[float, int]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
     (scale and zero_point) for target quantized Tensor from the Tensor
 
@@ -210,6 +210,17 @@ def choose_qparams_tensor(
     observer(input)
     scale, zero_point = observer.calculate_qparams()
     return (scale, zero_point)
+
+@impl(quantized_decomposed_lib, "choose_qparams.tensor", "Meta")
+def choose_qparams_tensor_meta(
+        input: torch.Tensor,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: {quant_min} max: {quant_max}"
+    return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
 
 # Helper function used to implement per-channel quantization against any axis
 def _permute_to_axis_zero(x, axis):
