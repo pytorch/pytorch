@@ -116,8 +116,8 @@ class elastic_launch:
         return outputs[0]
 
         # entrypoint is a command and ``script.py`` is the python module.
-        ouptuts = elestic_launch(LaunchConfig, "script.py")(args)
-        ouptuts = elestic_launch(LaunchConfig, "python")("script.py")
+        outputs = elastic_launch(LaunchConfig, "script.py")(args)
+        outputs = elastic_launch(LaunchConfig, "python")("script.py")
     """
 
     def __init__(
