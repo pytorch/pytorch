@@ -28,7 +28,7 @@ def get_aten():
     op_schema_pairs = []
     for key, op in sorted(aten_ops.items()):
         op_name = f"aten.{key}"
-        schema = str(op.func).replace("*", "\*")
+        schema = str(op.func).replace("*", r"\*")
 
         op_schema_pairs.append((op_name, schema))
 
@@ -47,7 +47,7 @@ def get_prims():
         op_overloadpacket = op_overload.overloadpacket
 
         op_name = str(op_overload).replace(".default", "")
-        schema = op_overloadpacket.schema.replace("*", "\*")
+        schema = op_overloadpacket.schema.replace("*", r"\*")
 
         op_schema_pairs.append((op_name, schema))
 
