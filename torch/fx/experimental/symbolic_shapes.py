@@ -446,34 +446,35 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-# This stub exists so we can easily add metadata to sympy symbols
-# NB: This inherits from Dummy, not Symbol, because Symbols with the same
-# name get interned.  This is bad for us as we want the metadata (snames)
-# to vary across different invocations and not leak.
-class Symbol(sympy.Dummy):
-    __slots__: List[str] = ['snames', 'stack']
-    snames: List[str]
-    stack: Optional[str]
+if HAS_SYMPY:
+    # This stub exists so we can easily add metadata to sympy symbols
+    # NB: This inherits from Dummy, not Symbol, because Symbols with the same
+    # name get interned.  This is bad for us as we want the metadata (snames)
+    # to vary across different invocations and not leak.
+    class Symbol(sympy.Dummy):
+        __slots__: List[str] = ['snames', 'stack']
+        snames: List[str]
+        stack: Optional[str]
 
-    def __new__(cls, *args, **kwargs):
-        self = super().__new__(cls, *args, **kwargs)
-        self.snames = []
-        self.stack = None
-        return self
+        def __new__(cls, *args, **kwargs):
+            self = super().__new__(cls, *args, **kwargs)
+            self.snames = []
+            self.stack = None
+            return self
 
 
-class ShapeGuardPrinter(StrPrinter):
-    def __init__(
-        self,
-        symbol_to_source,
-    ):
-        super().__init__()
-        self.symbol_to_source = symbol_to_source
+    class ShapeGuardPrinter(StrPrinter):
+        def __init__(
+            self,
+            symbol_to_source,
+        ):
+            super().__init__()
+            self.symbol_to_source = symbol_to_source
 
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, Symbol), str(type(expr))
-        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
-        return self.symbol_to_source[expr][0]
+        def _print_Symbol(self, expr) -> str:
+            assert isinstance(expr, Symbol), str(type(expr))
+            assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
+            return self.symbol_to_source[expr][0]
 
 
 
