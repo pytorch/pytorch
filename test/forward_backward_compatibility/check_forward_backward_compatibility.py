@@ -280,6 +280,7 @@ ALLOW_LIST = [
     ("aten::unsafe_split_with_sizes.out", datetime.date(2022, 9, 1)),
     ("aten::vsplit.array", datetime.date(2022, 9, 1)),
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
+    ("c10d::_reduce_scatter_base_", datetime.date(2022, 12, 30)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
     ("c10d::alltoall_", datetime.date(2022, 12, 30)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
