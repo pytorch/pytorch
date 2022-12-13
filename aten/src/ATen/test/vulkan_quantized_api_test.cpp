@@ -2016,6 +2016,8 @@ void test_quantized_conv2d(
     const at::IntArrayRef input_shape,
     const at::IntArrayRef weight_shape,
     const at::IntArrayRef bias_shape,
+    const c10::ScalarType w_dtype,
+    const c10::ScalarType b_dtype,
     std::vector<int64_t> stride,
     std::vector<int64_t> padding,
     std::vector<int64_t> dilation,
@@ -2029,6 +2031,9 @@ void test_quantized_conv2d(
     int64_t b_zero_point = 27,
     int64_t out_zero_point = 10) {
   c10::InferenceMode mode;
+
+  const c10::ScalarType in_dtype = c10::ScalarType::QUInt8;
+  const c10::ScalarType out_dtype = c10::ScalarType::QUInt8;
 
   // input cpu
   at::Tensor input_cpu;         // input cpu tensor
@@ -2068,11 +2073,11 @@ void test_quantized_conv2d(
 
     if (compute_quantization_params) {
       // compute appropiate scale and zero point for input, weight and bias
-      const auto in_quant_params = compute_quant_params(input_cpu);
+      const auto in_quant_params = compute_quant_params(input_cpu, in_dtype);
       in_scale = std::get<0>(in_quant_params);
       in_zero_point = std::get<1>(in_quant_params);
 
-      const auto w_quant_params = compute_quant_params(weight_cpu);
+      const auto w_quant_params = compute_quant_params(weight_cpu, w_dtype);
       w_scale = std::get<0>(w_quant_params);
       w_zero_point = std::get<1>(w_quant_params);
 
@@ -2083,26 +2088,30 @@ void test_quantized_conv2d(
       bias_cpu = input_range * at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat)) + input_min;
       b_scale = in_scale;
       b_zero_point = in_zero_point;
+      if (b_dtype == c10::ScalarType::QInt32) {
+        b_scale = in_scale * w_scale;
+        b_zero_point = 0;
+      }
     }
     else if (random_quantization_params) {
       // produce random scale and zero point for inputs
       in_scale = produce_random_scale();
-      in_zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+      in_zero_point = produce_random_zero_point(in_dtype);
 
       w_scale = produce_random_scale();
-      w_zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+      w_zero_point = produce_random_zero_point(w_dtype);
 
       b_scale = produce_random_scale();
-      b_zero_point = produce_random_zero_point(c10::ScalarType::QUInt8);
+      b_zero_point = produce_random_zero_point(b_dtype);
     }
 
     // quantize cpu input, weight and bias
     input_cpu_q = at::quantize_per_tensor(
-        input_cpu, in_scale, in_zero_point, c10::ScalarType::QUInt8);
+        input_cpu, in_scale, in_zero_point, in_dtype);
     weight_cpu_q = at::quantize_per_tensor(
-        weight_cpu, w_scale, w_zero_point, c10::ScalarType::QUInt8);
+        weight_cpu, w_scale, w_zero_point, w_dtype);
     bias_cpu_q = at::quantize_per_tensor(
-        bias_cpu, b_scale, b_zero_point, c10::ScalarType::QUInt8);
+        bias_cpu, b_scale, b_zero_point, b_dtype);
 
     // dequantize quantized cpu input, weight and bias
     input_cpu_deq = at::dequantize(input_cpu_q);
@@ -2112,7 +2121,7 @@ void test_quantized_conv2d(
     // vulkan quantized input
     input_vk = input_cpu.vulkan();
     input_vk_q = at::quantize_per_tensor(
-        input_vk, in_scale, in_zero_point, c10::ScalarType::QUInt8);
+        input_vk, in_scale, in_zero_point, in_dtype);
 
     // dequantize quantized vulkan input
     input_vk_deq = at::dequantize(input_vk_q);
@@ -2133,21 +2142,21 @@ void test_quantized_conv2d(
   }
 
   // conv2d on dequantized cpu tensors
-  // Note: we apply the convolutio to the dequantized quantized tensors, that way
+  // Note: we apply the convolution to the dequantized quantized tensors, that way
   // we are performing the operations on the same numeric values.
   const auto output_cpu = at::conv2d(
       input_cpu_deq, weight_cpu_deq, bias_cpu_deq, stride, padding, dilation, groups);
 
   if (compute_quantization_params || random_quantization_params) {
     // compute appropiate scale and zero point for output
-    const auto out_quant_params = compute_quant_params(output_cpu);
+    const auto out_quant_params = compute_quant_params(output_cpu, out_dtype);
     out_scale = std::get<0>(out_quant_params);
     out_zero_point = std::get<1>(out_quant_params);
   }
 
   // quantize and dequantize cpu output
   at::Tensor output_cpu_q = at::quantize_per_tensor(
-      output_cpu, out_scale, out_zero_point, c10::ScalarType::QUInt8);
+      output_cpu, out_scale, out_zero_point, out_dtype);
   at::Tensor output_cpu_deq = at::dequantize(output_cpu_q);
 
   // vulkan quantized output
@@ -2196,7 +2205,7 @@ void test_quantized_conv2d(
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2204,6 +2213,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_fixed_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2211,7 +2222,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_computed_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */true,
@@ -2219,6 +2230,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_computed_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2226,7 +2239,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_random_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2234,6 +2247,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_random_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2241,7 +2256,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_random_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_prepack_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2249,6 +2264,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_fixed_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2256,7 +2273,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_prepack_computed_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */true,
@@ -2264,6 +2281,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_computed_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2271,7 +2290,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_quantized_prepack_random_params) {
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2279,6 +2298,8 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_random_params) {
     /* input_shape */   {1, 3, 8, 8},
     /* weight_shape */  {1, 3, 3, 3},
     /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 2},
     /* padding */       {1, 1},
     /* dilation */      {1, 1},
@@ -2286,7 +2307,7 @@ TEST_F(VulkanAPITest, conv2d_quantized_prepack_random_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2294,6 +2315,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_fixed_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2301,7 +2324,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_computed_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */true,
@@ -2309,6 +2332,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_computed_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2316,7 +2341,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_random_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2324,6 +2349,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_random_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2331,7 +2358,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_random_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2339,6 +2366,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_fixed_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2346,7 +2375,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_computed_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */true,
@@ -2354,6 +2383,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_computed_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2361,7 +2392,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_random_params) {
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2369,6 +2400,8 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_random_params) {
     /* input_shape */   {1, 7, 137, 199},
     /* weight_shape */  {7, 1, 17, 7},
     /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {2, 3},
     /* padding */       {0, 4},
     /* dilation */      {3, 1},
@@ -2376,7 +2409,7 @@ TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_random_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2384,6 +2417,8 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_fixed_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
@@ -2391,7 +2426,7 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_computed_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */true,
@@ -2399,6 +2434,8 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_computed_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
@@ -2406,7 +2443,7 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_random_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   false,
     /* compute params */false,
@@ -2414,6 +2451,8 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_random_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
@@ -2421,7 +2460,7 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_random_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_fixed_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_fixed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2429,6 +2468,8 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_fixed_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
@@ -2436,7 +2477,7 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_fixed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_computed_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_computed_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */true,
@@ -2444,6 +2485,8 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_computed_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
@@ -2451,7 +2494,7 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_computed_params) {
   );
 }
 
-TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params) {
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params_uint8) {
   test_quantized_conv2d(
     /* prepacking? */   true,
     /* compute params */false,
@@ -2459,6 +2502,314 @@ TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params) {
     /* input_shape */   {1, 17, 127, 397},
     /* weight_shape */  {29, 17, 1, 1},
     /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QUInt8,
+    /* bias_dtype */    c10::ScalarType::QUInt8,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_quantized_prepack_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 3, 8, 8},
+    /* weight_shape */  {1, 3, 3, 3},
+    /* bias_shape */    {1},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 2},
+    /* padding */       {1, 1},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_quantized_prepack_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 7, 137, 199},
+    /* weight_shape */  {7, 1, 17, 7},
+    /* bias_shape */    {7},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {2, 3},
+    /* padding */       {0, 4},
+    /* dilation */      {3, 1},
+    /* groups */        7
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   false,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_fixed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ false,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_computed_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */true,
+    /* random params */ false,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
+    /* stride */        {1, 1},
+    /* padding */       {0, 0},
+    /* dilation */      {1, 1},
+    /* groups */        1
+  );
+}
+
+TEST_F(VulkanAPITest, conv2d_pw_quantized_prepack_random_params_int8_int32) {
+  test_quantized_conv2d(
+    /* prepacking? */   true,
+    /* compute params */false,
+    /* random params */ true,
+    /* input_shape */   {1, 17, 127, 397},
+    /* weight_shape */  {29, 17, 1, 1},
+    /* bias_shape */    {29},
+    /* weight_dtype */  c10::ScalarType::QInt8,
+    /* bias_dtype */    c10::ScalarType::QInt32,
     /* stride */        {1, 1},
     /* padding */       {0, 0},
     /* dilation */      {1, 1},
