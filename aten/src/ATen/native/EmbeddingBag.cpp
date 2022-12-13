@@ -61,30 +61,10 @@ namespace native {
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
-static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag, bool include_last_offset = false) {
-  AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "make_offset2bag", [&]() {
-    auto offsets_a = offsets.accessor<index_t, 1>();
-    auto offset2bag_a = offset2bag.accessor<index_t, 1>();
-
-    // example: offsets = [0, 2, 4]
-    int64_t offsets_size = offsets_a.size(0);
-    int64_t indices_size = offset2bag_a.size(0) - 1;
-    for (const auto i : c10::irange(0, offsets_size - 1)) {
-      index_t pos = offsets_a[i];
-      offset2bag_a[pos] += 1;
-    } // offset2bag = [1 0 1 0 0]
-
-    // when `include_last_offset` is true, ignore the last index from offsets.
-    // fix segfault when `include_last_offset` is true and offsets[-1] != indices.size(0)
-    // see https://github.com/pytorch/pytorch/issues/89677 for more details.
-    if (include_last_offset) {
-      offset2bag_a[indices_size] += 1;
-    } else {
-      offset2bag_a[offsets_a[offsets_size - 1]] += 1;
-    } // offset2bag = [1 0 1 0 1]
-
-    offset2bag_a[0] -= 1; // offset2bag = [0 0 1 0 1]
-  });
+static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
+  offset2bag.index_add_(
+      0, offsets, at::ones_like(offsets, LEGACY_CONTIGUOUS_MEMORY_FORMAT)); // offset2bag = [1 0 1 0 1]
+  offset2bag[0] -= 1;                     // offset2bag = [0 0 1 0 1]
   offset2bag = offset2bag.cumsum(0, offset2bag.scalar_type());     // offset2bag = [0 0 1 1 2]
 }
 
@@ -932,8 +912,16 @@ void make_offset2bag_out(
     at::native::resize_(offset2bag, {indices.size(0) + 1}, c10::nullopt);
     at::native::zero_(offset2bag);
 
-    bool include_last_offset = (output.size(0) == offsets.size(0) - 1);
-    make_offset2bag(offsets, offset2bag, include_last_offset);
+    int64_t offsets_size = offsets.size(0);
+    bool include_last_offset = (output.size(0) == offsets_size - 1);
+    // when include_last_offset is true, ignore the last index in offset.
+    // fix segfault when include_last_offset is true and offsets[-1] != indices.size(0)
+    // see https://github.com/pytorch/pytorch/issues/89677 for more details.
+    Tensor _offsets = offsets;
+    if (include_last_offset) {
+      _offsets = offsets.narrow(0, 0, offsets_size - 1);
+    }
+    make_offset2bag(_offsets, offset2bag);
     at::native::resize_(offset2bag, {indices.size(0)}, c10::nullopt);
     // only initialize output in slow path
     at::native::zero_(output);
