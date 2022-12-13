@@ -23,11 +23,13 @@ FSDP_FLATTENED = "_fsdp_flattened"
 
 class _FSDPState(_State):
     def __init__(self) -> None:
-        # Move all the attributes to this class to enable typing for FSDP/fully_shard.
+        # TODO: Move all the attributes to this class to enable typing for
+        # FSDP/fully_shard.
         self._use_orig_params: bool = False
         self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
+        self._is_root: Optional[bool] = None
         self.rank: int = -1
 
 
