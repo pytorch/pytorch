@@ -225,7 +225,7 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
 
   Tensor out = at::full(out_dims, padding_value, sequences[0].options());
   for (const auto i : c10::irange(sequences_size)) {
-    const Tensor currseq = sequences[i];
+    const Tensor& currseq = sequences[i];
     const int64_t length_i = currseq.size(0);
     // use index notation to prevent duplicate references to the tensor
     if (batch_first) {

@@ -24,6 +24,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/cat.h>
+
+#include <utility>
 #endif
 
 int register_linear_params();
@@ -531,7 +533,7 @@ int register_embedding_params() {
           [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
               -> EmbeddingParamsSerializationType { // __getstate__ call
             at::Tensor weight = params->unpack();
-            std::vector<at::Tensor> tensors_to_serialize = {weight};
+            std::vector<at::Tensor> tensors_to_serialize = {std::move(weight)};
             std::vector<double> doubles_to_serialize = {};
             int64_t bit_rate = params->bit_rate();
             int64_t version = params->version();
@@ -557,7 +559,7 @@ int register_embedding_params() {
             TORCH_CHECK(version == 1, "EmbeddingPackedParams: Currently only version 1 supported.");
 
             at::Tensor weight = std::move(tensors[0]);
-            return PackedEmbeddingBagWeight::prepack(weight);
+            return PackedEmbeddingBagWeight::prepack(std::move(weight));
           })
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
       .def("unpack", &EmbeddingPackedParamsBase::unpack)
