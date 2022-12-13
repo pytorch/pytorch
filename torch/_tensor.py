@@ -225,7 +225,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        torch.storage._warn_typed_storage_removal()
+        torch.storage._warn_typed_storage_removal(stacklevel=2)
         return self._typed_storage()
 
     # For internal use only, to avoid raising deprecation warning
