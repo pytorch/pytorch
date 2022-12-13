@@ -1,6 +1,6 @@
 import collections
 import dataclasses
-from typing import Any
+from typing import Any, Union
 
 from torch._guards import Guard, GuardSource
 
@@ -146,6 +146,45 @@ class AttrSource(Source):
         if self.member.isnumeric():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
+
+
+@dataclasses.dataclass
+class DefaultsSource(Source):
+    base: Source
+    idx_key: Union[int, str]
+    is_kw: bool
+    field: str
+
+    def __init__(self, base, idx_key, is_kw=False):
+        super().__init__()
+        self.base = base
+        self.idx_key = idx_key
+        self.is_kw = is_kw
+        self.field = "__kwdefaults__" if is_kw else "__defaults__"
+        if not is_kw:
+            assert isinstance(idx_key, int)
+        else:
+            assert isinstance(idx_key, str)
+
+    def reconstruct(self, codegen):
+        instrs = self.base.reconstruct(codegen)
+        instrs.extend(codegen.create_load_attrs(self.field))
+        instrs.extend(
+            [
+                codegen.create_load_const(self.idx_key),
+                create_instruction("BINARY_SUBSCR"),
+            ]
+        )
+        return instrs
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if self.is_kw:
+            return f"{self.base.name()}.__kwdefaults__['{self.idx_key}']"
+        else:
+            return f"{self.base.name()}.__defaults__[{self.idx_key}]"
 
 
 @dataclasses.dataclass
