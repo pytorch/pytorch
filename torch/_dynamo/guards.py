@@ -460,9 +460,9 @@ class CheckFunctionManager:
                 and guard.is_nn_module()
                 # we must guard on default args for functions,
                 # even if we specialize on the rest of the nnmodule contents
-                # TODO(whc) - presumably we can use the 'DefaultsSource' in some way here?
-                and not "__defaults__" in guard.name
-                and not "__kwdefaults__" in guard.name
+                # TODO(whc) - presumably we can use the 'DefaultsSource' in some way here instead of name parsing?
+                and "__defaults__" not in guard.name
+                and "__kwdefaults__" not in guard.name
             ):
                 continue
             guard.create(local_builder, global_builder)

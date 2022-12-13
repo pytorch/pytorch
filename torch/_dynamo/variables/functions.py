@@ -13,9 +13,6 @@ from ..source import AttrSource, DefaultsSource, GetItemSource
 from ..utils import istensor, make_cell
 from .base import typestr, VariableTracker
 
-# todo annotate types
-default_tensor_values = {}
-
 
 def wrap_bound_arg(tx, val, options, source=None):
     if isinstance(val, dict):
@@ -36,7 +33,10 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif istensor(val):
         # Circular import...
         from torch._dynamo.variables.builder import VariableBuilder
-        assert source is not None, "Must provide a source if wrapping a tensor arg, otherwise can't guard"
+
+        assert (
+            source is not None
+        ), "Must provide a source if wrapping a tensor arg, otherwise can't guard"
         return VariableBuilder(tx, source)(val)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
