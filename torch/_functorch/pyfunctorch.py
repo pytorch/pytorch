@@ -95,6 +95,14 @@ class VmapInterpreter(FuncTorchInterpreter):
         return self._cptr.batchSize()
 
 
+@contextlib.contextmanager
+def nested(*contexts):
+    with contextlib.ExitStack() as stack:
+        for ctx in contexts:
+            stack.enter_context(ctx)
+        yield contexts
+
+
 class GradInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Grad
@@ -117,7 +125,7 @@ class GradInterpreter(FuncTorchInterpreter):
     def lower(self):
         prev_grad_mode = self.prev_grad_mode()
         if not self.prev_grad_mode:
-            return contextlib.nested(torch.no_grad(), super().lower())
+            return nested(torch.no_grad(), super().lower())
         return super().lower()
 
     def prev_grad_mode(self):
@@ -146,7 +154,7 @@ class JvpInterpreter(FuncTorchInterpreter):
     def lower(self):
         prev_fwd_grad_mode = self.prev_fwd_grad_mode()
         if not self.prev_fwd_grad_mode:
-            return contextlib.nested(_set_fwd_grad_enabled(False), super().lower())
+            return nested(_set_fwd_grad_enabled(False), super().lower())
         return super().lower()
 
     def prev_fwd_grad_mode(self):
