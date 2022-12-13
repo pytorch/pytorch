@@ -249,6 +249,10 @@ class GraphLowering(torch.fx.Interpreter):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
 
+            if hasattr(target, "_inductor_lowering_function"):
+                # passthrough lowerings from .pattern_matcher
+                return target(*args, **kwargs)
+
             if target not in lowerings:
                 if config.implicit_fallbacks:
                     error = (

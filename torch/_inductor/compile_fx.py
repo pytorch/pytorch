@@ -13,7 +13,7 @@ from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
-from . import config, metrics, overrides
+from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -120,13 +120,15 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
+
+    pattern_matcher.fx_passes(gm)
+    V.debug.fx_graph_transformed(gm, example_inputs)
 
     graph = GraphLowering(
         gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id

@@ -36,6 +36,9 @@ epilogue_fusion = False
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 
+# enable pattern match+replace optimizations
+pattern_matcher = True
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -180,8 +183,11 @@ class trace:
     # Save python logger call >=logging.INFO
     info_log = False
 
-    # Save input FX graph (post decomps)
+    # Save input FX graph (post decomps, pre optimization)
     fx_graph = True
+
+    # Save FX graph after transformations
+    fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True
