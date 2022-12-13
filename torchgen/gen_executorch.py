@@ -4,14 +4,14 @@ import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
 from io import TextIOWrapper
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import yaml
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 from torchgen import dest
 from torchgen.api import cpp as aten_cpp
-from torchgen.api.types import CppSignatureGroup
+from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
 from torchgen.context import method_with_native_function, with_native_function_and_index
 from torchgen.executorch.api import et_cpp
 from torchgen.executorch.api.custom_ops import gen_custom_ops
@@ -110,9 +110,8 @@ TORCH_API inline {sig.decl()} {{
             """
 
         else:
-            sig = ExecutorchCppSignature.from_native_function(f)
             return static_dispatch(
-                sig,
+                ExecutorchCppSignature.from_native_function(f),
                 f,
                 backend_indices=self.static_dispatch_backend_indices,
             )
@@ -129,6 +128,9 @@ class ComputeCodegenUnboxedKernels:
     def __call__(self, f: NativeFunction) -> str:
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return ""
+        sig: Union[CppSignature, ExecutorchCppSignature]
+        argument_type_gen: Callable[..., NamedCType]
+        return_type_gen: Callable[..., CType]
         if self.use_aten_lib:
             sig = CppSignatureGroup.from_native_function(
                 f, method=False, fallback_binding=f.manual_cpp_binding
