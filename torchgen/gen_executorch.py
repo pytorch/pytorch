@@ -3,8 +3,7 @@ import os
 import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
-from io import TextIOWrapper
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
 
 import yaml
 
@@ -308,7 +307,7 @@ def translate_native_yaml(
     aten_yaml_path: str,
     native_yaml_path: str,
     use_aten_lib: bool,
-    out_file: TextIOWrapper,
+    out_file: TextIO,
 ) -> None:
     """Translates Executorch DSL dialect to use the same syntax as
     native_functions.yaml. The major difference is that Executorch DSL dialect
