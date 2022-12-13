@@ -1856,8 +1856,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def __getattr__(self, item: str):
                 try:
                     return self.data[item]
-                except KeyError:
-                    raise AttributeError
+                except KeyError as e:
+                    raise AttributeError from e
 
         def tokenization(x):
             encoding = BatchEncoding({"key": x})
