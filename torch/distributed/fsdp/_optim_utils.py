@@ -962,28 +962,6 @@ def _rekey_sharded_optim_state_dict(
     return {"state": rekeyed_osd_state, "param_groups": rekeyed_osd_param_groups}
 
 
-def _get_flat_param_to_fsdp_module(model: torch.nn.Module):
-    """
-    Constructs a mapping from FSDP flattened parameters to their owning FSDP
-    modules and ensures that all FSDP modules are initialized.
-
-    Args:
-        model (torch.nn.model): Root module (which may or may not be a
-            :class:`FullyShardedDataParallel` instance).
-
-    Returns:
-        Dict[FlatParameter, FullyShardedDataParallel]: Mapping from FSDP
-            flattened parameters to their owning FSDP modules.
-    """
-    flat_param_to_fsdp_module = {}
-    for module in model.modules():
-        if isinstance(module, fsdp_file.FullyShardedDataParallel):
-            _lazy_init(module, module)
-            for param in module.params:  # may have none
-                flat_param_to_fsdp_module[param] = module
-    return flat_param_to_fsdp_module
-
-
 def _get_param_id_to_param(
     optim: torch.optim.Optimizer,
 ):
