@@ -270,6 +270,17 @@ class DTensorSpec(object):
         if self.ndim == -1:
             self.ndim = len(self.shape)
 
+    def __hash__(self) -> int:
+        spec_str = str(self.mesh) + str(self.placements) + str(self.shape)
+        return hash(spec_str)
+
+    def __eq__(self, __o: object) -> bool:
+        return (
+            self.mesh == __o.mesh
+            and self.placements == __o.placements
+            and self.shape == __o.shape
+        )
+
     @property
     def dim_map(self) -> List[int]:
         """

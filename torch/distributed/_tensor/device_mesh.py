@@ -105,7 +105,7 @@ class DeviceMesh(object):
     ) -> None:
         self.device_type = device_type
         self.mesh = (
-            mesh.detach()
+            mesh
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
@@ -227,6 +227,9 @@ class DeviceMesh(object):
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
+
+    def __hash__(self):
+        return hash(self.mesh)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
