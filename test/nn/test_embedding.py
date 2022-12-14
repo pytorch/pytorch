@@ -230,9 +230,9 @@ class TestEmbeddingNN(NNTestCase):
         out2 = embeddingbag(input, torch.tensor([0, 3, 4]))
 
         weight = embeddingbag.weight
-        ref_out = torch.zeros(2, 3)
-        ref_out[0] = weight[0:3].mean(0)
-        ref_out[1] = weight[3]
+        row0 = weight[0:3].mean(0)
+        row1 = weight[3]
+        ref_out = torch.stack([row0, row1])
 
         self.assertEqual(ref_out, out)
         self.assertEqual(ref_out, out2)
