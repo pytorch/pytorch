@@ -28,14 +28,22 @@ inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
   return {asIntArrayRefUnchecked(ar)};
 }
 
-inline at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar) {
+inline at::IntArrayRef asIntArrayRefSlow(
+    c10::SymIntArrayRef ar,
+    const char* file,
+    int64_t line) {
   for (c10::SymInt sci : ar) {
     TORCH_CHECK(
         !sci.is_symbolic(),
-        "SymIntArrayRef expected to contain only concrete integers");
+        file,
+        ":",
+        line,
+        ": SymIntArrayRef expected to contain only concrete integers");
   }
   return asIntArrayRefUnchecked(ar);
 }
+
+#define C10_AS_INTARRAYREF_SLOW(a) c10::asIntArrayRefSlow(a, __FILE__, __LINE__)
 
 // Prefer using a more semantic constructor, like
 // fromIntArrayRefKnownNonNegative

@@ -733,8 +733,8 @@ Tensor new_empty_strided_batching_rule(
     optional<Device> device,
     optional<bool> pin_memory) {
 
-  auto size = c10::asIntArrayRefSlow(sym_size);
-  auto stride = c10::asIntArrayRefSlow(sym_stride);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
+  auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return self.new_empty_strided(
