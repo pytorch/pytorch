@@ -1726,11 +1726,24 @@ class TestJac(TestCase):
             return (x.sin(), x + y), (x + 2, x.sum())
 
         for chunk_size in [1, 2, 3, 4, 7, 10]:
-            expected = functorch.jacrev(f, argnums=(0, 1))(x, y)
-            actual = functorch.jacrev(f, argnums=(0, 1),
-                                      chunk_size=chunk_size,
-                                      _preallocate_and_copy=_preallocate_and_copy)(x, y)
+            expected = jacrev(f, argnums=(0, 1))(x, y)
+            actual = jacrev(f, argnums=(0, 1),
+                            chunk_size=chunk_size,
+                            _preallocate_and_copy=_preallocate_and_copy)(x, y)
             self.assertEqual(actual, expected)
+
+    @parametrize('_preallocate_and_copy', (True, False))
+    def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
+        x = torch.randn(10, 2, device=device)
+        chunk_size = 3
+
+        def f(x):
+            return (x.sin(), x), (x + 2, x.sum())
+
+        expected = vmap(jacrev(jacrev(f)))(x)
+        actual = vmap(jacrev(jacrev(f, chunk_size=chunk_size,
+                             _preallocate_and_copy=_preallocate_and_copy), chunk_size=chunk_size))(x)
+        self.assertEqual(actual, expected)
 
 
 class TestHessian(TestCase):
