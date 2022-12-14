@@ -69,8 +69,13 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        fake_mode=None,
     ):
         super().__init__(gm)
+        if fake_mode is None:
+            self.fake_mode = torch._subclasses.FakeTensorMode()
+        else:
+            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -95,7 +100,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
         self.creation_time = time.time()
-        self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
 
@@ -405,11 +409,6 @@ class GraphLowering(torch.fx.Interpreter):
             if value.get_dtype() != torch.float32:
                 self.disable_cpp_wrapper("inputs not FP32")
 
-    def check_output_for_cpp_buffer(self):
-        for item in self.graph_outputs:
-            if isinstance(item, ir.NoneAsConstantBuffer):
-                self.disable_cpp_wrapper("NoneAsConstantBuffer")
-
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
@@ -419,7 +418,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
-        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
