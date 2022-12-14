@@ -2999,7 +2999,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
-           V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
         with context():
             (
