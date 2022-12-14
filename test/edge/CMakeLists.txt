@@ -4,10 +4,6 @@ set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TEST_ROOT ${TORCH_ROOT}/test/edge)
 set(OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
 
-find_package(Python COMPONENTS Interpreter)
-set(PYTHONINTERP_FOUND ${Python_Interpreter_FOUND})
-set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
-
 # Generate unboxing kernels
 set(GEN_COMMAND
         "${PYTHON_EXECUTABLE}" -m torchgen.gen_executorch
