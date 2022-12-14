@@ -10236,7 +10236,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
-           error_inputs_func=error_inputs_masked_select),
+           error_inputs_func=error_inputs_masked_select,
+           skips=(
+               # Compiler issue on ROCm. Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -12153,7 +12158,9 @@ op_db: List[OpInfo] = [
     OpInfo(
         'nn.functional._scaled_dot_product_attention',
         op=lambda *args, **kwargs:
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)
+               if kwargs['need_attn_weights'] else
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs)[0],
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12171,17 +12178,12 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # Doesn't support autocasting
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
             # Forward works for dtype=float64 which is the math path
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
-            # No meta function
-            DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+            # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # No meta function
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
@@ -12918,6 +12920,12 @@ op_db: List[OpInfo] = [
                         # For `chalf`, reference computation in `numpy` is computed in `cfloat`.
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick',
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive',
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
@@ -14683,6 +14691,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_multiple_devices',
+                            dtypes=[torch.float32, torch.int64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -15620,6 +15631,9 @@ op_db: List[OpInfo] = [
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
+               # Compiler issue on ROCm. Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )
            ),
     OpInfo('logcumsumexp',
@@ -15854,6 +15868,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # Compiler issue on ROCm. Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     # Following tests are for jiterator's python interface
     # Jiterator can be used to author elementwise CUDA kernel
@@ -16370,6 +16387,11 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,
         sample_inputs_func=sample_inputs_argwhere,
+        skips=(
+            # Compiler issue on ROCm. Might need to skip until ROCm5.5
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+        ),
     ),
     ReductionOpInfo(
         'all',
