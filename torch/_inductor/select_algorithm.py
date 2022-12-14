@@ -297,7 +297,8 @@ class TritonTemplateKernel(TritonKernel):
         )
 
 
-def make_jinja2_env():
+@functools.lru_cache(None)
+def _jinja2_env():
     try:
         import jinja2
 
@@ -310,15 +311,20 @@ def make_jinja2_env():
 
 class TritonTemplate:
     index_counter = itertools.count()
-    template_env = make_jinja2_env()
     all_templates = dict()
+
+    @staticmethod
+    def _template_from_string(source):
+        env = _jinja2_env()
+        if env is not None:
+            return env.from_string(source)
+        return None
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__()
         self.name = name
         self.grid = grid
-        assert self.template_env is not None, "requires jinja2"
-        self.template = self.template_env.from_string(source)
+        self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         self.all_templates[name] = self
         self.debug = debug
@@ -334,6 +340,7 @@ class TritonTemplate:
         epilogue_fn=identity,
         **kwargs,
     ):
+        assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
             defines.write(f"    {name} : tl.constexpr = {val}\n")
