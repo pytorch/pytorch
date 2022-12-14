@@ -26,7 +26,7 @@ def _dispatch_opset_version(
 
     Args:
         target: The target opset version.
-        available_opsets: The available opsets.
+        registered_opsets: The available opsets.
 
     Returns:
         The registered opset version.
