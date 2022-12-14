@@ -308,15 +308,8 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
-    # Mapping from module to every `FlatParamHandle` that the module consumes,
-    # where there is an entry for every (sub)module
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
-    # Same as `_module_to_handle` but filtered to only include keys that are
-    # "communication modules", which are responsible for the unshard/reshard
-    # for their `FlatParamHandle`s
+    # Mapping from comm. module to the handles it is responsible to unshard and
+    # reshard (see `FlatParamHandle` for the comm. module definition)
     _comm_module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
@@ -506,8 +499,6 @@ def _init_param_handle_from_params(
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
-    for module in handle.flat_param._modules:
-        state._module_to_handles[module].append(handle)
     state._comm_module_to_handles[handle._comm_module].append(handle)
     num_comm_module_handles = len(state._comm_module_to_handles[handle._comm_module])
     assert num_comm_module_handles == 1, (
