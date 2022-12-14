@@ -1,5 +1,6 @@
-import expecttest
 from typing import Any, Dict
+
+import expecttest
 
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
 from torchgen.model import Location, NativeFunction
@@ -30,8 +31,9 @@ class TestComputeNativeFunctionStub(expecttest.TestCase):
 
         gen = ComputeNativeFunctionStub()
         res = gen(func)
+        self.assertIsNotNone(res)
         self.assertExpectedInline(
-            res,
+            str(res),
             expected,
         )
 
