@@ -10239,7 +10239,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_masked_select,
            skips=(
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -12923,11 +12924,11 @@ op_db: List[OpInfo] = [
                         # Output of `chalf` saturates to `inf` quicker than reference due to its small range
                         # which leads to failure of this test.
                         DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick',
-                                     dtypes=(torch.complex32,)),
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive',
-                                     dtypes=(torch.complex32,)),
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing',
-                                     dtypes=(torch.complex32,)),
+                                     dtypes=(torch.complex32,), active_if=TEST_WITH_ROCM),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_batch_vs_slicing',
                                      dtypes=(torch.complex32,)),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_non_contig',
@@ -14694,7 +14695,8 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Might need to skip until ROCm5.5
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_multiple_devices', dtypes=[torch.float32, torch.int64]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_multiple_devices',
+                            dtypes=[torch.float32, torch.int64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -15633,7 +15635,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )
            ),
     OpInfo('logcumsumexp',
@@ -15869,7 +15872,8 @@ op_db: List[OpInfo] = [
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     # Following tests are for jiterator's python interface
     # Jiterator can be used to author elementwise CUDA kernel
@@ -16388,7 +16392,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_argwhere,
         skips=(
             # Compiler issue on ROCm. Might need to skip until ROCm5.5
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values', dtypes=[torch.bool]),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
         ),
     ),
     ReductionOpInfo(

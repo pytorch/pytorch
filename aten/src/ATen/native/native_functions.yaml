@@ -13228,12 +13228,6 @@
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
 
-# Note: this function is only for testing.
-- func: _test_inductor_realize(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA, Meta: _test_inductor_realize
-
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:

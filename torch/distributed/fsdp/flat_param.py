@@ -167,6 +167,9 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
+        _comm_module_prefix (str): Module name prefix starting from ``module``
+            to ``comm_module`` as passed to :class:`FlatParamHandle`, including
+            a trailing '.' if this is not the empty string.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
 
@@ -236,6 +239,7 @@ class FlatParameter(nn.Parameter):
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
         param_extensions: List[Any],
+        comm_module_prefix: str,
         params: Optional[List[nn.Parameter]],
         shared_params: Optional[List[nn.Parameter]],
     ) -> None:
@@ -265,6 +269,7 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
+        self._comm_module_prefix = comm_module_prefix
         self._modules = set(pi.module for pi in self._param_infos).union(
             set(spi.module for spi in self._shared_param_infos)
         )
@@ -364,7 +369,7 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._comm_module = comm_module
-        self._init_flat_param(params, module, use_orig_params)
+        self._init_flat_param(params, module, comm_module, use_orig_params)
         self._orig_param_dtype = self.flat_param.dtype
         self._use_unsharded_views(as_params=False)
         self._config = self._init_config(
@@ -379,6 +384,7 @@ class FlatParamHandle:
         self,
         params: Sequence[Optional[nn.Parameter]],
         module: nn.Module,
+        comm_module: nn.Module,
         use_orig_params: bool,
     ) -> None:
         """
@@ -486,6 +492,7 @@ class FlatParamHandle:
             prefixed_param_names,
             shared_param_infos,
             param_extensions,
+            self._get_comm_module_prefix(module, comm_module),
             convert_to_params(params_to_flatten) if use_orig_params else None,
             convert_to_params(shared_params) if use_orig_params else None,
         )
@@ -552,6 +559,25 @@ class FlatParamHandle:
             fwd_bwd_param_dtype,
             reduce_dtype,
             keep_low_precision_grads,
+        )
+
+    def _get_comm_module_prefix(
+        self,
+        local_root_module: nn.Module,
+        comm_module: nn.Module,
+    ) -> str:
+        """
+        Returns the prefix from ``local_root_module`` to ``comm_module``. For
+        example, if we have ``local_root.submodule.comm_module``, then the
+        returned prefix is ``local_root.submodule.`` (with the trailing '.').
+        """
+        if local_root_module is comm_module:
+            return ""
+        for submodule_name, submodule in local_root_module.named_modules():
+            if submodule is comm_module:
+                return submodule_name + "."
+        raise AssertionError(
+            "Expects `comm_module` to be in `local_root_module`'s subtree"
         )
 
     ###################################
@@ -1309,10 +1335,21 @@ class FlatParamHandle:
         if self._use_orig_params:
             self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
-            # views, but for the post-backward reshard, we delay the call to
-            # after the reduce-scatter
+            # views (or unsharded gradient views if a gradient was accumulated
+            # in `no_sync()`), but for the post-backward reshard, we delay the
+            # call to after the reduce-scatter.
             if self._training_state == HandleTrainingState.FORWARD:
-                self._use_sharded_grad_views()
+                # TODO: Change `_unpadded_unsharded_size` if we change the
+                # gradient to be computed directly with padding.
+                accumulated_grad_in_no_sync = (
+                    flat_param.grad is not None
+                    and self.uses_sharded_strategy
+                    and flat_param.grad.shape == flat_param._unpadded_unsharded_size
+                )
+                if accumulated_grad_in_no_sync:
+                    self._use_unsharded_grad_views()
+                else:
+                    self._use_sharded_grad_views()
 
     #########
     # VIEWS #
@@ -1466,7 +1503,16 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            param.grad = view
+            if param.shape != view.shape:
+                # NOTE: This is a hack using `.data` to side step the
+                # check that parameter/gradient sizes match. Here,
+                # `param` has the sharded size; `grad` has the unsharded size.
+                # This happens when running in `no_sync()`.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = view
+            else:
+                param.grad = view
         for i, (
             param_name,
             module,
@@ -1481,7 +1527,14 @@ class FlatParamHandle:
             )  # did not save prefixed name
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            param.grad = prim_param.grad
+            if param.shape != prim_param.grad.shape:
+                # NOTE: This is the same hack to use `.data` to side step the
+                # size check.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = prim_param.grad
+            else:
+                param.grad = prim_param.grad
 
     @contextlib.contextmanager
     def unflatten_as_params(self) -> Generator:
@@ -1661,6 +1714,7 @@ class FlatParamHandle:
                 continue
             param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
             numel_in_shard = param_end - param_start + 1
+
             # Check for parameter writeback
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
@@ -1677,6 +1731,7 @@ class FlatParamHandle:
                     param, flat_param, i, expected_shape, offset, True
                 )
                 wroteback = True
+
             # Check for gradient writeback
             # NOTE: Since this method is called in the pre-unshard, which is
             # only called during computation in the pre-forward or
@@ -1831,7 +1886,13 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
+    # NOTE: These two methods to get parameter and module names are used for
+    # `state_dict()`, which constructs a prefix starting from the module on
+    # which `state_dict()` is called. Since the comm. module is the module that
+    # saves its managed parameters, we must strip the comm. module prefix to
+    # align with the state-dict prefix.
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        comm_module_prefix = self.flat_param._comm_module_prefix
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1846,9 +1907,17 @@ class FlatParamHandle:
         for param_name, _, module_name in chain(
             self.flat_param._param_infos, shared_param_infos
         ):
-            yield (param_name, module_name)
+            assert module_name.startswith(comm_module_prefix), (
+                f"module_name: {module_name} comm_module_prefix: "
+                f"{comm_module_prefix}"
+            )
+            module_name_prefixed_from_comm_module = module_name[
+                len(comm_module_prefix) :
+            ]
+            yield (param_name, module_name_prefixed_from_comm_module)
 
     def shared_parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        comm_module_prefix = self.flat_param._comm_module_prefix
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1860,7 +1929,14 @@ class FlatParamHandle:
                 _,
             ) in self.flat_param._shared_param_infos
         ]:
-            yield (param_name, module_name)
+            assert module_name.startswith(comm_module_prefix), (
+                f"module_name: {module_name} comm_module_prefix: "
+                f"{comm_module_prefix}"
+            )
+            module_name_prefixed_from_comm_module = module_name[
+                len(comm_module_prefix) :
+            ]
+            yield (param_name, module_name_prefixed_from_comm_module)
 
     @property
     def _fqns_in_shard(self) -> List[str]:
