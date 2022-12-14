@@ -543,6 +543,9 @@ register_extra_random_decomp = functools.partial(
 def bernoulli_(self, p=0.5):
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
+@register_extra_random_decomp([aten.uniform_])
+def uniform_(self, low=0, high=1):
+    return self.copy_((high - low) * torch.rand_like(self) + low)
 
 @functools.lru_cache(None)
 def fast_random_decomps():
