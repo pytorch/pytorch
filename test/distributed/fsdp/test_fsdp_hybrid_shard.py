@@ -223,7 +223,10 @@ class TestFSDPHybridShard(FSDPTest):
                 cntr = Counter()
                 patched_allreduce = partial(patched_collective, orig_ar, cntr)
                 patched_reduce_scatter = partial(patched_collective, orig_rs, cntr)
-                with patch_allreduce(patched_allreduce), patch_reduce_scatter(patched_reduce_scatter):
+                with (
+                    patch_allreduce(patched_allreduce),
+                    patch_reduce_scatter(patched_reduce_scatter),
+                ):
                     inp = fsdp_model.get_input(device=torch.cuda.current_device())
                     out = fsdp_model(inp[0], inp[1])
                     loss = fsdp_model.get_loss(inp, out)

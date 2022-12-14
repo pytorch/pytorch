@@ -121,19 +121,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
-    "convmixer_768_32",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "sebotnet33ts_256",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
-    "spnasnet_100",  # accuracy
-    "resnest101e",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -1212,7 +1202,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
-        self.init_optimizer(name, current_device, model.parameters())
+        self.init_optimizer(current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -2080,23 +2070,14 @@ def run(runner, args, original_dir=None):
         for name in runner.iter_model_names(args):
             current_name = name
             placeholder_batch_size = 0
-
-            def write_csv():
+            try:
+                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
+            except subprocess.SubprocessError:
+                print("ERROR")
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
-
-            try:
-                subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
-                )
-            except subprocess.TimeoutExpired:
-                print("TIMEOUT", file=sys.stderr)
-                write_csv()
-            except subprocess.SubprocessError:
-                print("ERROR", file=sys.stderr)
-                write_csv()
         print_summary(output_filename)
 
 

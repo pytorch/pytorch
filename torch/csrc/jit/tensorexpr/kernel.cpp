@@ -845,7 +845,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kCudaCodeGen) {
-    for (const auto& buf : bufOutputs_) {
+    for (auto buf : bufOutputs_) {
       std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
       if (loops.empty()) {
         // This happens when Buf is 0-dim
@@ -893,7 +893,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   }
 
   if (backendType == kBlockCodeGen) {
-    for (const auto& buf : bufOutputs_) {
+    for (auto buf : bufOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
@@ -1294,7 +1294,8 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
         std::vector<ExprHandle> new_axes(
             sorted_stride_indices_descending.size());
         for (size_t stride_index : sorted_stride_indices_descending) {
-          const auto& stride = strides[stride_index];
+          auto size = sizes[stride_index];
+          auto stride = strides[stride_index];
           auto index = absolute_position / ExprHandle(stride);
           // XXX, in symbolic output ordering, we do not the arbitrary
           // ordering of strides as in usual output ordering, just
@@ -1465,7 +1466,7 @@ std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
   std::vector<std::pair<BufPtr, void*>> allocated_bufs;
-  for (const auto& buf : interm_bufs) {
+  for (auto buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
     size_t size =
@@ -1837,7 +1838,7 @@ void TensorExprKernel::compile() {
   BackendType backendType = inferBackendTypeFromDevice(device_);
   stmt_ = transformLoops(backendType, block);
 
-  for (const auto& c : constants_) {
+  for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
   }
 
@@ -2015,7 +2016,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  for (const auto& c : constants_) {
+  for (auto c : constants_) {
     runArgs.emplace_back(c.ptr);
   }
 
@@ -2059,7 +2060,7 @@ void TensorExprKernel::runFast(
   args.insert(args.end(), outputs.begin(), outputs.end());
 
   // TODO: we can consider preallocating and pre-filling the args vector.
-  for (const auto& c : constants_) {
+  for (auto c : constants_) {
     args.push_back(c.ptr);
   }
 

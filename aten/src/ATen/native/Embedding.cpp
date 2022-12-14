@@ -46,7 +46,7 @@ Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
   }
 
   auto size = indices.sym_sizes().vec();
-  for (const auto& d : weight.sym_sizes().slice(1)) {
+  for (auto d : weight.sym_sizes().slice(1)) {
     size.push_back(d);
   }
 

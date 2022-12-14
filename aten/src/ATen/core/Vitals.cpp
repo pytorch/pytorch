@@ -60,7 +60,7 @@ std::string APIVitals::readVitals() {
   }
 
   std::stringstream buf;
-  for (const auto& x : name_map_) {
+  for (auto x : name_map_) {
     buf << x.second;
   }
   return buf.str();

@@ -623,7 +623,7 @@ class TransferEvents {
     static const auto prefix = fmt::format("\"{}\": ", indexKey);
     auto pos = metadata_json.find(prefix);
     return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(',', pos);
+      auto end = metadata_json.find(",", pos);
       end = (end == std::string::npos) ? metadata_json.size() : end;
       return std::stoll(metadata_json.substr(pos + prefix.size(), end));
     }();
@@ -994,7 +994,7 @@ RecordQueue::getRecords(
   }
 
   if (python_tracer_) {
-    for (const auto& i : python_tracer_->getEvents(
+    for (auto i : python_tracer_->getEvents(
              converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }

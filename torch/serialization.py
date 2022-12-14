@@ -773,7 +773,7 @@ def load(
 
     if weights_only:
         if pickle_module is not None:
-            raise RuntimeError("Can not safely load weights when explicit pickle_module is specified")
+            raise RuntimeError("Can not safely load weights when explicit picke_module is specified")
     else:
         if pickle_module is None:
             pickle_module = pickle
