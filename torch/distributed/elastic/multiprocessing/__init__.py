@@ -224,6 +224,7 @@ def start_processes(
             tee_stdouts[local_rank] = os.devnull
             tee_stderrs[local_rank] = os.devnull
             error_files[local_rank] = os.devnull
+            envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
         else:
             clogdir = os.path.join(log_dir, str(local_rank))
             os.mkdir(clogdir)
