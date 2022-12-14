@@ -3,6 +3,7 @@
 import contextlib
 import sys
 from collections import Counter
+from enum import auto, Enum
 from functools import partial
 
 import torch
@@ -73,6 +74,11 @@ class MyModel(nn.Module):
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
         self.lin3 = nn.Linear(10, 10)
+
+
+class ShardingStrategyMode(Enum):
+    ALL_HYBRID_SHARD = auto()
+    MIXED_HYBRID_FULL_SHARD = auto()
 
 
 class TestFSDPHybridShard(FSDPTest):
@@ -168,7 +174,7 @@ class TestFSDPHybridShard(FSDPTest):
                     ShardingStrategy.HYBRID_SHARD,
                     ShardingStrategy._HYBRID_SHARD_ZERO2,
                 ],
-                "init_mode": ["uniform", "mixed"],
+                "sharding_strategy_mode": ["uniform", "mixed"],
             },
             self._test_fsdp_hybrid_shard_basic_setup,
         )
@@ -176,7 +182,7 @@ class TestFSDPHybridShard(FSDPTest):
     def _test_fsdp_hybrid_shard_basic_setup(
         self,
         hsdp_sharding_strategy: ShardingStrategy,
-        init_mode: str,
+        sharding_strategy_mode: ShardingStrategyMode,
     ):
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer},
@@ -192,7 +198,9 @@ class TestFSDPHybridShard(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             fsdp_kwargs,
         )
-        fsdp_model = self._init_hsdp_model(hsdp_sharding_strategy, init_mode)
+        fsdp_model = self._init_hsdp_model(
+            hsdp_sharding_strategy, sharding_strategy_mode
+        )
         # All FSDP modules should have state.process_group as the process group over which to
         # shard (default process group), and state._inter_node_pg (process group containing only
         # this rank)
@@ -201,8 +209,14 @@ class TestFSDPHybridShard(FSDPTest):
         for fsdp_module in fsdp_model.fsdp_modules(fsdp_model):
             # TODO: This needs to be replaced if we deprecate
             # `FSDP.sharding_strategy` to only use the handle one.
+            # https://github.com/pytorch/pytorch/issues/90857
             if fsdp_module.sharding_strategy not in HYBRID_SHARDING_STRATEGIES:
-                self.assertEqual(init_mode, "mixed")
+                self.assertEqual(
+                    sharding_strategy_mode, ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD
+                )
+                self.assertEqual(
+                    fsdp_module.sharding_strategy, ShardingStrategy.FULL_SHARD
+                )
                 continue
             # process_group should be across the node, which is just the
             # whole world here.
@@ -238,11 +252,11 @@ class TestFSDPHybridShard(FSDPTest):
             loss = fsdp_model.get_loss(inp, out)
             loss.backward()
 
-        if init_mode == "uniform":
+        if sharding_strategy_mode == "uniform":
             num_flat_params = len(list(FSDP._fsdp_handles(fsdp_model)))
             self.assertEqual(num_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
-        elif init_mode == "mixed":
+        elif sharding_strategy_mode == "mixed":
             num_hsdp_flat_params = len(list(FSDP._fsdp_handles(fsdp_model.transformer)))
             num_flat_params = len(list(FSDP._fsdp_handles(fsdp_model)))
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
@@ -251,9 +265,9 @@ class TestFSDPHybridShard(FSDPTest):
     def _init_hsdp_model(
         self,
         hsdp_sharding_strategy: ShardingStrategy,
-        init_mode: str,
+        sharding_strategy_mode: str,
     ):
-        if init_mode == "uniform":
+        if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
             auto_wrap_policy = ModuleWrapPolicy(
                 {TransformerEncoderLayer, TransformerDecoderLayer},
             )
@@ -268,7 +282,7 @@ class TestFSDPHybridShard(FSDPTest):
                 CUDAInitMode.CUDA_BEFORE,
                 fsdp_kwargs,
             )
-        elif init_mode == "mixed":
+        elif sharding_strategy_mode == ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD:
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,

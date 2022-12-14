@@ -37,7 +37,9 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
 
 
 @no_type_check
-def _validate_and_get_hybrid_shard_state(root_module: nn.Module):
+def _validate_and_get_hybrid_shard_state(
+    root_module: nn.Module,
+) -> default_hooks.DefaultState:
     """
     Precondition: ``root_module`` is a ``FullyShardedDataParallel`` instance.
 
@@ -45,7 +47,7 @@ def _validate_and_get_hybrid_shard_state(root_module: nn.Module):
     same intra- and inter-node process groups.
 
     Returns:
-        Tuple[HookState]: One of the instances' inter-node state (does not
+        DefaultState: One of the instances' inter-node state (does not
         matter which since they will share the same one).
     """
     intra_node_pgs = set()
@@ -121,7 +123,11 @@ def _lazy_init(
             # Share the allreduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
-            assert inter_node_state is not None, "Implementation error"
+            assert inter_node_state is not None, (
+                "`_validate_and_get_hybrid_shard_state()` should have returned "
+                "a valid inter-node state if there exists an FSDP instance "
+                "using a hybrid sharding strategy"
+            )
             fsdp_module._inter_node_state = inter_node_state
 
         # Relax the assert for non-root FSDP instances in case the nested
