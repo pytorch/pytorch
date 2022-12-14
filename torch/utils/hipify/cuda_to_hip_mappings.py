@@ -4128,6 +4128,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cudaStreamGetPriority",
             ("hipStreamGetPriority", CONV_STREAM, API_RUNTIME, HIP_UNSUPPORTED),
         ),
+        ("cudaCpuDeviceId", ("hipCpuDeviceId", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamDefault", ("hipStreamDefault", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamNonBlocking", ("hipStreamNonBlocking", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceSynchronize", ("hipDeviceSynchronize", CONV_DEVICE, API_RUNTIME)),
@@ -8085,6 +8086,20 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 API_PYTORCH,
             ),
         ),
+        (
+            "cuda::CUDAAllocator::recordStream",
+            (
+                "hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
+                API_PYTORCH,
+            ),
+        ),
+        (
+            "CUDAAllocator::recordStream",
+            (
+                "HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
+                API_PYTORCH,
+            ),
+        ),
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (
@@ -8256,6 +8271,8 @@ C10_MAPPINGS = collections.OrderedDict(
     [
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
+        ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),
+        ("c10/cuda/CUDADeviceAssertionHost.h", ("c10/hip/HIPDeviceAssertionHost.h", API_C10)),
         ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
@@ -8295,6 +8312,9 @@ C10_MAPPINGS = collections.OrderedDict(
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
+        ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
+        ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
+        ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
 )

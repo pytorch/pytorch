@@ -27,12 +27,10 @@ def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_RUNTIME_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch._assert
@@ -42,12 +40,10 @@ def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_ACCURACY_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch.add
@@ -191,8 +187,10 @@ class MinifierTests(MinifierTestBase):
         """
         )
 
+        repro_after = "dynamo"
+        repro_level = 2
         test_code = self._gen_test_code(
-            run_code, "dynamo", 2, RELU_CUSTOM_ERROR_BACKEND
+            run_code, repro_after, repro_level, RELU_CUSTOM_ERROR_BACKEND
         )
         _, repro_dir = self._run_test_code(test_code)
         launch_proc, _ = self._run_minifier_launcher("", repro_dir)

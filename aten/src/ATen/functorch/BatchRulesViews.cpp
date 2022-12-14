@@ -172,7 +172,7 @@ const Tensor& resize__plumbing(
       optional_memory_format == c10::MemoryFormat::Contiguous,
       "resize_: batching rule only supports None or Contiguous MemoryFormat");
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "resize__plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
@@ -275,14 +275,14 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Ten
   return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, int64_t index) {
+std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select(dim, index), nullopt);
+    return std::make_tuple(self.select_symint(dim, index), nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);
   auto dim_physical = getPhysicalDim(_self, true, dim);
-  auto result = _self.select(dim_physical, index);
+  auto result = _self.select_symint(dim_physical, index);
   return std::make_tuple(result, 0);
 }
 
@@ -402,7 +402,7 @@ std::tuple<Tensor, optional<int64_t>> permute_batching_rule(
 
 std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    SymIntArrayRef input_sizes, int64_t dim, int64_t index) {
+    c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank + 1) + 1;
@@ -535,8 +535,6 @@ Tensor trace_decomp(const Tensor& tensor) {
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  VMAP_SUPPORT(diag, diag_batch_rule);
-  VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);

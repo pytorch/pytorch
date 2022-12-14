@@ -1648,6 +1648,17 @@ cu_library(
     deps = [":torch_headers"],
 )
 
+torch_sources = ({
+    k: "" for k in (
+    libtorch_core_sources +
+    libtorch_distributed_sources +
+    torch_cpp_srcs +
+    libtorch_extra_sources +
+    jit_core_sources +
+    lazy_tensor_ts_sources +
+    GENERATED_AUTOGRAD_CPP)
+}).keys()
+
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
@@ -1657,11 +1668,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
-        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
-    ],
+    )) + torch_sources,
     copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",

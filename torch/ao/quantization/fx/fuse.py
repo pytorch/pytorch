@@ -24,11 +24,13 @@ from ..backend_config.utils import (
     get_fusion_pattern_to_root_node_getter,
     get_fusion_pattern_to_extra_inputs_getter,
 )
-from .backend_config_utils import get_fusion_pattern_to_fuse_handler_cls
 
 from .custom_config import FuseCustomConfig
 
-from .fusion_patterns import *  # noqa: F401,F403
+from .fuse_handler import (
+    _get_fusion_pattern_to_fuse_handler_cls,
+    FuseHandler,
+)
 
 from typing import Any, Callable, Dict, List, Tuple, Union
 import warnings
@@ -38,6 +40,9 @@ from torch.ao.quantization.utils import Pattern, NodePattern
 
 __all__ = [
     "fuse",
+    # TODO: We should make this private in the future
+    # This is currently needed for test_public_bindings for some reason
+    "FuseHandler",
 ]
 
 
@@ -69,7 +74,7 @@ def fuse(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
-    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(get_fusion_pattern_to_fuse_handler_cls(backend_config))
+    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(_get_fusion_pattern_to_fuse_handler_cls(backend_config))
     fuser_method_mapping = get_fuser_method_mapping(backend_config)
     fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
     fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config)

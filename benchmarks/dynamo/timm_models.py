@@ -67,11 +67,16 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set()
+REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
 
 SKIP = {
     # Unusual training setup
     "levit_128",
+}
+
+
+MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
+    "cait_m36_384": 4,
 }
 
 
@@ -223,6 +228,10 @@ class TimmRunnner(BenchmarkRunner):
             )
         batch_size = batch_size or recorded_batch_size
 
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
+
         # example_inputs = torch.randn(
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
         # )
@@ -248,8 +257,6 @@ class TimmRunnner(BenchmarkRunner):
             model.train()
         else:
             model.eval()
-
-        self.init_optimizer(device, model.parameters())
 
         self.validate_model(model, example_inputs)
 
@@ -303,7 +310,7 @@ class TimmRunnner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):

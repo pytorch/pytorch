@@ -317,6 +317,9 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
+    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 12, 15)),
+    ("aten::_scaled_dot_product_attention_forward", datetime.date(2022, 12, 15)),
+    ("aten::_efficient_attention_backward", datetime.date(2022, 12, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
 ]
 
