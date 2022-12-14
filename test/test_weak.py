@@ -116,6 +116,11 @@ class WeakTest(TestCase):
         self.assertEqual(list(d.keys()), [o2])
 
     def test_weak_keyed_union_operators(self):
+        try:
+            {} | {}
+        except TypeError:
+            self.skipTest("dict union not supported in this Python")
+
         o1 = C()
         o2 = C()
         o3 = C()
@@ -174,15 +179,13 @@ class WeakTest(TestCase):
         # `deepcopy` should be either True or False.
         exc = []
 
-        class DummyKey:
-            __slots__ = ["ctr"]
-
+        # Cannot give these slots as weakrefs weren't supported
+        # on these objects until later versions of Python
+        class DummyKey:  # noqa: B903
             def __init__(self, ctr):
                 self.ctr = ctr
 
-        class DummyValue:
-            __slots__ = ["ctr"]
-
+        class DummyValue:  # noqa: B903
             def __init__(self, ctr):
                 self.ctr = ctr
 
