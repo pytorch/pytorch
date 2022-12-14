@@ -22,6 +22,8 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
+
+#include <utility>
 #endif
 
 namespace {
@@ -38,7 +40,7 @@ namespace {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (t.defined() && at::functionalization::impl::isFunctionalTensor(t)) {
           any_functional_inputs = true;
           at::functionalization::impl::sync(t);
@@ -79,7 +81,7 @@ namespace {
     for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor() && should_wrap_outputs) {
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (!t.defined()) continue;
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
@@ -169,7 +171,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
       return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, view_meta);
+  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
   return self;
 }
 
@@ -278,7 +280,7 @@ at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRe
     }
   );
 
-  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());

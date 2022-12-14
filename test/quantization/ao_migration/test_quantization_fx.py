@@ -59,9 +59,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_pattern_utils(self):
         function_list = [
             'QuantizeHandler',
-            'register_fusion_pattern',
+            '_register_fusion_pattern',
             'get_default_fusion_patterns',
-            'register_quant_pattern',
+            '_register_quant_pattern',
             'get_default_quant_patterns',
             'get_default_output_activation_post_process_map'
         ]
@@ -135,10 +135,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_match_utils(self):
         function_list = [
-            'MatchResult',
+            '_MatchResult',
             'MatchAllNode',
-            'is_match',
-            'find_matches'
+            '_is_match',
+            '_find_matches'
         ]
         self._test_function_import('fx.match_utils', function_list)
 
@@ -194,22 +194,15 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_utils(self):
         function_list = [
-            'graph_pretty_str',
-            'get_per_tensor_qparams',
-            'quantize_node',
             'get_custom_module_class_keys',
             'get_linear_prepack_op_for_dtype',
             'get_qconv_prepack_op',
-            'get_qconv_op',
             'get_new_attr_name_with_prefix',
             'graph_module_from_producer_nodes',
             'assert_and_get_unique_device',
             'create_getattr_from_value',
-            'create_qparam_nodes',
             'all_node_args_have_no_tensors',
-            'node_return_type_is_int',
             'get_non_observable_arg_indexes_and_types',
-            'is_get_tensor_info_node',
             'maybe_get_next_module'
         ]
         self._test_function_import('fx.utils', function_list)
