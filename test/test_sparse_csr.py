@@ -1459,13 +1459,25 @@ class TestSparseCSR(TestCase):
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
-        # Tensor params
-        batches = [(), (2,)]
-        size = [128, 256]
 
-        for bd, bs, m, n, k in itertools.product(batches, batches, size, size, size):
-            bsr = tensor(bs + (m, k)).to_sparse_bsr(block_size)
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,)]
+        size = [128, 256, 0]
+
+        # Whether to make inputs orthogonal so that the product is zero
+        make_orthogonal = [True, False]
+
+        for bd, bs, m, n, k, is_ortho in itertools.product(batches, batches, size, size, size, make_orthogonal):
+            bsr = tensor(bs + (m, k))
+            # NOTE: do not get confused, it will be transposed
             dense = tensor(bd + (n, k))
+
+            if is_ortho:
+                bsr = torch.cat((bsr, torch.zeros_like(bsr)), dim=-1)
+                dense = torch.cat((dense, torch.zeros_like(dense)), dim=-1)
+
+            bsr = bsr.to_sparse_bsr(block_size)
+
             if bsr.dim() == 2:
                 # Test against linear to check dispatch.
                 res_tri = torch.nn.functional.linear(dense, bsr)
