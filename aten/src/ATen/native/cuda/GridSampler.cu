@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cuda/GridSampler.h>
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/cuda/GridSampler.cuh>
@@ -20,7 +20,7 @@ using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
 
 namespace {
-  template <typename scalar_t, typename accscalar_t, typename index_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_kernel(
       const index_t nthreads,
@@ -30,6 +30,8 @@ namespace {
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners) {
+
+    using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
     index_t inp_H = input.sizes[2];
     index_t inp_W = input.sizes[3];
@@ -58,8 +60,8 @@ namespace {
       scalar_t x = grid.data[grid_offset];
       scalar_t y = grid.data[grid_offset + grid_sCoor];
 
-      accscalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-      accscalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+      opmath_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+      opmath_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -73,16 +75,16 @@ namespace {
         index_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
-        accscalar_t nw = (ix_se - ix)    * (iy_se - iy);
-        accscalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-        accscalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-        accscalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
+        opmath_t nw = (ix_se - ix)    * (iy_se - iy);
+        opmath_t ne = (ix    - ix_sw) * (iy_sw - iy);
+        opmath_t sw = (ix_ne - ix)    * (iy    - iy_ne);
+        opmath_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
         // calculate bilinear weighted pixel value and set output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
-          accscalar_t out_acc = 0;
+          opmath_t out_acc = 0;
           if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
           }
@@ -116,16 +118,16 @@ namespace {
         ix = grid_sampler_unnormalize(x, inp_W, align_corners);
         iy = grid_sampler_unnormalize(y, inp_H, align_corners);
 
-        accscalar_t ix_nw = ::floor(ix);
-        accscalar_t iy_nw = ::floor(iy);
+        opmath_t ix_nw = ::floor(ix);
+        opmath_t iy_nw = ::floor(iy);
 
-        const accscalar_t tx = ix - ix_nw;
-        const accscalar_t ty = iy - iy_nw;
+        const opmath_t tx = ix - ix_nw;
+        const opmath_t ty = iy - iy_nw;
 
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
-          accscalar_t coefficients[4];
+          opmath_t coefficients[4];
 
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
@@ -148,7 +150,7 @@ namespace {
     }
   }
 
-  template <typename scalar_t, typename accscalar_t, typename index_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_kernel(
       const index_t nthreads,
@@ -159,6 +161,7 @@ namespace {
       const GridSamplerPadding padding_mode,
       bool align_corners) {
 
+    using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
     index_t inp_D = input.sizes[2];
     index_t inp_H = input.sizes[3];
@@ -194,9 +197,9 @@ namespace {
       scalar_t y = grid.data[grid_offset + grid_sCoor];
       scalar_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
-      accscalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
-      accscalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
-      accscalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
+      opmath_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+      opmath_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+      opmath_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get corner pixel values from (x, y, z)
@@ -235,14 +238,14 @@ namespace {
         index_t iz_bse = iz_tnw + 1;
 
         // get surfaces to each neighbor:
-        accscalar_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
-        accscalar_t tne = (ix    - ix_bsw) * (iy_bsw - iy)    * (iz_bsw - iz);
-        accscalar_t tsw = (ix_bne - ix)    * (iy    - iy_bne) * (iz_bne - iz);
-        accscalar_t tse = (ix    - ix_bnw) * (iy    - iy_bnw) * (iz_bnw - iz);
-        accscalar_t bnw = (ix_tse - ix)    * (iy_tse - iy)    * (iz - iz_tse);
-        accscalar_t bne = (ix    - ix_tsw) * (iy_tsw - iy)    * (iz - iz_tsw);
-        accscalar_t bsw = (ix_tne - ix)    * (iy    - iy_tne) * (iz - iz_tne);
-        accscalar_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
+        opmath_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
+        opmath_t tne = (ix    - ix_bsw) * (iy_bsw - iy)    * (iz_bsw - iz);
+        opmath_t tsw = (ix_bne - ix)    * (iy    - iy_bne) * (iz_bne - iz);
+        opmath_t tse = (ix    - ix_bnw) * (iy    - iy_bnw) * (iz_bnw - iz);
+        opmath_t bnw = (ix_tse - ix)    * (iy_tse - iy)    * (iz - iz_tse);
+        opmath_t bne = (ix    - ix_tsw) * (iy_tsw - iy)    * (iz - iz_tsw);
+        opmath_t bsw = (ix_tne - ix)    * (iy    - iy_tne) * (iz - iz_tne);
+        opmath_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
 
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
@@ -251,7 +254,7 @@ namespace {
           // + (c, iz_tsw, iy_tsw, ix_tsw) * tsw + (c, iz_tse, iy_tse, ix_tse) * tse
           // + (c, iz_bnw, iy_bnw, ix_bnw) * bnw + (c, iz_bne, iy_bne, ix_bne) * bne
           // + (c, iz_bsw, iy_bsw, ix_bsw) * bsw + (c, iz_bse, iy_bse, ix_bse) * bse
-          accscalar_t out_acc = 0;
+          opmath_t out_acc = 0;
           if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_tnw * inp_sD + iy_tnw * inp_sH + ix_tnw * inp_sW] * tnw;
           }
@@ -757,10 +760,9 @@ void launch_grid_sampler_2d_forward_kernel(
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
-      using accscalar_t = at::acc_type<scalar_t, true>;
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
-        grid_sampler_2d_kernel<scalar_t, accscalar_t>
+        grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(input),
@@ -771,7 +773,7 @@ void launch_grid_sampler_2d_forward_kernel(
             align_corners);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
-        grid_sampler_2d_kernel<scalar_t, accscalar_t>
+        grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(input),
@@ -801,10 +803,9 @@ void launch_grid_sampler_3d_forward_kernel(
   int64_t count = N * D * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_cuda", [&] {
-      using accscalar_t = at::acc_type<scalar_t, true>;
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
-        grid_sampler_3d_kernel<scalar_t, accscalar_t>
+        grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(input),
@@ -815,7 +816,7 @@ void launch_grid_sampler_3d_forward_kernel(
             align_corners);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
-        grid_sampler_3d_kernel<scalar_t, accscalar_t>
+        grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(input),
