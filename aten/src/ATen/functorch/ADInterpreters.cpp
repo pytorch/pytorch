@@ -44,12 +44,17 @@ Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
+static Tensor base_lift(const Tensor& tensor, int64_t level) {
+  auto tensor_ = unwrapIfDead(tensor);
+  return materializeGradWrappers(tensor_, level);
+}
+
 Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
-  return materializeGradWrappers(tensor, level());
+  return base_lift(tensor, level());
 }
 
 static void autogradBasedTransformProcess(
@@ -139,7 +144,7 @@ static void autogradBasedTransformSendToNext(
       if (!ivalue.isTensor()) {
         continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
       }
-      const auto tensor = ivalue.toTensor();
+      const auto& tensor = ivalue.toTensor();
       auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
       if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
         // if the input is immutable, we find if it aliases anything, noting that

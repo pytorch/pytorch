@@ -15,7 +15,7 @@
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
 /torch/nn/ @albanD @jbschlosser
-/torch/optim/ @albanD
+/torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
@@ -25,8 +25,8 @@
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @jerryzh168 @dzdang
-/aten/src/ATen/native/quantized/cudnn @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized/cuda @jerryzh168
+/aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
 /test/ao/ @jerryzh168 @z-a-f @hdcharles
 /test/quantization/ @jerryzh168 @z-a-f
@@ -39,22 +39,22 @@ nn/quantizable/ @jerryzh168 @z-a-f
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol
 /torch/distributed/_composable @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol
 
 # ONNX Export
 /torch/csrc/jit/passes/onnx.h @bowenbao @abock

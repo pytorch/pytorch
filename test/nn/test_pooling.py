@@ -130,6 +130,9 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -409,6 +412,30 @@ class TestPoolingNNDeviceType(NNTestCase):
         inp = torch.rand([16, 50, 32, 32], device=device)
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 2], device=device)
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_samples(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[1, 1, 1], _random_samples=samples)
+        inp = torch.randn([0, 16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((0, 16, 1, 1, 1), device=device))
+
+        inp1 = torch.randn([1, 16, 50, 32, 32], device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
+            out1 = mod(inp1)
 
     @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):

@@ -10,6 +10,7 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 
+#include <iostream>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 #endif
@@ -73,14 +74,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const at::Tensor& logsumexp,
     const at::Tensor& out,
+    const at::Tensor& logsumexp,
     bool causal) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
-    // ndim
+  // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
   TORCH_CHECK(query.dim() == key.dim());
   TORCH_CHECK(query.dim() == value.dim());
@@ -128,6 +129,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   // initialized
   bool grad_kv_needs_init = causal && N > M;
   at::Tensor grad_q, grad_k, grad_v;
+  int8_t gQKV_strideM_multiplier = 1;
   if (!grad_kv_needs_init && query.size(1) == key.size(1) &&
       query.size(3) == value.size(3) &&
       query.storage().is_alias_of(key.storage()) &&
@@ -141,10 +143,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     grad_q = chunk.select(2, 0);
     grad_k = chunk.select(2, 1);
     grad_v = chunk.select(2, 2);
+    gQKV_strideM_multiplier=3;
   } else {
-    grad_q = at::empty_like(query);
-    grad_k = grad_kv_needs_init ? at::zeros_like(key) : at::empty_like(key);
-    grad_v = grad_kv_needs_init ? at::zeros_like(value) : at::empty_like(value);
+    grad_q = at::empty(query.sizes(), query.options());
+    grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
+                                : at::empty(key.sizes(), key.options());
+    grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
+                                : at::empty(value.sizes(), value.options());
   }
 
   auto launchKernel = [&](auto _k, int computeCapability) {
@@ -198,7 +203,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
-    p.gQKV_strideM_multiplier = grad_q.is_contiguous() ? 1 : 3;
+    p.gQKV_strideM_multiplier = gQKV_strideM_multiplier;
     TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
     TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
     TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
@@ -255,6 +260,29 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+}
+
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    bool causal){
+  if (!grad_out_.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+  auto grad_out = grad_out_.transpose(1, 2);
+  auto out_t = out.transpose(1, 2);
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+
+  Tensor grad_q, grad_k, grad_v;
+  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal);
+  return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
 
 } // namespace native

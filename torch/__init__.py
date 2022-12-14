@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
+from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'compile',
 ]
 
 ################################################################################
@@ -141,20 +142,46 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
+def _preload_cuda_deps():
+    """ Preloads cudnn/cublas deps if they could not be found otherwise """
+    # Should only be called on Linux if default path resolution have failed
+    assert platform.system() == 'Linux', 'Should only be called on Linux'
+    for path in sys.path:
+        nvidia_path = os.path.join(path, 'nvidia')
+        if not os.path.exists(nvidia_path):
+            continue
+        cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
+        cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
+        if not os.path.exists(cublas_path) or not os.path.exists(cudnn_path):
+            continue
+        break
+
+    ctypes.CDLL(cublas_path)
+    ctypes.CDLL(cudnn_path)
+
+
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    try:
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    except OSError as err:
+        # Can only happen of wheel with cublas as PYPI deps
+        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
+        if 'libcublas.so.11' not in err.args[0]:
+            raise err
+        _preload_cuda_deps()
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        platform.system() != 'Windows':
+        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -929,7 +956,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1111,6 +1138,75 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+
+def compile(model: Optional[Callable] = None, *,
+            fullgraph: builtins.bool = False,
+            dynamic: builtins.bool = False,
+            backend: Union[str, Callable] = "inductor",
+            mode: Union[str, None] = None,
+            passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            **kwargs) -> Callable:
+    """
+    Optimizes given model/function using Dynamo and specified backend
+
+    Args:
+       model (Callable): Module/function to optimize
+       fullgraph (bool): Whether it is ok to break model into several subgraphs
+       dynamic (bool): Use dynamic shape tracing
+       backend (str or Callable): backend to be used
+       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       passes (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
+                       - static-memory
+                       - matmul-tune
+                       - matmul-padding
+                       - triton-autotune
+                       - triton-bmm
+                       - triton-mm
+                       - triton-convolution
+                       - rematerialize-threshold
+                       - rematerialize-acc-threshold
+
+    Example::
+
+        @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
+        def foo(x):
+            return torch.sin(x) + torch.cos(x)
+
+    """
+    _C._log_api_usage_once("torch.compile")
+    # Decorator mode
+    if model is None:
+        def fn(model: Callable):
+            if model is None:
+                raise RuntimeError("Model can't be None")
+            return compile(model,
+                           fullgraph=fullgraph,
+                           dynamic=dynamic,
+                           backend=backend,
+                           mode=mode,
+                           passes=passes,
+                           **kwargs)
+        return fn
+
+    import torch._dynamo
+    from torch._dynamo.eval_frame import lookup_backend
+    from torch._inductor.config import InductorConfigContext
+    if mode is not None and passes is not None:
+        raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
+    if mode is None and passes is None:
+        mode = "default"
+    if backend == "inductor":
+        compile_fn = lookup_backend(backend)
+        cm = InductorConfigContext(mode if mode is not None else passes)
+
+        def _compile_fn(model_, inputs_):
+            with cm:
+                return compile_fn(model_, inputs_)
+
+        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
+        backend = _compile_fn
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

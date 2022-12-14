@@ -335,10 +335,21 @@ class OpOverload(PyOperatorABC):
 
         return inner
 
+    # Remove a dispatch key from the dispatch cache.  This will force it to get
+    # recomputed the next time.  Does nothing
+    # WARNING: if you register a dispatch key to py_kernels of an OpOverload,
+    # calling _del_dispatch on that key is NOT sufficient to apply your change,
+    # because a single registration may affect MULTIPLE dispatch keys (e.g.,
+    # registering Autograd affects AutogradCPU).  del_dispatch is to be used
+    # only if you are specifically modifying how get_dispatch handles a
+    # particular input 'key'.
+    def _uncache_dispatch(self, key):
+        self._dispatch_cache.pop(key, None)
+
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
         # This is only called upon a cache miss
-        assert key not in self._dispatch_cache
+        assert key not in self._dispatch_cache, f"{self} {key}"
 
         if key == torch._C.DispatchKey.Python:
             if not self.python_key_mode_table:
@@ -365,6 +376,18 @@ class OpOverload(PyOperatorABC):
             return handler
 
         final_key = resolve_key(self, key)
+
+        # TODO: We could potentially have lots of debugging wrappers against
+        # dispatch keys; design some general registration mechanism instead of
+        # having if statement for each of them
+        if key == torch._C.DispatchKey.Functionalize:
+            import torch._dispatch.python as pydispatch
+
+            if pydispatch.CROSSREF_FUNCTIONALIZE:
+                handler = pydispatch.make_crossref_functionalize(self, final_key)
+                self._dispatch_cache[key] = handler
+                return handler
+
         # print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
@@ -398,6 +421,7 @@ class OpOverloadPacket:
         self.__name__ = op_name
         self._op = op
         self._overload_names = overload_names
+        self._dir = []
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -456,6 +480,7 @@ class OpOverloadPacket:
             overload = OpOverload(self, op_, op_dk_, schema, tags)
             # cache the overload object
             setattr(self, key, overload)
+            self._dir.append(key)
             return overload
         except RuntimeError:
             raise AttributeError(
@@ -463,6 +488,9 @@ class OpOverloadPacket:
                     str(self), key
                 )
             ) from None
+
+    def __iter__(self):
+        return iter(self._dir)
 
     def __call__(self, *args, **kwargs):
         # overloading __call__ to ensure torch.ops.foo.bar()
@@ -515,6 +543,10 @@ class _OpNamespace(types.ModuleType):
     def __init__(self, name):
         super(_OpNamespace, self).__init__("torch.ops." + name)
         self.name = name
+        self._dir = []
+
+    def __iter__(self):
+        return iter(self._dir)
 
     def __getattr__(self, op_name):
         # It is not a valid op_name when __file__ is passed in
@@ -547,6 +579,7 @@ class _OpNamespace(types.ModuleType):
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
+        self._dir.append(op_name)
         return opoverloadpacket
 
 
@@ -563,6 +596,7 @@ class _Ops(types.ModuleType):
         super(_Ops, self).__init__("torch.ops")
         self.loaded_libraries = set()
         self.pyops = _PyOpNamespace()
+        self._dir = []
 
     def __getattr__(self, name):
         # Check if the name is a pyop
@@ -572,7 +606,11 @@ class _Ops(types.ModuleType):
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
         setattr(self, name, namespace)
+        self._dir.append(name)
         return namespace
+
+    def __iter__(self):
+        return iter(self._dir)
 
     def load_library(self, path):
         """

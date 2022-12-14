@@ -22,7 +22,6 @@ from typing import Any, Callable, Dict, List
 
 import torch
 from torch.utils import cpp_extension
-
 from . import config, cuda_properties, exc
 
 LOCK_TIMEOUT = 600
@@ -74,12 +73,17 @@ def code_hash(code):
     )
 
 
-def write(source_code, ext, extra=""):
+def get_code_path(source_code, ext, extra):
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
+    path = os.path.join(subdir, f"{basename}.{ext}")
+    return basename, subdir, path
+
+
+def write(source_code, ext, extra=""):
+    basename, subdir, path = get_code_path(source_code, ext, extra)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
         # use a temp file for thread safety
         fd, tmp_path = tempfile.mkstemp(dir=subdir)
@@ -102,6 +106,13 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
+                # gxx package is only available for Linux
+                # according to https://anaconda.org/conda-forge/gxx/
+                if sys.platform != "linux":
+                    continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
+                    continue
                 from filelock import FileLock
 
                 lock_dir = get_lock_dir()
@@ -309,15 +320,37 @@ def pick_vec_isa():
     return invalid_vec_isa
 
 
-def cpp_compile_command(
-    input,
-    output,
-    warning_all=True,
-    shared=True,
-    include_pytorch=False,
-    vec_isa: VecISA = invalid_vec_isa,
+def get_shared(shared=True):
+    return "-shared -fPIC" if shared else ""
+
+
+def get_warning_all_flag(warning_all=True):
+    return "-Wall" if warning_all else ""
+
+
+def cpp_flags():
+    return "-std=c++17 -Wno-unused-variable"
+
+
+def optimization_flags():
+    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+
+
+def use_custom_generated_macros():
+    return "-D C10_USING_CUSTOM_GENERATED_MACROS"
+
+
+def get_include_and_linking_paths(
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
 ):
-    if include_pytorch or vec_isa != invalid_vec_isa:
+    if sys.platform == "linux" and (
+        include_pytorch
+        or vec_isa != invalid_vec_isa
+        or config.cpp.enable_kernel_profile
+    ):
+        # Note - We include pytorch only on linux right now. There is more work
+        # to do to enable OMP build on darwin where PyTorch is built with IOMP
+        # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
@@ -336,17 +369,29 @@ def cpp_compile_command(
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+    return ipaths, lpaths, libs, macros
 
-    shared_lib = "-shared -fPIC" if shared else ""
-    warning_all_flag = "-Wall" if warning_all else ""
+
+def cpp_compile_command(
+    input,
+    output,
+    warning_all=True,
+    shared=True,
+    include_pytorch=False,
+    vec_isa: VecISA = invalid_vec_isa,
+):
+    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+        include_pytorch, vec_isa
+    )
+
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {shared_lib} {warning_all_flag} -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
-            -D C10_USING_CUSTOM_GENERATED_MACROS
+            {optimization_flags()}
+            {use_custom_generated_macros()}
             -o{output}
         """,
     ).strip()
@@ -390,7 +435,7 @@ class CppCodeCache:
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output)
+                        raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
@@ -427,7 +472,7 @@ def patch_triton_dir():
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("kernel")]
+        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
         return name
 
     @classmethod
@@ -449,17 +494,30 @@ def _load_kernel(source_code):
     return kernel
 
 
+def _load_kernel_name(source_code):
+    return TritonCodeCache.get_name(PyCodeCache.load(source_code))
+
+
 class TritonFuture:
     def __init__(self, source_code, future):
         self.source_code = source_code
         self.future = future
 
+    # @dynamo_utils.dynamo_timed
     def result(self):
+        t0 = time()
         if hasattr(self, "kernel"):
             return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
         kernel = self.kernel = _load_kernel(self.source_code)
+        latency = time() - t0
+        if latency > 50:
+            name = _load_kernel_name(self.source_code)
+            log.warning(
+                f"Detected long compilation time of {latency} seconds for kernel name {name}"
+            )
+            log.warning(self.source_code)
         del self.source_code, self.future
         return kernel
 

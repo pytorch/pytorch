@@ -1,5 +1,10 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+
 import dataclasses
 import io
+import logging
+import operator
+from functools import reduce
 from typing import List, Tuple, Dict, Any, Union, cast
 
 import torch
@@ -8,7 +13,7 @@ from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
-from .planner import (
+from torch.distributed.checkpoint.planner import (
     SavePlanner,
     LoadPlanner,
     SavePlan,
@@ -18,8 +23,9 @@ from .planner import (
     WriteItemType,
 )
 
-from .metadata import (
+from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
+    ChunkStorageMetadata,
     TensorStorageMetadata,
     MetadataIndex,
     Metadata,
@@ -27,13 +33,26 @@ from .metadata import (
     STORAGE_TYPES,
 )
 
-from .planner_helpers import (
+from torch.distributed.checkpoint.planner_helpers import (
     _create_read_items,
     _create_write_items,
     _create_default_metadata_only_plan,
 )
 
-from .utils import find_state_dict_object
+from torch.distributed.checkpoint._nested_dict import (
+    FLATTEN_MAPPING,
+    flatten_state_dict,
+)
+from torch.distributed.checkpoint._nested_tensor import flatten_sharded_tensors
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint.utils import (
+    find_state_dict_object,
+    find_tensor_shard,
+)
+from torch.distributed.checkpoint._traverse import set_element, get_element
+
+logger: logging.Logger = logging.getLogger(__file__)
+
 
 __all__ = [
     "DefaultSavePlanner",
@@ -45,23 +64,63 @@ __all__ = [
 ]
 
 
+# TODO: Update docstrings for default_planner.py
+
+
 class DefaultSavePlanner(SavePlanner):
-    def init(self, state_dict: Dict[str, Any], is_coordinator: bool) -> None:
+    mappings: FLATTEN_MAPPING
+
+    def __init__(
+        self,
+        flatten_state_dict: bool = False,
+        flatten_sharded_tensors: bool = False,
+        dedup_replicated_tensors: bool = False,
+    ) -> None:
+        self.flatten_state_dict = flatten_state_dict
+        self.flatten_sharded_tensors = flatten_sharded_tensors
+        self.dedup_replicated_tensors = dedup_replicated_tensors
+        self.mappings = {}
+
+    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+        if self.flatten_state_dict:
+            state_dict, self.mappings = flatten_state_dict(state_dict)
+        if self.flatten_sharded_tensors:
+            state_dict = flatten_sharded_tensors(state_dict)
         self.state_dict = state_dict
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> SavePlan:
-        self.plan = create_default_local_save_plan(
+        plan = create_default_local_save_plan(
             self.state_dict, self.is_coordinator
         )
+        if self.flatten_state_dict:
+            plan = dataclasses.replace(plan, planner_data=self.mappings)
+        self.plan = plan
+
         return self.plan
 
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        self.global_plan, self.metadata = create_default_global_save_plan(
-            all_plans
-        )
+        if self.dedup_replicated_tensors:
+            all_plans = dedup_tensors(all_plans)
+
+        global_plan, metadata = create_default_global_save_plan(all_plans)
+
+        if self.flatten_state_dict:
+            merged_mappings = reduce(
+                lambda x, y: x | y, (p.planner_data for p in global_plan)
+            )
+            metadata = dataclasses.replace(
+                metadata, planner_data=merged_mappings
+            )
+
+        if not _validate_global_plan(global_plan, metadata):
+            raise ValueError("Failed to validate global plan")
+
+        self.global_plan = global_plan
+        self.metadata = metadata
+
         return self.global_plan, self.metadata
 
     def finish_plan(self, new_plan: SavePlan) -> SavePlan:
@@ -92,12 +151,42 @@ class DefaultSavePlanner(SavePlanner):
 
 
 class DefaultLoadPlanner(LoadPlanner):
+    """
+    DefaultLoadPlanner that adds multiple features on top of LoadPlanner.
+
+    In particular it adds the following:
+
+    flatten_state_dict: Handle state_dict with nested dicts
+    flatten_sharded_tensors: For FSDP in 2D parallel mode
+    """
+
+    original_state_dict: STATE_DICT_TYPE
+    mappings: FLATTEN_MAPPING
+
+    def __init__(
+        self,
+        flatten_state_dict: bool = False,
+        flatten_sharded_tensors: bool = False,
+    ) -> None:
+        self.flatten_state_dict = flatten_state_dict
+        self.flatten_sharded_tensors = flatten_sharded_tensors
+        self.original_state_dict = {}
+        self.mappings = {}
+
     def init(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        if self.flatten_sharded_tensors:
+            state_dict = flatten_sharded_tensors(state_dict)
+
+        self.original_state_dict = state_dict
+
+        if self.flatten_state_dict:
+            state_dict, self.mappings = flatten_state_dict(state_dict)
+
         self.state_dict = state_dict
         self.metadata = metadata
         self.is_coordinator = is_coordinator
@@ -112,7 +201,14 @@ class DefaultLoadPlanner(LoadPlanner):
         return new_plan
 
     def load_bytes(self, read_item: ReadItem, value: io.BytesIO) -> None:
-        self.state_dict[read_item.dest_index.fqn] = torch.load(value)
+        if self.flatten_state_dict:
+            set_element(
+                self.original_state_dict,
+                self.mappings[read_item.dest_index.fqn],
+                torch.load(value),
+            )
+        else:
+            self.state_dict[read_item.dest_index.fqn] = torch.load(value)
 
     def resolve_tensor(self, read_item: ReadItem):
         tensor = self.lookup_tensor(read_item.dest_index)
@@ -125,7 +221,14 @@ class DefaultLoadPlanner(LoadPlanner):
         """
         This is an extension from the planner interface to make it easy to extend the default planner
         """
-        return find_state_dict_object(self.state_dict, index)
+        if self.flatten_state_dict:
+            obj = get_element(
+                self.original_state_dict, self.mappings[index.fqn]
+            )
+            assert isinstance(obj, torch.Tensor)
+            return find_tensor_shard(obj, index)
+        else:
+            return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """
@@ -229,7 +332,10 @@ def create_default_global_save_plan(
 
                 assert (
                     item.tensor_data.chunk is not None
-                ), f"Cannot create MD for tensor without bounds. FQN: {item.index.fqn}"
+                ), f"""
+                    Cannot create MD for tensor without bounds.
+                    FQN: {item.index.fqn}
+                """
                 tensor_md.chunks.append(item.tensor_data.chunk)
         new_plans.append(dataclasses.replace(plan, items=new_items))
     return (new_plans, Metadata(md))
@@ -242,3 +348,79 @@ def _create_default_local_metadata(state_dict: STATE_DICT_TYPE) -> Metadata:
     plan = _create_default_metadata_only_plan(state_dict)
     _, md = create_default_global_save_plan([plan])
     return md
+
+
+def _check_box_overlap(
+    box0: ChunkStorageMetadata, box1: ChunkStorageMetadata
+) -> bool:
+    """
+    Checks if two boxes overlap. Tuples are (offset, lengths)
+    """
+
+    # For each dim of each shard, check if one shard resides on the other
+    # end of second shard with respect to that dim. As an example for a 2D
+    # shard, we would check if one shard is above or on the left of the
+    # other shard.
+    ndims = len(box0.offsets)
+    for i in range(ndims):
+        if box0.offsets[i] >= box1.offsets[i] + box1.sizes[i]:
+            return False
+        if box1.offsets[i] >= box0.offsets[i] + box0.sizes[i]:
+            return False
+
+    return True
+
+
+def _check_box_bounds(
+    outer_box_size: torch.Size, inner_box: ChunkStorageMetadata
+) -> bool:
+    for i in range(len(outer_box_size)):
+        if inner_box.offsets[i] < 0:
+            return False
+        if inner_box.sizes[i] < 0:
+            return False
+        if inner_box.offsets[i] + inner_box.sizes[i] > outer_box_size[i]:
+            return False
+
+    return True
+
+
+def _validate_global_plan(
+    global_plan: List[SavePlan], metadata: Metadata
+) -> bool:
+    all_good = True
+    for key, value in metadata.state_dict_metadata.items():
+        if isinstance(value, BytesStorageMetadata):
+            continue
+        if len(value.size) == 0:
+            continue
+        chunks_volume = 0
+        for chunk_idx, chunk0 in enumerate(value.chunks):
+            if not _check_box_bounds(value.size, chunk0):
+                logger.warning(
+                    f"""
+                        key:{key} has out of bounds chunk:
+                        tensor-size:{value.size} chunk: {chunk0}
+                    """
+                )
+                all_good = False
+            chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
+
+            for chunk1 in value.chunks[chunk_idx + 1 :]:
+                if _check_box_overlap(chunk0, chunk1):
+                    logger.warning(
+                        f"key:{key} has overlapping chunks: {chunk0} {chunk1}"
+                    )
+                    all_good = False
+
+        tensor_volume = reduce(operator.mul, value.size, 1)
+        if chunks_volume != tensor_volume:
+            logger.warning(
+                f"""
+                    key:{key} invalid fill tensor-volume:
+                    {tensor_volume} chunks-volume: {chunks_volume}
+                """
+            )
+            all_good = False
+
+    return all_good

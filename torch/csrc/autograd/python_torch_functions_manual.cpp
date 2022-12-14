@@ -1,6 +1,9 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -421,8 +424,11 @@ static PyObject* THPVariable__to_functional_tensor(
     if (inner_autograd_meta) {
       wrapped.set_requires_grad(self_.requires_grad());
       if (wrapped.requires_grad()) {
-        impl::get_autograd_meta(wrapped)->grad_fn_ =
-            inner_autograd_meta->grad_fn_;
+        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+            new torch::autograd::Error(
+                "Cannot backprop through mirrored meta, file a bug in PyTorch"),
+            torch::autograd::deleteNode);
+        torch::autograd::set_history(wrapped, new_grad_fn);
       }
     }
   }

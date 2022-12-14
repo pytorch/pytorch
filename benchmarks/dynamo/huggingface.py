@@ -432,8 +432,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.init_optimizer(device, model.parameters())
-
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 
@@ -480,7 +478,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)
