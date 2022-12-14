@@ -345,6 +345,18 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
 
+    # Test for bug occurring at the intersection of fake tensors & functionalization.
+    @patch("torch._functorch.config.use_dynamic_shapes", True)
+    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_squeeze_mutation(self):
+        def f(a):
+            b = a.clone().squeeze(-1)
+            b.add_(1.)
+            return a + b
+
+        inp = [torch.randn(3, 1, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
     def test_input_mutation_simple(self):
         def f(a):
             a.mul_(2)
@@ -1215,6 +1227,66 @@ def forward(self, primals_1, primals_2):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
+    def test_real_weights_in_symbolic_mode(self):
+        from functorch.experimental import functionalize
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+
+        inp = torch.randn(2, 5)
+
+        gm = make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        self.assertEqual(gm(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        gm_functionalized = make_fx(functionalize(gm,), tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+        self.assertEqual(gm_functionalized(torch.ones(2, 5)), m(torch.ones(2, 5)))
+
+        inp_count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        inp_count = 0
+        for node in gm_functionalized.graph.nodes:
+            if node.op == "placeholder":
+                inp_count += 1
+
+        # No more param lifting
+        self.assertEqual(inp_count, 1)
+
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors to FakeTensors"):
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=False)(torch.randn(2, 5))
+
+    def test_real_weights_in_symbolic_mode_with_inplace_ops(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(4, 5))
+
+            def forward(self, x):
+                y = self.buffer.add_(3)
+                y.resize_([20])
+                assert(y.shape == self.buffer.shape)
+                return x.sum() + self.buffer.sum()
+
+        m = M().eval()
+        inp = torch.randn(2, 5)
+        # inplace mutation on attr is not allowed
+        with self.assertRaisesRegex(Exception, "Can't call metadata"):
+            make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -1817,9 +1889,7 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('addr', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
@@ -1919,14 +1989,12 @@ symbolic_aot_autograd_failures = {
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
-    xfail('matmul', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
     xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1975,7 +2043,6 @@ symbolic_aot_autograd_failures = {
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('outer', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('pca_lowrank', ''),  # could not find kernel
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...
     xfail('polar', ''),  # could not find kernel
