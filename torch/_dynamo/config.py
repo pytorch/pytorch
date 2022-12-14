@@ -25,7 +25,6 @@ except ImportError:
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
 
-# log compiled function + graphs at level INFO
 output_code = False
 
 # the name of a file to write the logs to
@@ -61,7 +60,6 @@ constant_functions = {
     torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
     external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
 }
 
 

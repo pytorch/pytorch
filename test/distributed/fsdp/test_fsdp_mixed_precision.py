@@ -818,9 +818,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         forward_inputs: Dict[str, nn.Module] = {}
         float16 = MixedPrecision(param_dtype=torch.float16)
 
-        model = SaveForwardInputsModel(
-            forward_inputs, cast_forward_inputs=False,
-        ).cuda()
+        model = SaveForwardInputsModel(forward_inputs).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
@@ -833,52 +831,6 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         self.assertEqual(forward_inputs[model].dtype, torch.float32)
         self.assertEqual(forward_inputs[c1].dtype, torch.float32)
         self.assertEqual(forward_inputs[c2].dtype, torch.float16)
-
-    @skip_if_lt_x_gpu(2)
-    def test_float16_on_one_submodule_skip_inputs(self):
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(
-            param_dtype=torch.float16, cast_forward_inputs=False
-        )
-
-        model = SaveForwardInputsModel(
-            forward_inputs=forward_inputs, cast_forward_inputs=True
-        ).cuda()
-        c1, c2 = model.c1, model.c2
-        x = torch.zeros(2, 100, device="cuda")
-
-        # float16 on one submodule and float32 on everything else
-        model.c2 = FSDP(model.c2, mixed_precision=float16)
-        fsdp = FSDP(model)
-
-        fsdp(x).sum().backward()
-
-        self.assertEqual(forward_inputs[model].dtype, torch.float32)
-        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
-        self.assertEqual(forward_inputs[c2].dtype, torch.float32)
-
-    @skip_if_lt_x_gpu(2)
-    def test_float16_on_one_submodule_skip_inputs_error(self):
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(
-            param_dtype=torch.float16, cast_forward_inputs=False
-        )
-
-        model = SaveForwardInputsModel(
-            forward_inputs=forward_inputs, cast_forward_inputs=False
-        ).cuda()
-        c1, c2 = model.c1, model.c2
-        x = torch.zeros(2, 100, device="cuda")
-
-        # float16 on one submodule and float32 on everything else
-        model.c2 = FSDP(model.c2, mixed_precision=float16)
-        fsdp = FSDP(model)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "mat1 and mat2 must have the same dtype"
-        ):
-            fsdp(x).sum().backward()
 
 
 if __name__ == "__main__":

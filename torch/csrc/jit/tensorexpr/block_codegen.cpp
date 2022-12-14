@@ -309,7 +309,7 @@ void BlockPrinter::visit(StorePtr v) {
 void BlockPrinter::visit(BlockPtr v) {
   os() << "{" << std::endl;
   indent_++;
-  for (const StmtPtr& s : v->stmts()) {
+  for (StmtPtr s : v->stmts()) {
     s->accept(this);
   }
   indent_--;

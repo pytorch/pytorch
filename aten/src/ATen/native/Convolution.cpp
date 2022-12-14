@@ -315,7 +315,7 @@ struct ConvParams {
 
   bool is_output_padding_neg() const {
     bool is_non_neg = false;
-    for (const auto& p : output_padding) {
+    for (auto p : output_padding) {
       is_non_neg |= (p < 0);
     }
     return is_non_neg;
@@ -331,7 +331,7 @@ struct ConvParams {
 
   bool is_padding_neg() const {
     bool is_non_neg = false;
-    for (const auto& p : padding) {
+    for (auto p : padding) {
       is_non_neg |= (p < 0);
     }
     return is_non_neg;

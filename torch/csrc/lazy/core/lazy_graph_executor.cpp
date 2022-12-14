@@ -708,7 +708,7 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     SyncTensorCollection* coll) {
   std::vector<const Node*> roots;
   roots.reserve(ir_values.size());
-  for (const auto& ir_value : ir_values) {
+  for (auto ir_value : ir_values) {
     roots.push_back(ir_value.node.get());
   }
   PostOrderData po_data;
@@ -772,7 +772,7 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
       coll.device,
       po_data->post_order,
       std::move(po_data->emission_map));
-  for (const auto& ir_value : ir_values) {
+  for (auto ir_value : ir_values) {
     lowering_ctx->AddResult(ir_value);
   }
 

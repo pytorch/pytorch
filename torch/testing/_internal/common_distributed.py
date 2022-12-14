@@ -958,30 +958,21 @@ class MultiThreadedTestCase(TestCase):
 
 
 class SaveForwardInputsModule(nn.Module):
-    def __init__(
-        self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
-        cast_forward_inputs: bool,
-    ) -> None:
+    def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
         super().__init__()
         self.l = nn.Linear(100, 100)
         self.forward_inputs = forward_inputs
-        self.cast_forward_inputs = cast_forward_inputs
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.forward_inputs[self] = x
-        return self.l(x.to(self.l.weight.dtype) if self.cast_forward_inputs else x)
+        return self.l(x)
 
 
 class SaveForwardInputsModel(nn.Module):
-    def __init__(
-        self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
-        cast_forward_inputs: bool,
-    ) -> None:
+    def __init__(self, forward_inputs: Dict[nn.Module, torch.Tensor]) -> None:
         super().__init__()
-        self.c1 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
-        self.c2 = SaveForwardInputsModule(forward_inputs, cast_forward_inputs)
+        self.c1 = SaveForwardInputsModule(forward_inputs)
+        self.c2 = SaveForwardInputsModule(forward_inputs)
         self.forward_inputs = forward_inputs
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

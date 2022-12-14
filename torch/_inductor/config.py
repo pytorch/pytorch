@@ -134,12 +134,6 @@ class triton:
     # Use cudagraphs on output code
     cudagraphs = True
 
-    # Synchronize before and after every compiled graph.
-    debug_sync_graph = False
-
-    # Synchronize after every kernel launch, to help pinpoint bugs
-    debug_sync_kernel = False
-
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"
 

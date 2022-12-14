@@ -76,7 +76,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
-  for (const auto& b : bufs) {
+  for (auto b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
@@ -86,7 +86,7 @@ std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
-  for (const auto& b : bufs) {
+  for (auto b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;

@@ -568,7 +568,7 @@ RegisterOperators reg_guard({
             }
           }
 
-          for (const auto& type : types) {
+          for (auto type : types) {
             auto tt = type->expect<TensorType>();
             auto ss = tt->symbolic_sizes();
             TORCH_INTERNAL_ASSERT(ss.rank());
@@ -720,7 +720,7 @@ void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
 }
 
 Operation createTensorExprDynamicGroup(const Node* node) {
-  const auto& graph = node->g(attr::Subgraph);
+  auto graph = node->g(attr::Subgraph);
   Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
   // call to TensorExprDynamicGroup, which affects performance. Ideally, we
