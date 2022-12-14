@@ -6,6 +6,7 @@ python_library(
     base_module = "torchgen",
     visibility = ["PUBLIC"],
     deps = [
+        "//third_party:mypy-extensions",
         "//third_party:pyyaml",
         "//third_party:typing-extensions",
     ],
