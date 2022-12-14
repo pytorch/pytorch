@@ -5758,6 +5758,27 @@ class TestQuantizedConv(TestCase):
             qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
             # The following should pass when input shape is changed
             torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+        # conv_transposed part
+        with override_quantized_engine('onednn'):
+            bs = 1
+            ic, oc = 16, 33
+            kh, kw = 3, 3
+            ih, iw = 50, 100
+            bias = None
+            strides, paddings, output_paddings, dilates, groups = [2, 2], [0, 0], [0, 0], [1, 1], 1
+            w = torch.randn((ic, oc, kh, kw))
+            qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            w_packed = torch.ops.quantized.conv_transpose2d_prepack(
+                qw, bias, strides, paddings, output_paddings, dilates, groups
+            )
+            torch.ops.quantized.conv_transpose2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
+            ih, iw = 5, 4
+            x = torch.randn((bs, ic, ih, iw))
+            qx = torch.quantize_per_tensor(x, scale=1.0, zero_point=0, dtype=torch.quint8)
+            # The following should pass when input shape is changed
+            torch.ops.quantized.conv2d(qx, w_packed, output_scale=1.0, output_zero_point=0)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),

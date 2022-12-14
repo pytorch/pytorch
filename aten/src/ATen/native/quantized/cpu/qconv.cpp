@@ -1316,7 +1316,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   }
   // Since src zero point is unknown, set runtime value here
-  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL});
+  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), src_zero_points);
 
   // Bias might be modified outside (e.g. by quantization bias correction).
   // If so, update the prepacked bias as well.
@@ -1353,15 +1353,18 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       ideep::convolution_transpose_forward::compute(
           pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
-      ideep::convolution_transpose_forward::compute_v2(
-          src, weights, b, dst_dims, dst,
-          strides, padding_l, padding_r, dilates,
-          groups(), src_scales, weights_scales,
-          ideep::scale_t(scale_size, inv_output_scale),
+      DeconvParams params;
+      ideep::convolution_transpose_forward::prepare(
+          params, src, weights, b, dst_dims, dst,
+          strides, padding_l, padding_r, dilates, groups(),
+          src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
+      onednn_utils::try_reorder(
+          weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+      ideep::convolution_transpose_forward::compute(params, src, weights, b, dst);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(

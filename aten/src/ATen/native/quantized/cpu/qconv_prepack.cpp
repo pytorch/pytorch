@@ -366,7 +366,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   auto padding_l = padding.vec();
   auto padding_r = padding.vec();
   auto dilates = dilation.vec();
-  auto op_attr = ideep::attr_t();
   std::vector<int32_t> wgt_zero_points;
   ideep::scale_t wgt_scales;
   const int output_channels = transpose ? weight.size(1) * groups
@@ -397,11 +396,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
 
-  // Set runtime src zero point
-  auto src_zero_point = {DNNL_RUNTIME_S32_VAL};
-  op_attr.set_zero_points(DNNL_ARG_SRC,
-                          ideep::utils::tensor_zp_mask(src_zero_point.size()),
-                          src_zero_point);
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
   ideep::dims dims_iohw, dims_giohw;
@@ -412,7 +406,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
-        ideep::dims(), op_attr);
+        ideep::dims());
     // convolution_transpose_forward::expected_weights_desc() gives format [i, o, ...],
     // but ONEDNN requires [o, i, ...] for computation
     dims_iohw = w_desc.get_dims();
@@ -427,7 +421,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-        dnnl::memory::data_type::u8, ideep::dims(), op_attr);
+        dnnl::memory::data_type::u8, ideep::dims());
     weight_copy = weight.clone();
   }
   if (with_groups) {
