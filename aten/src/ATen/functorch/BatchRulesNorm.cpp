@@ -222,7 +222,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "batch_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   Tensor grad_out_value;
@@ -304,7 +304,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   const Tensor& bias = *bias_maybe_owned;
 
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_group_norm_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({input, weight_opt, bias_opt}, cur_level)) {
@@ -393,7 +393,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_group_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt}, cur_level)) {
@@ -604,7 +604,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_layer_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt, bias_opt}, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -756,7 +756,7 @@ struct NativeBatchNormBackwardBatchRuleHelper {
     std::array<bool,3> output_mask) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "NativeBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({grad_out, input, weight_opt, running_mean_opt,
@@ -786,7 +786,7 @@ struct CudnnBatchNormBackwardBatchRuleHelper {
     const at::Tensor & reserve) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "CudnnBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
@@ -814,7 +814,7 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
     double eps) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "MiopenBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,

@@ -2995,6 +2995,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_is_compiling(self):
+        def f():
+            if torch._dynamo.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+        self.assertEqual(opt_f(), torch.ones(2, 2))
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1

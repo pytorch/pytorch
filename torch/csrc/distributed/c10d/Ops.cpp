@@ -173,6 +173,21 @@ c10::intrusive_ptr<Work> alltoall_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> alltoall_base_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->alltoall_base(
+      output,
+      input,
+      output_split_sizes,
+      input_split_sizes,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -210,6 +225,14 @@ c10::intrusive_ptr<Work> recv_(
   auto tensor_vec = tensors.vec();
   return process_group->recv(
       tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> recv_any_source_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recvAnysource(tensor_vec, static_cast<int>(tag));
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -264,6 +287,9 @@ TORCH_LIBRARY(c10d, m) {
       "alltoall_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
   m.def(
+      "alltoall_base_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_base_));
+  m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def(
@@ -272,6 +298,9 @@ TORCH_LIBRARY(c10d, m) {
           c10::DispatchKey::CompositeExplicitAutograd, monitored_barrier_));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
   m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
+  m.def(
+      "recv_any_source_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_any_source_));
 }
 } // namespace
 
@@ -512,6 +541,31 @@ c10::intrusive_ptr<Work> alltoall(
       output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
+c10::intrusive_ptr<Work> alltoall_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& output,
+    at::Tensor& input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    const AllToAllOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::alltoall_base_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::Tensor&,
+                           at::Tensor&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           std::vector<int64_t>,
+                           std::vector<int64_t>,
+                           int64_t)>();
+  return op.call(
+      output,
+      input,
+      process_group,
+      output_split_sizes,
+      input_split_sizes,
+      opts.timeout.count());
+}
+
 void monitored_barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts,
@@ -574,6 +628,19 @@ c10::intrusive_ptr<Work> recv(
                            int64_t,
                            int64_t)>();
   return op.call(tensors, process_group, srcRank, tag);
+}
+
+c10::intrusive_ptr<Work> recv_any_source(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    int64_t tag) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::recv_any_source_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t)>();
+  return op.call(tensors, process_group, tag);
 }
 
 } // namespace ops

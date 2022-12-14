@@ -1523,9 +1523,10 @@ def _to_copy(
 ):
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
+    if device is None and dtype is None and memory_format is None:
+        return x.clone()
     dtype_converted = False
-    if device is not None and device != x.get_device():
+    if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
