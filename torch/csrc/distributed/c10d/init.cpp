@@ -1440,34 +1440,26 @@ Arguments:
 
           .def(
               "alltoall_base",
-              &::c10d::ProcessGroup::alltoall_base,
-              py::arg("output_tensor"),
-              py::arg("input_tensor"),
-              py::arg("output_split_sizes"),
-              py::arg("input_split_sizes"),
-              py::arg("opts") = ::c10d::AllToAllOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "alltoall_base",
-              [](::c10d::ProcessGroup& self,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& output,
                  at::Tensor& input,
                  std::vector<int64_t> outputSplitSizes,
-                 std::vector<int64_t> inputSplitSizes) {
-                return self.alltoall_base(
+                 std::vector<int64_t> inputSplitSizes,
+                 const ::c10d::AllToAllOptions& opts) {
+                return ::c10d::ops::alltoall_base(
+                    self,
                     output,
                     input,
                     outputSplitSizes,
                     inputSplitSizes,
-                    ::c10d::AllToAllOptions());
+                    opts);
               },
               py::arg("output"),
               py::arg("input"),
               py::arg("output_split_sizes"),
               py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "alltoall",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1522,7 +1514,11 @@ Arguments:
 
           .def(
               "recv_anysource",
-              &::c10d::ProcessGroup::recvAnysource,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t tag) {
+                return ::c10d::ops::recv_any_source(self, tensors, tag);
+              },
               py::call_guard<py::gil_scoped_release>())
 
           .def(
