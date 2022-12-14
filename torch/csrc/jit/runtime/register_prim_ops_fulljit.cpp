@@ -315,7 +315,14 @@ RegisterOperators reg(
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
          },
-         aliasAnalysisSpecialCase())});
+         aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::awaitable_wait(Await(t) self) -> t",
+         [](Stack& stack) {
+           TORCH_CHECK(false, "Not implemented yet");
+         },
+         aliasAnalysisSpecialCase()),
+    });
 
 RegisterOperators logging_operators(
     {Operator(

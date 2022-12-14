@@ -240,6 +240,40 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 };
 
+struct VISIBILITY_HIDDEN PythonAwaitWrapper
+    : std::enable_shared_from_this<PythonAwaitWrapper> {
+  explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
+      : aw_(std::move(aw)) {}
+
+  explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
+  PythonAwaitWrapper& operator=(const PythonAwaitWrapper&) = delete;
+
+  py::object wait() {
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(aw_->wait());
+    return py_obj;
+  }
+
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    aw_->markCompleted(std::move(value));
+  }
+
+  // void init_func(py::function f) {
+  //   auto pf = std::make_shared<PythonFunctionGuard>(std::move(f));
+  // }
+
+  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+
+ private:
+  std::shared_ptr<PythonAwaitWrapper> getPtr() {
+    return shared_from_this();
+  }
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports

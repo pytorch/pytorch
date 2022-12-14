@@ -92,6 +92,14 @@ inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const& {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
 }
+inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() && {
+  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::Await>();
+}
+inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() const& {
+  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  return toIntrusivePtr<ivalue::Await>();
+}
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return moveToIntrusivePtr<c10::RRefInterface>();
@@ -1340,6 +1348,72 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const std::vector<c10::Device> devices_;
 };
 
+struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
+ private:
+  explicit Await(TypePtr type, std::function<IValue()> init_func)
+      : type_(std::move(type)), init_func_(init_func) {}
+
+  explicit Await(TypePtr type) : type_(std::move(type)) {}
+
+  friend c10::intrusive_ptr<Await>;
+
+ public:
+  Await(const Await&) = delete;
+  Await(Await&&) = delete;
+  Await& operator=(const Await&) = delete;
+  Await& operator=(Await&&) = delete;
+
+  IValue wait() {
+    if (!completed_) {
+      TORCH_CHECK(init_func_, "Incompleted Await init_func can't be None");
+      value_ = init_func_();
+      completed_ = true;
+    }
+    return value_;
+  }
+
+  IValue value() {
+    TORCH_CHECK(completed_, "Await must be completed");
+    return value_;
+  }
+
+  void setInitFunc(std::function<IValue()> init_func) {
+    init_func_ = init_func;
+  }
+
+  bool completed() {
+    return completed_;
+  }
+
+  void markCompleted(IValue value) {
+    value_ = std::move(value);
+    completed_ = true;
+  }
+
+  TORCH_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const Await& v);
+
+  TypePtr elementType() const {
+    return type_;
+  }
+
+  void setArgs(std::vector<IValue> args) {
+    args_ = std::move(args);
+  }
+
+  std::vector<IValue> args() {
+    return args_;
+  }
+
+ private:
+  TypePtr type_;
+  std::vector<IValue> args_;
+  std::function<IValue()> init_func_;
+  IValue value_;
+  bool completed_{};
+};
+
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1597,6 +1671,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Await>, toAwait)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
 DEFINE_TO(IValue, toIValue)
@@ -2155,6 +2230,11 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
     : tag(Tag::Future) {
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
+}
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Await> v)
+    : tag(Tag::Await) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 

@@ -82,6 +82,8 @@ struct CodeImpl {
       operator_table_inv_;
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
+  std::vector<std::unique_ptr<GraphFunction>> awaited_functions_;
+  std::unordered_map<Value*, size_t> awaitable_to_function_table_idx_;
   std::vector<TypePtr> type_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
@@ -340,6 +342,16 @@ struct CodeImpl {
   void emitWait(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(WAIT);
+  }
+
+  void emitAwaitableWait(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto fn_idx = awaitable_to_function_table_idx_[node->input()];
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+              << "\n awaitableWait node:" << *node
+              << "\n awaitableWait node.input.node::" << *node->input()->node()
+              << std::endl;
+    insertInstruction(AWAITABLE_WAIT, fn_idx);
   }
 
   void emitDrop(at::ArrayRef<Value*> to_drop) {
@@ -608,7 +620,19 @@ struct CodeImpl {
         "<forked function>", node->g(attr::Subgraph), nullptr));
     forked_functions_.emplace_back(std::move(forked_fn));
     function_table_.emplace_back(forked_functions_.back().get());
+    awaitable_to_function_table_idx_.insert(
+        {node->output(), function_table_.size() - 1});
     insertInstruction(FORK, function_table_.size() - 1, node->inputs().size());
+  }
+
+  void emitAwaitable(Node* node) {
+    emitLoadInputs(node->inputs());
+    std::unique_ptr<GraphFunction> await_fn(new GraphFunction(
+        "<awaitable function>", node->g(attr::Subgraph), nullptr));
+    awaited_functions_.emplace_back(std::move(await_fn));
+    function_table_.emplace_back(awaited_functions_.back().get());
+    insertInstruction(
+        AWAITABLE, function_table_.size() - 1, node->inputs().size());
   }
 
   void emitWarn(Node* node) {
@@ -661,6 +685,9 @@ struct CodeImpl {
         break;
       case aten::wait:
         emitWait(node);
+        break;
+      case aten::awaitable_wait:
+        emitAwaitableWait(node);
         break;
       case prim::Param:
         break;
@@ -715,6 +742,9 @@ struct CodeImpl {
         break;
       case prim::fork:
         emitFork(node);
+        break;
+      case prim::awaitable:
+        emitAwaitable(node);
         break;
       case aten::warn:
         emitWarn(node);

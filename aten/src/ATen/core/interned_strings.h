@@ -163,7 +163,9 @@ namespace c10 {
   _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
+  _(prim, awaitable)                 \
   _(prim, forkClosure)               \
+  _(prim, awaitableClosure)               \
   _(prim, RaiseException)            \
   _(prim, Closure)                   \
   _(prim, CreateObject)              \
@@ -204,6 +206,7 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, dict)                      \
   _(aten, wait)                      \
+  _(aten, awaitable_wait)            \
   _(aten, save)                      \
   _(aten, keys)                      \
   _(aten, ord)                       \

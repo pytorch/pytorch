@@ -1101,6 +1101,21 @@ c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
   c10::intrusive_ptr<Future> future = c10::make_intrusive<Future>(return_type_);
   return future;
 }
+
+c10::intrusive_ptr<c10::ivalue::Await> createAwaitTypeFromGraphOutput(
+    std::shared_ptr<torch::jit::Graph> graph) {
+  TypePtr return_type_;
+  if (graph->outputs().size() == 1) {
+    return_type_ = graph->outputs().at(0)->type();
+  } else {
+    return_type_ = TupleType::create(
+        fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+  }
+  c10::intrusive_ptr<c10::ivalue::Await> await =
+      c10::make_intrusive<c10::ivalue::Await>(return_type_);
+  return await;
+}
+
 } // namespace
 
 /*
@@ -1146,6 +1161,41 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         (*launcher)(std::move(runtime_launcher));
       };
     });
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::awaitable,
+    prim_Awaitable,
+    [](Node* node) -> SROperator {
+      if (!sr_schema_check_kind(node, prim::awaitable)) {
+        return nullptr;
+      }
+      auto awaitGraph = node->g(attr::Subgraph);
+      Inline(*awaitGraph);
+      auto sr_metadata = node->ival(getStaticRuntimeMetadataSymbol())
+                             .toCustomClass<StaticRuntimeMetadata>();
+      auto smodule =
+          std::make_shared<StaticModule>(awaitGraph, sr_metadata->get_opts());
+
+      return [awaitGraph = std::move(awaitGraph),
+              smodule = std::move(smodule)](ProcessedNode* p_node) {
+        std::vector<IValue> args;
+        args.reserve(p_node->num_inputs());
+        for (const auto i : c10::irange(p_node->num_inputs())) {
+          args.push_back(p_node->Input(i));
+        }
+
+        c10::intrusive_ptr<c10::ivalue::Await> await =
+            createAwaitTypeFromGraphOutput(awaitGraph);
+        p_node->Output(0) = await;
+
+        // auto* metadata = p_node->metadata();
+        // DCHECK(metadata);
+        // auto* launcher = metadata->launcher();
+        // DCHECK(launcher);
+        // ForkedSubgraphSRLauncher runtime_launcher(
+        //    smodule, args, future, *launcher);
+        //(*launcher)(std::move(runtime_launcher));
+      };
+    });
 /*
   aten::wait waits on the future (present in corresponding fork)
   to be executed. Once the execution is complete, the future is marked
@@ -1174,6 +1224,34 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           return;
         }
         auto& elems = future->value().toTupleRef().elements();
+        TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
+        for (const auto i : c10::irange(elems.size())) {
+          p_node->Output(i) = elems[i];
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::awaitable_wait,
+    aten_AwaitableWait,
+    [](Node* n) -> SROperator {
+      if (!sr_schema_check(n, "aten::awaitable_wait(Await(t) self) -> t")) {
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        TORCH_INTERNAL_ASSERT(p_node->Input(0).isAwait());
+        auto await = p_node->Input(0).toAwait();
+
+        // blocking call: waiting for the future to be completed
+        await->wait();
+
+        TORCH_INTERNAL_ASSERT(await->completed());
+
+        if (!await->value().isTuple()) {
+          p_node->Output(0) = await->value();
+          return;
+        }
+        auto& elems = await->value().toTupleRef().elements();
         TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
         for (const auto i : c10::irange(elems.size())) {
           p_node->Output(i) = elems[i];

@@ -440,6 +440,36 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             leaveFrame();
             return false;
           }
+          case INST(AWAITABLE_WAIT): {
+            INST_GUARD;
+            auto aw = stack.back().toAwait();
+            if (!aw->completed()) {
+              frame.function->function_table_[inst.X]->ensure_defined();
+
+              auto& gf =
+                  toGraphFunction(*frame.function->function_table_[inst.X]);
+              auto num_outputs = gf.graph()->outputs().size();
+
+              for (const auto& arg : aw->args()) {
+                stack.push_back(arg);
+              }
+
+              // works, but not perfect, no frame enter
+              gf.run(stack);
+              // callFunction(f, stack);
+
+              if (num_outputs == 1) {
+                aw->markCompleted(stack.back());
+              } else {
+                aw->markCompleted(
+                    c10::ivalue::Tuple::create(jit::last(stack, num_outputs)));
+              }
+              drop(stack, num_outputs);
+            }
+            stack.pop_back();
+            stack.emplace_back(aw->value());
+          }
+            INST_NEXT;
           case INST(WAIT): {
             INST_GUARD;
             auto future = stack.back().toFuture();
@@ -725,6 +755,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
+          }
+            INST_NEXT;
+          case INST(AWAITABLE): {
+            INST_GUARD;
+            auto& fn =
+                toGraphFunction(*frame.function->function_table_[inst.X]);
+            auto num_outputs = fn.graph()->outputs().size();
+            TypePtr out_type;
+            if (num_outputs == 1) {
+              out_type = fn.graph()->outputs()[0]->type();
+            } else {
+              std::vector<TypePtr> out_types;
+              for (const auto& o : fn.graph()->outputs()) {
+                out_types.push_back(o->type());
+              }
+              out_type = TupleType::create(out_types);
+            }
+            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            // XXX: Avoid storing arguments this way - Closure must be created
+            // with arguments at .awaitable()
+            aw->setArgs(std::vector<IValue>(stack.end() - inst.N, stack.end()));
+            drop(stack, inst.N);
+            push(stack, std::move(aw));
           }
             INST_NEXT;
           case INST(WARN): {

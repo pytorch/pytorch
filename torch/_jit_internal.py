@@ -39,8 +39,10 @@ import torch
 import torch.distributed.rpc
 import torch.package._mangling as package_mangling
 from torch._C import Future as CFuture
+from torch._C import Await as CAwait
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+from torch.awaits import Await
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
@@ -343,7 +345,8 @@ def get_annotation_str(annotation):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
         subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
-    elif isinstance(annotation, ast.Tuple):
+    elif isinstance(annotation, ast.Tuple) or isinstance(annotation, ast.List):
+        strs = [get_annotation_str(elt) for elt in annotation.elts]
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(
         annotation, ast.NameConstant
@@ -1037,6 +1040,18 @@ def is_future(ann) -> bool:
     return getattr(ann, "__origin__", None) is Future
 
 
+def is_await(ann) -> bool:
+    #if ann is Await:
+    #    #if len(ann.__args__) == 0:
+    #    #    raise RuntimeError(
+    #    #        "Attempted to use Await without a "
+    #    #        "contained type. Please add a contained type, e.g. "
+    #    #        "Await[int]"
+    #    #    )
+    #    return True
+    return getattr(ann, "__origin__", None) is Await
+
+
 if torch.distributed.rpc.is_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
@@ -1397,6 +1412,8 @@ class _TensorExtractor(pickle.Pickler):
         # Futures and RRefs don't technically contain a value, they just offer
         # the means to access a value.
         if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, CAwait):
             return ""
         if isinstance(obj, torch.cuda.Event):
             return ""

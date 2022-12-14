@@ -1839,6 +1839,54 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
+
+  py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
+      m, "Await")
+      .def(py::init([]() {
+        return std::make_shared<PythonAwaitWrapper>(
+            c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get()));
+      }))
+      .def(py::init([](py::function initFunc) {
+        auto functionGuard = std::make_shared<torch::jit::PythonFunctionGuard>(
+            std::move(initFunc));
+
+        std::function<IValue()> pf =
+            [functionGuard(std::move(functionGuard))]() {
+              py::object py_obj = functionGuard->func_();
+              return toTypeInferredIValue(py_obj.release());
+            };
+        return std::make_shared<PythonAwaitWrapper>(
+            c10::make_intrusive<c10::ivalue::Await>(
+                PyObjectType::get(), std::move(pf)));
+      }))
+      .def(
+          "wait",
+          &PythonAwaitWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_result",
+          // Intentionally not releasing GIL
+          &PythonAwaitWrapper::markCompleted)
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonAwaitWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
+          py::call_guard<py::gil_scoped_release>());
+
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
     c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
@@ -1858,6 +1906,35 @@ void initJITBindings(PyObject* module) {
       return false;
     }
     return self_value->overlaps(*other_value);
+  });
+  m.def("awaitable", [](const py::args& args, const py::kwargs& kwargs) {
+    AT_ASSERT(args.size() >= 1);
+    py::function f = py::cast<py::function>(args[0]);
+
+    py::tuple args_tup(args.size() - 1);
+
+    for (const auto i : c10::irange(1, args.size())) {
+      args_tup[i - 1] = args[i];
+    }
+
+    // Run specified function to infer result type
+    auto result = toTypeInferredIValue(f(*args_tup, **kwargs));
+    // retval->markCompleted(std::move(result));
+
+    auto fg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(f));
+
+    std::function<IValue()> ivf = [fg(std::move(fg))]() {
+      py::object py_obj = fg->func_();
+      return toTypeInferredIValue(py_obj.release());
+    };
+    auto retval =
+        c10::make_intrusive<c10::ivalue::Await>(result.type(), std::move(ivf));
+
+    return std::make_shared<PythonAwaitWrapper>(retval);
+  });
+  m.def("awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
+    TORCH_CHECK(py_aw, "Await can't be None");
+    return py_aw->wait();
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);

@@ -1051,6 +1051,48 @@ struct TORCH_API FutureType
   }
 };
 
+struct AwaitType;
+using AwaitTypePtr = std::shared_ptr<AwaitType>;
+
+struct TORCH_API AwaitType
+    : public SingleElementType<TypeKind::AwaitType, AwaitType> {
+  friend struct Type;
+  template <typename... T>
+  static AwaitTypePtr create(TypePtr elem) {
+    return AwaitTypePtr(
+        new AwaitType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "Await(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return create(std::move(contained_types.at(0)));
+  }
+
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs.castRaw<AwaitType>()) {
+      return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
+    }
+    return false;
+  }
+
+ private:
+  AwaitType(TypePtr elem) : SingleElementType(std::move(elem)) {}
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Await[" << getElementType()->annotation_str(printer) << "]";
+    return ss.str();
+  }
+};
+
 struct RRefType;
 using RRefTypePtr = std::shared_ptr<RRefType>;
 

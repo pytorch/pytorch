@@ -1208,6 +1208,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
+  } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
   } else if (

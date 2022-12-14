@@ -53,6 +53,7 @@ TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
 namespace ivalue {
 struct Tuple;
 struct Future;
+struct Await;
 struct ConstantString;
 struct GenericDict;
 struct Object;
@@ -156,6 +157,7 @@ struct Capsule {
   _(GenericList)             \
   _(GenericDict)             \
   _(Future)                  \
+  _(Await)                   \
   _(Device)                  \
   _(Stream)                  \
   _(Object)                  \
@@ -538,6 +540,14 @@ public:
   }
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const&;
+
+  // Future
+  IValue(c10::intrusive_ptr<ivalue::Await> v);
+  bool isAwait() const {
+    return Tag::Await == tag;
+  }
+  c10::intrusive_ptr<ivalue::Await> toAwait() &&;
+  c10::intrusive_ptr<ivalue::Await> toAwait() const&;
 
   // RRef
   IValue(c10::intrusive_ptr<c10::RRefInterface> v);
@@ -1160,6 +1170,8 @@ public:
       case Tag::GenericDict:
         return true;
       case Tag::Future:
+        return true;
+      case Tag::Await:
         return true;
       case Tag::Device:
         return false;

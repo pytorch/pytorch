@@ -34,6 +34,7 @@ namespace jit {
   _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */    \
   _(RET, "") /* exit execution */                                              \
   _(WAIT, "") /* wait for a future to be complete */                           \
+  _(AWAITABLE_WAIT, "") /* call await function */                              \
   _(CALL, "F") /* call function X */                                           \
   _(GUARD, "T") /* check a guard against type_table, true if passes */         \
   _(TYPECHECK, "TN") /* check each type of input[i] against type_table[X+N] */ \
@@ -71,6 +72,7 @@ namespace jit {
     "") /* performs the conversion of a number/scalar to Tensor */             \
   _(IS_CUDA, "") /* invokes aten::is_cuda for a Tensor */                      \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
+  _(AWAITABLE, "CN") /* initialize await for code entry x with N inputs  */    \
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
   _(EXIT, "EX") /* exit the last entered contextmanager */
