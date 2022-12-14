@@ -127,17 +127,12 @@ def reads_from_conv(buf, var_ranges):
     return False, None
 
 
-def ir_node_to_tensor(x, guard_shape=True):
-    shape_fn = (
-        V.graph.sizevars.guard_static_shape
-        if guard_shape
-        else V.graph.sizevars.size_hint
-    )
-    size = [shape_fn(s) for s in x.get_size()]
+def ir_node_to_tensor(x):
+    size = x.get_size()
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]
+        stride = x.get_layout().stride
     else:
-        stride = make_contiguous_strides_for(size)
+        stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
     device = x.get_device()
     t = torch.empty_strided(
@@ -2399,7 +2394,7 @@ class ExternKernel(InputsKernel):
         example_args = []
 
         for x in tensor_args:
-            example_args.append(ir_node_to_tensor(x, guard_shape=True))
+            example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
@@ -3111,11 +3106,9 @@ class Convolution(ExternKernelAlloc):
         groups: int,
     ):
         with V.graph.fake_mode:
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
+            x_fake = ir_node_to_tensor(x)
+            weight_fake = ir_node_to_tensor(weight)
+            bias_fake = ir_node_to_tensor(bias) if bias is not None else bias
             output = torch.ops.aten.convolution(
                 x_fake,
                 weight_fake,
@@ -3370,11 +3363,9 @@ def _prepare_convolution_fusion_create(
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
     with V.graph.fake_mode:
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
+        x_fake = ir_node_to_tensor(x)
+        weight_fake = ir_node_to_tensor(weight)
+        bias_fake = ir_node_to_tensor(bias) if bias is not None else bias
         output = torch.ops.aten.convolution(
             x_fake,
             weight_fake,
@@ -3604,11 +3595,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         kernel = "torch.ops.mkl._mkl_linear"
 
         with V.graph.fake_mode:
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
+            x_fake = ir_node_to_tensor(x)
+            weight_fake = ir_node_to_tensor(orig_w)
+            bias_fake = ir_node_to_tensor(bias) if bias is not None else bias
             output = torch.ops.aten.linear(
                 x_fake,
                 weight_fake,
