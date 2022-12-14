@@ -28,6 +28,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
+    _FSDPState,
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -81,12 +82,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._state_dict_utils import (
-    _register_load_state_dict_post_hooks,
-    _register_load_state_dict_pre_hooks,
-    _register_state_dict_hooks,
-    _register_state_dict_pre_hooks,
-)
+from ._state_dict_utils import _register_all_state_dict_hooks
 from ._unshard_param_utils import (
     _deregister_orig_params,
     _register_flat_param,
@@ -112,7 +108,7 @@ class OptimStateKeyType(Enum):
     PARAM_ID = auto()
 
 
-class FullyShardedDataParallel(nn.Module):
+class FullyShardedDataParallel(nn.Module, _FSDPState):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
@@ -411,10 +407,7 @@ class FullyShardedDataParallel(nn.Module):
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
         _init_state_dict_state(self)
-        _register_state_dict_pre_hooks(self)
-        _register_state_dict_hooks(self)
-        _register_load_state_dict_pre_hooks(self)
-        _register_load_state_dict_post_hooks(self)
+        _register_all_state_dict_hooks(self)
 
     @property
     def module(self) -> nn.Module:
