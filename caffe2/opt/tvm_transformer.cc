@@ -203,6 +203,7 @@ const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
       "Logit",
       "MatMul",
       "Mul",
+      "Normalize",
       "Relu",
       "Reshape",
       "ReplaceNaN",
