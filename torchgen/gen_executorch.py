@@ -13,7 +13,7 @@ from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
 from torchgen.context import method_with_native_function, with_native_function_and_index
 from torchgen.executorch.api import et_cpp
-from torchgen.executorch.api.custom_ops import gen_custom_ops
+from torchgen.executorch.api.custom_ops import gen_custom_ops_registration, ComputeNativeFunctionStub
 from torchgen.executorch.api.types import ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
@@ -21,7 +21,7 @@ from torchgen.gen import (
     get_native_function_declarations,
     LineLoader,
     parse_native_yaml,
-    ParsedYaml,
+    ParsedYaml, get_native_function_schema_registrations,
 )
 from torchgen.model import (
     BackendIndex,
@@ -37,7 +37,7 @@ from torchgen.utils import (
     FileManager,
     make_file_manager,
     mapMaybe,
-    NamespaceHelper,
+    NamespaceHelper, concatMap, Target,
 )
 
 
@@ -302,6 +302,61 @@ def gen_headers(
     )
 
 
+def gen_custom_ops(
+        *,
+        native_functions: Sequence[NativeFunction],
+        selector: SelectiveBuilder,
+        backend_indices: Dict[DispatchKey, BackendIndex],
+        cpu_fm: FileManager,
+        rocm: bool,
+) -> None:
+
+    dispatch_key = DispatchKey.CPU
+    backend_index = backend_indices[dispatch_key]
+    anonymous_definition, static_init_dispatch_registrations = gen_custom_ops_registration(native_functions=native_functions, selector=selector, backend_index=backend_index, rocm=rocm)
+    cpu_fm.write_with_template(
+        f"Register{dispatch_key}CustomOps.cpp",
+        "RegisterDispatchKeyCustomOps.cpp",
+        lambda: {
+            "ops_headers": '#include "NativeFunctions.h"',
+            "DispatchKey": dispatch_key,
+            "dispatch_namespace": dispatch_key.lower(),
+            "dispatch_namespaced_definitions": "",
+            "dispatch_anonymous_definitions": anonymous_definition,
+            "static_init_dispatch_registrations": static_init_dispatch_registrations,
+        },
+    )
+    cpu_fm.write_with_template(
+        f"Register{dispatch_key}Stub.cpp",
+        "RegisterDispatchKeyCustomOps.cpp",
+        lambda: {
+            "ops_headers": "",
+            "DispatchKey": dispatch_key,
+            "dispatch_namespace": dispatch_key.lower(),
+            "dispatch_namespaced_definitions": "",
+            "dispatch_anonymous_definitions": list(
+                mapMaybe(ComputeNativeFunctionStub(), native_functions)
+            ),
+            "static_init_dispatch_registrations": static_init_dispatch_registrations,
+        },
+    )
+
+    (
+        aten_schema_registrations,
+        schema_registrations,
+    ) = get_native_function_schema_registrations(
+        native_functions=native_functions,
+        schema_selector=selector,
+    )
+    cpu_fm.write(
+        "RegisterSchema.cpp",
+        lambda: {
+            "schema_registrations": schema_registrations,
+            "aten_schema_registrations": aten_schema_registrations,
+        },
+    )
+
+
 def translate_native_yaml(
     tags_yaml_path: str,
     aten_yaml_path: str,
@@ -526,7 +581,8 @@ def main() -> None:
     parser.add_argument(
         "--use_aten_lib",
         action="store_true",
-        help="a boolean flag to indicate whether we use ATen kernels or not, in the future this flag will be per operator",
+        help="a boolean flag to indicate whether we use ATen kernels or not, in the future this flag will be per "
+             "operator",
     )
     parser.add_argument(
         "--generate",
