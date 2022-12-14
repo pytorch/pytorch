@@ -7,7 +7,7 @@ from . import _ddp
 from .contract import contract, _get_registry
 
 
-@contract
+@contract()
 def replicate(
     module: nn.Module,  # NOTE: contract now supports single module only
     **kwargs,

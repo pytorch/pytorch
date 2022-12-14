@@ -179,7 +179,10 @@ class TestFSDPCheckpoint(FSDPTest):
             self._test_parity,
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_composable_fsdp_replicate(self):
+        # Verify how the APIs can be composed, e.g. if both `fully_shard` and
+        # `replicate` are applied on the same module, it should raise exception.
         model = CompositeModel(device=torch.device("cpu"))
         fully_shard(model.l1)
         with self.assertRaisesRegex(
