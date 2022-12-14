@@ -17,7 +17,6 @@ from .variables.tensor import (
     DynamicShapeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 
@@ -98,7 +97,6 @@ class PyCodegen(object):
                 TensorVariable,
                 DynamicShapeVariable,
                 TensorWithTFOverrideVariable,
-                UnspecializedNumpyVariable,
                 UnspecializedPythonVariable,
             ),
         ):
@@ -119,19 +117,6 @@ class PyCodegen(object):
             )
             output.append(create_instruction("BINARY_SUBSCR"))
 
-            if isinstance(value, UnspecializedNumpyVariable):
-                unspec_var = self.tx.output.new_var("unspec")
-                raw_type = type(value.raw_value)
-                output.extend(
-                    [
-                        self.create_load_attr("item"),
-                        create_instruction("CALL_FUNCTION", 0),
-                        self.create_store(unspec_var),
-                        self.create_load_const(raw_type),
-                        self.create_load(unspec_var),
-                        create_instruction("CALL_FUNCTION", 1),
-                    ]
-                )
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [
