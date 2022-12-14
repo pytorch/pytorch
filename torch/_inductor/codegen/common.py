@@ -595,8 +595,6 @@ class Kernel(CodeGen):
 
     def __enter__(self):
         class CSEProxy:
-            self.name = "CSEProxy"
-
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
