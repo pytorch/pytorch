@@ -42,8 +42,8 @@ from torch.ao.quantization.backend_config import (
 )
 from .graph_module import (
     QuantizedGraphModule,
-    is_observed_module,
-    is_observed_standalone_module,
+    _is_observed_module,
+    _is_observed_standalone_module,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -450,7 +450,7 @@ def _restore_state(
 ) -> Tuple[Dict[str, Tuple[str, type]],
            PrepareCustomConfig,
            Set[str]]:
-    assert is_observed_module(observed), \
+    assert _is_observed_module(observed), \
         'incoming model must be produced by prepare_fx'
     prepare_custom_config: PrepareCustomConfig = observed._prepare_custom_config  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
@@ -1017,7 +1017,7 @@ def convert(
                             node_name_to_qconfig)
             elif isinstance(mod, DeQuantStub):
                 _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
-            elif is_observed_standalone_module(mod):
+            elif _is_observed_standalone_module(mod):
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config)
             # below this point `type_before_parametrizations` is used
