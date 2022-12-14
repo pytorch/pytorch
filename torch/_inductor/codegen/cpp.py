@@ -151,6 +151,10 @@ def float16_reduction_prefix(rtype):
 
 
 def parallel_num_threads():
+    # Current platform does not support OMP
+    if codecache.is_omp_valid():
+        return 1
+
     threads = config.cpp.threads
     if threads < 1:
         threads = torch.get_num_threads()
