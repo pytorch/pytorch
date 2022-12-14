@@ -27,8 +27,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-static* ]]; then
   TEST_CUSTOM_BUILD_STATIC=1 test/mobile/custom_build/build.sh
 elif [[ "$BUILD_ENVIRONMENT" == *-mobile-lightweight-dispatch* ]]; then
   test/mobile/lightweight_dispatch/build.sh
-elif [[ "$BUILD_ENVIRONMENT" == *-edge-executorch-build* ]]; then
-  test/edge/build.sh
 else
   TEST_DEFAULT_BUILD=1 test/mobile/custom_build/build.sh
 fi

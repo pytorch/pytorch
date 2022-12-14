@@ -299,14 +299,6 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-focal-py3_7-gcc7-edge-executorch-build:
-    name: linux-focal-py3.7-gcc7-edge-executorch-build
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-py3.7-gcc7-edge-executorch-build
-      docker-image-name: pytorch-linux-focal-py3.7-gcc7
-      build-generates-artifacts: false
-
   linux-focal-rocm5_2-py3_8-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
