@@ -1126,7 +1126,6 @@ install(FILES
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
-  message("Building test. ${BUILD_EXECUTORCH}")
   if(BUILD_EXECUTORCH)
     add_subdirectory(
             ${TORCH_ROOT}/test/edge
