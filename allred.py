@@ -32,4 +32,3 @@ if __name__ == '__main__':
     inductor_out = compiled_matmul_cat_col(*inputs)
     assert same(correct_out, inductor_out)
     print(inductor_out)
-
