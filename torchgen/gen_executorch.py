@@ -13,15 +13,19 @@ from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
 from torchgen.context import method_with_native_function, with_native_function_and_index
 from torchgen.executorch.api import et_cpp
-from torchgen.executorch.api.custom_ops import gen_custom_ops_registration, ComputeNativeFunctionStub
+from torchgen.executorch.api.custom_ops import (
+    ComputeNativeFunctionStub,
+    gen_custom_ops_registration,
+)
 from torchgen.executorch.api.types import ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
     get_custom_build_selector,
     get_native_function_declarations,
+    get_native_function_schema_registrations,
     LineLoader,
     parse_native_yaml,
-    ParsedYaml, get_native_function_schema_registrations,
+    ParsedYaml,
 )
 from torchgen.model import (
     BackendIndex,
@@ -37,7 +41,7 @@ from torchgen.utils import (
     FileManager,
     make_file_manager,
     mapMaybe,
-    NamespaceHelper, concatMap, Target,
+    NamespaceHelper,
 )
 
 
@@ -303,17 +307,25 @@ def gen_headers(
 
 
 def gen_custom_ops(
-        *,
-        native_functions: Sequence[NativeFunction],
-        selector: SelectiveBuilder,
-        backend_indices: Dict[DispatchKey, BackendIndex],
-        cpu_fm: FileManager,
-        rocm: bool,
+    *,
+    native_functions: Sequence[NativeFunction],
+    selector: SelectiveBuilder,
+    backend_indices: Dict[DispatchKey, BackendIndex],
+    cpu_fm: FileManager,
+    rocm: bool,
 ) -> None:
 
     dispatch_key = DispatchKey.CPU
     backend_index = backend_indices[dispatch_key]
-    anonymous_definition, static_init_dispatch_registrations = gen_custom_ops_registration(native_functions=native_functions, selector=selector, backend_index=backend_index, rocm=rocm)
+    (
+        anonymous_definition,
+        static_init_dispatch_registrations,
+    ) = gen_custom_ops_registration(
+        native_functions=native_functions,
+        selector=selector,
+        backend_index=backend_index,
+        rocm=rocm,
+    )
     cpu_fm.write_with_template(
         f"Register{dispatch_key}CustomOps.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
@@ -582,7 +594,7 @@ def main() -> None:
         "--use_aten_lib",
         action="store_true",
         help="a boolean flag to indicate whether we use ATen kernels or not, in the future this flag will be per "
-             "operator",
+        "operator",
     )
     parser.add_argument(
         "--generate",
