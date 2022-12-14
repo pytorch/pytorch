@@ -11,7 +11,7 @@ from .backend_config import BackendConfig
 from .fx import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 
-from typing import Tuple, Any
+from typing import Tuple, Any, Dict
 from collections import OrderedDict
 import operator
 
@@ -156,14 +156,19 @@ def _rearrange_weight_observer_for_addmm(
         with model.graph.inserting_after(maybe_weight_obs):
             args = list(transpose_node.args)
             args[0] = maybe_weight_obs
-            new_transpose_node = model.graph.create_node("call_function", torch.ops.aten.t.default, tuple(args), transpose_node.kwargs)
+            new_transpose_node = model.graph.create_node(
+                "call_function",
+                torch.ops.aten.t.default,
+                tuple(args),
+                transpose_node.kwargs
+            )
         addmm.replace_input_with(maybe_weight_obs, new_transpose_node)
 
     model.graph.eliminate_dead_code()
     model.graph.lint()
 
 def prepare_pt2e(
-    model: torch.nn.Module,
+    model: torch.fx.GraphModule,
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,

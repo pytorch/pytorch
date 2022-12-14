@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: quantization"]
 import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_quantization import (

@@ -6,7 +6,6 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
     BackendPatternConfig,
 )
-from torch.ao.quantization.fx.match_utils import MatchAllNode
 
 weighted_op_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
@@ -14,6 +13,7 @@ weighted_op_quint8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float,
 )
+from typing import List
 
 def get_linear_configs():
     linear_configs = []
