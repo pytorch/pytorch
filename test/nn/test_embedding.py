@@ -224,7 +224,7 @@ class TestEmbeddingNN(NNTestCase):
 
     def test_embeddingbag_include_last_offset(self):
         # Test case from https://github.com/pytorch/pytorch/issues/89677
-        embeddingbag = nn.EmbeddingBag(100, 3, include_last_offset=True, padding_idx = 61)
+        embeddingbag = nn.EmbeddingBag(100, 3, include_last_offset=True, padding_idx=61)
         input = torch.tensor([0, 1, 2, 3])
         out = embeddingbag(input, torch.tensor([0, 3, 3]))
         out2 = embeddingbag(input, torch.tensor([0, 3, 4]))
