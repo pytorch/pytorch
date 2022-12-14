@@ -797,6 +797,11 @@ include_patterns = [
     'functorch/functorch/_src/aot_autograd.py',
     'functorch/functorch/_src/compilers.py',
     'torch/testing/*.py',
+    'torch/distributed/fsdp/*.py',
+    'test/distributed/fsdp/*.py`,
+    'torch/testing/_internal/common_fsdp.py',
+    'torch/distributed/_composable/*.py`,
+    'test/distributed/_composable/*.py`,
 ]
 command = [
     'python3',
