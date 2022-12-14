@@ -60,13 +60,13 @@ Single instance inference
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --throughput_mode script.py args
+   python -m torch.backends.xeon.run_cpu --throughput_mode script.py args
 
 2. Run single-instance inference on a single CPU node.
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --node_id 1 script.py args
+   python -m torch.backends.xeon.run_cpu --node_id 1 script.py args
 
 Multi-instance inference
 ------------------------
@@ -77,13 +77,13 @@ Multi-instance inference
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu -- python_script args
+   python -m torch.backends.xeon.run_cpu -- python_script args
 
    eg: on an Intel(R) Xeon(R) Scalable Processor with 14 instance, 4 cores per instance
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores_per_instance 4 python_script args
+   python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores_per_instance 4 python_script args
 
 2. Run single-instance inference among multiple instances.
    By default, runs all ninstances. If you want to independently run a single instance among ninstances, specify rank.
@@ -92,27 +92,27 @@ Multi-instance inference
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 0 python_script args
+   python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 0 python_script args
 
    eg: run 1st instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance (i.e., numactl -C 28-55)
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 1 python_script args
+   python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 1 python_script args
 
    eg: run 0th instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance, 2 cores per instance,
    first four cores (i.e., numactl -C 0-1)
 
 ::
 
-   >>> python -m torch.backends.xeon.run_cpu --core_list "0, 1, 2, 3" --ninstances 2 --ncores_per_instance 2
+   python -m torch.backends.xeon.run_cpu --core_list "0, 1, 2, 3" --ninstances 2 --ncores_per_instance 2
    --rank 0 python_script args
 
 3. To look up what optional arguments this module offers:
 
 ::
 
-    >>> python -m torch.backends.xeon.run_cpu --help
+    python -m torch.backends.xeon.run_cpu --help
 
 Memory allocator
 ----------------
@@ -598,7 +598,7 @@ def create_args(parser=None):
     _add_multi_instance_params(parser)
     # positional
     parser.add_argument("program", type=str,
-                        help="The full path to the proram/script to be launched. "
+                        help="The full path to the program/script to be launched. "
                              "followed by all the arguments for the script")
 
     # rest from the training program

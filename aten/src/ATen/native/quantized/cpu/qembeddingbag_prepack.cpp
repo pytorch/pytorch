@@ -1,13 +1,27 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/custom_class.h>
 #include <ATen/Parallel.h>
+#include <ATen/Utils.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/choose_qparams_optimized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/resize_native.h>
+#endif
+
 #include <c10/util/irange.h>
+
+#include <utility>
 
 int register_embedding_params();
 
@@ -254,9 +268,10 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
   }
 
 #else
-  const auto weight_data = weight_contig->scalar_type() == at::ScalarType::Half
-      ? weight_contig->to(at::ScalarType::Float).data_ptr<float>()
-      : weight_contig->data_ptr<float>();
+  const Tensor& float_weight = weight_contig->scalar_type() == at::ScalarType::Half
+    ? weight_contig->to(at::ScalarType::Float)
+    : *weight_contig;
+  const auto weight_data = float_weight.data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
   for (auto row : c10::irange(embedding_rows)) {
     const float* input_row = weight_data + row * embedding_cols;
@@ -379,7 +394,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
     const auto float_weight =
         weight_contig.scalar_type() == at::ScalarType::Half
         ? weight_contig.to(at::ScalarType::Float)
-        : weight_contig;
+        : std::move(weight_contig);
     const auto weight_data = float_weight.data_ptr<float>();
     for (const auto row : c10::irange(embedding_rows)) {
       const float* input_row = weight_data + row * embedding_cols;

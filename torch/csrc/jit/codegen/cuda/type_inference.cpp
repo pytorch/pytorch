@@ -40,8 +40,8 @@ void copyScalarTypeAndDeviceToOutput(
       out != nullptr,
       "Expect target node's type pointer to be non-nullptr, but get nullptr");
   if (!hasTypeAndDevice(out)) {
-    out->scalarType() = dtype;
-    out->device() = device;
+    node->output(index)->setType(
+        TensorType::create(dtype, device, c10::nullopt, c10::nullopt));
   }
 }
 
@@ -121,6 +121,7 @@ class NaiveTypePropagator {
       case aten::round:
       case aten::trunc:
       case aten::frac:
+      case aten::leaky_relu:
       case aten::relu:
       case aten::silu:
       case aten::gelu:
@@ -444,13 +445,16 @@ class NaiveTypePropagator {
         copyScalarTypeAndDeviceToOutput(out_type->withDim(c10::nullopt), node);
         break;
       }
-      case prim::unsqueeze_copy:
       case prim::expand_copy:
       case prim::expand_as_copy:
-      case prim::squeeze_copy:
+      case prim::flatten_copy:
+      case prim::permute_copy:
       case prim::reshape_copy:
-      case prim::view_copy:
-      case prim::flatten_copy: {
+      case prim::squeeze_copy:
+      case prim::t_copy:
+      case prim::transpose_copy:
+      case prim::unsqueeze_copy:
+      case prim::view_copy: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         copyScalarTypeAndDeviceToOutput(out_type, node);
         break;

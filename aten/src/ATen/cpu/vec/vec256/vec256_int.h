@@ -133,7 +133,6 @@ public:
   Vectorized<int64_t> conj() const {
     return *this;
   }
-  Vectorized<int64_t> frac() const;
   Vectorized<int64_t> neg() const;
   Vectorized<int64_t> operator==(const Vectorized<int64_t>& other) const {
     return _mm256_cmpeq_epi64(values, other.values);
@@ -253,7 +252,6 @@ public:
   Vectorized<int32_t> conj() const {
     return *this;
   }
-  Vectorized<int32_t> frac() const;
   Vectorized<int32_t> neg() const;
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
@@ -467,7 +465,6 @@ public:
   Vectorized<int16_t> conj() const {
     return *this;
   }
-  Vectorized<int16_t> frac() const;
   Vectorized<int16_t> neg() const;
   Vectorized<int16_t> operator==(const Vectorized<int16_t>& other) const {
     return _mm256_cmpeq_epi16(values, other.values);
@@ -496,34 +493,37 @@ public:
   Vectorized<int16_t> le(const Vectorized<int16_t>& other) const;
 };
 
-template <>
-class Vectorized<int8_t> : public Vectorizedi {
-private:
-  static const Vectorized<int8_t> ones;
+template <typename T>
+class Vectorized8 : public Vectorizedi {
+  static_assert(
+    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    "Only int8_t/uint8_t are supported");
+protected:
+  static const Vectorized<T> ones;
 public:
-  using value_type = int8_t;
+  using value_type = T;
   static constexpr int size() {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(int8_t v) { values = _mm256_set1_epi8(v); }
-  Vectorized(int8_t val1, int8_t val2, int8_t val3, int8_t val4,
-         int8_t val5, int8_t val6, int8_t val7, int8_t val8,
-         int8_t val9, int8_t val10, int8_t val11, int8_t val12,
-         int8_t val13, int8_t val14, int8_t val15, int8_t val16,
-         int8_t val17, int8_t val18, int8_t val19, int8_t val20,
-         int8_t val21, int8_t val22, int8_t val23, int8_t val24,
-         int8_t val25, int8_t val26, int8_t val27, int8_t val28,
-         int8_t val29, int8_t val30, int8_t val31, int8_t val32) {
+  Vectorized8() {}
+  Vectorized8(T v) { values = _mm256_set1_epi8(v); }
+  Vectorized8(T val1, T val2, T val3, T val4,
+         T val5, T val6, T val7, T val8,
+         T val9, T val10, T val11, T val12,
+         T val13, T val14, T val15, T val16,
+         T val17, T val18, T val19, T val20,
+         T val21, T val22, T val23, T val24,
+         T val25, T val26, T val27, T val28,
+         T val29, T val30, T val31, T val32) {
     values = _mm256_setr_epi8(val1, val2, val3, val4, val5, val6, val7, val8,
                               val9, val10, val11, val12, val13, val14, val15, val16,
                               val17, val18, val19, val20, val21, val22, val23, val24,
                               val25, val26, val27, val28, val29, val30, val31, val32);
   }
   template <int64_t mask>
-  static Vectorized<int8_t> blend(Vectorized<int8_t> a, Vectorized<int8_t> b) {
-    __at_align__ int8_t tmp_values[size()];
+  static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
+    __at_align__ T tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi8(b.values, 0);
@@ -591,13 +591,13 @@ public:
       tmp_values[31] = _mm256_extract_epi8(b.values, 31);
     return loadu(tmp_values);
   }
-  static Vectorized<int8_t> blendv(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b,
-                               const Vectorized<int8_t>& mask) {
+  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
+                               const Vectorized<T>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
   template <typename step_t>
-  static Vectorized<int8_t> arange(int8_t base = 0, step_t step = static_cast<step_t>(1)) {
-    return Vectorized<int8_t>(
+  static Vectorized<T> arange(T base = 0, step_t step = static_cast<step_t>(1)) {
+    return Vectorized<T>(
       base,             base +      step, base +  2 * step, base +  3 * step,
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
       base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
@@ -607,8 +607,8 @@ public:
       base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
       base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step);
   }
-  static Vectorized<int8_t>
-  set(Vectorized<int8_t> a, Vectorized<int8_t> b, int8_t count = size()) {
+  static Vectorized<T>
+  set(Vectorized<T> a, Vectorized<T> b, T count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -677,18 +677,18 @@ public:
     }
     return b;
   }
-  static Vectorized<int8_t> loadu(const void* ptr) {
+  static Vectorized<T> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
-  static Vectorized<int8_t> loadu(const void* ptr, int8_t count) {
-    __at_align__ int8_t tmp_values[size()];
+  static Vectorized<T> loadu(const void* ptr, T count) {
+    __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int8_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(T));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -697,27 +697,35 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int8_t tmp_values[size()];
+      __at_align__ T tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int8_t));
+      std::memcpy(ptr, tmp_values, count * sizeof(T));
     }
   }
-  const int8_t& operator[](int idx) const  = delete;
-  int8_t& operator[](int idx)  = delete;
-  Vectorized<int8_t> abs() const {
-    return _mm256_abs_epi8(values);
-  }
-  Vectorized<int8_t> real() const {
+  const T& operator[](int idx) const  = delete;
+  T& operator[](int idx)  = delete;
+  Vectorized<T> real() const {
     return *this;
   }
-  Vectorized<int8_t> imag() const {
+  Vectorized<T> imag() const {
     return _mm256_set1_epi8(0);
   }
-  Vectorized<int8_t> conj() const {
+  Vectorized<T> conj() const {
     return *this;
   }
-  Vectorized<int8_t> frac() const;
+};
+
+template<>
+class Vectorized<int8_t>: public Vectorized8<int8_t> {
+public:
+  using Vectorized8::Vectorized8;
+
   Vectorized<int8_t> neg() const;
+
+  Vectorized<int8_t> abs() const {
+   return _mm256_abs_epi8(values);
+  }
+
   Vectorized<int8_t> operator==(const Vectorized<int8_t>& other) const {
     return _mm256_cmpeq_epi8(values, other.values);
   }
@@ -731,10 +739,10 @@ public:
     return invert(_mm256_cmpgt_epi8(values, other.values));
   }
   Vectorized<int8_t> operator>(const Vectorized<int8_t>& other) const {
-    return _mm256_cmpgt_epi8(values, other.values);
+    return other < *this;
   }
   Vectorized<int8_t> operator>=(const Vectorized<int8_t>& other) const {
-    return invert(_mm256_cmpgt_epi8(other.values, values));
+    return other <= *this;
   }
 
   Vectorized<int8_t> eq(const Vectorized<int8_t>& other) const;
@@ -743,6 +751,46 @@ public:
   Vectorized<int8_t> ge(const Vectorized<int8_t>& other) const;
   Vectorized<int8_t> lt(const Vectorized<int8_t>& other) const;
   Vectorized<int8_t> le(const Vectorized<int8_t>& other) const;
+};
+
+template<>
+class Vectorized<uint8_t>: public Vectorized8<uint8_t> {
+public:
+  using Vectorized8::Vectorized8;
+
+  Vectorized<uint8_t> neg() const;
+
+  Vectorized<uint8_t> abs() const {
+    return *this;
+  }
+
+  Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
+    return _mm256_cmpeq_epi8(values, other.values);
+  }
+  Vectorized<uint8_t> operator!=(const Vectorized<uint8_t>& other) const {
+    return invert(_mm256_cmpeq_epi8(values, other.values));
+  }
+  Vectorized<uint8_t> operator<(const Vectorized<uint8_t>& other) const {
+    __m256i max = _mm256_max_epu8(values, other.values);
+    return invert(_mm256_cmpeq_epi8(max, values));
+  }
+  Vectorized<uint8_t> operator<=(const Vectorized<uint8_t>& other) const {
+    __m256i max = _mm256_max_epu8(values, other.values);
+    return _mm256_cmpeq_epi8(max, other.values);
+  }
+  Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
+    return other < *this;
+  }
+  Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
+    return other <= *this;
+  }
+
+  Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ne(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> gt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ge(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> lt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> le(const Vectorized<uint8_t>& other) const;
 };
 
 template <>
@@ -766,6 +814,11 @@ Vectorized<int8_t> inline operator+(const Vectorized<int8_t>& a, const Vectorize
 }
 
 template <>
+Vectorized<uint8_t> inline operator+(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm256_add_epi8(a, b);
+}
+
+template <>
 Vectorized<int64_t> inline operator-(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return _mm256_sub_epi64(a, b);
 }
@@ -785,6 +838,11 @@ Vectorized<int8_t> inline operator-(const Vectorized<int8_t>& a, const Vectorize
   return _mm256_sub_epi8(a, b);
 }
 
+template <>
+Vectorized<uint8_t> inline operator-(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm256_sub_epi8(a, b);
+}
+
 // Negation. Defined here so we can utilize operator-
 inline Vectorized<int64_t> Vectorized<int64_t>::neg() const {
   return Vectorized<int64_t>(0) - *this;
@@ -800,6 +858,10 @@ inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
 
 inline Vectorized<int8_t> Vectorized<int8_t>::neg() const {
   return Vectorized<int8_t>(0) - *this;
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::neg() const {
+  return Vectorized<uint8_t>(0) - *this;
 }
 
 // Emulate operations with no native 64-bit support in avx,
@@ -889,6 +951,12 @@ Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorize
 }
 
 template <>
+Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  // We don't have an instruction for multiplying uint8_t
+  return int_elementwise_binary_256(a, b, std::multiplies<uint8_t>());
+}
+
+template <>
 Vectorized<int64_t> inline minimum(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return emulate(a, b, [](int64_t a_point, int64_t b_point) {return std::min(a_point, b_point);});
 }
@@ -906,6 +974,11 @@ Vectorized<int16_t> inline minimum(const Vectorized<int16_t>& a, const Vectorize
 template <>
 Vectorized<int8_t> inline minimum(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   return _mm256_min_epi8(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline minimum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm256_min_epu8(a, b);
 }
 
 template <>
@@ -929,6 +1002,11 @@ Vectorized<int8_t> inline maximum(const Vectorized<int8_t>& a, const Vectorized<
 }
 
 template <>
+Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm256_max_epu8(a, b);
+}
+
+template <>
 Vectorized<int64_t> inline clamp(const Vectorized<int64_t>& a, const Vectorized<int64_t>& min_val, const Vectorized<int64_t>& max_val) {
   return emulate(a, min_val, max_val, [](int64_t a_point, int64_t min_point, int64_t max_point) {return std::min(max_point, std::max(a_point, min_point));});
 }
@@ -946,6 +1024,11 @@ Vectorized<int16_t> inline clamp(const Vectorized<int16_t>& a, const Vectorized<
 template <>
 Vectorized<int8_t> inline clamp(const Vectorized<int8_t>& a, const Vectorized<int8_t>& min_val, const Vectorized<int8_t>& max_val) {
   return _mm256_min_epi8(max_val, _mm256_max_epi8(a, min_val));
+}
+
+template <>
+Vectorized<uint8_t> inline clamp(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& min_val, const Vectorized<uint8_t>& max_val) {
+  return _mm256_min_epu8(max_val, _mm256_max_epu8(a, min_val));
 }
 
 template <>
@@ -969,6 +1052,11 @@ Vectorized<int8_t> inline clamp_max(const Vectorized<int8_t>& a, const Vectorize
 }
 
 template <>
+Vectorized<uint8_t> inline clamp_max(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& max_val) {
+  return _mm256_min_epu8(max_val, a);
+}
+
+template <>
 Vectorized<int64_t> inline clamp_min(const Vectorized<int64_t>& a, const Vectorized<int64_t>& min_val) {
   return emulate(a, min_val, [](int64_t a_point, int64_t min_point) {return std::max(min_point, a_point);});
 }
@@ -986,6 +1074,11 @@ Vectorized<int16_t> inline clamp_min(const Vectorized<int16_t>& a, const Vectori
 template <>
 Vectorized<int8_t> inline clamp_min(const Vectorized<int8_t>& a, const Vectorized<int8_t>& min_val) {
   return _mm256_max_epi8(min_val, a);
+}
+
+template <>
+Vectorized<uint8_t> inline clamp_min(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& min_val) {
+  return _mm256_max_epu8(min_val, a);
 }
 
 template<typename T>
@@ -1018,6 +1111,10 @@ Vectorized<int16_t> inline operator/(const Vectorized<int16_t>& a, const Vectori
 template <>
 Vectorized<int8_t> inline operator/(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   return int_elementwise_binary_256(a, b, std::divides<int8_t>());
+}
+template <>
+Vectorized<uint8_t> inline operator/(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return int_elementwise_binary_256(a, b, std::divides<uint8_t>());
 }
 
 template<class T, typename std::enable_if_t<std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
@@ -1131,6 +1228,292 @@ inline Vectorized<int8_t> Vectorized<int8_t>::lt(const Vectorized<int8_t>& other
 
 inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other) const {
   return (*this <= other) & Vectorized<int8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::eq(const Vectorized<uint8_t>& other) const {
+  return (*this == other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ne(const Vectorized<uint8_t>& other) const {
+  return (*this != other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::gt(const Vectorized<uint8_t>& other) const {
+  return (*this > other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ge(const Vectorized<uint8_t>& other) const {
+  return (*this >= other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::lt(const Vectorized<uint8_t>& other) const {
+  return (*this < other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& other) const {
+  return (*this <= other) & Vectorized<uint8_t>(1);
+}
+
+template <bool left_shift>
+Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  // No vector instruction for shifting int16_t, so emulating it instead.
+
+  // Control masks for shuffle operation, treating 256 bits as an
+  // array of 16-bit elements, and considering pairs of neighboring
+  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // M!=N) is set so that shuffle will move element with index M from
+  // input pair into element with index N in output pair, and element
+  // with index M in output pair will be set to all 0s.
+  __m256i ctl_0_1 = _mm256_set_epi8(29, 28, 0x80, 0x80, 25, 24, 0x80, 0x80,
+                                    21, 20, 0x80, 0x80, 17, 16, 0x80, 0x80,
+                                    13, 12, 0x80, 0x80, 9, 8, 0x80, 0x80,
+                                    5, 4, 0x80, 0x80, 1, 0, 0x80, 0x80);
+  __m256i ctl_1_0 = _mm256_set_epi8(0x80, 0x80, 31, 30, 0x80, 0x80, 27, 26,
+                                    0x80, 0x80, 23, 22, 0x80, 0x80, 19, 18,
+                                    0x80, 0x80, 15, 14, 0x80, 0x80, 11, 10,
+                                    0x80, 0x80, 7, 6, 0x80, 0x80, 3, 2);
+
+  // Masks for bitwise and operation, treating 256 bits as an array of
+  // 16-bit elements, and considering them in pairs of neighboring
+  // elements.  A mask named "keep_M" (M in [0,1]) is set so that
+  // bitwise and will copy element with index M from input pair into
+  // element with the same index in output pair, while the other
+  // element in output pair will be set to all 0s.
+  __m256i keep_0 = _mm256_set1_epi32(0xFFFF);
+  __m256i keep_1 = _mm256_set1_epi32(0xFFFF0000);
+
+  // Take each 16-bit element with idx%2==0 from input array to be
+  // shifted and extend it to 32 bits so that 0s are added to the
+  // right.  Then, perform shifting on this 32-bit number.  Upper 16
+  // bits will be proper result of shifting original 16-bit number, so
+  // write them to result array, into the same position from which
+  // corresponding input element is taken.  Also, make sure that
+  // result array elements with idx%2!=0 are set to all 0s.
+  //
+  // Note that number of bits to shift for is extended to 32 bits by
+  // adding 0s to the left.  That means this number is not properly
+  // sign-extended for negative values.  However, number of bits to
+  // shift is treated as an unsigned integer by respective shift
+  // intrinsics anyway so if negative then either with or without
+  // proper sign extension, it will be interpreted as a number greater
+  // than 32, and the shifting result will be the same.
+  __m256i a0 = _mm256_shuffle_epi8(a, ctl_0_1);
+  __m256i b0 = _mm256_and_si256(b, keep_0);
+  __m256i c0;
+  if (left_shift)
+    c0 = _mm256_sllv_epi32(a0, b0);
+  else
+    c0 = _mm256_srav_epi32(a0, b0);
+  c0 = _mm256_shuffle_epi8(c0, ctl_1_0);
+
+  // Peform shifting the same way for input array elements with
+  // idx%2==1.
+  __m256i a1 = _mm256_and_si256(a, keep_1);
+  __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
+  __m256i c1;
+  if (left_shift)
+    c1 = _mm256_sllv_epi32(a1, b1);
+  else
+    c1 = _mm256_srav_epi32(a1, b1);
+  c1 = _mm256_and_si256(c1, keep_1);
+
+  // Merge partial results into the final result.
+  __m256i c = _mm256_or_si256(c0, c1);
+
+  return c;
+}
+
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b) {
+  // No vector instruction for shifting int8_t/uint8_t, so emulating
+  // it instead.
+
+  // Control masks for shuffle operation, treating 256 bits as an
+  // array of 8-bit elements, and considering quadruples of
+  // neighboring elements.  Specifially, a mask named "ctl_M_N" (M,N
+  // in [0,1,2,3], and M!=N) is set so that shuffle will move element
+  // with index M from input quadruple into element with index N in
+  // output quadruple, and other elements in output quadruple will be
+  // set to all 0s.
+  __m256i ctl_0_3 = _mm256_set_epi8(28, 0x80, 0x80, 0x80, 24, 0x80, 0x80, 0x80,
+                                    20, 0x80, 0x80, 0x80, 16, 0x80, 0x80, 0x80,
+                                    12, 0x80, 0x80, 0x80, 8, 0x80, 0x80, 0x80,
+                                    4, 0x80, 0x80, 0x80, 0, 0x80, 0x80, 0x80);
+  __m256i ctl_1_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 29, 0x80, 0x80, 0x80, 25,
+                                    0x80, 0x80, 0x80, 21, 0x80, 0x80, 0x80, 17,
+                                    0x80, 0x80, 0x80, 13, 0x80, 0x80, 0x80, 9,
+                                    0x80, 0x80, 0x80, 5, 0x80, 0x80, 0x80, 1);
+  __m256i ctl_1_3 = _mm256_set_epi8(29, 0x80, 0x80, 0x80, 25, 0x80, 0x80, 0x80,
+                                    21, 0x80, 0x80, 0x80, 17, 0x80, 0x80, 0x80,
+                                    13, 0x80, 0x80, 0x80, 9, 0x80, 0x80, 0x80,
+                                    5, 0x80, 0x80, 0x80, 1, 0x80, 0x80, 0x80);
+  __m256i ctl_2_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 30, 0x80, 0x80, 0x80, 26,
+                                    0x80, 0x80, 0x80, 22, 0x80, 0x80, 0x80, 18,
+                                    0x80, 0x80, 0x80, 14, 0x80, 0x80, 0x80, 10,
+                                    0x80, 0x80, 0x80, 6, 0x80, 0x80, 0x80, 2);
+  __m256i ctl_2_3 = _mm256_set_epi8(30, 0x80, 0x80, 0x80, 26, 0x80, 0x80, 0x80,
+                                    22, 0x80, 0x80, 0x80, 18, 0x80, 0x80, 0x80,
+                                    14, 0x80, 0x80, 0x80, 10, 0x80, 0x80, 0x80,
+                                    6, 0x80, 0x80, 0x80, 2, 0x80, 0x80, 0x80);
+  __m256i ctl_3_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 31, 0x80, 0x80, 0x80, 27,
+                                    0x80, 0x80, 0x80, 23, 0x80, 0x80, 0x80, 19,
+                                    0x80, 0x80, 0x80, 15, 0x80, 0x80, 0x80, 11,
+                                    0x80, 0x80, 0x80, 7, 0x80, 0x80, 0x80, 3);
+  __m256i ctl_3_1 = _mm256_set_epi8(0x80, 0x80, 31, 0x80, 0x80, 0x80, 27, 0x80,
+                                    0x80, 0x80, 23, 0x80, 0x80, 0x80, 19, 0x80,
+                                    0x80, 0x80, 15, 0x80, 0x80, 0x80, 11, 0x80,
+                                    0x80, 0x80, 7, 0x80, 0x80, 0x80, 3, 0x80);
+  __m256i ctl_3_2 = _mm256_set_epi8(0x80, 31, 0x80, 0x80, 0x80, 27, 0x80, 0x80,
+                                    0x80, 23, 0x80, 0x80, 0x80, 19, 0x80, 0x80,
+                                    0x80, 15, 0x80, 0x80, 0x80, 11, 0x80, 0x80,
+                                    0x80, 7, 0x80, 0x80, 0x80, 3, 0x80, 0x80);
+
+  // Masks for bitwise and operation, treating 256 bits as an array of
+  // 8-bit elements, and considering them in quadruples of neighboring
+  // elements.  A mask named "keep_M" (M in [0,1,2,3]) is set so that
+  // bitwise and will copy element with index M from input quadruple
+  // into element with the same index in output quadruple, while the
+  // other elements in output quadruple will be set to all 0s.
+  __m256i keep_0 = _mm256_set1_epi32(0xFF);
+  __m256i keep_3 = _mm256_set1_epi32(0xFF000000);
+
+  // Take each 8-bit element with idx%4==0 from input array to be
+  // shifted and extend it to 32 bits so that 0s are added to the
+  // right.  Then, perform shifting on this 32-bit number.  Upper 8
+  // bits will be proper result of shifting original 8-bit number, so
+  // write them to result array, into the same position from which
+  // corresponding input element is taken.  Also, make sure that
+  // result array elements with idx%4!=0 are set to all 0s.
+  //
+  // Note that number of bits to shift for is extended to 32 bits by
+  // adding 0s to the left.  That means this number is not properly
+  // sign-extended for negative values.  However, number of bits to
+  // shift is treated as an unsigned integer by respective shift
+  // intrinsics anyway so if negative then either with or without
+  // proper sign extension, it will be interpreted as a number greater
+  // than 32, and the shifting result will be the same.
+  __m256i a0 = _mm256_shuffle_epi8(a, ctl_0_3);
+  __m256i b0 = _mm256_and_si256(b, keep_0);
+  __m256i c0;
+  if (left_shift)
+    c0 = _mm256_sllv_epi32(a0, b0);
+  else
+    if (std::is_same<T, int8_t>::value)
+      c0 = _mm256_srav_epi32(a0, b0);
+    else
+      c0 = _mm256_srlv_epi32(a0, b0);
+  c0 = _mm256_shuffle_epi8(c0, ctl_3_0);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==1.
+  __m256i a1 = _mm256_shuffle_epi8(a, ctl_1_3);
+  __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
+  __m256i c1;
+  if (left_shift)
+    c1 = _mm256_sllv_epi32(a1, b1);
+  else
+    if (std::is_same<T, int8_t>::value)
+      c1 = _mm256_srav_epi32(a1, b1);
+    else
+      c1 = _mm256_srlv_epi32(a1, b1);
+  c1 = _mm256_shuffle_epi8(c1, ctl_3_1);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==2.
+  __m256i a2 = _mm256_shuffle_epi8(a, ctl_2_3);
+  __m256i b2 = _mm256_shuffle_epi8(b, ctl_2_0);
+  __m256i c2;
+  if (left_shift)
+    c2 = _mm256_sllv_epi32(a2, b2);
+  else
+    if (std::is_same<T, int8_t>::value)
+      c2 = _mm256_srav_epi32(a2, b2);
+    else
+      c2 = _mm256_srlv_epi32(a2, b2);
+  c2 = _mm256_shuffle_epi8(c2, ctl_3_2);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==3.
+  __m256i a3 =  _mm256_and_si256(a, keep_3);
+  __m256i b3 = _mm256_shuffle_epi8(b, ctl_3_0);
+  __m256i c3;
+  if (left_shift)
+    c3 = _mm256_sllv_epi32(a3, b3);
+  else
+    if (std::is_same<T, int8_t>::value)
+      c3 = _mm256_srav_epi32(a3, b3);
+    else
+      c3 = _mm256_srlv_epi32(a3, b3);
+  c3 = _mm256_and_si256(c3, keep_3);
+
+  // Merge partial results into the final result.
+  __m256i c01 = _mm256_or_si256(c0, c1);
+  __m256i c23 = _mm256_or_si256(c2, c3);
+  __m256i c = _mm256_or_si256(c01, c23);
+
+  return c;
+}
+
+template <>
+Vectorized<int64_t> inline operator<<(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  return _mm256_sllv_epi64(a, b);
+}
+
+template <>
+Vectorized<int32_t> inline operator<<(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return _mm256_sllv_epi32(a, b);
+}
+
+template <>
+Vectorized<int16_t> inline operator<<(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return shift_256_16<true>(a, b);
+}
+
+template <>
+Vectorized<int8_t> inline operator<<(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_256_8<true>(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline operator<<(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return shift_256_8<true>(a, b);
+}
+
+template <>
+Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  // No vector instruction for right shifting int64_t, so emulating it
+  // instead.
+
+  // Shift the number logically to the right, thus filling the most
+  // significant bits with 0s.  Then, replace these bits with the sign
+  // bit.
+  __m256i sign_bits = _mm256_cmpgt_epi64(_mm256_set1_epi64x(0), a);
+  __m256i b_inv_mod_64 = _mm256_sub_epi64(_mm256_set1_epi64x(64), b);
+  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, b_inv_mod_64);
+  __m256i c = _mm256_srlv_epi64(a, b);
+  c = _mm256_or_si256(c, sign_ext);
+
+  return c;
+}
+
+template <>
+Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return _mm256_srav_epi32(a, b);
+}
+
+template <>
+Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return shift_256_16<false>(a, b);
+}
+
+template <>
+Vectorized<int8_t> inline operator>>(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_256_8<false>(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return shift_256_8<false>(a, b);
 }
 
 #endif

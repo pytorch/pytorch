@@ -14,6 +14,35 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// Simple selector that only propagates across tensor views in the provided
+// unordered_set. Will also propagate to all consumers of those tensors, and the
+// siblings of those tensors.
+class ComputeAtSelector : public MaxInfoSpanningTree::Selector {
+  std::unordered_set<TensorView*> selected_;
+
+ public:
+  virtual bool allowC2P(TensorView* from, TensorView* to) override {
+    return selected_.count(to) > 0;
+  }
+
+  virtual bool allowP2C(TensorView* from, TensorView* to) override {
+    // If the producer is in the selected set, then the consumer must also be
+    // replayed to obtain a compatible loop structure so that this producer
+    // can be consumed in this loop.
+    return selected_.count(from) > 0 || selected_.count(to) > 0;
+  }
+
+  virtual bool allowSibling(TensorView* from, TensorView* to) override {
+    return true;
+  }
+
+  ComputeAtSelector(std::unordered_set<TensorView*> selected)
+      : selected_(std::move(selected)) {}
+  const std::unordered_set<TensorView*>& selected() const {
+    return selected_;
+  }
+};
+
 namespace {
 
 // Wrapper around set_intersection
@@ -182,24 +211,23 @@ void ComputeAt::runAt(
   FusionGuard fg(producer->fusion());
 
   auto selected = getPropagationSubgraph(producer, consumer);
-  InlinePropagatorSelector selector(selected);
-
-  InlinePropagator inline_propagator(
-      consumer, consumer_position, mode, selector.selected());
-  MaxProducerPosUpdater updater;
+  ComputeAtSelector selector(selected);
 
   MaxRootDomainInfoSpanningTree path(consumer, consumer_position, &selector);
 
   if (mode == ComputeAtMode::MostInlined) {
     MostInlinedTransformPropagator propagator;
     path.traverse(&propagator);
+    inlineMost(selected);
   } else {
     TransformPropagator propagator(consumer, consumer_position);
     path.traverse(&propagator);
+    inlineSelectedAt(
+        selected,
+        consumer,
+        consumer_position,
+        mode == ComputeAtMode::BestEffort);
   }
-
-  path.traverse(&inline_propagator);
-  path.traverse(&updater);
 }
 
 void ComputeAt::runWith(
@@ -224,23 +252,23 @@ void ComputeAt::runWith(
   FusionGuard fg(producer->fusion());
 
   auto selected = getPropagationSubgraph(producer, consumer);
-  InlinePropagatorSelector selector(selected);
-
-  InlinePropagator inline_propagator(
-      producer, producer_position, mode, selector.selected());
-  MaxProducerPosUpdater updater;
+  ComputeAtSelector selector(selected);
 
   MaxRootDomainInfoSpanningTree path(producer, producer_position, &selector);
 
   if (mode == ComputeAtMode::MostInlined) {
     MostInlinedTransformPropagator propagator;
     path.traverse(&propagator);
+    inlineMost(selected);
   } else {
     TransformPropagator propagator(producer, producer_position);
     path.traverse(&propagator);
+    inlineSelectedAt(
+        selected,
+        producer,
+        producer_position,
+        mode == ComputeAtMode::BestEffort);
   }
-  path.traverse(&inline_propagator);
-  path.traverse(&updater);
 }
 
 } // namespace cuda

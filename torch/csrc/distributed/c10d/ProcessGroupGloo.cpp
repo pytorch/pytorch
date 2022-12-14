@@ -1,8 +1,9 @@
-#include <c10d/ProcessGroupGloo.hpp>
+#include <c10/util/Exception.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
 
-#include <c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <chrono>
 #include <exception>
 #include <ratio>
@@ -190,6 +191,9 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::AVG:
       TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
       break;
+    case ReduceOp::PREMUL_SUM:
+      TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -257,6 +261,9 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bxor<T>);
     case ReduceOp::AVG:
       TORCH_CHECK(false, "Cannot use ReduceOp.AVG with Gloo");
+      break;
+    case ReduceOp::PREMUL_SUM:
+      TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
       break;
@@ -509,7 +516,7 @@ ProcessGroupGloo::AsyncWork::AsyncWork(
     // Profiler: Pass nullptr as profilingTitle to parent constructor to
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
-    : ProcessGroup::Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
+    : Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
       future_(createFutureAsOutput(outputTensors)) {
   if (profilingTitle != nullptr) {
@@ -530,7 +537,7 @@ void ProcessGroupGloo::AsyncWork::finishWorkGloo() {
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : ProcessGroupGloo::Work(
+    : Work(
           -1,
           OpType::SEND,
           "gloo:send",
@@ -564,7 +571,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
     const char* profilingTitle)
-    : ProcessGroupGloo::Work(
+    : Work(
           -1,
           OpType::UNKNOWN,
           profilingTitle,
@@ -932,7 +939,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
+c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1142,7 +1149,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   // Every process then sums the resulting sparse tensors locally.
   // The nnz for sparse tensors may be different across processes, so first
   // we run allgather on the nnz, and then allgather with max(nnz).
-  // We could use an allgatherv for this, if it were available.
   at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off
@@ -1425,7 +1431,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
+c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1486,7 +1492,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1655,7 +1661,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
     std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
@@ -1832,7 +1838,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
+c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
@@ -1966,7 +1972,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& output_lists,
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
@@ -2021,7 +2027,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {
@@ -2162,7 +2168,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
+c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
@@ -2347,7 +2353,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
+c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
@@ -2409,7 +2415,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
@@ -2540,7 +2546,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
@@ -2603,7 +2609,7 @@ uint32_t checkTag(int32_t tag) {
   return (uint32_t)tag;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
+c10::intrusive_ptr<Work> ProcessGroupGloo::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
@@ -2622,7 +2628,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   return c10::make_intrusive<SendWork>(tensor, std::move(buf));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
+c10::intrusive_ptr<Work> ProcessGroupGloo::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
@@ -2641,7 +2647,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   return c10::make_intrusive<RecvWork>(tensor, std::move(buf), "gloo:recv");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
+c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
@@ -2704,8 +2710,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupGloo::barrier(const BarrierOptions& opts) {
   std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
 
   // Snapshot all in progress and pending work as weak_ptr.
@@ -2759,8 +2764,8 @@ void ProcessGroupGloo::monitoredBarrier(
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
   // Mappings of rank to recvWork/sendWork respectively.
-  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> recvWorkMap;
-  std::map<int, c10::intrusive_ptr<ProcessGroup::Work>> sendWorkMap;
+  std::map<int, c10::intrusive_ptr<Work>> recvWorkMap;
+  std::map<int, c10::intrusive_ptr<Work>> sendWorkMap;
   // Kick off recvWork and wait to unblock sendWork->wait() from non-zero ranks.
   // Failed/hanging ranks will not ack this call, letting rank 0 know about the
   // failure.
@@ -2768,69 +2773,67 @@ void ProcessGroupGloo::monitoredBarrier(
     recvWorkMap.insert({dstRank, recv(commTensor, dstRank, t1)});
   }
 
-  auto waitLoop =
-      [&](const std::map<int, c10::intrusive_ptr<ProcessGroup::Work>>& works) {
-        std::vector<int> processedRanks;
-        for (auto& work : works) {
-          bool rankResponded = false;
-          try {
-            // Note: if waitAllRanks=false, we recompute the time remaining in
-            // barrier and use this recomputed time in wait(). However, if
-            // waitAllRanks=true, we use the original timeout, since if we use
-            // up the entire timeout waiting for response from rank n, then we
-            // won't have any timeout left to query ranks beginning with n + 1.
-            auto remainingTime = getRemainingTime(
-                startTime, monitoredBarrierTimeout, waitAllRanks);
-            if (!waitAllRanks) {
-              checkRemainingTime(
-                  monitoredBarrierTimeout, remainingTime, processedRanks, rank);
-            }
-            work.second->wait(remainingTime);
-            rankResponded = true;
-          } catch (const std::exception& e) {
-            const std::string error = c10::str(
-                "[Rank 0]: Rank ",
-                work.first,
-                " failed to pass monitoredBarrier in ",
-                monitoredBarrierTimeout.count(),
-                " ms");
-            if (waitAllRanks) {
-              LOG(ERROR) << error;
-            } else {
-              logAndThrow(
-                  error,
-                  c10::str(error, "\n Original exception: \n", e.what()));
-            }
-          }
-          if (rankResponded) {
-            processedRanks.push_back(work.first);
-          }
+  auto waitLoop = [&](const std::map<int, c10::intrusive_ptr<Work>>& works) {
+    std::vector<int> processedRanks;
+    for (auto& work : works) {
+      bool rankResponded = false;
+      try {
+        // Note: if waitAllRanks=false, we recompute the time remaining in
+        // barrier and use this recomputed time in wait(). However, if
+        // waitAllRanks=true, we use the original timeout, since if we use
+        // up the entire timeout waiting for response from rank n, then we
+        // won't have any timeout left to query ranks beginning with n + 1.
+        auto remainingTime =
+            getRemainingTime(startTime, monitoredBarrierTimeout, waitAllRanks);
+        if (!waitAllRanks) {
+          checkRemainingTime(
+              monitoredBarrierTimeout, remainingTime, processedRanks, rank);
         }
-        // If we are collecting all failed ranks, check if we need to throw if
-        // some ranks have not responded.
-        // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
-        // processed.
-        auto rankFailure = (processedRanks.size() != size_ - 1);
-        if (waitAllRanks && rankFailure) {
-          std::vector<int> failedRanks;
-          for (const auto i : c10::irange(1, size_)) {
-            if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
-                processedRanks.end()) {
-              failedRanks.push_back(i);
-            }
-          }
+        work.second->wait(remainingTime);
+        rankResponded = true;
+      } catch (const std::exception& e) {
+        const std::string error = c10::str(
+            "[Rank 0]: Rank ",
+            work.first,
+            " failed to pass monitoredBarrier in ",
+            monitoredBarrierTimeout.count(),
+            " ms");
+        if (waitAllRanks) {
+          LOG(ERROR) << error;
+        } else {
+          logAndThrow(
+              error, c10::str(error, "\n Original exception: \n", e.what()));
+        }
+      }
+      if (rankResponded) {
+        processedRanks.push_back(work.first);
+      }
+    }
+    // If we are collecting all failed ranks, check if we need to throw if
+    // some ranks have not responded.
+    // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
+    // processed.
+    auto rankFailure = (processedRanks.size() != size_ - 1);
+    if (waitAllRanks && rankFailure) {
+      std::vector<int> failedRanks;
+      for (const auto i : c10::irange(1, size_)) {
+        if (std::find(processedRanks.begin(), processedRanks.end(), i) ==
+            processedRanks.end()) {
+          failedRanks.push_back(i);
+        }
+      }
 
-          TORCH_INTERNAL_ASSERT(!failedRanks.empty());
-          const std::string ranksStr = c10::Join(", ", failedRanks);
-          const std::string error = c10::str(
-              "[Rank 0]: Ranks ",
-              ranksStr,
-              " failed to pass monitoredBarrier in ",
-              monitoredBarrierTimeout.count(),
-              " ms");
-          logAndThrow(error, error);
-        }
-      };
+      TORCH_INTERNAL_ASSERT(!failedRanks.empty());
+      const std::string ranksStr = c10::Join(", ", failedRanks);
+      const std::string error = c10::str(
+          "[Rank 0]: Ranks ",
+          ranksStr,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
+      logAndThrow(error, error);
+    }
+  };
 
   waitLoop(recvWorkMap);
   // If we've reached here successfully, this means all ranks have acked in
@@ -2842,10 +2845,6 @@ void ProcessGroupGloo::monitoredBarrier(
   }
 
   waitLoop(sendWorkMap);
-
-  using namespace std::chrono;
-  C10_UNUSED auto elapsedTime =
-      duration_cast<milliseconds>(steady_clock::now() - startTime);
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {

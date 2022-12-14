@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable.h>
@@ -53,6 +54,15 @@ class NodeGuard {
  private:
   std::shared_ptr<Node> last_evaluating_node_;
 };
+
+// Global (not thread-local) feature flag for the new autograd.Function
+// extension. The extension consists of:
+// - splitting autograd.Function.forward into forward() and setup_context().
+// - adding a vmap staticmethod to autograd.Function
+// The feature flag is for preventing users from unknowningly stumbling upon
+// the feature and will be removed once we've ironed out the details.
+TORCH_API bool isAutogradFunctionExtensionEnabled();
+TORCH_API void setAutogradFunctionExtensionEnabled(bool enabled);
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
@@ -142,6 +152,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   Node& operator=(Node&& other) = delete;
   virtual ~Node() = default;
 
+  std::shared_ptr<Node> getptr() {
+    return shared_from_this();
+  }
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
@@ -369,6 +382,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
+  /// The difference between functions `should_compute_output` and
+  /// `task_should_compute_output`:
+  /// - `should_compute_output` should only be used during graph construction
+  /// and takes into account only requires_grad information
+  /// - `task_should_compute_output` should only be called during the backward
+  /// pass (unless called directly through grad_fn) and takes into account the
+  /// current graph task.  Specifically, the autograd engine trims unnecessary
+  /// edges when `inputs` are specified, and during backward untrimmed nodes
+  /// left on the graph can/should check `task_should_compute_output` to see if
+  /// any outgoing edges have been trimmed by the engine. If that is the case,
+  /// gradient computation wrt those edges can be omitted.
+  ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
@@ -381,6 +406,37 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
       for (const auto i : c10::irange(range.first, range.second)) {
         if (should_compute_output(i))
+          return true;
+      }
+      return false;
+    });
+  }
+
+  /// Same as the above `should_compute_output` function but will also
+  /// check whether this edge is needed within the current graph task.
+  bool task_should_compute_output(size_t output_edge_index) const {
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    const auto& next = next_edges_[output_edge_index];
+    if (next.is_valid()) {
+      const auto exec_info = get_current_graph_task_exec_info();
+      if (exec_info && !exec_info->empty()) {
+        auto it = exec_info->find(next.function.get());
+        if (it == exec_info->end() || !it->second.should_execute()) {
+          return false; // this edge is not needed for the current graph_task
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Returns true if any of the output edges in any of the ranges are active
+  /// and should be computed in the current graph task.
+  bool task_should_compute_output(
+      std::initializer_list<IndexRange> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
+      for (const auto i : c10::irange(range.first, range.second)) {
+        if (task_should_compute_output(i))
           return true;
       }
       return false;

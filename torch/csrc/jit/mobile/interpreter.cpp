@@ -110,6 +110,10 @@ bool InterpreterState::run(Stack& stack) {
       // Check with iliacher if has been done.
       // Plus this is not safe as if you throw exception record function will be
       // left enabled. That is a TODO
+      // NOTE: this recordFunction logic takes up ~2-3% of cpu cycles in some
+      // workflows. do we need it and/or can we opt-out of
+      // isRecordFunctionEnabled with a macro? if we delete it, things appear to
+      // work just fine.
       bool prev_value = isRecordFunctionEnabled();
       if (!prev_value) {
         // enable only for the RecordFunction

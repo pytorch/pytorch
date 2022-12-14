@@ -72,7 +72,7 @@ PyTorch provides Tensors that can live either on the CPU or the GPU and accelera
 computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, math operations, linear algebra, reductions.
+such as slicing, indexing, mathematical operations, linear algebra, reductions.
 And they are fast!
 
 ### Dynamic Neural Networks: Tape-Based Autograd
@@ -234,7 +234,7 @@ python tools/amd_build/build_amd.py
 Install PyTorch
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-python setup.py install
+python setup.py develop
 ```
 
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
@@ -245,13 +245,13 @@ collect2: error: ld returned 1 exit status
 error: command 'g++' failed with exit status 1
 ```
 
-This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
+This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
 
 **On macOS**
 
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py develop
 ```
 
 **On Windows**
@@ -274,7 +274,7 @@ In this mode PyTorch computations will run on your CPU, not your GPU
 
 ```cmd
 conda activate
-python setup.py install
+python setup.py develop
 ```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
@@ -284,7 +284,7 @@ Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In ord
 In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
-NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
+NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
@@ -299,7 +299,7 @@ You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob
 ```cmd
 cmd
 
-:: Set the environment variables after you have downloaded and upzipped the mkl package,
+:: Set the environment variables after you have downloaded and unzipped the mkl package,
 :: else CMake would throw an error as `Could NOT find OpenMP`.
 set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
 set LIB={Your directory}\mkl\lib;%LIB%
@@ -315,7 +315,7 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
-python setup.py install
+python setup.py develop
 
 ```
 

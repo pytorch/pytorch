@@ -1,16 +1,16 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
+import pytorch_test_common
 
 import torch
-
 from onnx_test_common import run_model_test
 from torch.onnx import OperatorExportTypes
 from torch.onnx._globals import GLOBALS
 from torch.onnx.utils import _model_to_graph
+from torch.testing._internal import common_utils
 
 
-class TestAutogradFuns(unittest.TestCase):
+class TestAutogradFuns(pytorch_test_common.ExportTestCase):
     opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -148,7 +148,7 @@ class TestAutogradFuns(unittest.TestCase):
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "prim::PythonOp")
+        self.assertEqual(next(iter).kind(), "aten::ATen")
 
     def test_inline_and_symbolic(self):
         class Exp(torch.autograd.Function):
@@ -176,6 +176,37 @@ class TestAutogradFuns(unittest.TestCase):
         input = torch.ones(1)
         run_model_test(self, model, input_args=(input,))
 
+    def test_inline_with_scoped_tracing(self):
+        class Exp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.exp()
+
+            @staticmethod
+            def symbolic(g, input):
+                return g.op("Exp", input)
+
+        class LogLog(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                ctx.save_for_backward(input)
+                return i.log().log()
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                exp_result = Exp.apply(input)
+                return LogLog.apply(exp_result)
+
+        model = Caller()
+        input = torch.ones(1)
+
+        torch.jit._trace._trace_module_map = {
+            _m: torch.typename(type(_m)) for _m in model.modules()
+        }
+        run_model_test(self, model, input_args=(input,))
+        torch.jit._trace._trace_module_map = None
+
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

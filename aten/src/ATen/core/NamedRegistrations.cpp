@@ -179,7 +179,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("exp.out", CppFunction::makeFallthrough());
   m.impl("exp_", CppFunction::makeFallthrough());
   m.impl("expand", CppFunction::makeFallthrough());
-  m.impl("expand.SymInt", CppFunction::makeFallthrough());
   m.impl("expm1", CppFunction::makeFallthrough());
   m.impl("expm1.out", CppFunction::makeFallthrough());
   m.impl("expm1_", CppFunction::makeFallthrough());
@@ -467,7 +466,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("sum.IntList_out", CppFunction::makeFallthrough());
   m.impl("sum.dim_DimnameList", CppFunction::makeFallthrough());
   m.impl("sum.dim_IntList", CppFunction::makeFallthrough());
-  m.impl("sum.SymInt", CppFunction::makeFallthrough());
   m.impl("t", CppFunction::makeFallthrough());
   m.impl("tan", CppFunction::makeFallthrough());
   m.impl("tan.out", CppFunction::makeFallthrough());

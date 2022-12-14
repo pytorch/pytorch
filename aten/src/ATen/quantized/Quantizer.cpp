@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <typeinfo>
+#include <utility>
 
 namespace at {
 
@@ -126,6 +127,10 @@ inline Tensor new_qtensor(
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    TORCH_CHECK(!device.is_cuda(), "It looks like you are trying to quantize a CUDA tensor ",
+                "while QNNPACK backend is enabled. Although not expected to happen in ",
+                "practice, you might have done it for testing purposes. ",
+                "Please, either change the quantization engine or move the tensor to a CPU.");
     allocator = c10::GetDefaultMobileCPUAllocator();
   }
 #endif
@@ -373,7 +378,7 @@ Tensor from_blob_quantized_per_tensor_affine(
       data,
       sizes,
       strides,
-      deleter,
+      std::move(deleter),
       scale,
       zeroPoint,
       options);

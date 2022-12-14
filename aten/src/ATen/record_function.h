@@ -561,12 +561,30 @@ void record_function_with_scope_and_debug_handle(
         guard, fn, inputs, ##__VA_ARGS__);                 \
   }
 
+#define RECORD_FUNCTION_WITH_SCOPE_INPUTS_OUTPUTS( \
+    scope, fn, inputs, outputs, ...)               \
+  at::RecordFunction guard(scope);                 \
+  if (guard.isActive()) {                          \
+    if (guard.needsInputs()) {                     \
+      guard.before(fn, inputs, ##__VA_ARGS__);     \
+    } else {                                       \
+      guard.before(fn, ##__VA_ARGS__);             \
+    }                                              \
+    if (guard.needsOutputs()) {                    \
+      guard.setOutputs(outputs);                   \
+    }                                              \
+  }
+
 #define RECORD_FUNCTION(fn, inputs, ...) \
   RECORD_FUNCTION_WITH_SCOPE(            \
       at::RecordScope::FUNCTION, fn, inputs, ##__VA_ARGS__)
 
 #define RECORD_TORCHSCRIPT_FUNCTION(mn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::TORCHSCRIPT_FUNCTION, mn, inputs)
+
+#define RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(fn, inputs, outputs, ...) \
+  RECORD_FUNCTION_WITH_SCOPE_INPUTS_OUTPUTS(                          \
+      at::RecordScope::FUNCTION, fn, inputs, outputs, ##__VA_ARGS__)
 
 // Custom user scopes in C++; similar to Python's 'with record_function("..."):'
 #define RECORD_USER_SCOPE(fn) \
@@ -592,6 +610,16 @@ void record_function_with_scope_and_debug_handle(
     fn, debug_handle, inputs)                           \
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \
       at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
+
+// Bookend to the RECORD_FUNCTION macros.  Use this after the kernel
+// launch to let the profiler bind the outputs to the op that produced
+// them.  Note that guard is declared by RECORD_FUNCTION so this macro
+// needs to be called from the same scope as RECORD_FUNCTION
+#define RECORD_OUTPUTS(outputs)                                    \
+  if (guard.needsOutputs()) {                                      \
+    guard.setOutputs(                                              \
+        std::vector<c10::IValue>(outputs.begin(), outputs.end())); \
+  }
 
 /**
  * addThreadLocalCallback adds a thread local callback to run with

@@ -8,6 +8,10 @@ except ImportError:
         def _fail(*args, **kwargs):
             raise RuntimeError("ITT functions not installed. Are you sure you have a ITT build?")
 
+        @staticmethod
+        def is_available():
+            return False
+
         rangePush = _fail
         rangePop = _fail
         mark = _fail
@@ -15,11 +19,21 @@ except ImportError:
     _itt = _ITTStub()  # type: ignore[assignment]
 
 
-__all__ = ['range_push', 'range_pop', 'mark', 'range']
+__all__ = ['is_available', 'range_push', 'range_pop', 'mark', 'range']
+
+
+def is_available():
+    """
+    Check if ITT feature is available or not
+    """
+    return _itt.is_available()
 
 
 def range_push(msg):
     """
+    Pushes a range onto a stack of nested range span.  Returns zero-based
+    depth of the range that is started.
+
     Arguments:
         msg (str): ASCII message to associate with range
     """
@@ -28,6 +42,8 @@ def range_push(msg):
 
 def range_pop():
     """
+    Pops a range off of a stack of nested range spans. Returns the
+    zero-based depth of the range that is ended.
     """
     return _itt.rangePop()
 
@@ -35,6 +51,7 @@ def range_pop():
 def mark(msg):
     """
     Describe an instantaneous event that occurred at some point.
+
     Arguments:
         msg (str): ASCII message to associate with the event.
     """

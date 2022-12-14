@@ -134,6 +134,7 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP("incorrect want text")
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
@@ -161,7 +162,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     return gathered list of tensors in output list.
 
     Arguments:
-        out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
+        output_tensor_list (list[Tensor]): list of tensors to gather one per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.
 

@@ -18,16 +18,17 @@ namespace native {
 
 Tensor _mps_linear(
   const Tensor& input,
-  const Tensor& weight,
+  const Tensor& weight_arg,
   const c10::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
   // y=x*wT+b
 
   using namespace mps;
 
-  TORCH_CHECK(input.scalar_type() == ScalarType::Double
-              || input.scalar_type() == ScalarType::Float
-              || input.scalar_type() == ScalarType::Half, "MPS device does not support linear for non-float inputs");
+  auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
+
+  TORCH_CHECK(input.scalar_type() == ScalarType::Float ||
+              input.scalar_type() == ScalarType::Half, "MPS device does not support linear for non-float inputs");
 
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
@@ -45,6 +46,10 @@ Tensor _mps_linear(
                                         input.suggest_memory_format());
 
   TORCH_CHECK(output.is_mps());
+
+  if(output.numel() == 0) {
+    return output;
+  }
 
   MPSStream *stream = getCurrentMPSStream();
 
@@ -65,7 +70,6 @@ Tensor _mps_linear(
 
     MPSShape* wt_shape = getMPSShape(weight);
     string wt_key = string([[[wt_shape valueForKey:@"description"] componentsJoinedByString:@","] UTF8String]);
-    MPSShape* bias_shape = nil;
     string bias_key = "nobias";
     if(is_bias_defined) {
       bias_key = "bias";
@@ -147,7 +151,15 @@ Tensor _mps_linear(
     mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  return output;
+  // Shave off '1' present at the end of the shape
+  if(weight_arg.dim() == 1) {
+    // Number of elements in new output shape
+    auto output_sizes = output.sizes();
+    std::vector<int64_t> out_shape(output_sizes.begin(), output_sizes.end()-1);
+    return output.view(IntArrayRef(out_shape));
+  }
+  else
+    return output;
 }
 
 Tensor _mps_linear_backward_input(
@@ -157,8 +169,9 @@ Tensor _mps_linear_backward_input(
 {
   TORCH_CHECK(grad_output.is_mps(),
       "mps_linear_backward: grad_output needs to be mps layout");
-  TORCH_CHECK(weight.device().is_mps() && weight.scalar_type() == kFloat,
-      "mps_linear_backward: weight needs to be a dense tensor");
+  TORCH_CHECK(weight.device().is_mps() &&
+             (weight.scalar_type() == kFloat || (weight.scalar_type() == kHalf)),
+             "mps_linear_backward: unsupported weights data type: ", weight.scalar_type());
 
   TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double
               || grad_output.scalar_type() == ScalarType::Float
@@ -240,9 +253,8 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
   TORCH_CHECK(grad_output.is_mps() && input.is_mps(),
       "_mps_linear_backward: grad_output and input needs to be mps layout");
 
-  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Double
-              || grad_output.scalar_type() == ScalarType::Float
-              || grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");
+  TORCH_CHECK(grad_output.scalar_type() == ScalarType::Float ||
+              grad_output.scalar_type() == ScalarType::Half, "MPS device does not support linear backward for non-float inputs");
 
    struct CachedGraph : public mps::MPSCachedGraph
   {
@@ -358,10 +370,10 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(
     const Tensor& weight, std::array<bool,3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::_mps_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = _mps_linear_backward_input(input.sizes(), grad_output, weight);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::_mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = _mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

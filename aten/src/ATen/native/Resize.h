@@ -23,11 +23,13 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_symint(const Tensor& output, SymIntArrayRef shape);
 
 // Utility for resize_output
 //  Returns a bool saying resize should happen or not and
 //  raises a warning if resizing for one or more elements
 TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
@@ -54,49 +56,36 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_by
   }
 }
 
-inline TensorImpl* resize_impl_cpu_(
+TORCH_API TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
     at::OptionalIntArrayRef stride,
-    bool resize_storage = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride.value())) {
-    return self;
-  }
+    bool resize_storage = true);
 
-  const auto itemsize = self->dtype().itemsize();
-  const auto storage_offset = self->storage_offset();
-  size_t storage_size = 1;
-  if (stride) {
-    self->set_sizes_and_strides(size, *stride);
-    storage_size = at::detail::computeStorageNbytes(
-        size, *stride, itemsize, storage_offset);
-  } else {
-    self->set_sizes_contiguous(size);
-    storage_size = at::detail::computeStorageNbytesContiguous(
-        size, itemsize, storage_offset);
-  }
+template <typename T>
+T maybe_convert_symint(c10::SymInt) = delete;
 
-  if (resize_storage) {
-    maybe_resize_storage_cpu(self, storage_size);
-  }
+template <>
+inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 
-  return self;
-}
+template <>
+inline int64_t maybe_convert_symint(c10::SymInt x) { return x.expect_int(); }
 
+template <typename T>
 static inline void checkInBoundsForStorage(
-    IntArrayRef size,
-    IntArrayRef stride,
-    int64_t storage_offset,
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset,
     const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
-  int64_t storage_size_bytes =
+  T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
-  int64_t storage_offset_bytes = storage_offset * data_type.itemsize();
+  T storage_offset_bytes = storage_offset * data_type.itemsize();
   if (storage_size_bytes == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
   }
-  int64_t new_storage_size_bytes = new_storage.nbytes();
+  T new_storage_size_bytes = maybe_convert_symint<T>(new_storage.sym_nbytes());
   TORCH_CHECK(
       storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
       "setStorage: sizes ",
@@ -114,8 +103,9 @@ static inline void checkInBoundsForStorage(
       new_storage_size_bytes);
 }
 
-static inline void checkSetStorage(Tensor& result, Storage storage, int64_t storage_offset,
-                                   IntArrayRef size, IntArrayRef stride) {
+template <typename T>
+static inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
+                                   ArrayRef<T> size, ArrayRef<T> stride) {
   // FIXME: stride should be optional
   if (stride.data()) {
     TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
@@ -151,11 +141,12 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
  * Set self's sizes, strides, and storage_offset.
  * (size, stride, storage_offset) must be in bounds for self's storage.
  */
+template <typename T>
 inline void setStrided(
     const Tensor& self,
-    IntArrayRef size,
-    IntArrayRef stride,
-    int64_t storage_offset) {
+    ArrayRef<T> size,
+    ArrayRef<T> stride,
+    T storage_offset) {
   TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
   for (auto val : stride) {
     TORCH_CHECK(val >= 0,
@@ -169,13 +160,7 @@ inline void setStrided(
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
-  self_->set_storage_offset(storage_offset);
-
-  /* size and stride */
-  if (self_->sizes() == size && self_->strides() == stride) {
-    return;
-  }
-  self_->set_sizes_and_strides(size, stride);
+  self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
 }
 
 }}

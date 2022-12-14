@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 #include <system_error>
 
+#include <ATen/ops/from_blob.h>
 #include <c10/core/CPUAllocator.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/serialization.h>
@@ -228,21 +229,22 @@ void THPStorage_writeFileRaw(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint8_t* data;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::unique_ptr<char[]> cpu_data;
+  at::Tensor cpu_tensor;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
   if (self->device_type() == at::kCPU) {
     data = self->data<uint8_t>();
-#ifdef USE_CUDA
-  } else if (self->device_type() == at::kCUDA) {
-    cpu_data = std::unique_ptr<char[]>(new char[size_bytes]);
-    data = (uint8_t*)cpu_data.get();
-    C10_CUDA_CHECK(cudaMemcpy(
-        data, self->data<uint8_t>(), size_bytes, cudaMemcpyDeviceToHost));
-#endif
   } else {
-    TORCH_CHECK(
-        false, "writeFileRaw: Device not recognized: ", self->device_type());
+    // Here we use a tensor.to() to impl D2H for all non-CPU device.
+    auto device_tensor = at::from_blob(
+        self->data<void>(),
+        {size_bytes},
+        {1},
+        NULL,
+        at::device(self->device()).dtype(c10::kByte),
+        {self->device()});
+    cpu_tensor = device_tensor.to(at::kCPU);
+    data = (uint8_t*)cpu_tensor.data_ptr();
   }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -398,12 +400,19 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     }
   }
 
-#ifdef USE_CUDA
-  if (storage->device_type() == at::kCUDA) {
-    C10_CUDA_CHECK(cudaMemcpy(
-        storage->data<uint8_t>(), data, nbytes, cudaMemcpyHostToDevice));
+  if (storage->device_type() != at::kCPU) {
+    // Here we use a tensor.copy_() to impl H2D for all non-CPU device.
+    auto cpu_tensor = at::from_blob(
+        (void*)data, {nbytes}, at::device(at::kCPU).dtype(c10::kByte));
+    auto device_tensor = at::from_blob(
+        storage->data<void>(),
+        {nbytes},
+        {1},
+        NULL,
+        at::device(storage->device()).dtype(c10::kByte),
+        {storage->device()});
+    device_tensor.copy_(cpu_tensor);
   }
-#endif
   return storage;
 }
 

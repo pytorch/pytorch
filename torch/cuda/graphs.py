@@ -100,6 +100,22 @@ class CUDAGraph(torch._C._CUDAGraph):
         """
         return super(CUDAGraph, self).pool()
 
+    def enable_debug_mode(self):
+        r"""
+        Enables debugging mode for CUDAGraph.debug_dump.
+        """
+        return super(CUDAGraph, self).enable_debug_mode()
+
+    def debug_dump(self, debug_path):
+        r"""
+        Arguments:
+            debug_path (required): Path to dump the graph to.
+
+        Calls a debugging function to dump the graph if the debugging is
+        enabled via CUDAGraph.enable_debug_mode()
+        """
+        return super(CUDAGraph, self).debug_dump(debug_path)
+
 
 class graph(object):
     r"""
@@ -224,8 +240,15 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
         they appeared in that callable's ``sample_args``.
 
     .. warning::
+        The automatic mixed precision is supported in :func:`~torch.cuda.make_graphed_callables` only with disabled
+        caching. The context manager `torch.cuda.amp.autocast()` must have `cache_enabled=False`.
+
+    .. warning::
         All Tensor outputs of graphed callables must require grad.
     """
+    if torch.is_autocast_enabled() and torch.is_autocast_cache_enabled():
+        raise RuntimeError("make_graphed_callables does not support the autocast caching. Please set `cache_enabled=False`.")
+
     just_one_callable = False
 
     if not isinstance(callables, tuple):
@@ -280,9 +303,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     # All captures here share a mempool. To avoid replays corrupting each other's memory,
     # the safest approach is to capture all passes in the same order they'll run:
     # fwd 1, fwd 2, ... fwd N, then bwd N, bwd N-1, ... bwd 1.
-
-    # Clear AMP autocast cache before capturing the graphs
-    torch.clear_autocast_cache()
 
     # Capture forward graphs
     per_callable_static_outputs = []
@@ -342,9 +362,6 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3):
     per_callable_static_grad_outputs = list(reversed(per_callable_static_grad_outputs))
     per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
-
-    # Clear AMP autocast cache after both forward and backward graphs are captured
-    torch.clear_autocast_cache()
 
     def make_graphed_autograd_function(fwd_graph,
                                        bwd_graph,

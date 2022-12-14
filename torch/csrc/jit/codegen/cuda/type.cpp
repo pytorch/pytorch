@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <stdexcept>
 #include <unordered_map>
 
@@ -160,6 +162,17 @@ DataType getTypeFromComplexType(DataType dtype) {
   }
 }
 
+bool isSupportedTypeByDevice(DataType dtype) {
+  auto prop = at::cuda::getCurrentDeviceProperties();
+  auto major_ver = prop->major;
+  switch (dtype) {
+    case DataType::BFloat16:
+      return major_ver >= 8;
+    default:
+      return true;
+  }
+}
+
 bool isIntegerOp(const BinaryOpType bopt) {
   return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Rshift;
 }
@@ -258,6 +271,8 @@ static const char* val_type2string(ValType t) {
       return "Predicate";
     case ValType::TensorIndex:
       return "TensorIndex";
+    case ValType::IntPair:
+      return "IntPair";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -288,12 +303,20 @@ static const char* predicate_type2string(PredicateType t) {
 
 static const char* expr_type2string(ExprType t) {
   switch (t) {
+    case ExprType::FullOp:
+      return "FullOp";
+    case ExprType::ARangeOp:
+      return "ARangeOp";
+    case ExprType::EyeOp:
+      return "EyeOp";
     case ExprType::UnaryOp:
       return "UnaryOp";
     case ExprType::BinaryOp:
       return "BinaryOp";
     case ExprType::TernaryOp:
       return "TernaryOp";
+    case ExprType::RNGOp:
+      return "RNGOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
     case ExprType::GroupedReductionOp:
@@ -302,6 +325,8 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
+    case ExprType::GroupedWelfordOp:
+      return "GroupedWelfordOp";
     case ExprType::LoadStoreOp:
       return "LoadStoreOp";
     case ExprType::MmaOp:
@@ -330,6 +355,8 @@ static const char* expr_type2string(ExprType t) {
       return "GridSync";
     case ExprType::CpAsyncWait:
       return "CpAsyncWait";
+    case ExprType::CpAsyncCommit:
+      return "CpAsyncCommit";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:
@@ -346,6 +373,8 @@ static const char* expr_type2string(ExprType t) {
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::GroupedGridWelford:
+      return "GroupedGridWelford";
     case ExprType::Swizzle2D:
       return "Swizzle2D";
     case ExprType::Swizzle2DInt:
@@ -376,12 +405,15 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
-    case UnaryOpType::Real:
-    case UnaryOpType::Imag:
+    case UnaryOpType::Print:
       return false;
     default:
       return true;
   }
+}
+
+bool needFloatSuffix(RNGOpType t) {
+  return true;
 }
 
 static const char* unary_op_type2string(UnaryOpType t) {
@@ -434,8 +466,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "neg";
     case UnaryOpType::Not:
       return "not";
-    case UnaryOpType::RandLike:
-      return "randLike";
+    case UnaryOpType::Print:
+      return "print";
     case UnaryOpType::Reciprocal:
       return "reciprocal";
     case UnaryOpType::Relu:
@@ -637,6 +669,18 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   return nullptr;
 }
 
+static const char* rng_op_type_inline_op2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 std::string stringifyBooleanOp(const BinaryOpType bopt) {
   switch (bopt) {
     case BinaryOpType::And:
@@ -662,6 +706,17 @@ static const char* ternary_op_type2string(TernaryOpType t) {
       return "where";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType");
+  }
+}
+
+static const char* rng_op_type2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected RNGOpType");
   }
 }
 
@@ -696,6 +751,28 @@ static const char* parallel_type2string(ParallelType t) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType");
   }
+}
+
+std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except) {
+  std::unordered_set<ParallelType> result = {
+      ParallelType::BIDz,
+      ParallelType::BIDy,
+      ParallelType::BIDx,
+      ParallelType::TIDz,
+      ParallelType::TIDy,
+      ParallelType::TIDx,
+      ParallelType::Vectorize,
+      ParallelType::MisalignedVectorize,
+      ParallelType::Unroll,
+      ParallelType::Unswitch,
+      ParallelType::Mma,
+      ParallelType::Group,
+      ParallelType::Serial};
+  for (auto t : except) {
+    result.erase(t);
+  }
+  return result;
 }
 
 static const char* memory_type2string(MemoryType t) {
@@ -955,6 +1032,10 @@ std::ostream& operator<<(std::ostream& out, const TernaryOpType totype) {
   return out << ternary_op_type2string(totype);
 }
 
+std::ostream& operator<<(std::ostream& out, const RNGOpType rngtype) {
+  return out << rng_op_type2string(rngtype);
+}
+
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   return out << stringifyThread(ptype);
 }
@@ -1005,6 +1086,26 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
   return os;
 }
 
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const SwizzleMode& swizzle) {
+  switch (swizzle) {
+    case SwizzleMode::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case SwizzleMode::Loop:
+      os << "Loop";
+      break;
+    case SwizzleMode::Data:
+      os << "Data";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
+}
+
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
     const UnaryOpType uotype) {
   const char* str = unary_op_type_inline_op2string(uotype);
@@ -1014,6 +1115,12 @@ TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
 
 c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   const char* str = binary_op_type_inline_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
+c10::optional<std::string> inline_op_str(const RNGOpType rngtype) {
+  const char* str = rng_op_type_inline_op2string(rngtype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
 }

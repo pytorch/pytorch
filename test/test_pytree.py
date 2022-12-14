@@ -3,8 +3,9 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
-from torch.utils._pytree import _broadcast_to_and_flatten
-from collections import namedtuple
+from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
+from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
+from collections import namedtuple, OrderedDict
 from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
 
 class TestPytree(TestCase):
@@ -62,6 +63,28 @@ class TestPytree(TestCase):
         run_test((1.,))
         run_test((1., 2))
         run_test((torch.tensor([1., 2]), 2, 10, 9, 11))
+
+    def test_flatten_unflatten_odict(self):
+        def run_test(odict):
+            expected_spec = TreeSpec(
+                OrderedDict,
+                list(odict.keys()),
+                [LeafSpec() for _ in odict.values()])
+            values, treespec = tree_flatten(odict)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, list(odict.values()))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, odict)
+            self.assertTrue(isinstance(unflattened, OrderedDict))
+
+        od = OrderedDict()
+        run_test(od)
+
+        od['b'] = 1
+        od['a'] = torch.tensor(3.14)
+        run_test(od)
 
     def test_flatten_unflatten_namedtuple(self):
         Point = namedtuple('Point', ['x', 'y'])
@@ -160,12 +183,29 @@ class TestPytree(TestCase):
                 run_test(case)
 
 
+    def test_tree_only(self):
+        self.assertEqual(tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"])
+
+
+    def test_tree_all_any(self):
+        self.assertTrue(tree_all(lambda x: x % 2, [1, 3]))
+        self.assertFalse(tree_all(lambda x: x % 2, [0, 1]))
+        self.assertTrue(tree_any(lambda x: x % 2, [0, 1]))
+        self.assertFalse(tree_any(lambda x: x % 2, [0, 2]))
+        self.assertTrue(tree_all_only(int, lambda x: x % 2, [1, 3, "a"]))
+        self.assertFalse(tree_all_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertTrue(tree_any_only(int, lambda x: x % 2, [0, 1, "a"]))
+        self.assertFalse(tree_any_only(int, lambda x: x % 2, [0, 2, "a"]))
+
+
     def test_treespec_repr(self):
         # Check that it looks sane
-        pytree = (0, [0, 0, 0])
+        pytree = (0, [0, 0, [0]])
         _, spec = tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec), 'TreeSpec(tuple, None, [*, TreeSpec(list, None, [*, *, *])])')
+        self.assertEqual(repr(spec), ("TreeSpec(tuple, None, [*,\n"
+                                      "                       TreeSpec(list, None, [*,\n"
+                                      "                                             *,\n"
+                                      "                                             TreeSpec(list, None, [*])])])"))
 
     def test_broadcast_to_and_flatten(self):
         cases = [

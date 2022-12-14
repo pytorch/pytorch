@@ -18,6 +18,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -28,12 +30,12 @@ namespace native {
 
 namespace {
 
-__device__ inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+__device__ inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-__device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+__device__ inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // 5d tensor B x D x T x H x W
@@ -425,6 +427,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_input_arg{gradInput, "gradInput", 1};
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
+
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",

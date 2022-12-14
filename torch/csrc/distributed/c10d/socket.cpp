@@ -4,7 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <c10d/socket.h>
+#include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
 #include <system_error>
@@ -30,9 +30,9 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 
-#include <c10d/error.h>
-#include <c10d/exception.h>
-#include <c10d/logging.h>
+#include <torch/csrc/distributed/c10d/error.h>
+#include <torch/csrc/distributed/c10d/exception.h>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #include <c10/util/CallOnce.h>
 

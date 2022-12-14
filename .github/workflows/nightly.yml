@@ -35,3 +35,13 @@ jobs:
       run-doxygen: true
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+
+  update-vision-commit-hash:
+    uses: ./.github/workflows/_update-commit-hash.yml
+    if: ${{ github.event_name == 'schedule' }}
+    with:
+      repo-name: vision
+      branch: main
+    secrets:
+      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

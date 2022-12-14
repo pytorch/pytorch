@@ -69,6 +69,7 @@ class Embedding(Module):
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding(input)
         tensor([[[-0.0251, -1.6902,  0.7172],
                  [-0.6431,  0.0748,  0.6969],
@@ -116,11 +117,12 @@ class Embedding(Module):
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
+    freeze: bool
     sparse: bool
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
-                 sparse: bool = False, _weight: Optional[Tensor] = None,
+                 sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Embedding, self).__init__()
@@ -137,12 +139,13 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs))
+            self.weight = Parameter(torch.empty((num_embeddings, embedding_dim), **factory_kwargs),
+                                    requires_grad=not _freeze)
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
-            self.weight = Parameter(_weight)
+            self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
 
@@ -200,6 +203,7 @@ class Embedding(Module):
             >>> embedding = nn.Embedding.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
@@ -210,12 +214,12 @@ class Embedding(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
+            _freeze=freeze,
             padding_idx=padding_idx,
             max_norm=max_norm,
             norm_type=norm_type,
             scale_grad_by_freq=scale_grad_by_freq,
             sparse=sparse)
-        embedding.weight.requires_grad = not freeze
         return embedding
 
 
@@ -277,6 +281,7 @@ class EmbeddingBag(Module):
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
         >>> offsets = torch.tensor([0,4], dtype=torch.long)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> embedding_sum(input, offsets)
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
@@ -427,6 +432,7 @@ class EmbeddingBag(Module):
             >>> embeddingbag = nn.EmbeddingBag.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([[1, 0]])
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """

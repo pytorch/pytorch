@@ -1,20 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
-#include <atomic>
-
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Tensor.h>
-#include <ATen/native/Copy.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/mps/MPSDevice.h>
-
-#ifdef __OBJC__
-#include <Foundation/Foundation.h>
-#include <Metal/Metal.h>
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
+#include <ATen/core/Tensor.h>
 
 namespace at {
 namespace native {

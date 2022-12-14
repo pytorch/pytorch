@@ -241,8 +241,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
     auto* b_batch_idx_ptr = data[0];
     auto* a_batch_idx_ptr = data[1];
 
-    for (const auto elem : c10::irange(nelems)) {
-      (void)elem; //Suppress unused variable warning
+    for (const auto elem C10_UNUSED : c10::irange(nelems)) {
       auto b_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(b_batch_idx_ptr);
       auto a_curr_linear_batch_idx = *reinterpret_cast<int64_t*>(a_batch_idx_ptr);
 

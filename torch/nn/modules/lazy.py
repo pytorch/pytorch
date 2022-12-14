@@ -74,6 +74,7 @@ class LazyModuleMixin:
     These "dry runs" send inputs of the correct size, dtype, and device through
     the network and to each one of its lazy modules. After this the network can be used as usual.
 
+    >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
     ...    def __init__(self):
     ...        super().__init__()

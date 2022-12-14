@@ -1,11 +1,12 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Activation.h>
 
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
@@ -15,6 +16,65 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/celu_native.h>
+#include <ATen/ops/clamp.h>
+#include <ATen/ops/clamp_min.h>
+#include <ATen/ops/elu.h>
+#include <ATen/ops/elu_backward_native.h>
+#include <ATen/ops/elu_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/gelu_backward_native.h>
+#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/hardshrink_backward_native.h>
+#include <ATen/ops/hardshrink_native.h>
+#include <ATen/ops/hardsigmoid_backward_native.h>
+#include <ATen/ops/hardsigmoid_native.h>
+#include <ATen/ops/hardswish_backward_native.h>
+#include <ATen/ops/hardswish_native.h>
+#include <ATen/ops/hardtanh.h>
+#include <ATen/ops/hardtanh_backward_native.h>
+#include <ATen/ops/hardtanh_native.h>
+#include <ATen/ops/infinitely_differentiable_gelu_backward_native.h>
+#include <ATen/ops/leaky_relu.h>
+#include <ATen/ops/leaky_relu_backward.h>
+#include <ATen/ops/leaky_relu_backward_native.h>
+#include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/log_sigmoid_backward_native.h>
+#include <ATen/ops/log_sigmoid_forward.h>
+#include <ATen/ops/log_sigmoid_forward_native.h>
+#include <ATen/ops/log_sigmoid_native.h>
+#include <ATen/ops/mish_backward_native.h>
+#include <ATen/ops/mish_native.h>
+#include <ATen/ops/prelu_backward_native.h>
+#include <ATen/ops/prelu_native.h>
+#include <ATen/ops/relu6_native.h>
+#include <ATen/ops/relu_native.h>
+#include <ATen/ops/rrelu_native.h>
+#include <ATen/ops/rrelu_with_noise.h>
+#include <ATen/ops/rrelu_with_noise_backward_native.h>
+#include <ATen/ops/rrelu_with_noise_native.h>
+#include <ATen/ops/selu_native.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/silu_backward_native.h>
+#include <ATen/ops/silu_native.h>
+#include <ATen/ops/softplus.h>
+#include <ATen/ops/softplus_backward_native.h>
+#include <ATen/ops/softplus_native.h>
+#include <ATen/ops/softshrink_backward_native.h>
+#include <ATen/ops/softshrink_native.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/threshold_backward_native.h>
+#include <ATen/ops/threshold_native.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -314,7 +374,7 @@ bool use_mkldnn(const Tensor& input) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
-  if (!input.is_contiguous() || input.numel() == 1) {
+  if (!input.is_contiguous() || input.numel() <= 1) {
     return false;
   }
   return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -566,7 +626,7 @@ Tensor rrelu_with_noise_cpu(
     c10::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cpu(
-      self, noise, lower, upper, training, generator, output);
+      self, noise, lower, upper, training, std::move(generator), output);
 }
 
 Tensor& rrelu_with_noise_cpu_(
@@ -577,7 +637,7 @@ Tensor& rrelu_with_noise_cpu_(
     bool training,
     c10::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(
-      self, noise, lower, upper, training, generator, self);
+      self, noise, lower, upper, training, std::move(generator), self);
 }
 
 Tensor rrelu_with_noise_backward(
@@ -599,11 +659,13 @@ Tensor rrelu_with_noise_backward(
 }
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
-  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
-  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
 
 TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {
@@ -639,7 +701,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   auto as_nd = [&](const Tensor& t) {
     TORCH_CHECK(
       t.dim() == 1 || t.dim() == 0,
-      "prelu: Expected `weight` to be a scalar or 1D tensor, but got ndim = ", t.dim());
+      "prelu: Expected `weight` to be a scalar or 1D tensor, but got: ndim = ", t.dim());
     if (ndim >= 2) {
       sizes[1] = t.dim() == 1 ? t.size(0) : 1;
       strides[1] = t.dim() == 1 ? t.stride(0) : 0;

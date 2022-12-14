@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
-import random
 from typing import Any, Mapping, Type
 
-import numpy as np
 import onnxruntime
+import pytorch_test_common
 
 import torch
 from torch.onnx import _constants, verification
-from torch.testing._internal import common_utils
 
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
@@ -30,14 +29,27 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
-_ORT_PROVIDERS = ("CPUExecutionProvider",)
-
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
-    kwargs["ort_providers"] = _ORT_PROVIDERS
+    options = verification.VerificationOptions()
+
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
-    return verification.verify(*args, **kwargs)
+    if hasattr(test_suite, "check_shape"):
+        options.check_shape = test_suite.check_shape
+    if hasattr(test_suite, "check_dtype"):
+        options.check_dtype = test_suite.check_dtype
+
+    names = set([f.name for f in dataclasses.fields(options)])
+    keywords_to_pop = []
+    for k, v in kwargs.items():
+        if k in names:
+            setattr(options, k, v)
+            keywords_to_pop.append(k)
+    for k in keywords_to_pop:
+        kwargs.pop(k)
+
+    return verification.verify(*args, options=options, **kwargs)
 
 
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
@@ -50,19 +62,15 @@ def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any])
     return f"{cls.__name__}_{suffix}"
 
 
-def set_rng_seed(seed):
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-
-
-class _TestONNXRuntime(common_utils.TestCase):
-    opset_version = _constants.onnx_default_opset
+class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
+    opset_version = _constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
+    check_shape = True
+    check_dtype = True
 
     def setUp(self):
-        set_rng_seed(0)
+        super().setUp()
         onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
@@ -90,7 +98,7 @@ class _TestONNXRuntime(common_utils.TestCase):
         remained_onnx_input_idx=None,
         verbose=False,
     ):
-        def _run_test(m, remained_onnx_input_idx, flatten=True):
+        def _run_test(m, remained_onnx_input_idx, flatten=True, ignore_none=True):
             return run_model_test(
                 self,
                 m,
@@ -107,6 +115,7 @@ class _TestONNXRuntime(common_utils.TestCase):
                 training=training,
                 remained_onnx_input_idx=remained_onnx_input_idx,
                 flatten=flatten,
+                ignore_none=ignore_none,
                 verbose=verbose,
             )
 
@@ -123,7 +132,11 @@ class _TestONNXRuntime(common_utils.TestCase):
 
         if self.is_script_test_enabled and self.is_script:
             script_model = model if is_model_script else torch.jit.script(model)
-            _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
-
+            _run_test(
+                script_model,
+                scripting_remained_onnx_input_idx,
+                flatten=False,
+                ignore_none=False,
+            )
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)

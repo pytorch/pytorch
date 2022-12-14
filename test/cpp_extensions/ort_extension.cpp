@@ -26,11 +26,6 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
   return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
 
-Tensor empty_symint_override(c10::SymIntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  return empty_override(c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
 Tensor& add_out_override(const Tensor & a, const Tensor & b , const Scalar& c, Tensor & out) {
   test_int = 1;
   return out;
@@ -58,7 +53,6 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 TORCH_LIBRARY_IMPL(aten, ORT, m) {
-  m.impl("empty.SymInt",                       empty_symint_override);
   m.impl("empty.memory_format",                empty_override);
   m.impl("add.out",                            add_out_override);
   m.impl("convolution_overrideable",           fake_convolution);

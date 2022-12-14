@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <thrust/tuple.h>
 #include <cmath>

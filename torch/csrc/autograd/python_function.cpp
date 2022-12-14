@@ -9,6 +9,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/functorch/DynamicLayer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -16,6 +17,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -39,7 +41,6 @@
 
 using namespace torch;
 using namespace torch::autograd;
-using namespace torch::jit;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
@@ -213,7 +214,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
     for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -599,6 +600,7 @@ static void _append_subgraph(
     torch::jit::Graph* graph,
     std::vector<torch::jit::Value*> trace_outputs,
     bool unpack_output) {
+  using Value = torch::jit::Value;
   node->g_(
       torch::jit::attr::Subgraph,
       std::make_shared<torch::jit::Graph>(graph->current_scope()));
@@ -611,14 +613,16 @@ static void _append_subgraph(
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
   }
-  // Find node position in graph, all subsequent nodes after are added to
+  // Find node position in owning block, all subsequent nodes after are added to
   // subgraph
-  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  auto owning_block = node->owningBlock();
+  auto it = std::find(
+      owning_block->nodes().begin(), owning_block->nodes().end(), node);
   // Skip TupleUnpack node if created
   if (!unpack_output) {
     it++;
   }
-  for (it++; it != graph->nodes().end(); ++it) {
+  for (it++; it != owning_block->nodes().end(); ++it) {
     torch::jit::Node* node = *it;
     auto* clone_node =
         subgraph->insertNode(subgraph->createClone(node, value_map_func));
@@ -689,8 +693,8 @@ static void _trace_post_record(
   node->addOutput();
   auto old_node = node;
   if (!unpack_output) {
-    std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
-    TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    std::vector<at::TypePtr> tuple_values(num_outputs, at::TensorType::get());
+    auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
     node->output()->setType(tuple_type);
@@ -702,7 +706,7 @@ static void _trace_post_record(
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
-      Value* value = node->outputs()[i];
+      auto value = node->outputs()[i];
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
@@ -720,12 +724,12 @@ static void _trace_post_record(
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.
   if (!unpack_output) {
-    std::vector<TypePtr> new_tuple_values;
+    std::vector<at::TypePtr> new_tuple_values;
     for (const auto i : c10::irange(num_outputs)) {
-      TypePtr ptr = node->outputs()[i]->type();
+      auto ptr = node->outputs()[i]->type();
       new_tuple_values.push_back(ptr);
     }
-    TypePtr tuple_type = TupleType::create(std::move(new_tuple_values));
+    auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
     // shape.
     old_node->output()->setType(tuple_type);
@@ -806,6 +810,55 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_maybe_clear_saved_tensors(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  if (!get_current_graph_task_keep_graph()) {
+    cdata->release_variables();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+namespace {
+
+THPObjectPtr make_ctx_input_tuple(
+    THPFunction* ctx,
+    const UnpackedInput& unpacked_input,
+    int64_t num_args) {
+  THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
+  if (!ctx_input_tuple)
+    return {};
+  Py_INCREF(ctx);
+  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
+  for (const auto i : c10::irange(num_args)) {
+    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
+    Py_INCREF(arg);
+    PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
+  }
+  return ctx_input_tuple;
+}
+
+THPObjectPtr make_ctx_input_output_tuple(
+    THPFunction* ctx,
+    UnpackedInput& unpacked_input,
+    PyObject* outputs) {
+  THPObjectPtr result(PyTuple_New(3));
+  if (!result)
+    return {};
+  Py_INCREF(ctx);
+  Py_INCREF(unpacked_input.input_tuple.get());
+  Py_INCREF(outputs);
+  PyTuple_SET_ITEM(result.get(), 0, (PyObject*)ctx);
+  PyTuple_SET_ITEM(result.get(), 1, unpacked_input.input_tuple.get());
+  PyTuple_SET_ITEM(result.get(), 2, outputs);
+  return result;
+}
+
+} // namespace
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -850,29 +903,51 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  // Prepend ctx to input_tuple, in preparation for static method call
+  // autograd.Function may optionally contain a setup_context staticmethod.
+  // In this case, autograd.Function.forward does NOT accept a ctx object.
+  bool has_separate_setup_context_fn =
+      (isAutogradFunctionExtensionEnabled() &&
+       PyObject_HasAttrString(cls, "setup_context"));
+
   auto num_args = PyTuple_GET_SIZE(inputs);
-  THPObjectPtr ctx_input_tuple(PyTuple_New(num_args + 1));
-  if (!ctx_input_tuple)
-    return nullptr;
-  Py_INCREF(ctx);
-  PyTuple_SET_ITEM(ctx_input_tuple.get(), 0, (PyObject*)ctx);
-  for (const auto i : c10::irange(num_args)) {
-    PyObject* arg = PyTuple_GET_ITEM(unpacked_input.input_tuple.get(), i);
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(ctx_input_tuple.get(), i + 1, arg);
-  }
 
   // Call forward
-  THPObjectPtr tensor_outputs;
+  THPObjectPtr outputs;
   {
     AutoGradMode grad_mode(false);
     at::AutoFwGradMode fw_grad_mode(false);
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn)
       return nullptr;
-    tensor_outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
-    if (!tensor_outputs)
+    if (has_separate_setup_context_fn) {
+      // call forward followed by setup_context
+      outputs = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
+      if (!outputs) {
+        return nullptr;
+      }
+      // signature is setup_context(ctx, inputs, outputs)
+      auto ctx_input_output_tuple =
+          make_ctx_input_output_tuple(ctx, unpacked_input, outputs);
+      if (!ctx_input_output_tuple) {
+        return nullptr;
+      }
+      THPObjectPtr setup_context_fn(
+          PyObject_GetAttrString(cls, "setup_context"));
+      auto result =
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      if (!result) {
+        return nullptr;
+      }
+    } else {
+      // call forward
+      auto ctx_input_tuple =
+          make_ctx_input_tuple(ctx, unpacked_input, num_args);
+      if (!ctx_input_tuple) {
+        return nullptr;
+      }
+      outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
+    }
+    if (!outputs)
       return nullptr;
   }
 
@@ -882,7 +957,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       ctx,
       unpacked_input,
       inputs,
-      std::move(tensor_outputs),
+      std::move(outputs),
       is_executable,
       node);
   END_HANDLE_TH_ERRORS
@@ -899,7 +974,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, tensor.output_nr()));
+      new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
@@ -926,6 +1001,21 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return torch::autograd::registerFunctionHook(*cdata, hook);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
+  TORCH_CHECK(
+      cdata,
+      "Attribute 'register_prehook' is invalid for this instance of _C._FunctionBase. "
+      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+      "access pattern that is no longer supported. For examples on how to use new-style "
+      "autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  return torch::autograd::registerFunctionPreHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1184,12 +1274,17 @@ static struct PyGetSetDef THPFunction_properties[] = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
+    {(char*)"maybe_clear_saved_tensors",
+     THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
     {(char*)"_register_hook_dict",
      THPFunction__register_hook_dict,
      METH_O,
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
+    {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPFunctionType = {

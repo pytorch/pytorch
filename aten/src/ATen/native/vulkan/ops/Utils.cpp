@@ -1,9 +1,272 @@
 #include <ATen/native/vulkan/ops/Common.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
+
+namespace packing {
+
+static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
+  if (v_dst.is_quantized()) {
+    switch (v_dst.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        switch (v_dst.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return VK_KERNEL(nchw_to_image_uint8);
+          case c10::ScalarType::QInt8:
+            return VK_KERNEL(nchw_to_image_int8);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(nchw_to_image_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_dst.dtype());
+        }
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+      case api::StorageType::BUFFER:
+      case api::StorageType::UNKNOWN:
+        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+    }
+  }
+
+  switch (v_dst.storage_type()) {
+    case api::StorageType::TEXTURE_3D:
+      return VK_KERNEL(nchw_to_image);
+    case api::StorageType::TEXTURE_2D:
+      return VK_KERNEL(nchw_to_image2d);
+    default:
+      TORCH_CHECK(false, "No kernel available!");
+  }
+}
+
+static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
+  if (v_src.is_quantized()) {
+    auto plane_size =
+        get_dim<Dim4D::Height>(v_src) * get_dim<Dim4D::Width>(v_src);
+    switch (v_src.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        switch (v_src.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt8:
+            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
+                                       : VK_KERNEL(image_to_nchw_quantized);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(image_to_nchw_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_src.dtype());
+        }
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+      case api::StorageType::BUFFER:
+      case api::StorageType::UNKNOWN:
+        TORCH_CHECK(false, "Requested storage type must be a texture type.");
+    }
+  }
+
+  switch (v_src.storage_type()) {
+    case api::StorageType::TEXTURE_3D:
+      return VK_KERNEL(image_to_nchw);
+    case api::StorageType::TEXTURE_2D:
+      return VK_KERNEL(image2d_to_nchw);
+    default:
+      TORCH_CHECK(false, "No kernel available!");
+  }
+}
+
+struct ToFromTextureParams final {
+  api::utils::ivec3 extents;
+  int32_t plane_size;
+};
+
+void record_nchw_to_image_op(
+    api::Context* const context,
+    api::ShaderSource& compute_shader,
+    api::VulkanBuffer& src_buffer,
+    vTensor& v_dst,
+    api::PipelineBarrier pipeline_barrier,
+    const VkFence fence_handle) {
+  api::utils::uvec3 global_size = v_dst.extents();
+  api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
+
+  int32_t height =
+      api::utils::safe_downcast<int32_t>(get_dim<Dim4D::Height>(v_dst));
+  int32_t width =
+      api::utils::safe_downcast<int32_t>(get_dim<Dim4D::Width>(v_dst));
+  int32_t plane_size = height * width;
+
+  ToFromTextureParams block{
+      api::utils::make_ivec3(v_dst.extents()),
+      plane_size,
+  };
+
+  api::UniformParamsBuffer params(context, block);
+  context->submit_compute_job(
+      // shader descriptor
+      compute_shader,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      local_size,
+      // fence handle
+      fence_handle,
+      // shader arguments
+      v_dst.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      src_buffer,
+      // params buffer
+      params.buffer());
+}
+
+void record_image_to_nchw_op(
+    api::Context* const context,
+    api::ShaderSource& compute_shader,
+    vTensor& v_src,
+    api::VulkanBuffer& dst_buffer,
+    api::PipelineBarrier pipeline_barrier,
+    const VkFence fence_handle) {
+  api::utils::uvec3 global_size = v_src.extents();
+  api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
+
+  int32_t height =
+      api::utils::safe_downcast<int32_t>(get_dim<Dim4D::Height>(v_src));
+  int32_t width =
+      api::utils::safe_downcast<int32_t>(get_dim<Dim4D::Width>(v_src));
+  int32_t plane_size = height * width;
+
+  ToFromTextureParams block{
+      api::utils::make_ivec3(v_src.extents()),
+      plane_size,
+  };
+
+  if (v_src.dtype() == c10::ScalarType::QUInt8 ||
+      v_src.dtype() == c10::ScalarType::QInt8) {
+    if (plane_size % 4 == 0) {
+      global_size.data[0u] = plane_size / 4;
+      global_size.data[1u] = 1;
+      local_size.data[0u] *= local_size.data[1u];
+      local_size.data[1u] = 1;
+    } else {
+      uint32_t numel = v_src.numel();
+      global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
+      local_size = {64u, 1u, 1u};
+    }
+  }
+
+  api::UniformParamsBuffer params(context, block);
+  context->submit_compute_job(
+      // shader descriptor
+      compute_shader,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      local_size,
+      // fence handle
+      fence_handle,
+      // shader arguments
+      v_src.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      dst_buffer,
+      // params buffer
+      params.buffer());
+}
+
+void record_nchw_to_buffer_op(
+    api::Context* const context,
+    api::VulkanBuffer& src_buffer,
+    vTensor& v_dst,
+    api::PipelineBarrier pipeline_barrier,
+    const VkFence fence_handle) {
+  uint32_t gpu_buf_len = api::utils::safe_downcast<uint32_t>(v_dst.gpu_numel());
+
+  api::utils::uvec3 global_size = {gpu_buf_len, 1u, 1u};
+  api::utils::uvec3 local_size = {32u, 1u, 1u};
+
+  api::UniformParamsBuffer cpu_buffer_metadata(
+      context, v_dst.get_cpu_buffer_metadata());
+
+  context->submit_compute_job(
+      // shader descriptor
+      VK_KERNEL(buffer_to_buffer),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      local_size,
+      // fence handle
+      fence_handle,
+      // shader arguments
+      v_dst.buffer(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_dst.buffer_metadata(),
+      src_buffer,
+      cpu_buffer_metadata.buffer());
+}
+
+void record_buffer_to_nchw_op(
+    api::Context* const context,
+    vTensor& v_src,
+    api::VulkanBuffer& dst_buffer,
+    api::PipelineBarrier pipeline_barrier,
+    const VkFence fence_handle) {
+  uint32_t buf_len = api::utils::safe_downcast<uint32_t>(v_src.numel());
+
+  api::utils::uvec3 global_size = {buf_len, 1u, 1u};
+  api::utils::uvec3 local_size = {4u, 1u, 1u};
+
+  api::UniformParamsBuffer cpu_buffer_metadata(
+      context, v_src.get_cpu_buffer_metadata());
+
+  context->submit_compute_job(
+      // shader descriptor
+      VK_KERNEL(buffer_to_buffer),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      local_size,
+      // fence handle
+      fence_handle,
+      // shader arguments
+      dst_buffer,
+      cpu_buffer_metadata.buffer(),
+      v_src.buffer(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_src.buffer_metadata());
+}
+
+} // namespace packing
+
 namespace utils {
 
 /*
@@ -32,10 +295,10 @@ namespace utils {
  *    tensor would be {NC_aligned/4, H, W, 4}
  */
 Tensor nchw_to_nc4hw(const Tensor& src) {
-  uint32_t N = batch_size(src.sizes());
-  uint32_t C = channels_size(src.sizes());
-  uint32_t H = height_size(src.sizes());
-  uint32_t W = width_size(src.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(src.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(src.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(src.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(src.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
@@ -57,10 +320,10 @@ Tensor nchw_to_nc4hw(const Tensor& src) {
  * same as the tensor produced by a call to format_src_tensor().
  */
 Tensor create_staging_tensor(const vTensor& v_in) {
-  uint32_t N = batch_size(v_in.sizes());
-  uint32_t C = channels_size(v_in.sizes());
-  uint32_t H = height_size(v_in.sizes());
-  uint32_t W = width_size(v_in.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(v_in.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(v_in.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(v_in.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(v_in.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
 
@@ -82,10 +345,10 @@ Tensor create_staging_tensor(const vTensor& v_in) {
  * the properties of the original tensor.
  */
 Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
-  uint32_t N = batch_size(sizes);
-  uint32_t C = channels_size(sizes);
-  uint32_t H = height_size(sizes);
-  uint32_t W = width_size(sizes);
+  uint32_t N = get_dim<Dim4D::Batch>(sizes);
+  uint32_t C = get_dim<Dim4D::Channel>(sizes);
+  uint32_t H = get_dim<Dim4D::Height>(sizes);
+  uint32_t W = get_dim<Dim4D::Width>(sizes);
 
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
 
@@ -106,7 +369,7 @@ void copy_buffer_to_vtensor(
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      src_buffer.mem_size() == v_dst.buffer_bytes(),
+      src_buffer.mem_size() == v_dst.gpu_nbytes(),
       "Vulkan copy_buffer_to_vtensor: source buffer and destination texture "
       "do not have the same number of bytes");
 
@@ -127,6 +390,27 @@ void copy_buffer_to_vtensor(
       VK_NULL_HANDLE);
 }
 
+void copy_buffer_to_buffer(
+    api::Context* const context,
+    api::StorageBuffer& src,
+    api::StorageBuffer& dst,
+    VkFence fence_handle) {
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_copy<api::VulkanBuffer, api::VulkanBuffer>(
+      // pipeline barrier
+      pipeline_barrier,
+      // resources
+      src.buffer(),
+      dst.buffer(),
+      // copy details
+      {static_cast<uint32_t>(src.buffer().mem_size()), 0u, 0u},
+      {0u, 0u, 0u},
+      {0u, 0u, 0u},
+      // fence handle
+      fence_handle);
+}
+
 void copy_vtensor_to_buffer(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
@@ -135,7 +419,7 @@ void copy_vtensor_to_buffer(
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      v_src.buffer_bytes() == dst_buffer.mem_size(),
+      v_src.gpu_nbytes() == dst_buffer.mem_size(),
       "Vulkan copy_vtensor_to_buffer: source texture and destination buffer "
       "do not have the same number of bytes");
 
@@ -162,48 +446,20 @@ void pack_buffer_to_vtensor(
     api::PipelineBarrier& pipeline_barrier) {
   api::Context* const context = api::context();
 
-  const api::utils::uvec3 extents = v_self.extents();
-  const uint32_t plane = extents.data[0u] * extents.data[1u];
-
-  const struct Block final {
-    api::utils::uvec3 extents;
-    uint32_t block;
-    api::utils::uvec4 offset;
-  } block{
-      extents,
-      4u * plane,
-      {
-          0u * plane,
-          1u * plane,
-          2u * plane,
-          3u * plane,
-      },
-  };
-
-  api::UniformParamsBuffer params(context, block);
-  bool is_quantized = v_self.is_quantized();
-  api::ShaderSource kernel = is_quantized ? VK_KERNEL(nchw_to_image_quantized)
-                                          : VK_KERNEL(nchw_to_image);
-
-  context->submit_compute_job(
-      // shader descriptor
-      kernel,
-      // pipeline barrier
-      pipeline_barrier,
-      // global work group size
-      extents,
-      // local work group size
-      adaptive_work_group_size(extents),
-      // fence handle
-      VK_NULL_HANDLE,
-      // shader arguments
-      v_self.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE,
-          api::MemoryAccessType::WRITE),
-      buffer,
-      // params buffer
-      params.buffer());
+  if (v_self.storage_type() == api::StorageType::BUFFER) {
+    packing::record_nchw_to_buffer_op(
+        context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
+  } else {
+    api::ShaderSource compute_shader =
+        packing::get_nchw_to_image_shader(v_self);
+    packing::record_nchw_to_image_op(
+        context,
+        compute_shader,
+        buffer,
+        v_self,
+        pipeline_barrier,
+        VK_NULL_HANDLE);
+  }
 }
 
 void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
@@ -216,53 +472,22 @@ void pack_vtensor_to_staging(
     api::VulkanBuffer& staging,
     const VkFence fence_handle) {
   api::Context* const context = api::context();
-
-  const api::utils::uvec3 extents = v_self.extents();
-  const uint32_t plane = extents.data[0u] * extents.data[1u];
-
-  const struct Block final {
-    api::utils::uvec3 extents;
-    uint32_t block;
-    api::utils::uvec4 offset;
-  } block{
-      extents,
-      4u * plane,
-      {
-          0u * plane,
-          1u * plane,
-          2u * plane,
-          3u * plane,
-      },
-  };
-
-  api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
-  bool is_quantized = v_self.is_quantized();
-  api::utils::uvec3 copy_extents;
-  copy_extents.data[0u] = 1;
-  copy_extents.data[1u] = 1;
-  copy_extents.data[2u] =
-      ((v_self.sizes()[1] * v_self.sizes()[2] * v_self.sizes()[3]) / 4);
-  api::ShaderSource kernel = is_quantized ? VK_KERNEL(image_to_nchw_quantized)
-                                          : VK_KERNEL(image_to_nchw);
-  api::utils::uvec3 extents_to_use = is_quantized ? copy_extents : extents;
 
-  context->submit_compute_job(
-      // shader descriptor
-      kernel,
-      // pipeline barrier
-      pipeline_barrier,
-      // global work group size
-      extents_to_use,
-      // local work group size
-      adaptive_work_group_size(extents_to_use),
-      // fence handle
-      fence_handle,
-      // shader arguments
-      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      staging,
-      // params buffer
-      params.buffer());
+  if (v_self.storage_type() == api::StorageType::BUFFER) {
+    packing::record_buffer_to_nchw_op(
+        context, v_self, staging, pipeline_barrier, fence_handle);
+  } else {
+    api::ShaderSource compute_shader =
+        packing::get_image_to_nchw_shader(v_self);
+    packing::record_image_to_nchw_op(
+        context,
+        compute_shader,
+        v_self,
+        staging,
+        pipeline_barrier,
+        fence_handle);
+  }
 }
 
 } // namespace utils

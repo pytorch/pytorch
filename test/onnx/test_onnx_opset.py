@@ -4,6 +4,7 @@ import io
 import itertools
 
 import onnx
+import pytorch_test_common
 
 import torch
 import torch.onnx
@@ -70,7 +71,7 @@ def check_onnx_opsets_operator(
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
 
-class TestONNXOpset(common_utils.TestCase):
+class TestONNXOpset(pytorch_test_common.ExportTestCase):
     def test_opset_fallback(self):
         class MyModule(Module):
             def forward(self, x):
@@ -118,7 +119,7 @@ class TestONNXOpset(common_utils.TestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
-        check_onnx_opsets_operator(module, [x, k], ops, opset_versions=[10])
+        check_onnx_opsets_operator(module, (x, k), ops, opset_versions=[10])
 
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)

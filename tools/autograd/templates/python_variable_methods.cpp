@@ -47,6 +47,7 @@
 #include <ATen/Functions.h>
 #else
 $ops_headers
+#include <ATen/ops/_local_scalar_dense.h>
 #endif
 
 using at::DeviceGuard;
@@ -147,13 +148,21 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    return wrap(self_.stride(r.toInt64(0)));
+    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntArrayRef strides = self_.strides();
+    at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
-    return THPUtils_packInt64Array(strides.size(), strides.data());
+    // TODO: consider factoring this out
+    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    if (!tuple) throw python_error();
+    for (size_t i = 0; i != strides.size(); i++) {
+      PyObject* s = torch::toPyObject(strides[i]);
+      if (!s) throw python_error();
+      PyTuple_SET_ITEM(tuple.get(), i, s);
+    }
+    return tuple.release();
   }
   else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
@@ -205,7 +214,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
-  return wrap(self.storage_offset());
+  return py::cast(self.sym_storage_offset()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -222,7 +231,6 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
-#include <iostream>
 static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
@@ -233,12 +241,7 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     auto si = self_.sym_numel();
-     if (si.is_symbolic()) {
-       return py::cast(si.toSymIntNodeImpl()).release().ptr();
-     } else {
-       return THPUtils_packInt64(si.as_int_unchecked());
-     }
+     return py::cast(self_.sym_numel()).release().ptr();
    }
    END_HANDLE_TH_ERRORS
 }
@@ -315,7 +318,7 @@ static Tensor dispatch_copy_(const Tensor & self, const Tensor & other, bool non
 static double dispatch_to_CDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
+  if (self.sym_numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
   return self.item<double>();
@@ -324,7 +327,7 @@ static double dispatch_to_CDouble(const Tensor & self) {
 static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
+  if (self.sym_numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
   return self.item<c10::complex<double>>();
@@ -333,19 +336,10 @@ static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
 static int64_t dispatch_to_CLong(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
+  if (self.sym_numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
   return self.item<int64_t>();
-}
-
-static bool dispatch_to_Bool(const Tensor & self) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  if (self.numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
-  return self.item<bool>();
 }
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
@@ -397,7 +391,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = THPVariable_Unpack(self);
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.numel() != 1) {
+  if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1) {
     throw TypeError("only integer tensors of a single element can be converted to an index");
   }
   return wrap(dispatch_to_CLong(self_));
@@ -881,15 +875,7 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   }
   jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_floating_point()) {
-    return wrap(dispatch_to_CDouble(self_));
-  } else if (self_.is_complex()) {
-    return wrap(dispatch_to_CComplexDouble(self_));
-  } else if (self_.scalar_type() == ScalarType::Bool) {
-    return wrap(dispatch_to_Bool(self_));
-  } else {
-    return wrap(dispatch_to_CLong(self_));
-  }
+  return py::cast(self_.item()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -913,6 +899,10 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
+  TORCH_CHECK(
+      !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map_ is not supported for tensor subclasses.");
+
   return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -938,6 +928,9 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }
+  TORCH_CHECK(
+      !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map2_ is not supported for tensor subclasses.");
   return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
   END_HANDLE_TH_ERRORS
 }
@@ -970,7 +963,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "storage");
+    return handle_torch_function(self, "_storage");
   }
   auto& self_ = THPVariable_Unpack(self);
   return createPyObject(self_.storage());
@@ -1126,9 +1119,9 @@ static PyObject* THPVariable_set_(
       {
           "set_()",
           "set_(Storage source)",
-          "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
+          "set_(Storage source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
           "set_(Tensor source)",
-          "set_(Tensor source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
+          "set_(Tensor source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
       },
       /*traceable=*/false);
 
@@ -1172,19 +1165,19 @@ static PyObject* THPVariable_set_(
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
-                              int64_t storage_offset,
-                              IntArrayRef size,
-                              IntArrayRef stride) -> Tensor {
+                              c10::SymInt storage_offset,
+                              c10::SymIntArrayRef size,
+                              c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source, storage_offset, size, stride);
+        return self.set__symint(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
     }
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
       auto dispatch_set_ = [](const Tensor& self, const Tensor& source) -> Tensor {
-        TORCH_INTERNAL_ASSERT(source.dtype() == self.dtype());
+        TORCH_CHECK(source.dtype() == self.dtype(), "Could not set tensor of type ", source.dtype(), " to a tensor of type ", self.dtype());
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
       };
@@ -1196,14 +1189,14 @@ static PyObject* THPVariable_set_(
       at::Tensor storage = _r.tensor(0);
       auto dispatch_set_ = [](const Tensor& self,
                               const Tensor& source,
-                              int64_t storage_offset,
-                              IntArrayRef size,
-                              IntArrayRef stride) -> Tensor {
+                              c10::SymInt storage_offset,
+                              c10::SymIntArrayRef size,
+                              c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source, storage_offset, size, stride);
+        return self.set__symint(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
     }
   }
   Py_RETURN_NONE;

@@ -7,10 +7,16 @@
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Utils.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at { namespace native {
 
@@ -40,7 +46,8 @@ inline int dataSize(cudnnDataType_t dataType)
 // that the stride for dim i is the product of the sizes of dims
 // i+1 to the end.  This stride is indeed uniquely determined.  This
 // function modifies 'stride' in place so this invariant holds.
-static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bool nhwc) {
+template <typename T>
+static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
   int64_t z = 1;
   int index = 0;
   std::vector<int> permutation(dim);
@@ -144,7 +151,7 @@ private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    fixSizeOneDimStride(dim, size, stride, nhwc);
+    fixSizeOneDimStride<int>(dim, size, stride, nhwc);
     AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };

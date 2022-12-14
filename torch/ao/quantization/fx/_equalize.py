@@ -10,13 +10,15 @@ import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
+from torch.ao.quantization.backend_config import get_native_backend_config
+
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, check_min_max_valid
 
 from .utils import (
     get_new_attr_name_with_prefix,
     maybe_get_next_module,
-    WEIGHT_INDEX_DICT,
+    node_arg_is_weight,
 )
 
 CUSTOM_MODULE_SUPP_LIST: List[Any] = []
@@ -27,6 +29,11 @@ def reshape_scale(scale: torch.Tensor, axis: int, input: torch.Tensor) -> torch.
     new_shape = [1] * input.ndim
     new_shape[axis] = input.size(axis)
     return scale.view(new_shape)
+
+qsheme_mapping_per_tensor_to_per_channel = {
+    torch.per_tensor_affine: torch.per_channel_affine,
+    torch.per_tensor_symmetric: torch.per_channel_symmetric,
+}
 
 
 class _InputEqualizationObserver(nn.Module):
@@ -58,8 +65,9 @@ class _InputEqualizationObserver(nn.Module):
         self.dtype = dtype
         self.qscheme = qscheme
 
+        per_channel_qscheme = qsheme_mapping_per_tensor_to_per_channel[qscheme]
         self.input_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
-                                                  qscheme=qscheme,
+                                                  qscheme=per_channel_qscheme,
                                                   quant_min=quant_min,
                                                   quant_max=quant_max,
                                                   factory_kwargs=factory_kwargs)
@@ -139,8 +147,11 @@ class _WeightEqualizationObserver(nn.Module):
         self.qscheme = qscheme
         self.ch_axis = 1
 
+        per_channel_qscheme = qscheme
+        if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+            per_channel_qscheme = qsheme_mapping_per_tensor_to_per_channel[qscheme]
         self.weight_col_obs = PerChannelMinMaxObserver(ch_axis=1, dtype=dtype,
-                                                       qscheme=qscheme,
+                                                       qscheme=per_channel_qscheme,
                                                        quant_min=quant_min,
                                                        quant_max=quant_max,
                                                        factory_kwargs=factory_kwargs)
@@ -286,9 +297,9 @@ def get_op_node_and_weight_eq_obs(
     if op_node.op == 'call_module':
         # If the op_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
-        equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
-        assert(equalization_qconfig_map.get(op_node.name, None) is not None)
-        weight_eq_obs = equalization_qconfig_map.get(op_node.name, None).weight()
+        equalization_node_name_to_qconfig: Dict[str, Any] = model._equalization_node_name_to_qconfig  # type: ignore[assignment]
+        assert(equalization_node_name_to_qconfig.get(op_node.name, None) is not None)
+        weight_eq_obs = equalization_node_name_to_qconfig.get(op_node.name, None).weight()
 
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
         return op_node, weight_eq_obs
@@ -305,9 +316,11 @@ def get_op_node_and_weight_eq_obs(
 def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
     """ Gets the weight equalization observer node if it exists.
     """
-    assert(op_node.op == 'call_function' and op_node.target in WEIGHT_INDEX_DICT)
-    for i, node_arg in enumerate(op_node.args):
-        if i in WEIGHT_INDEX_DICT[op_node.target]:  # type: ignore[index]
+    assert(op_node.op == 'call_function')
+    # TODO: Pass in backend_config into this function and parent functions.
+    backend_config = get_native_backend_config()
+    for node_arg in op_node.args:
+        if node_arg_is_weight(op_node, node_arg, backend_config):
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg
@@ -805,9 +818,6 @@ def get_equalization_qconfig_dict(
 
     # Constructs an equalization_qconfig_dict that specifies to only equalize
     # the layers with the highest quantization errors
-    module_to_qconfig_list = list(
-        map(lambda item: (item[0], default_equalization_qconfig), layers_to_equalize)
-    )
-
+    module_to_qconfig_list = [(item[0], default_equalization_qconfig) for item in layers_to_equalize]
     equalization_qconfig_dict = {"module_name": module_to_qconfig_list}
     return equalization_qconfig_dict

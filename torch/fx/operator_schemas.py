@@ -13,6 +13,9 @@ from torch._ops import OpOverloadPacket, OpOverload
 if TYPE_CHECKING:
     from .node import Argument
 
+__all__ = ["ArgsKwargsPair", "check_for_mutable_operation", "get_signature_for_torch_op", "create_type_hint",
+           "type_matches", "normalize_function", "normalize_module"]
+
 @compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
     """
@@ -352,9 +355,9 @@ def normalize_module(
     """
     try:
         submod = root.get_submodule(target)
-    except AttributeError:
+    except AttributeError as e:
         raise RuntimeError(f"Tried to normalize node with target {target} but root did not "
-                           f"have that target!")
+                           f"have that target!") from e
     if hasattr(submod.__class__, '__name__'):
         classname = submod.__class__.__name__
         if getattr(torch.nn, classname, None) == submod.__class__:
@@ -376,7 +379,7 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
 
     Args:
 
-        target (inspect.Signature): Signature object for the target
+        sig (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
         kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.

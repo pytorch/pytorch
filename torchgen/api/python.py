@@ -216,8 +216,12 @@ class PythonArgument:
 
     # Compute argument formal for python argument parsing.
     # Needs to be consistent with torch/csrc/utils/python_arg_parser.h.
-    def argument_str(self, *, method: bool = False) -> str:
-        type_str = argument_type_str(self.type).replace("const ", "").replace(" &", "")
+    def argument_str(self, *, method: bool = False, symint: bool = True) -> str:
+        type_str = (
+            argument_type_str(self.type, symint=symint)
+            .replace("const ", "")
+            .replace(" &", "")
+        )
 
         name = self.name
         # s/self/input/ outside method bindings
@@ -384,10 +388,10 @@ class PythonSignature:
     #
     # For a translation to mypy-valid type signatures, see
     # signature_str_pyi().
-    def signature_str(self, *, skip_outputs: bool = False) -> str:
+    def signature_str(self, *, skip_outputs: bool = False, symint: bool = True) -> str:
         args = self.arguments(skip_outputs=skip_outputs)
         schema_formals: List[str] = list(
-            map(lambda a: a.argument_str(method=self.method), args)
+            map(lambda a: a.argument_str(method=self.method, symint=symint), args)
         )
         positional_argc = len(self.input_args)
         if len(schema_formals) > positional_argc:
@@ -426,7 +430,7 @@ class PythonSignature:
             vararg_type = args[0].type
             if (
                 isinstance(vararg_type, ListType)
-                and str(vararg_type.elem) == "int"
+                and str(vararg_type.elem) in ["int", "SymInt"]
                 and num_positionalargs == 1
             ):
                 have_vararg_version = True
@@ -464,9 +468,11 @@ class PythonSignatureDeprecated(PythonSignature):
     def deprecated(self) -> bool:
         return True
 
-    def signature_str(self, *, skip_outputs: bool = False) -> str:
+    def signature_str(self, *, skip_outputs: bool = False, symint: bool = True) -> str:
         return (
-            PythonSignature.signature_str(self, skip_outputs=skip_outputs)
+            PythonSignature.signature_str(
+                self, skip_outputs=skip_outputs, symint=symint
+            )
             + "|deprecated"
         )
 
@@ -633,7 +639,9 @@ def has_tensor_options(f: NativeFunction) -> bool:
 # 'simple_type' was introduced by the old codegen, which is slightly
 # different from the python schema type, e.g.: doesn't have '?' suffix
 # for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
-def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
+def argument_type_str(
+    t: Type, *, simple_type: bool = False, symint: bool = True
+) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             return "Tensor"
@@ -665,7 +673,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         if str(t.elem) == "Tensor":
             # Is it desired to keep '?' for simple_type with new style dispatcher?
             return "Tensor?"
-        elem = argument_type_str(t.elem, simple_type=simple_type)
+        elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
         return f"{elem}?"
     elif isinstance(t, ListType):
         size = t.size if not simple_type else None
@@ -675,7 +683,12 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif str(t.elem) == "int":
             return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
         elif str(t.elem) == "SymInt":
-            return f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
+            if symint:
+                return (
+                    f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
+                )
+            else:
+                return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
         elif str(t.elem) == "Tensor":
             return f"TensorList[{size}]" if size is not None else "TensorList"
         elif str(t.elem) == "Scalar":
@@ -687,7 +700,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
                 return "const c10::List<c10::optional<Tensor>> &"
         elif str(t.elem) == "Dimname":
             return f"DimnameList[{size}]" if size is not None else "DimnameList"
-        elem = argument_type_str(t.elem, simple_type=simple_type)
+        elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
         return f"ArrayRef<{elem}>"
 
     raise RuntimeError(f"unrecognized type {repr(t)}")
@@ -706,7 +719,9 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(pythonify_default(cpp.default_expr(a.default, a.type)))
+        default=str(
+            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
+        )
         if a.default is not None
         else None,
         default_init=None,
@@ -791,7 +806,7 @@ def signature_from_schema(
             a = getattr(topt_args, name)
             if a.default is None or a.default == "None":
                 return None
-            return cpp.default_expr(a.default, a.type)
+            return cpp.default_expr(a.default, a.type, symint=False)
 
         tensor_options_args.append(
             PythonArgument(
@@ -898,7 +913,7 @@ def argument_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.int:
             ret = "_int"
         if t.name == BaseTy.SymInt:
-            ret = "SymInt"
+            ret = "Union[_int, SymInt]"
         elif t.name == BaseTy.float:
             ret = "_float"
         elif t.name == BaseTy.str:
@@ -943,11 +958,13 @@ def argument_type_str_pyi(t: Type) -> str:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
 
+    else:
+        raise RuntimeError(f"unrecognized type {repr(t)}")
+
     if add_optional:
         ret = "Optional[" + ret + "]"
-    return ret
 
-    raise RuntimeError(f"unrecognized type {repr(t)}")
+    return ret
 
 
 def return_type_str_pyi(t: Type) -> str:
@@ -1040,7 +1057,7 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 
 
 def dispatch_lambda_args(
-    ps: PythonSignature, f: NativeFunction
+    ps: PythonSignature, f: NativeFunction, symint: bool = True
 ) -> Tuple[DispatchLambdaArgument, ...]:
     if isinstance(ps, PythonSignatureDeprecated):
         schema = ps.deprecated_schema
@@ -1051,6 +1068,7 @@ def dispatch_lambda_args(
     cpp_args = cpp.arguments(
         arguments=schema.arguments,
         faithful=False,
+        symint=symint,
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
@@ -1133,14 +1151,15 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     returns_without_annotation = tuple(
         map(lambda r: Return(r.name, r.type, None), f.func.returns)
     )
-    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
+    return_str = cpp.returns_type(returns_without_annotation, symint=True).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f"{f.func.name} returns unsupported type {return_str}")
     return return_str
 
 
 def cpp_dispatch_target(f: NativeFunction) -> str:
-    name = cpp.name(f.func)
+    symint = f.func.has_symint()
+    name = cpp.name(f.func, symint_overload=symint)
     if Variant.method in f.variants:
         return f"self.{name}"
     if Variant.function in f.variants:
@@ -1192,7 +1211,7 @@ def cpp_dispatch_exprs(
 # For certain cases it is intentionally more restrictive than necessary,
 # e.g.: it doesn't accepts doublelist with definite size.
 def arg_parser_unpack_method(
-    t: Type, default: Optional[str], default_init: Optional[str]
+    t: Type, default: Optional[str], default_init: Optional[str], *, symint: bool = True
 ) -> str:
     has_default_init = default_init is not None
     if has_default_init and str(t) not in (
@@ -1224,7 +1243,10 @@ def arg_parser_unpack_method(
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
-            return "toSymInt"
+            if symint:
+                return "toSymInt"
+            else:
+                return "toInt64"
         elif t.name == BaseTy.bool:
             return "toBoolWithDefault" if has_default_init else "toBool"
         elif t.name == BaseTy.float:
@@ -1245,10 +1267,14 @@ def arg_parser_unpack_method(
             return "toDimnameListOptional"
         elif not has_default_init and default in (None, "None", "c10::nullopt"):
             # If default is None: append 'Optional' to elem's unpacking method
-            return arg_parser_unpack_method(t.elem, None, None) + "Optional"
+            return (
+                arg_parser_unpack_method(t.elem, None, None, symint=symint) + "Optional"
+            )
         else:
             # Otherwise, load as underlying type with default
-            return arg_parser_unpack_method(t.elem, default, default_init)
+            return arg_parser_unpack_method(
+                t.elem, default, default_init, symint=symint
+            )
 
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
@@ -1269,7 +1295,10 @@ def arg_parser_unpack_method(
             return "doublelist"
         elif str(t.elem) == "SymInt":
             # accept definite size
-            return "symintlist"
+            if symint:
+                return "symintlist"
+            else:
+                return "intlist"
         elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
@@ -1278,11 +1307,11 @@ def arg_parser_unpack_method(
 # Return RHS expression for python argument using PythonArgParser output.
 # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
 def arg_parser_output_expr(
-    arg_index: int, a: PythonArgument
+    arg_index: int, a: PythonArgument, *, symint: bool = True
 ) -> PythonArgParserOutputExpr:
     has_default = a.default_init is not None
     unpack_method = arg_parser_unpack_method(
-        t=a.type, default=a.default, default_init=a.default_init
+        t=a.type, default=a.default, default_init=a.default_init, symint=symint
     )
     default = f", {a.default_init}" if has_default else ""
     expr = f"_r.{unpack_method}({arg_index}{default})"
@@ -1297,12 +1326,12 @@ def arg_parser_output_expr(
 
 # Returns a map with key = arg_name and value = PythonArgParserOutputExpr.
 def arg_parser_output_exprs(
-    ps: PythonSignature, f: NativeFunction
+    ps: PythonSignature, f: NativeFunction, *, symint: bool = True
 ) -> Dict[str, PythonArgParserOutputExpr]:
     return {
         e.name: e
         for i, a in enumerate(ps.arguments())
-        for e in (arg_parser_output_expr(i, a),)
+        for e in (arg_parser_output_expr(i, a, symint=symint),)
     }
 
 
@@ -1317,15 +1346,15 @@ TENSOR_OPTIONS_FIELDS = {
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(
-    ps: PythonSignature, f: NativeFunction
+    ps: PythonSignature, f: NativeFunction, *, symint: bool = True
 ) -> DispatchLambdaArgumentExprs:
     # This method is to bind 'arg_parser_outputs' and 'lambda_args' by producing
     # 'inits' and 'lambda_args_exprs' for each lambda argument using arg parser
     # outputs.
-    arg_parser_outputs = arg_parser_output_exprs(ps, f)
-    lambda_args = dispatch_lambda_args(ps, f)
+    arg_parser_outputs = arg_parser_output_exprs(ps, f, symint=symint)
+    lambda_args = dispatch_lambda_args(ps, f, symint=symint)
     inits: List[str] = []
-    lambda_args_exprs: Dict[str, str] = dict()
+    lambda_args_exprs: Dict[str, str] = {}
 
     has_toptions = has_tensor_options(f)
 

@@ -28,6 +28,8 @@ TORCH_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
 
+TORCH_API void activateCUDATrace();
+
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
 
@@ -67,6 +69,7 @@ inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
 }
 
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
+TORCH_PYTHON_API bool isMainPyInterpreter();
 
 std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     const c10::OperatorHandle& op,

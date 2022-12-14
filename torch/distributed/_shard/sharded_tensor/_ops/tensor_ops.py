@@ -20,6 +20,7 @@ _register_default_op(torch.Tensor.dim, _sharded_op_impl)
 _register_default_op(torch.Tensor.ndim.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.is_contiguous, _sharded_op_impl)
 _register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
+_register_default_op(torch.Tensor.is_floating_point, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
 _register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
@@ -41,8 +42,18 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
     # Validate types
     if not isinstance(self_st, ShardedTensor):
         raise TypeError("input needs to be a ShardedTensor")
+    dev: torch.device
+    if self_st._local_shards:
+        dev = self_st._local_shards[0].tensor.device
+    elif pg and pg._get_backend_name() == "gloo":
+        dev = torch.device("cpu")
+    else:
+        dev = torch.device(torch.cuda.current_device())
+    return dev
 
-    return self_st.local_shards()[0].tensor.device
+@_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
+def st_is_meta(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().is_meta
 
 
 def sharded_type_as_check(*args, **kwargs):

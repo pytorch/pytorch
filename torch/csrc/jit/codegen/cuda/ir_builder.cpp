@@ -60,9 +60,13 @@ IR_BUILDER_INSTANTIATE(ShiftOp)
 IR_BUILDER_INSTANTIATE(GatherOp)
 IR_BUILDER_INSTANTIATE(ViewAsScalar)
 IR_BUILDER_INSTANTIATE(ViewOp)
+IR_BUILDER_INSTANTIATE(FullOp)
+IR_BUILDER_INSTANTIATE(ARangeOp)
+IR_BUILDER_INSTANTIATE(EyeOp)
 IR_BUILDER_INSTANTIATE(UnaryOp)
 IR_BUILDER_INSTANTIATE(BinaryOp)
 IR_BUILDER_INSTANTIATE(TernaryOp)
+IR_BUILDER_INSTANTIATE(RNGOp)
 IR_BUILDER_INSTANTIATE(ReductionOp)
 IR_BUILDER_INSTANTIATE(GroupedReductionOp)
 IR_BUILDER_INSTANTIATE(WelfordOp)
@@ -85,6 +89,9 @@ Val* IrBuilder::newResult(DataType dtype) {
 
 Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   TORCH_CHECK(
+      lhs != nullptr && rhs != nullptr,
+      "Either lhs or rhs is a nullptr in newArithmeticExpr.");
+  TORCH_CHECK(
       lhs->dtype() == rhs->dtype(),
       "Incompatible operand types: ",
       lhs->dtype(),
@@ -97,6 +104,9 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
 }
 
 Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
+  TORCH_CHECK(
+      lhs != nullptr && rhs != nullptr,
+      "Either lhs or rhs is a nullptr in newLogicExpr.");
   auto result = IrBuilder::create<Bool>(c10::nullopt);
   IrBuilder::create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -104,6 +114,9 @@ Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
 }
 
 Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
+  TORCH_CHECK(
+      pred != nullptr && lhs != nullptr && rhs != nullptr,
+      "Either pred, lhs, or rhs is a nullptr in whereExpr.");
   TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
   auto result = newResult(lhs->dtype());
   IrBuilder::create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
@@ -111,30 +124,35 @@ Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
 }
 
 Val* IrBuilder::negExpr(Val* val) {
+  TORCH_CHECK(val != nullptr, "val is a nullptr in negExpr.");
   auto result = newResult(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Neg, result, val);
   return result;
 }
 
 Val* IrBuilder::notExpr(Val* val) {
+  TORCH_CHECK(val != nullptr, "val is a nullptr in notExpr.");
   auto result = newResult(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Not, result, val);
   return result;
 }
 
 Val* IrBuilder::setExpr(Val* val) {
+  TORCH_CHECK(val != nullptr, "val is a nullptr in setExpr.");
   auto result = newResult(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }
 
 Val* IrBuilder::setExprNamedScalar(const std::string& name, Val* val) {
+  TORCH_CHECK(val != nullptr, "val is a nullptr in setExprNamedScalar.");
   auto result = IrBuilder::create<NamedScalar>(name, val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }
 
 Val* IrBuilder::addressExprNamedScalar(const std::string& name, Val* val) {
+  TORCH_CHECK(val != nullptr, "val is a nullptr in addressExprNamedScalar.");
   auto result = IrBuilder::create<NamedScalar>(name, DataType::Int);
   IrBuilder::create<UnaryOp>(UnaryOpType::Address, result, val);
   return result;

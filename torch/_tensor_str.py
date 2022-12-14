@@ -1,4 +1,5 @@
 import math
+import textwrap
 from typing import Optional
 
 import torch
@@ -46,12 +47,20 @@ def set_printoptions(
 
     Example::
 
+        >>> # Limit the precision of elements
         >>> torch.set_printoptions(precision=2)
         >>> torch.tensor([1.12345])
         tensor([1.12])
+        >>> # Limit the number of elements shown
         >>> torch.set_printoptions(threshold=5)
         >>> torch.arange(10)
         tensor([0, 1, 2, ..., 7, 8, 9])
+        >>> # Restore defaults
+        >>> torch.set_printoptions(profile='default')
+        >>> torch.tensor([1.12345])
+        tensor([1.1235])
+        >>> torch.arange(10)
+        tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
 
     """
     if profile is not None:
@@ -206,7 +215,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     elements_per_line = max(
         1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     )
-    char_per_line = element_length * elements_per_line
+    # char_per_line = element_length * elements_per_line  # unused
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:
@@ -356,6 +365,8 @@ def get_summarized_data(self):
 
 
 def _str_intern(inp, *, tensor_contents=None):
+    if torch._C._functorch.is_functorch_wrapped_tensor(inp):
+        return _functorch_wrapper_str_intern(inp, tensor_contents=tensor_contents)
     is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
     if inp.is_nested:
         prefix = "nested_tensor("
@@ -589,6 +600,38 @@ def _str_intern(inp, *, tensor_contents=None):
     return string_repr
 
 
+def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
+    level = torch._C._functorch.maybe_get_level(tensor)
+    assert level != -1
+
+    if torch._C._functorch.is_functionaltensor(tensor):
+        # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
+        # that it's up to date first
+        torch._sync(tensor)
+
+    value = torch._C._functorch.get_unwrapped(tensor)
+    value_repr = repr(value)
+
+    indented_value_repr = textwrap.indent(value_repr, " " * 4)
+    if torch._C._functorch.is_batchedtensor(tensor):
+        bdim = torch._C._functorch.maybe_get_bdim(tensor)
+        assert bdim != -1
+        return (
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
+            f"{indented_value_repr}\n"
+            f")"
+        )
+    if torch._C._functorch.is_gradtrackingtensor(tensor):
+        return (
+            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
+        )
+    if torch._C._functorch.is_functionaltensor(tensor):
+        return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
+
+    raise ValueError("We don't know how to print this, please file us an issue")
+
+
 def _str(self, *, tensor_contents=None):
-    with torch.no_grad():
+    with torch.no_grad(), torch.utils._python_dispatch._disable_current_modes():
+        guard = torch._C._DisableFuncTorch()
         return _str_intern(self, tensor_contents=tensor_contents)

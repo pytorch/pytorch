@@ -1,10 +1,12 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <cmath>
 
 namespace at {
-class Tensor;
 
 namespace native {
 
@@ -19,11 +21,21 @@ DECLARE_DISPATCH(adaptive_max_pooling_fn, adaptive_max_pool2d_kernel);
 DECLARE_DISPATCH(adaptive_max_pooling_backward_fn, adaptive_max_pool2d_backward_kernel);
 
 static inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  return (int64_t)std::floor((float)(a * c) / b);
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
 static inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
-  return (int64_t)std::ceil((float)((a + 1) * c) / b);
+  return 1 + ((a + 1) * c - 1) / b;
+}
+
+static inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, const char* arg_name) {
+  int64_t ndim = gradOutput_.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(gradOutput_.size(i) > 0,
+      arg_name, "(): Expected grad_output to have non-zero size for non-batch dimensions, "
+      "but grad_output has sizes ", gradOutput_.sizes(), " with dimension ", i,
+      " being empty");
+  }
 }
 
 }} // namespace at::native

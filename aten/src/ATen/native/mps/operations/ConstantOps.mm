@@ -35,11 +35,15 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           MPSGraph *mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
           auto isBool = self.scalar_type() == c10::ScalarType::Bool;
-          auto dataType = (!isBool) ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8;
+          auto isUInt8 = self.scalar_type() == c10::ScalarType::Byte;
+          auto dataType = !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
           // constantWithScalar does not work for boolTypes on MacOS-12.[34]
           // workaround by filing it as int8 tensor and than casting to bool
           // See https://github.com/pytorch/pytorch/issues/82427
-          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
+          // constantWithScalar does not work for UInt8 Types on MacOS-12.[34]/Ventura preview
+          // workaround by filing it as uint32 tensor and than casting to uint8
+          // See https://github.com/pytorch/pytorch/issues/83692
+          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar: value.toDouble()
                                                                shape:getMPSShape(self)
                                                             dataType:dataType];
           MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
@@ -48,6 +52,11 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
               outputTensor = [mpsGraph castTensor:outputTensor
                                            toType:MPSDataTypeBool
                                              name:@"constWithBool-workaround"];
+          }
+          if (isUInt8) {
+              outputTensor = [mpsGraph castTensor:outputTensor
+                                           toType:MPSDataTypeUInt8
+                                             name:@"constWithUInt8-workaround"];
           }
 
           newCachedGraph->outputTensor_ = outputTensor;

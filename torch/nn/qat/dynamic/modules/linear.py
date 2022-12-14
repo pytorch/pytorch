@@ -1,25 +1,10 @@
-import torch
-from torch.ao.quantization import activation_is_memoryless
+# flake8: noqa: F401
+r"""QAT Modules
 
-
-class Linear(torch.nn.qat.Linear):
-    r"""
-    A linear module attached with FakeQuantize modules for weight,
-    used for dynamic quantization aware training.
-
-    We adopt the same interface as `torch.nn.Linear`, please see
-    https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
-    for documentation.
-
-    Similar to `torch.nn.Linear`, with FakeQuantize modules initialized to
-    default.
-    """
-
-    def __init__(self, in_features, out_features, bias=True,
-                 qconfig=None, device=None, dtype=None) -> None:
-        super().__init__(in_features, out_features, bias, qconfig, device, dtype)
-        if not activation_is_memoryless(qconfig):
-            raise ValueError(
-                "Dynamic QAT requires a memoryless observer." +
-                "This means a MovingAverage observer with averaging constant equal to 1"
-            )
+This file is in the process of migration to `torch/ao/nn/qat/dynamic`, and
+is kept here for compatibility while the migration process is ongoing.
+If you are adding a new entry/functionality, please, add it to the
+appropriate file under the `torch/ao/nn/qat/dynamic/modules`,
+while adding an import statement here.
+"""
+from torch.ao.nn.qat.dynamic.modules.linear import Linear

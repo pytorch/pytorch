@@ -25,6 +25,8 @@
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/env.h>
+
 
 namespace at {
 namespace native {
@@ -33,6 +35,7 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 constexpr int kColwiseReduceTileSize = 32;
+constexpr unsigned int kWarpSize = 32;
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -555,8 +558,108 @@ __global__ void GammaBetaBackwardCUDAKernel1(
   }
 }
 
+template <typename T, typename T_ACC>
+__global__ void GammaBetaBackwardCUDAKernel_32x32(
+    int64_t M,
+    int64_t N,
+    const T* dY,
+    const T* X,
+    const T_ACC* mean,
+    const T_ACC* rstd,
+    T* dg,
+    T* db) {
+  alignas(sizeof(double)) extern __shared__ char s_data1[];
+  T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  T_ACC* s_dg;
+  T_ACC* s_db;
 
+  T_ACC dg_sum = 0;
+  T_ACC db_sum = 0;
 
+  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (j < N) {
+    constexpr int unroll_factor = 8;
+    int laneId = threadIdx.x & 0x1f;
+
+    T_ACC mean_reg, mean_reg_tmp;
+    T_ACC rstd_reg, rstd_reg_tmp;
+    T dY_reg;
+    T X_reg;
+
+    // Main loop
+    int bcounter;
+    for (bcounter = 0; bcounter < M / (blockDim.y * unroll_factor);
+         bcounter++) {
+      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+
+      if (laneId < unroll_factor) {
+        mean_reg_tmp = mean[offset + laneId];
+        rstd_reg_tmp = rstd[offset + laneId];
+      }
+#if !defined(USE_ROCM)
+      // Volta and newer architectures allow lane divergence within a warp.
+      __syncwarp();
+#endif
+
+      #pragma unroll
+      for (int ii = 0; ii < unroll_factor; ++ii) {
+        dY_reg = dY[(offset + ii) * N + j];
+        X_reg = X[(offset + ii) * N + j];
+        mean_reg = WARP_SHFL(mean_reg_tmp, ii, kWarpSize);
+        rstd_reg = WARP_SHFL(rstd_reg_tmp, ii, kWarpSize);
+        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
+        db_sum += dY_reg;
+      }
+    }
+
+    // Remainder loop
+    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+    for (int ii = 0; ii < unroll_factor; ii++) {
+      if ((offset + ii) < M) {
+        mean_reg = mean[offset + ii];
+        rstd_reg = rstd[offset + ii];
+        dY_reg = dY[(offset + ii) * N + j];
+        X_reg = X[(offset + ii) * N + j];
+        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
+        db_sum += dY_reg;
+      }
+    }
+
+    // This kernel uses a block of (32 x 32) and gets called when M; N
+    // divide by 32. We can use warp shuffles for the final reduction
+    // step. This removes 4 shmem loads and stores with their
+    // corresponding __syncthreads()
+
+    // This greatly reduces bank conflicts at the expense of a little
+    // extra shared memory. It does not impact occupancy
+    int padded_bx = (1 + blockDim.x);
+
+    s_dg = s_data_typed;
+    s_db = s_data_typed + (padded_bx * blockDim.y);
+    s_dg[threadIdx.y * padded_bx + threadIdx.x] = dg_sum;
+    s_db[threadIdx.y * padded_bx + threadIdx.x] = db_sum;
+    __syncthreads();
+
+    // Load transposed so that a warp holds an entire column
+    T_ACC reg_dg = s_dg[threadIdx.x * padded_bx + threadIdx.y];
+    T_ACC reg_db = s_db[threadIdx.x * padded_bx + threadIdx.y];
+    for (int delta = 16; delta >= 1; delta /= 2) {
+      reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
+      reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
+    }
+
+    if (threadIdx.x == 0) {
+      const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
+      if (dg) {
+        dg[j] = reg_dg;
+      }
+      if (db) {
+        db[j] = reg_db;
+      }
+    }
+  }
+}
 
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel(
@@ -569,66 +672,75 @@ __global__ void GammaBetaBackwardCUDAKernel(
     T* dg,
     T* db) {
   alignas(sizeof(double)) extern __shared__ char s_data1[];
-  T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  T_ACC* s_dg;
+  T_ACC* s_db;
+
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
-  constexpr int unroll = 8;
-  T dYs[unroll];
-  T Xs[unroll];
-  T_ACC *  means = s_data_typed;
-  T_ACC * rstds = s_data_typed + unroll * blockDim.y;
+
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
-  if (j < N) {
-    int bcounter;
-    for (bcounter = 0; bcounter < M/(blockDim.y * unroll); bcounter++){
-      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
-      #pragma unroll
-      for (int ii=0; ii<unroll; ii++){
-        if (threadIdx.x == 0) {
-          means[ii*blockDim.y + threadIdx.y] = mean[offset + ii];
-          rstds[ii*blockDim.y + threadIdx.y] = rstd[offset + ii];
-        }
-        dYs[ii] = dY[(offset + ii) * N + j ];
-        Xs[ii] = X[(offset + ii) * N + j];
 
-      }
-      __syncthreads();
+  if (j < N) {
+    constexpr int unroll_factor = 8;
+
+    T_ACC mean_reg;
+    T_ACC rstd_reg;
+    T dY_reg;
+    T X_reg;
+
+    // Main Loop
+    int bcounter;
+    for (bcounter = 0; bcounter < M / (blockDim.y * unroll_factor); bcounter++){
+      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+
       #pragma unroll
-      for (int ii=0; ii<unroll; ii++){
-        dg_sum += dYs[ii] * (Xs[ii] - means[ii*blockDim.y + threadIdx.y]) * rstds[ii * blockDim.y + threadIdx.y];
-        db_sum += dYs[ii];
+      for (int ii = 0; ii < unroll_factor; ++ii) {
+        dY_reg = dY[(offset + ii) * N + j];
+        X_reg = X[(offset + ii) * N + j];
+        mean_reg = mean[offset + ii];
+        rstd_reg = rstd[offset + ii];
+        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
+        db_sum += dY_reg;
       }
-      __syncthreads();
     }
-    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
-    for (int ii = 0; ii<8; ii++ ){
-      T_ACC mean_val, rstd_val; // we don't use smem in the tail to avoid awkward synchronizations, perf penalty is negligible
+
+    // Remainder loop
+    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+    for (int ii = 0; ii < unroll_factor; ii++ ){
       if ((offset + ii) < M) {
-        mean_val = mean[offset+ii];
-        rstd_val = rstd[offset+ii];
-        dYs[0] = dY[(offset + ii) * N + j ];
-        Xs[0] = X[(offset + ii) * N + j];
-        dg_sum += dYs[0] * (Xs[0] - mean_val) * rstd_val;
-        db_sum += dYs[0];
+        dY_reg = dY[(offset + ii) * N + j ];
+        X_reg = X[(offset + ii) * N + j];
+        mean_reg = mean[offset + ii];
+        rstd_reg = rstd[offset + ii];
+        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
+        db_sum += dY_reg;
       }
     }
-    s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
-    s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
+
+    // Do the final reduction in shared memory
+    s_dg = s_data_typed;
+    s_db = s_data_typed + blockDim.x * blockDim.y;
+    s_dg[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
+    s_db[threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
     __syncthreads();
-    for (int offset = blockDim.y/2; offset >=1; offset /= 2){
+
+    for (int offset = blockDim.y / 2; offset >= 1; offset /= 2) {
       if (threadIdx.y < offset) {
-        s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] += s_data_typed[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
-        s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] +=
-        s_data_typed[blockDim.x * blockDim.y + (threadIdx.y + offset) * blockDim.x + threadIdx.x];
-      }
+        s_dg[threadIdx.y * blockDim.x + threadIdx.x] +=
+            s_dg[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
+        s_db[threadIdx.y * blockDim.x + threadIdx.x] +=
+            s_db[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
+        }
       __syncthreads();
     }
+
     if (threadIdx.y == 0) {
       if (dg) {
-        dg[j] = s_data_typed[threadIdx.x];
+        dg[j] = s_dg[threadIdx.x];
       }
       if (db) {
-        db[j] = s_data_typed[threadIdx.x + blockDim.x * blockDim.y];
+        db[j] = s_db[threadIdx.x];
       }
     }
   }
@@ -684,7 +796,7 @@ void LayerNormKernelImplInternal(
   auto can_vectorize = [&](const T * ptr, int alignment){uint64_t addr = reinterpret_cast<uint64_t>(ptr); return addr % alignment == 0;};
   constexpr int num_vec_elems = vec_size;
   constexpr int alignment = num_vec_elems * sizeof(T);
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value) &&
+  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
   N <= 1ULL << std::numeric_limits<float>::digits && N % num_vec_elems == 0 &&
   can_vectorize(X_data, alignment) && can_vectorize(Y_data, alignment)) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
@@ -722,6 +834,305 @@ void LayerNormKernelImpl(
       });
 }
 
+template<typename T, typename T_ACC> __device__
+void cuLoadWriteStridedInputs(
+    const int i1_block,
+    const int thr_load_row_off,
+    const int thr_load_col_off,
+    const int i2_off,
+    const int row_stride,
+    T_ACC* warp_buf1,
+    T_ACC* warp_buf2,
+    const T* input,
+    const T* dout,
+    const int i1_end,
+    const int64_t N,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ rstd)
+{
+  int i1 = i1_block+thr_load_row_off;
+  if (i1 < i1_end) {
+    T curr_mean = mean[i1];
+    T curr_rstd = rstd[i1];
+    for (int k = 0;  k < blockDim.y;  ++k) {
+      int i2 = i2_off + k;
+      int load_idx = i1*N+i2;
+      int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
+      if (i2<N) {
+        T curr_input = static_cast<T>(input[load_idx]);
+        T curr_dout = static_cast<T>(dout[load_idx]);
+        warp_buf1[write_idx] = curr_dout;
+        warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_rstd;
+      } else {
+        warp_buf1[write_idx] = T(0);
+        warp_buf2[write_idx] = T(0);
+      }
+    }
+  } else {
+    for (int k = 0;  k < blockDim.y;  ++k) {
+      int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
+      warp_buf1[write_idx] = T(0);
+      warp_buf2[write_idx] = T(0);
+    }
+  }
+}
+
+template<typename T, typename T_ACC> __device__
+void cuLoadAddStridedInputs(
+    const int i1_block,
+    const int thr_load_row_off,
+    const int thr_load_col_off,
+    const int i2_off,
+    const int row_stride,
+    T_ACC* warp_buf1,
+    T_ACC* warp_buf2,
+    const T* input,
+    const T* dout,
+    const int i1_end,
+    const int64_t N,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ rstd)
+{
+  int i1 = i1_block+thr_load_row_off;
+  if (i1 < i1_end) {
+    T_ACC curr_mean = mean[i1];
+    T_ACC curr_rstd = rstd[i1];
+    for (int k = 0;  k < blockDim.y;  ++k) {
+      int i2 = i2_off + k;
+      int load_idx = i1*N+i2;
+      int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
+      if (i2<N) {
+        T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
+        T_ACC curr_dout = static_cast<T_ACC>(dout[load_idx]);
+        warp_buf1[write_idx] += curr_dout;
+        warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_rstd;
+      }
+    }
+  }
+}
+
+template<typename T, typename T_ACC> __global__
+void cuComputePartGradGammaBeta(
+    const T* __restrict__ dout,
+    const T* __restrict__ input,
+    const int64_t M,
+    const int64_t N,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ rstd,
+    T_ACC* part_grad_gamma,
+    T_ACC* part_grad_beta)
+{
+    const int numsegs_M = (M+blockDim.y*blockDim.y-1) / (blockDim.y*blockDim.y);
+    const int segs_per_block = (numsegs_M + gridDim.y - 1) / gridDim.y;
+    const int i1_beg = blockIdx.y * segs_per_block * blockDim.y*blockDim.y;
+    const int i1_beg_plus_one = (blockIdx.y+1) * segs_per_block * blockDim.y*blockDim.y;
+    const int i1_end = i1_beg_plus_one < M ? i1_beg_plus_one : M;
+    const int row_stride = blockDim.x+1;
+    const int thr_load_col_off = (threadIdx.x*blockDim.y)&(blockDim.x-1);
+    const int thr_load_row_off = (threadIdx.x*blockDim.y)/blockDim.x + threadIdx.y*blockDim.y;
+    const int i2_off = blockIdx.x * blockDim.x + thr_load_col_off;
+    alignas(sizeof(double)) extern __shared__ char shared[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&shared); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
+    T_ACC* warp_buf1 = (T_ACC*)buf;
+    T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
+    // compute partial sums from strided inputs
+    // do this to increase number of loads in flight
+    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,N,mean,rstd);
+    for (int i1_block = i1_beg+blockDim.y*blockDim.y;  i1_block < i1_end;  i1_block+=blockDim.y*blockDim.y) {
+      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,N,mean,rstd);
+    }
+    __syncthreads();
+    // inter-warp reductions
+    // sum within each warp
+    T_ACC acc1 = T_ACC(0);
+    T_ACC acc2 = T_ACC(0);
+    for (int k = 0;  k < blockDim.y;  ++k) {
+      int row1 = threadIdx.y + k*blockDim.y;
+      int idx1 = row1*row_stride + threadIdx.x;
+      acc1 += warp_buf1[idx1];
+      acc2 += warp_buf2[idx1];
+    }
+    warp_buf1[threadIdx.y*row_stride+threadIdx.x] = acc1;
+    warp_buf2[threadIdx.y*row_stride+threadIdx.x] = acc2;
+    __syncthreads();
+    // sum all warps
+    for (int offset = blockDim.y/2;  offset > 1;  offset /= 2) {
+      if (threadIdx.y < offset) {
+        int row1 = threadIdx.y;
+        int row2 = threadIdx.y + offset;
+        int idx1 = row1*row_stride + threadIdx.x;
+        int idx2 = row2*row_stride + threadIdx.x;
+        warp_buf1[idx1] += warp_buf1[idx2];
+        warp_buf2[idx1] += warp_buf2[idx2];
+      }
+      __syncthreads();
+    }
+    int i2 = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadIdx.y == 0 && i2 < N) {
+      int row1 = threadIdx.y;
+      int row2 = threadIdx.y + 1;
+      int idx1 = row1*row_stride + threadIdx.x;
+      int idx2 = row2*row_stride + threadIdx.x;
+      part_grad_beta[blockIdx.y*N+i2] = warp_buf1[idx1] + warp_buf1[idx2];
+      part_grad_gamma[blockIdx.y*N+i2] = warp_buf2[idx1] + warp_buf2[idx2];
+    }
+}
+
+template<typename T, typename T_ACC> __global__
+void cuComputeGradGammaBeta(
+    const T_ACC* part_grad_gamma,
+    const T_ACC* part_grad_beta,
+    const int part_size,
+    const int64_t M,
+    const int64_t N,
+    T* grad_gamma,
+    T* grad_beta)
+{
+    // sum partial gradients for gamma and beta
+    alignas(sizeof(double)) extern __shared__ char shared[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
+    int i2 = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i2 < N) {
+      // each warp does sequential reductions until reduced part_size is num_warps
+      int num_warp_reductions = part_size / blockDim.y;
+      T_ACC sum_gamma = T_ACC(0);
+      T_ACC sum_beta = T_ACC(0);
+      const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * N + i2;
+      const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
+      for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
+        sum_gamma += part_grad_gamma_ptr[warp_offset*N];
+        sum_beta += part_grad_beta_ptr[warp_offset*N];
+      }
+      // inter-warp reductions
+      const int nbsize3 = blockDim.x * blockDim.y / 2;
+      for (int offset = blockDim.y/2;  offset >= 1;  offset /= 2) {
+        // top half write to shared memory
+        if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int write_idx = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
+          buf[write_idx] = sum_gamma;
+          buf[write_idx+nbsize3] = sum_beta;
+        }
+        __syncthreads();
+        // bottom half sums
+        if (threadIdx.y < offset) {
+          const int read_idx = threadIdx.y * blockDim.x + threadIdx.x;
+          sum_gamma += buf[read_idx];
+          sum_beta += buf[read_idx+nbsize3];
+        }
+        __syncthreads();
+      }
+      // write out fully summed gradients
+      if (threadIdx.y == 0) {
+        grad_gamma[i2] = sum_gamma;
+        grad_beta[i2] = sum_beta;
+      }
+    }
+}
+
+template<typename T, typename T_ACC> __global__
+void cuComputeGradInput(
+    const T* __restrict__ dout,
+    const T* __restrict__ input,
+    const int64_t M,
+    const int64_t N,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ rstd,
+    const T* gamma,
+    T* grad_input)
+{
+  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    T_ACC sum_loss1 = T_ACC(0);
+    T_ACC sum_loss2 = T_ACC(0);
+    T_ACC c_mean = mean[i1];
+    const T_ACC c_rstd = rstd[i1];
+    const T* k_input = input + i1*N;
+    const T* k_dout = dout + i1*N;
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    if (gamma != NULL) {
+      // Optimization for ROCm MI100
+      for( int l = 0; l < N ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
+        sum_loss1 += c_loss * gamma_idx;
+        sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
+      }
+    } else {
+      for( int l = 0; l < N ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
+        sum_loss1 += c_loss;
+        sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
+      }
+    }
+    // intra-warp reductions
+    for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
+      sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
+      sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
+    }
+    // inter-warp reductions
+    if (blockDim.y > 1) {
+      alignas(sizeof(double)) extern __shared__ char shared[];
+      T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
+      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+        // upper half of warps write to shared
+        if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
+          buf[2*wrt_i] = sum_loss1;
+          buf[2*wrt_i+1] = sum_loss2;
+        }
+        __syncthreads();
+        // lower half merges
+        if (threadIdx.y < offset) {
+          const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
+          sum_loss1 += buf[2*read_i];
+          sum_loss2 += buf[2*read_i+1];
+        }
+        __syncthreads();
+      }
+      if (threadIdx.y == 0) {
+        buf[2*threadIdx.x] = sum_loss1;
+        buf[2*threadIdx.x+1] = sum_loss2;
+      }
+      __syncthreads();
+      if (threadIdx.y !=0) {
+        sum_loss1 = buf[2*threadIdx.x];
+        sum_loss2 = buf[2*threadIdx.x+1];
+      }
+    }
+    // all threads now have the two sums over l
+    T_ACC fH = (T_ACC)N;
+    T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
+    T* k_grad_input = grad_input + i1*N;
+    if (gamma != NULL) {
+      for (int l = thrx;  l < N;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss * gamma[l];
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    } else {
+      for (int l = thrx;  l < N;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss;
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    }
+    // prevent race where buf is written again before reads are done
+    __syncthreads();
+  }
+}
+
 template <typename T>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
@@ -750,20 +1161,49 @@ void LayerNormBackwardKernelImplInternal(
       gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
+  const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-    const int warp_size = at::cuda::warp_size();
+#if defined __HIP_PLATFORM_HCC__
+    if (M >= 32768) {
+      const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+      const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
+      dim3 threads1(warp_size, 4, 1);
+      threads1.y = 2; // Optimization for ROCm
+      int nshared =
+              threads1.y > 1 ?
+              threads1.y*threads1.x*sizeof(T_ACC) :
+              0;
+      cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
+              dY_data,
+              X_data,
+              M, N,
+              mean_data,
+              rstd_data,
+              gamma_data,
+              dX_data);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      const dim3 blocks(M);
+      int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
+      layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+      X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+#else
     const dim3 blocks(M);
     int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
     layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
     X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
   }
 
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
         dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
     T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
-    if (M < 512) {
+
+    if (M < 128) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBetaBackwardSimpleCUDAKernel<T, T_ACC>
@@ -778,19 +1218,77 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      dim3 threads{16, 32};
-      int blocks = (N + threads.x-1)/threads.x;
-      GammaBetaBackwardCUDAKernel<T, T_ACC>
-          <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
-              M,
-              N,
-              dY_data,
-              X_data,
-              mean_data,
-              rstd_data,
-              dgamma_data,
-              dbeta_data);
+#if defined(USE_ROCM)
+      // For small batch size, do colwise reduce directly.
+      const int part_size = warp_size;
+      const dim3 threads2(warp_size, 4, 1);
+      const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
+      const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+      const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+      const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+
+      const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+      Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
+      Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+      cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
+                      dY_data,
+                      X_data,
+                      M,N,
+                      mean_data,
+                      rstd_data,
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+      const dim3 blocks3((N + threads2.x - 1) / threads2.x, 1, 1);
+      const int nshared3 = threads3.x * threads3.y * sizeof(T);
+      cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>(),
+                      part_size,
+                      M,N,
+                      dgamma_data,
+                      dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+      if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
+        // This implementation relies on warp primitives and requires that M and N divide
+        // exactly to warp size.
+        dim3 threads{kWarpSize, kWarpSize};
+        int blocks = (N + threads.x - 1) / threads.x;
+
+        // If M and N divide by 32, we can use warp shuffles for the final reduction. That requires
+        // transposing values in shared memory, so we apply a padding to reduce bank conflicts.
+        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
+        GammaBetaBackwardCUDAKernel_32x32<T, T_ACC>
+            <<<blocks, threads, shmem_sz, cuda_stream>>>(
+                M,
+                N,
+                dY_data,
+                X_data,
+                mean_data,
+                rstd_data,
+                dgamma_data,
+                dbeta_data);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+        dim3 threads{16, 32};
+        int blocks = (N + threads.x - 1) / threads.x;
+        size_t shmem_sz = 2 * sizeof(T_ACC) * threads.x * threads.y;
+        GammaBetaBackwardCUDAKernel<T, T_ACC>
+            <<<blocks, threads, shmem_sz, cuda_stream>>>(
+                M,
+                N,
+                dY_data,
+                X_data,
+                mean_data,
+                rstd_data,
+                dgamma_data,
+                dbeta_data);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+#endif
     }
   }
 }

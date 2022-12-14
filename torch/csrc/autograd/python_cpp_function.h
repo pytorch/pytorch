@@ -39,6 +39,10 @@ PyObject* CppFunction_pynew(
    METH_O,                                                                     \
    nullptr},                                                                   \
       {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr}, \
+      {(char*)"register_prehook",                                              \
+       THPCppFunction_register_prehook,                                        \
+       METH_O,                                                                 \
+       nullptr},                                                               \
   {                                                                            \
     (char*)"name", THPCppFunction_name, METH_NOARGS, nullptr                   \
   }
@@ -64,6 +68,8 @@ PyObject* THPCppFunction_metadata(THPCppFunction* self, void* _unused);
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void* _unused);
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
 PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
+PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
+
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
 
 PyTypeObject* _initFunctionPyTypeObject(
@@ -73,6 +79,8 @@ PyTypeObject* _initFunctionPyTypeObject(
     PyMethodDef* function_methods);
 
 PyObject* registerFunctionHook(Node& fn, PyObject* hook);
+
+PyObject* registerFunctionPreHook(Node& fn, PyObject* hook);
 
 template <typename Ctor>
 PyTypeObject* createForwardFunctionPyTypeObject(
@@ -87,6 +95,8 @@ PyTypeObject* createForwardFunctionPyTypeObject(
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
+
+bool THPCppFunction_Check(PyObject* obj);
 
 } // namespace autograd
 } // namespace torch

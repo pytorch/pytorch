@@ -1,8 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_adaptive_avg_pool2d.h>
+#include <ATen/ops/_adaptive_avg_pool2d_backward_native.h>
+#include <ATen/ops/_adaptive_avg_pool2d_native.h>
+#include <ATen/ops/adaptive_avg_pool2d_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mkldnn_adaptive_avg_pool2d.h>
+#endif
 
 
 namespace at {
@@ -16,16 +28,16 @@ namespace {
     IntArrayRef output_size)
   {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
-    int64_t ndim = input.ndimension();
-    for (const auto i : c10::irange(1, ndim)) {
+    int64_t ndim = input.dim();
+    TORCH_CHECK((ndim == 3 || ndim == 4),
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
+    for (const auto i : {-2, -1}) {
       TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
+        "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
         "empty");
     }
 
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
@@ -95,7 +107,7 @@ namespace {
     return output;
   }
 
-  Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
+  Tensor adaptive_avg_pool2d_symint(at::Tensor const& input, SymIntArrayRef output_size) {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0),
@@ -103,10 +115,10 @@ namespace {
         "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_mkldnn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, output_size);
+      return at::mkldnn_adaptive_avg_pool2d(input, c10::asIntArrayRefSlow(output_size));
     }
 
-    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       #if defined(C10_MOBILE) && defined(USE_XNNPACK)
@@ -118,13 +130,13 @@ namespace {
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
-        const int n = input.size(0);
-        const int c = input.size(1);
-        out.as_strided_({n, c, 1, 1}, {c, 1, c, c});
+        const auto n = input.sym_size(0);
+        const auto c = input.sym_size(1);
+        out.as_strided__symint({n, c, 1, 1}, {c, 1, c, c});
       }
       return out;
     } else {
-      return _adaptive_avg_pool2d(input, output_size);
+      return _adaptive_avg_pool2d_symint(input, output_size);
     }
   }
 

@@ -114,16 +114,6 @@ TEST(MathKernelTest, MishBackward) {
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
-TEST(MathKernelTest, NarrowCopy)  {
-  auto x = rand({5, 8, 7});
-  for (const auto dim : c10::irange(3)) {
-    const int64_t start = 1, length = 4;
-    auto y_ref = x.narrow(dim, start, length);
-    auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
-    ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
-  }
-}
-
 TEST(MathKernelTest, Bmm)  {
   auto test_bmm = [](int64_t last_dim) {
     auto x = rand({1, 4, 4}, at::kFloat);

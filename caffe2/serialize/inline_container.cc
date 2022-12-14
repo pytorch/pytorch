@@ -142,7 +142,13 @@ void PyTorchStreamReader::init() {
     std::tie(version_ptr, version_size) = getRecord("version");
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
-  version_ = caffe2::stoull(version);
+  try {
+    version_ = caffe2::stoull(version);
+  } catch (const std::invalid_argument &e) {
+    CAFFE_THROW("Couldn't parse the version ",
+                 version,
+                 " as Long Long.");
+  }
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (version_ < kMinSupportedFileFormatVersion) {
     CAFFE_THROW(
@@ -332,8 +338,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const std::function<size_t(const void*, size_t)>& writer_func)
+    const std::function<size_t(const void*, size_t)> writer_func)
     : archive_name_("archive"),
       writer_func_(writer_func) {
   setup(archive_name_);
@@ -410,6 +415,21 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  // Ensurers that finalized is set to true even
+  // exception is raised during the method call.
+  // I.e. even partial call to writeEndOfFile() should mark
+  // file as finalized, otherwise double exception raised from
+  // destructor would would result in `std::terminate()`
+  // See https://github.com/pytorch/pytorch/issues/87997/
+  struct Finalizer {
+    Finalizer(bool& var): var_(var) {}
+    ~Finalizer() {
+      var_ = true;
+    }
+    private:
+     bool& var_;
+  } f(finalized_);
+
   auto allRecords = getAllWrittenRecords();
   // If no ".data/version" or "version" record in the output model, rewrites version info
   if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {

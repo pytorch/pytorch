@@ -1,9 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool1d_native.h>
+#include <ATen/ops/max_pool1d_with_indices.h>
+#include <ATen/ops/quantized_max_pool1d.h>
+#endif
 
 namespace at {
 namespace native {
@@ -26,19 +38,19 @@ Tensor max_pool1d_impl(
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
   TORCH_CHECK(
       kernel_size.size() == 1,
-      "max_pool1d() kernel_size must be an int or int list of size 1 but got size ",
+      "max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size ",
       kernel_size.size());
   TORCH_CHECK(
       stride.size() == 0 || stride.size() == 1,
-      "max_pool1d() stride must be None, an int or int list of size 1 but got size ",
+      "max_pool1d() stride must be None, an int, list of ints, or tuple of ints of size 1 but got size ",
       stride.size());
   TORCH_CHECK(
       padding.size() == 1,
-      "max_pool1d() padding must be an int or int list of size 1 but got size ",
+      "max_pool1d() padding must be an int, list of ints, or tuple of ints of size 1 but got size ",
       padding.size());
   TORCH_CHECK(
       dilation.size() == 1,
-      "max_pool1d() dilation must be an int or int list of size 1 but got size ",
+      "max_pool1d() dilation must be an int, list of ints or tuple of ints of size 1 but got size ",
       dilation.size());
 
   // If stride=None then set it to kernel_size
@@ -97,13 +109,22 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+
+  auto ndim = self.ndimension();
+   TORCH_CHECK(
+       (ndim == 2 && self.size(0) != 0 && self.size(1) != 0) ||
+           (ndim == 3 && self.size(1) != 0 && self.size(2) != 0),
+       "max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+       self.sizes());
+
   if (self.is_quantized()) {
     return at::quantized_max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
-      !self.device().is_cpu()) {
+      !self.device().is_cpu() ||
+      isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));

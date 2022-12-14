@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 namespace torch {
 namespace jit {
@@ -48,7 +49,7 @@ bool canValidateIsInnerDim(
       if (!maybe_factor.has_value()) {
         return false;
       }
-      int factor = maybe_factor.value();
+      int factor = maybe_factor->as<int64_t>();
       if (factor < inner_dim_size) {
         // This might be too restrictive. Would need more
         //   bookkeeping to relax.
@@ -67,7 +68,7 @@ bool canValidateIsInnerDim(
       if (!maybe_leaf_size.has_value()) {
         return false;
       }
-      if (maybe_leaf_size.value() != inner_dim_size) {
+      if (maybe_leaf_size->as<int64_t>() != inner_dim_size) {
         return false;
       }
       leaf = merge->inner();
@@ -133,6 +134,13 @@ void WarpMmaSwizzler::scheduleMmaWarpOutput(
         setWarpMapped(tv, 4);
       }
       break;
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+      scheduleTuringM16N16K16MmaWarpOutput(tv, options);
+      if (tv->definition()->isA<MmaOp>()) {
+        setWarpMapped(tv, 4);
+      }
+      break;
     default:
       TORCH_CHECK(
           false, "scheduleMmaWarp: unsupported mma option ", toString(macro));
@@ -150,6 +158,8 @@ void WarpMmaSwizzler::scheduleOperandRead(TensorView* tv, MmaOptions options) {
       break;
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
       scheduleTuringOperandRead(tv, options);
       break;
     default:
@@ -198,7 +208,7 @@ std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
   TORCH_CHECK(
       a_domain.size() == b_domain.size() &&
           a_domain.size() == accumulator_domain.size(),
-      "Inconsisitent dimensions in mma op",
+      "Inconsistent dimensions in mma op",
       a_domain.size(),
       " ",
       b_domain.size(),
@@ -245,6 +255,14 @@ std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
   return result;
 }
 
+//! Variant of getMmaDomains that returns a set
+std::unordered_set<IterDomain*> getMmaDomainSet(
+    MmaOp* mma,
+    MmaDimension dimension) {
+  auto mma_domains = getMmaDomains(mma, dimension);
+  return {mma_domains.begin(), mma_domains.end()};
+}
+
 // [MMA dimension matching]
 // Returns all the axes that correspond to the given mma dimension. This is the
 //   first relaxation step on the mma check.
@@ -256,10 +274,10 @@ std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
 //  optimizations.
 //
 // A concrete example:
-//  T0 [I0, I1, I2, I3, I4, I5] = mma(T1[I01, B11, B21, I31, I41, B51], T2[B02,
+//  T0 [I0, I1, I2, R3, I4, I5] = mma(T1[I01, B11, B21, I31, I41, B51], T2[B02,
 //  I12, B22, I32, I42, I52], {3};
 // In this case some example querries:
-//  K dimension of T0 = {I3}
+//  K dimension of T0 = {R3}
 //  M dimension of T1 = {I01}
 //  N dimension of T2 = {I52}
 //  etc.
@@ -325,9 +343,10 @@ void validateMmaRootInnerMNK(
     int m,
     int n,
     int k) {
-  auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-  auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
-  auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+  auto mma = options.mmaOp();
+  auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+  auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
+  auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
   TORCH_CHECK(
       !m_dims.empty() && !n_dims.empty() && !k_dims.empty(),
@@ -354,8 +373,9 @@ void validateMmaRootInnerMNK(
 //!  swizzles to the right axes.
 //! This check will be relaxed as we build out the mma usage patterns.
 void validateMmaRootInnerMN(TensorView* tv, MmaOptions options, int m, int n) {
-  auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-  auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
+  auto mma = options.mmaOp();
+  auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+  auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
 
   TORCH_CHECK(
       !m_dims.empty() && !n_dims.empty(),
@@ -494,14 +514,17 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
   // Check mma option is supported
   TORCH_CHECK(
       options.macro == MmaOptions::MacroType::Ampere_16_8_16 ||
-          options.macro == MmaOptions::MacroType::Turing_16_8_16,
+          options.macro == MmaOptions::MacroType::Ampere_16_16_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_8_16 ||
+          options.macro == MmaOptions::MacroType::Turing_16_16_16,
       "scheduleLdMatrix: unknown macro for ldmatrix");
 
   if (options.operand == MmaOptions::Operand::A) {
     TORCH_INTERNAL_ASSERT(tv->nDims() >= 2);
     // validation:
-    auto m_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::M);
-    auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+    auto mma = options.mmaOp();
+    auto m_dims = getMmaRootDimensions(tv, mma, MmaDimension::M);
+    auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
     TORCH_INTERNAL_ASSERT(
         canValidateIsInnerDim(m_dims.back(), tv->axis(-2), 16),
@@ -532,46 +555,84 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
 
     tv->axis(-2)->parallelize(ParallelType::TIDx);
   } else if (options.operand == MmaOptions::Operand::B) {
-    auto n_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::N);
-    auto k_dims = getMmaRootDimensions(tv, options.mma_op, MmaDimension::K);
+    auto mma = options.mmaOp();
+    auto n_dims = getMmaRootDimensions(tv, mma, MmaDimension::N);
+    auto k_dims = getMmaRootDimensions(tv, mma, MmaDimension::K);
 
-    // validation:
-    TORCH_INTERNAL_ASSERT(
-        canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 8),
-        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
     TORCH_INTERNAL_ASSERT(
         canValidateIsInnerDim(k_dims.back(), tv->axis(-1), 16),
         "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
 
-    if (transposed) {
-      // [8, 16]
-      tv->split(-2, 4);
+    // Each ldmatrix 4 would be loading an effective 16x16x16 tile, which is 2x
+    // the
+    //  size of regular 16x8x16 tile supported by largest mma operation. The
+    //  swizzle also needs to be different to take this into account.
+    // TODO:
+    //  Using an emulated 16x16x16 mma tile is a temporary step to enable the
+    //   widest load possible for scheduler bring up phase.
+    //  A unifying step would be needed in a follow up to support all these
+    //  swizzles
+    //   with a single affine utility.
+    bool use_ldmatrix4 = canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 16);
 
-      // [2i, 4i, 16]
-      tv->reorder({{-1, -2}, {-2, -1}});
-      // [2i, 16, 4i]
+    if (use_ldmatrix4) {
+      // [... N16, K16]
+      tv->split(-2, 8);
+      tv->split(-1, 8);
 
-      tv->merge(-3);
-      // [warp, 4i]
-    } else {
-      //[8, 16]
-      tv->split(-1, 4);
-      tv->split(-2, 2);
+      //       -4   -3  -2  -1
+      // [... N2o, N8, K2o, K8]
+      tv->reorder({{-3, -2}, {-2, -3}});
+      // [... N2o, K2o, N8, K8]
 
-      // 0  1   2   3
-      //[8, oo2,oi2,i4]
-      tv->reorder({{-4, -2}, {-2, -4}});
-
-      // 0     1   2  3
-      //[oi2, oo2, 8,i4]
+      if (transposed) {
+        tv->reorder({{-1, -2}, {-2, -1}});
+      }
 
       tv->merge(-4);
       tv->merge(-3);
-      //  0    1
-      //[warp, i4]
-    }
 
-    tv->axis(-2)->parallelize(ParallelType::TIDx);
+      // [Warp, K8]
+      tv->axis(-2)->parallelize(ParallelType::TIDx);
+      if (is_immediate_output) {
+        tv->axis(-1)->parallelize(ParallelType::Vectorize);
+      }
+    } else {
+      // validation:
+      TORCH_INTERNAL_ASSERT(
+          canValidateIsInnerDim(n_dims.back(), tv->axis(-2), 8),
+          "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+
+      if (transposed) {
+        // [8, 16]
+        tv->split(-2, 4);
+
+        // [2i, 4i, 16]
+        tv->reorder({{-1, -2}, {-2, -1}});
+        // [2i, 16, 4i]
+
+        tv->merge(-3);
+        // [warp, 4i]
+      } else {
+        //[8, 16]
+        tv->split(-1, 4);
+        tv->split(-2, 2);
+
+        // 0  1   2   3
+        //[8, oo2,oi2,i4]
+        tv->reorder({{-4, -2}, {-2, -4}});
+
+        // 0     1   2  3
+        //[oi2, oo2, 8,i4]
+
+        tv->merge(-4);
+        tv->merge(-3);
+        //  0    1
+        //[warp, i4]
+      }
+
+      tv->axis(-2)->parallelize(ParallelType::TIDx);
+    }
   } else {
     TORCH_INTERNAL_ASSERT(false, "unreachable");
   }
@@ -704,6 +765,52 @@ void WarpMmaSwizzler::scheduleTuringM16N8K16MmaWarpOutput(
   tv->axis(m_pos)->parallelize(ParallelType::TIDx);
 }
 
+void WarpMmaSwizzler::scheduleTuringM16N16K16MmaWarpOutput(
+    TensorView* tv,
+    const MmaOptions& options) {
+  // Assume last 2 dims [M16, N8] or [M16, N8, R]
+  // Locate instruction m
+  bool is_reduction = tv->axis(-1)->isReduction();
+
+  // Make sure instruction tile size is correct.
+  if (is_reduction) {
+    validateMmaRootInnerMNK(tv, options, 16, 16, 16);
+  } else {
+    validateMmaRootInnerMN(tv, options, 16, 16);
+  }
+
+  int m_pos = is_reduction ? -3 : -2;
+  //  m
+  // [16, 16  (,R)]
+
+  tv->split(m_pos + 1, 8);
+  //       m
+  // [16, n2, 8 (,R)]
+  tv->reorder({{m_pos, m_pos - 1}, {m_pos - 1, m_pos}});
+
+  //       m
+  // [n2, 16, 8  (,R)]
+  tv->split(m_pos, 8);
+  tv->split(m_pos + 1, 2);
+
+  //          m
+  // [2o, 8o, 4i, 2i (,R)]
+  tv->merge(m_pos - 1);
+
+  //       m
+  // [2o, Warp, 2i (,R)]
+  TORCH_CHECK(tv->definition() != nullptr);
+
+  if (is_reduction && tv->definition()->isA<MmaOp>()) {
+    // Set instruction loops for mma reduce
+    for (int pos : c10::irange(5)) {
+      tv->axis(-pos - 1)->parallelize(ParallelType::Mma);
+    }
+  }
+
+  tv->axis(m_pos)->parallelize(ParallelType::TIDx);
+}
+
 namespace {
 
 bool isMmaInitLoop(const kir::Scope& loop_body) {
@@ -749,6 +856,76 @@ bool isMmaInitLoop(const kir::ForLoop* loop) {
 }
 
 } // namespace mma_util
+
+void scheduler_utils::matmul_utils::canonicalizeMmaTvOrdering(TensorView* tv) {
+  std::unordered_set<IterDomain*> root_id_set{
+      tv->getMaybeRFactorDomain().begin(), tv->getMaybeRFactorDomain().end()};
+
+  auto mma = dynamic_cast<MmaOp*>(tv->definition());
+  TORCH_CHECK(
+      mma != nullptr, "canonicalizeMmaTvOrdering : only support mma op output");
+
+  auto m_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::M);
+  auto n_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::N);
+  auto k_id_set = mma_util::getMmaDomainSet(mma, mma_util::MmaDimension::K);
+
+  std::vector<int> batch_pos, prev_reduction_pos, m_pos, n_pos, k_pos;
+
+  auto ndims = tv->nDims();
+
+  for (auto idx : c10::irange(ndims)) {
+    auto id = tv->axis(idx);
+    TORCH_CHECK(root_id_set.count(id), id->toString(), " not a root id.");
+
+    // Categorize each original iterdomain position
+    if (m_id_set.count(id)) {
+      m_pos.push_back(idx);
+    } else if (n_id_set.count(id)) {
+      n_pos.push_back(idx);
+    } else if (k_id_set.count(id)) {
+      k_pos.push_back(idx);
+    } else if (id->isReduction()) {
+      prev_reduction_pos.push_back(idx);
+    } else {
+      batch_pos.push_back(idx);
+    }
+  }
+
+  // Collect all mma id's, other id's would be either
+  //  batch or incoming reduction.
+
+  // Ordering map from old position to new position
+  //  that we wil build using the position vectors.
+  std::unordered_map<int, int> order_map;
+
+  // Running position counter keeping track of the
+  //  current insert position in order_map.
+  int current_pos = 0;
+
+  // Utility to insert the ordered pos sequences to
+  //  the ordering map.
+  auto insert_to_order_map =
+      [&order_map, &current_pos](const std::vector<int>& original_pos) {
+        for (auto pos : original_pos) {
+          order_map[pos] = current_pos++;
+        }
+      };
+
+  // Order the categories, while keeping the original
+  //  intra-category ordering.
+  insert_to_order_map(batch_pos);
+  insert_to_order_map(prev_reduction_pos);
+  insert_to_order_map(m_pos);
+  insert_to_order_map(n_pos);
+  insert_to_order_map(k_pos);
+
+  // Validate that all of the root ids are covered by
+  //  the inserted categories.
+  TORCH_INTERNAL_ASSERT(current_pos == ndims, "Id not completely categorized");
+
+  // Apply the new ordering
+  tv->reorder(order_map);
+}
 
 } // namespace cuda
 } // namespace fuser

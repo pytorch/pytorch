@@ -30,6 +30,7 @@ def named_params_with_sharded_tensor(
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> model = torch.nn.Linear(*linear_size)
         >>> shard_parameter(model, "weight", spec)
         >>> for name, param in named_params_with_sharded_tensor(model):

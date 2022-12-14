@@ -455,7 +455,7 @@ class ShardedTensor(ShardedTensorBase):
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = dict()
+        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = {}
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
@@ -630,7 +630,13 @@ class ShardedTensor(ShardedTensorBase):
         return st_cuda
 
     def to(self, *args, **kwargs) -> ShardedTensor:
-        current_device = self._local_shards[0].tensor.device
+        current_device: torch.device
+        if self._local_shards:
+            current_device = self._local_shards[0].tensor.device
+        elif self._process_group._get_backend_name() == "gloo":
+            current_device = torch.device("cpu")
+        else:
+            current_device = torch.device(torch.cuda.current_device())
         current_dtype = self.dtype
         device_to = current_device
         dtype_to = current_dtype
@@ -801,6 +807,7 @@ class ShardedTensor(ShardedTensorBase):
         Examples:
             >>> # All tensors below are of torch.int64 type.
             >>> # We have 2 process groups, 2 ranks.
+            >>> # xdoctest: +SKIP
             >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
             >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
             >>> local_tensor
@@ -949,6 +956,7 @@ class ShardedTensor(ShardedTensorBase):
 
         Examples:
             >>> # We have 2 process groups, 2 ranks.
+            >>> # xdoctest: +SKIP
             >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
             >>> tensor = torch.stack([tensor, tensor])
             >>> tensor

@@ -5,6 +5,8 @@
 #endif
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+
+#include <utility>
 #endif
 
 namespace ao {
@@ -190,9 +192,40 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_.begin() +
             output_channels_, // Don't go to the end because of padding
         w_zero_points_compact.data_ptr<int8_t>(),
-        subtract_128);
+        std::move(subtract_128));
   } else {
     TORCH_CHECK(false, "Unsupported quantization scheme.");
+  }
+
+  at::Tensor wrapped_row_values;
+  at::Tensor wrapped_col_indices;
+
+  const uint32_t max_index = bcsr_matrix_->max_index();
+
+  if (max_index <= std::numeric_limits<uint8_t>::max()) {
+    // Cast from uint8_t range to int8_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->row_values, c10::kChar); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->col_indices, c10::kChar); });
+  } else if (max_index <= std::numeric_limits<uint16_t>::max()) {
+    // Cast from uint16_t range to int16_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->row_values, c10::kShort); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->col_indices, c10::kShort); });
+  } else {
+    // Cast from uint32_t range to int32_t
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->row_values, c10::kInt); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->col_indices, c10::kInt); });
   }
 
   return BCSRSerializationType(
@@ -203,10 +236,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
       std::move(w_scales_compact),
       std::move(w_zero_points_compact),
       (q_scheme_ == c10::kPerTensorAffine),
-      wrap_vector<int>(
-          bcsr_matrix_->row_values, c10::kInt), // Casting from uint32_t to int
-      wrap_vector<int>(
-          bcsr_matrix_->col_indices, c10::kInt), // Casting from uint32_t to int
+      wrapped_row_values,
+      wrapped_col_indices,
       wrap_vector<uint8_t>(bcsr_matrix_->values, c10::kByte),
       output_channels_,
       input_channels_);

@@ -45,7 +45,7 @@ namespace torch {
 namespace detail {
 
 void record_custom_class(std::string name) {
-  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, name, c10::ArrayRef<const c10::IValue>{});
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, std::move(name), c10::ArrayRef<const c10::IValue>{});
 }
 
 } // namespace detail
@@ -143,6 +143,7 @@ c10::FunctionSchema class_base::withNewArguments(
     new_args.emplace_back(
         default_arg.name_,
         old_arg.type(),
+        old_arg.real_type(),
         old_arg.N(),
         default_arg.value_);
   }

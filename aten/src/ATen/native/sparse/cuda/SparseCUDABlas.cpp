@@ -19,7 +19,13 @@
 #define IS_SPMM_AVAILABLE() 0
 #endif
 
-#if IS_SPMM_AVAILABLE()
+#if defined(USE_ROCM) && ROCM_VERSION >= 50200
+#define IS_SPMM_HIP_AVAILABLE() 1
+#else
+#define IS_SPMM_HIP_AVAILABLE() 0
+#endif
+
+#if IS_SPMM_AVAILABLE() || IS_SPMM_HIP_AVAILABLE()
 #include <library_types.h>
 #endif
 
@@ -86,7 +92,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
   }
 }
 
-#if IS_SPMM_AVAILABLE()
+#if IS_SPMM_AVAILABLE() || IS_SPMM_HIP_AVAILABLE()
 
 namespace {
 template<typename T>
@@ -158,7 +164,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
+    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     &bufferSize           /* output */
   ));
 
@@ -172,7 +178,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,  /* data type in which the computation is executed */
-    CUSPARSE_CSRMM_ALG1,  /* default computing algorithm for CSR sparse matrix format */
+    CUSPARSE_SPMM_CSR_ALG1,  /* default computing algorithm for CSR sparse matrix format */
     dataPtr.get()         /* external buffer */
   ));
 

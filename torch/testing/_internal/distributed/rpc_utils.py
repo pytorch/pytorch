@@ -178,7 +178,7 @@ def generate_tests(
             continue
 
         name = f"{prefix}{test_class.__name__}"
-        class_ = type(name, (test_class, mixin, SpawnHelper), dict())
+        class_ = type(name, (test_class, mixin, SpawnHelper), {})
         class_.__module__ = module_name
         ret[name] = class_
     return ret

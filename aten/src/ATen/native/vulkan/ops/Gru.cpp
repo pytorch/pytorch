@@ -1,6 +1,18 @@
+#include <ATen/TensorOperators.h>
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <vector>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/gru.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/tanh.h>
+#endif
 
 namespace at {
 namespace native {
@@ -8,14 +20,19 @@ namespace vulkan {
 namespace ops {
 namespace {
 //
-// input_vk: input tensor of shape (L, N, H_in) when batch_first=False
-//                                 (N, L, H_in) when batch_first=True containing
-//                                 the features of the input sequence
-// hx_vk: initial hidden state for each element in the batch. tensor of shape (D
-// * num_layers, N, H_out) output: tensor of shape (N, L, D * H_out)) when
-// batch_first=True h_n: tensor of shape (D * num_layers, N, H_out)
+// input_vk: input tensor containing the features of the input sequence
+//           tensor of shape (N, L, H_in) when batch_first=True
+//                           (L, N, H_in) when batch_first=False
 //
-//  where
+// hx_vk: initial hidden state for each element in the batch.
+//        tensor of shape (D * num_layers, N, H_out)
+//
+// output: tensor of shape (N, L, D * H_out) when batch_first=True
+//                         (L, N, D * H_out) when batch_first=False
+//
+// h_n: tensor of shape (D * num_layers, N, H_out)
+//
+// where
 //    L = sequence length
 //    N = batch size
 //    D = 2 if bidirectional=True otherwise 1
@@ -46,17 +63,21 @@ std::tuple<Tensor, Tensor> gru_input(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan gru expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan gru expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan gru expects 'dropout' to be 0.0.");
+
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
 
   const auto hidden_size = hx_vk.size(2);
   std::vector<at::Tensor> h_n_list; // hidden output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   for (int64_t i = 0; i < num_layers; ++i) {
     // extract each hidden state and squeeze into 2D dim
@@ -99,6 +120,7 @@ std::tuple<Tensor, Tensor> gru_input(
   }
 
   auto h_n = at::cat(h_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   return std::tuple<Tensor, Tensor>(x, h_n);
 }
@@ -118,7 +140,11 @@ std::vector<c10::intrusive_ptr<LinearPackedContext>> pack_linear_op_contexts(
     int64_t num_layers) {
   TORCH_CHECK(
       static_cast<int64_t>(params_cpu.size()) == 4 * num_layers,
-      "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'.");
+      "Vulkan gru expects 'params_cpu' size to be 4 * 'num_layers'."
+      " But 'params_cpu' has size: ",
+      params_cpu.size(),
+      " and 'num_layers' is: ",
+      num_layers);
   std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 6);
 
@@ -171,12 +197,10 @@ GruPackedContext::GruPackedContext(
   TORCH_INTERNAL_ASSERT(
       !bidirectional, "Vulkan gru expects 'bidirectional' to be false.");
   TORCH_INTERNAL_ASSERT(
-      batch_first, "Vulkan gru expects 'batch_first' to be true.");
-  TORCH_INTERNAL_ASSERT(
       dropout < std::numeric_limits<double>::epsilon() * 1000,
       "Vulkan gru expects 'dropout' to be 0.0.");
 
-  packed_.reserve(7);
+  packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(pack_linear_op_contexts(params_cpu, num_layers));
   packed_.emplace_back(has_biases);
   packed_.emplace_back(num_layers);
@@ -188,22 +212,23 @@ GruPackedContext::GruPackedContext(
 
 GruPackedContext GruPackedContext::pack(c10::impl::GenericList unpacked) {
   return GruPackedContext(
-      unpacked.get(0).toTensorVector(),
-      unpacked.get(1).toBool(),
-      unpacked.get(2).toInt(),
-      unpacked.get(3).toDouble(),
-      unpacked.get(4).toBool(),
-      unpacked.get(5).toBool(),
-      unpacked.get(6).toBool());
+      unpacked.get(Unpacked::Params).toTensorVector(),
+      unpacked.get(Unpacked::hasBiases).toBool(),
+      unpacked.get(Unpacked::NumLayers).toInt(),
+      unpacked.get(Unpacked::Dropout).toDouble(),
+      unpacked.get(Unpacked::Train).toBool(),
+      unpacked.get(Unpacked::Bidirectional).toBool(),
+      unpacked.get(Unpacked::BatchFirst).toBool());
 }
 
 const c10::impl::GenericList GruPackedContext::unpack() const {
   c10::impl::GenericList unpacked_gru_context{c10::AnyType::get()};
-  unpacked_gru_context.reserve(7);
+  unpacked_gru_context.reserve(Unpacked::NumArgs);
 
-  const c10::List<c10::IValue> packed_linear_contexts = get_val(0).toList();
+  const c10::List<c10::IValue> packed_linear_contexts =
+      get_val(Packed::LinearContexts).toList();
 
-  const int64_t num_layers = get_val(2).toInt();
+  const int64_t num_layers = get_val(Packed::NumLayers).toInt();
   const int64_t linear_contexts_per_layer = 6;
 
   std::vector<Tensor> params_cpu;
@@ -212,11 +237,21 @@ const c10::impl::GenericList GruPackedContext::unpack() const {
   for (c10::IValue packed_linear_context : packed_linear_contexts) {
     const c10::impl::GenericList unpacked_linear_context =
         packed_linear_context.toCustomClass<LinearPackedContext>()->unpack();
-    params_cpu.emplace_back(unpacked_linear_context.get(0).toTensor().t());
-    params_cpu.emplace_back(unpacked_linear_context.get(1).toTensor());
+
+    TORCH_CHECK(
+        unpacked_linear_context.size() > 0u,
+        "unpacked_linear_context does not have any elements!");
+
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Weight)
+            .toTensor()
+            .t());
+    params_cpu.emplace_back(
+        unpacked_linear_context.get(LinearPackedContext::Unpacked::Bias)
+            .toTensor());
   }
   unpacked_gru_context.emplace_back(params_cpu);
-  for (int64_t i = 1; i < 7; ++i) {
+  for (int64_t i = 1; i < Unpacked::NumArgs; ++i) {
     unpacked_gru_context.emplace_back(get_val(i));
   }
 
@@ -251,9 +286,19 @@ std::tuple<Tensor, Tensor> run_gru_context(
   TORCH_INTERNAL_ASSERT(
       hx_vk.sizes().size() == 3, "Vulkan gru expects 'hx_vk' dims to be 3.");
 
+  const int64_t num_layers =
+      gru_context->get_val(GruPackedContext::Packed::NumLayers).toInt();
+  const bool batch_first =
+      gru_context->get_val(GruPackedContext::Packed::BatchFirst).toBool();
+  const auto batch_size = input_vk.size(0);
+  const auto seq_length = input_vk.size(1);
+
+  TORCH_INTERNAL_ASSERT(
+      (batch_size == 1 && seq_length == 1) || batch_first,
+      "Vulkan gru expects batch-first input");
+
   const c10::List<c10::IValue> packed_linear_contexts =
-      gru_context->get_val(0).toList();
-  const int64_t num_layers = gru_context->get_val(2).toInt();
+      gru_context->get_val(GruPackedContext::Packed::LinearContexts).toList();
 
   const int64_t linear_contexts_per_layer = 6;
   // (b_ir, w_ir), (b_hr, w_hr), (b_iz, w_iz),
@@ -261,8 +306,7 @@ std::tuple<Tensor, Tensor> run_gru_context(
   std::vector<at::Tensor> h_n_list; // hidden output
 
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
-  auto x =
-      input_vk.reshape({input_vk.size(0) * input_vk.size(1), input_vk.size(2)});
+  auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
   for (int64_t i = 0; i < num_layers; ++i) {
     // extract each hidden state and squeeze into 2D dim
@@ -304,6 +348,7 @@ std::tuple<Tensor, Tensor> run_gru_context(
   }
 
   auto h_n = at::cat(h_n_list, 1);
+  x = x.reshape({batch_size, seq_length, x.size(1)});
   h_n = h_n.reshape({h_n.size(0) * h_n.size(1), h_n.size(2), h_n.size(3)});
   return std::tuple<Tensor, Tensor>(x, h_n);
 }

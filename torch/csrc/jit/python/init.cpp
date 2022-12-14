@@ -13,7 +13,7 @@
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
 #include <torch/csrc/jit/codegen/onednn/interface.h>
 #endif
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -52,6 +52,7 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
+#include <torch/csrc/jit/passes/mobile_optimizer_type.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
@@ -125,103 +126,10 @@ using c10::Argument;
 using c10::FunctionSchema;
 using c10::SchemaArgType;
 using c10::SchemaArgument;
-using c10::SymIntNode;
+using c10::SymNode;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
 using torch::utils::SchemaInfo;
-
-static c10::SymIntNode toSymIntNode(c10::SymIntNode a, py::object b) {
-  return torch::is_symint_node(b) ? b.cast<c10::SymIntNode>()
-                                  : a->wrap(b.cast<int64_t>());
-}
-
-class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
- public:
-  PythonSymIntNodeImpl(py::object pyobj) : c10::SymIntNodeImpl() {
-    pyobj_ = std::make_shared<c10::SafePyObject>(
-        pyobj.release().ptr(), getPyInterpreter());
-  };
-
-  virtual SymIntNode wrap(int64_t num) override {
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("wrap")(num);
-    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
-  }
-
-  virtual bool bool_() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__bool__")().is(py::handle(Py_True));
-  }
-
-  virtual int64_t int_() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__int__")().cast<int64_t>();
-  }
-
-  virtual std::string str() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__str__")().cast<std::string>();
-  }
-
-  virtual SymIntNode dispatch_common_(
-      const char* fname,
-      const SymIntNode& other) {
-    auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
-    TORCH_CHECK(pother);
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj());
-    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
-  }
-
-  virtual SymIntNode add(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode sub(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode mul(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode truediv(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode floordiv(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode mod(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode eq(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode gt(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode lt(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode le(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  virtual SymIntNode ge(const SymIntNode& other) override {
-    return dispatch_common_(__FUNCTION__, other);
-  }
-
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
-  }
-  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
-};
 
 namespace {
 
@@ -237,10 +145,14 @@ bool loadPythonClasses() {
   return true;
 }
 
-bool isEmptyContainer(const py::handle self) {
-  bool is_empty_list =
-      PySequence_Check(self.ptr()) && !PySequence_Size(self.ptr());
-  return is_empty_list;
+c10::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
+  // Errors need to be caught here because toTypeInferredIValue errors out
+  // on various object types, but we want it to work with all types.
+  try {
+    return toTypeInferredIValue(input);
+  } catch (const c10::Error& e) {
+    return c10::nullopt;
+  }
 }
 } // anonymous namespace
 
@@ -405,6 +317,25 @@ void initJITBindings(PyObject* module) {
           py::arg("inplace"),
           py::arg("quant_type_int") = 1)
       .def(
+          "_jit_pass_insert_observer_method_for_ondevice_ptq",
+          [](Module& module,
+             const std::string& method_name,
+             const py::dict& qconfig_dict,
+             bool inplace,
+             int quant_type_int) {
+            auto dict = py::cast<std::unordered_map<
+                std::string,
+                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertObserversForOnDevicePTQ(
+                module, method_name, dict, inplace, quant_type);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("qconfig_dict"),
+          py::arg("inplace"),
+          py::arg("quant_type_int") = 1)
+      .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
              const std::string& method_name,
@@ -413,6 +344,22 @@ void initJITBindings(PyObject* module) {
              int quant_type_int) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
+          },
+          py::arg("module"),
+          py::arg("method_name"),
+          py::arg("inplace"),
+          py::arg("debug"),
+          py::arg("quant_type_int") = 1)
+      .def(
+          "_jit_pass_insert_quant_dequant_for_ondevice_ptq",
+          [](Module& module,
+             const std::string& method_name,
+             bool inplace,
+             bool debug,
+             int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertQuantDeQuantOnDevicePTQ(
                 module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
@@ -482,6 +429,17 @@ void initJITBindings(PyObject* module) {
              const std::vector<std::string>& preserved_attrs) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
             return Finalize(module, quant_type, preserved_attrs);
+          },
+          py::arg("module"),
+          py::arg("quant_type_int") = 1,
+          py::arg("preserved_attrs") = std::vector<std::string>())
+      .def(
+          "_jit_pass_quant_finalize_for_ondevice_ptq",
+          [](Module& module,
+             int quant_type_int,
+             const std::string& method_name) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return FinalizeOnDevicePTQ(module, quant_type, method_name);
           },
           py::arg("module"),
           py::arg("quant_type_int") = 1,
@@ -699,7 +657,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](const std::shared_ptr<Graph>& graph, py::object threshold) {
-            if (threshold.is(py::none())) {
+            if (threshold.is_none()) {
               CreateAutodiffSubgraphs(graph);
             } else {
               CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
@@ -767,6 +725,9 @@ void initJITBindings(PyObject* module) {
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#else
+      .def("_jit_set_llga_enabled", [](bool flag) { return false; })
+      .def("_jit_llga_enabled", []() { return false; })
 #endif
       .def(
           "_jit_set_tracer_state_warn",
@@ -1121,8 +1082,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
           [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blocklist,
              std::vector<std::string>& preserved_methods) {
-            return vulkanOptimizeForMobile(module, preserved_methods);
+            return vulkanOptimizeForMobile(
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_metal_insert_prepacked_ops",
@@ -1182,113 +1145,68 @@ void initJITBindings(PyObject* module) {
         }
       });
 
-  py::class_<c10::SymIntNodeImpl, c10::SymIntNode>(m, "SymIntNode")
-      .def_static(
-          "new_symint",
-          [](py::object obj) -> c10::SymIntNode {
-            return c10::make_intrusive<PythonSymIntNodeImpl>(obj);
+  // NB: This isn't actually used for regular PyTorch symbolic tracing;
+  // XLA is what needs this
+#define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
+#define SYMNODE_BINARY(n) \
+  .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
+  auto symnode_class =
+      py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
+      // clang-format off
+      // These DO NOT install magic methods; the SymInt/SymFloat wrapper in
+      // Python is responsible for this
+      SYMNODE_UNARY(clone)
+      SYMNODE_UNARY(is_int)
+      SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(bool_)
+      SYMNODE_UNARY(int_)
+      SYMNODE_UNARY(sym_float)
+      SYMNODE_BINARY(add)
+      SYMNODE_BINARY(sub)
+      SYMNODE_BINARY(mul)
+      SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(mod)
+      SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(gt)
+      SYMNODE_BINARY(lt)
+      SYMNODE_BINARY(le)
+      SYMNODE_BINARY(ge)
+      SYMNODE_BINARY(min)
+      SYMNODE_BINARY(max)
+      SYMNODE_UNARY(ceil)
+      SYMNODE_UNARY(floor)
+      SYMNODE_UNARY(neg)
+      // Intentionally don't set file line, as the
+      // Python backtrace matters more here
+      .def(
+          "guard_int",
+          [](c10::SymNode a) {
+            return a->guard_int(nullptr, 0);
           })
       .def(
-          "get_pyobj",
-          [](c10::SymIntNode a) -> py::object {
-            if (auto* psn = dynamic_cast<PythonSymIntNodeImpl*>(a.get())) {
-              return py::reinterpret_borrow<py::object>(psn->getPyObj());
-            }
-            return py::none();
+          "guard_float",
+          [](c10::SymNode a) {
+            return a->guard_float(nullptr, 0);
           })
       .def(
-          "__add__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->add(snb);
+          "wrap_int",
+          [](c10::SymNode a, int64_t b) {
+            return a->wrap_int(b);
           })
       .def(
-          "__radd__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->add(snb);
+          "wrap_float",
+          [](c10::SymNode a, double b) {
+            return a->wrap_float(b);
           })
       .def(
-          "__sub__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->sub(snb);
-          })
-      .def(
-          "__mul__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__rmul__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mul(snb);
-          })
-      .def(
-          "__truediv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->truediv(snb);
-          })
-      .def(
-          "__rtruediv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return snb->truediv(a);
-          })
-      .def(
-          "__floordiv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->floordiv(snb);
-          })
-      .def(
-          "__rfloordiv__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return snb->floordiv(a);
-          })
-      .def(
-          "__mod__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->mod(snb);
-          })
-      .def(
-          "__eq__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->eq(snb);
-          })
-      .def(
-          "__gt__",
-          [](c10::SymIntNode a, py::object b) {
-            auto snb = toSymIntNode(a, b);
-            return a->gt(snb);
-          })
-      .def(
-          "__lt__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->lt(snb);
-          })
-      .def(
-          "__le__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->le(snb);
-          })
-      .def(
-          "__ge__",
-          [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
-            auto snb = toSymIntNode(a, b);
-            return a->ge(snb);
-          })
-      .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
-      .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
-      .def("__str__", [](c10::SymIntNode a) { return a->str(); });
+          "__str__",
+          [](c10::SymNode a) { return a->str(); })
+      .def("__repr__", [](c10::SymNode a) {
+        return a->str();
+      });
+  // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -1362,7 +1280,7 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          // Writting an empty file is a noop
+          // Writing an empty file is a noop
           if (size == 0) {
             return size;
           }
@@ -1406,6 +1324,9 @@ void initJITBindings(PyObject* module) {
       .value(
           "HOIST_CONV_PACKED_PARAMS",
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
+      .value(
+          "VULKAN_AUTOMATIC_GPU_TRANSFER",
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
@@ -1587,9 +1508,19 @@ void initJITBindings(PyObject* module) {
                                        py::args args, py::kwargs kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, true);
+                        {op}, symbol, args, kwargs, /*is_overload*/ true);
                   });
-              return py::make_tuple(func, py::cast(op->getTags().vec()));
+              auto func_dk = py::cpp_function(
+                  [op, symbol, allow_numbers_as_tensors](
+                      c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
+                    c10::optional<c10::DispatchKey> dk =
+                        c10::make_optional(dk_);
+                    ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
+                    return _get_operation_for_overload_or_packet(
+                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
+                  });
+              return py::make_tuple(
+                  func, func_dk, py::cast(op->getTags().vec()));
             }
           }
           throw std::runtime_error("Found no matching operator overload");
@@ -1679,6 +1610,11 @@ void initJITBindings(PyObject* module) {
             return self.is_mutable(argument);
           })
       .def(
+          "has_argument",
+          [](SchemaInfo& self, const std::string& name) {
+            return self.has_argument(name);
+          })
+      .def(
           "is_mutable",
           [](SchemaInfo& self, const std::string& name) {
             return self.is_mutable(name);
@@ -1700,38 +1636,39 @@ void initJITBindings(PyObject* module) {
           [](SchemaInfo& self,
              const std::string& name,
              const py::object& value) {
-            if (isEmptyContainer(value)) {
-              return;
-            }
-            // For normalization purposes there is an inconsistency within
-            // torch.fx that turns all arguments named "self" into "input". Thus
-            // this check ensures that those arguments are checked correctly.
-            if (name == "input" && !self.hasInputArgumentNamed("input")) {
-              self.addArgumentValue("self", toTypeInferredIValue(value));
-            } else {
-              self.addArgumentValue(name, toTypeInferredIValue(value));
+            c10::optional<IValue> i_value = toTypeInferredIValueOptional(value);
+            if (i_value) {
+              // For normalization purposes there is an inconsistency within
+              // torch.fx that turns all arguments named "self" into "input".
+              // Thus this check ensures that those arguments are checked
+              // correctly.
+              if (name == "input" && !self.hasInputArgumentNamed("input")) {
+                self.addArgumentValue("self", *i_value);
+              } else {
+                self.addArgumentValue(name, *i_value);
+              }
             }
           })
       .def("add_argument_values", [](SchemaInfo& self, const py::dict& values) {
         std::unordered_map<std::string, IValue> value_map;
         for (const auto& key_pair : values) {
           IValue key = toTypeInferredIValue(key_pair.first);
-          if (isEmptyContainer(key_pair.second)) {
-            continue;
-          }
-          IValue value = toTypeInferredIValue(key_pair.second);
           TORCH_INTERNAL_ASSERT(
               key.isString(),
               "Add argument value keys types should be strings.");
-          // For normalization purposes there is an inconsistency within
-          // torch.fx that
-          // turns all arguments named "self" into "input". Thus this check
-          // ensures that those arguments are checked correctly.
-          if (key.toStringRef() == "input" &&
-              !self.hasInputArgumentNamed("input")) {
-            self.addArgumentValue("self", value);
-          } else {
-            value_map[key.toStringRef()] = value;
+          c10::optional<IValue> value =
+              toTypeInferredIValueOptional(key_pair.second);
+          if (value) {
+            // For normalization purposes there is an inconsistency within
+            // torch.fx that
+            // turns all arguments named "self" into "input". Thus this check
+            // ensures that those arguments are checked correctly.
+            if (key.toStringRef() == "input" &&
+                !self.hasInputArgumentNamed("input")) {
+              self.addArgumentValue("self", *value);
+            } else {
+              value_map[key.toStringRef()] = *value;
+            }
           }
         }
         self.addArgumentValues(value_map);
@@ -1903,16 +1840,24 @@ void initJITBindings(PyObject* module) {
               }),
           py::call_guard<py::gil_scoped_release>());
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
-    if (isEmptyContainer(self) || isEmptyContainer(other)) {
+    c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
+    c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
+
+    // Only return true if we are certain that self and other are aliasing.
+    if (!self_value || !other_value) {
       return false;
     }
-    return toTypeInferredIValue(self).isAliasOf(toTypeInferredIValue(other));
+    return self_value->isAliasOf(*other_value);
   });
   m.def("_overlaps", [](const py::object& self, const py::object& other) {
-    if (isEmptyContainer(self) || isEmptyContainer(other)) {
-      return true;
+    c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
+    c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
+
+    // Only return true if we are certain that self and other are overlapping.
+    if (!self_value || !other_value) {
+      return false;
     }
-    return toTypeInferredIValue(self).overlaps(toTypeInferredIValue(other));
+    return self_value->overlaps(*other_value);
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
@@ -1969,6 +1914,7 @@ void initJITBindings(PyObject* module) {
   });
 
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    TORCH_CHECK(fut, "Future can't be None");
     return fut->wait();
   });
 
@@ -1976,12 +1922,14 @@ void initJITBindings(PyObject* module) {
       "_collect_all",
       [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
           -> std::shared_ptr<jit::PythonFutureWrapper> {
-        auto typePtr =
-            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        auto typePtr = futures.empty() || futures[0] == nullptr
+            ? AnyType::get()
+            : futures[0]->fut->elementType();
         c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
             c10::FutureType::create(typePtr));
         asList.reserve(futures.size());
         for (const auto& f : futures) {
+          TORCH_CHECK(f, "Future can't be None");
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(

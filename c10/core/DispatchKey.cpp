@@ -136,6 +136,8 @@ const char* toString(DispatchKey t) {
       return "AutocastCPU";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
+    case DispatchKey::AutocastHPU:
+      return "AutocastHPU";
     case DispatchKey::AutocastCUDA:
       return "AutocastCUDA";
 
@@ -172,16 +174,23 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
+    case DispatchKey::PythonDispatcher:
+      return "PythonDispatcher";
+
       // Aliases
 
     case DispatchKey::Autograd:
       return "Autograd";
     case DispatchKey::CompositeImplicitAutograd:
       return "CompositeImplicitAutograd";
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      return "CompositeImplicitAutogradNestedTensor";
     case DispatchKey::CompositeExplicitAutograd:
       return "CompositeExplicitAutograd";
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return "CompositeExplicitAutogradNonFunctional";
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return "FuncTorchBatchedDecomposition";
 
       // Per-backend dispatch keys
 
@@ -199,7 +208,7 @@ const char* toString(DispatchKey t) {
     switch (bc) {                                  \
       C10_FORALL_BACKEND_COMPONENTS(ENTRY, prefix) \
       default:                                     \
-        return #prefix "Unknown";                  \
+        return #prefix "Undefined";                \
     }
 
         C10_FORALL_FUNCTIONALITY_KEYS(FORALL_BC)
@@ -262,6 +271,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
       {"FuncTorchDynamicLayerBackMode",
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
+      {"Functionalize", c10::DispatchKey::Functionalize},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
@@ -269,6 +279,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
+      {"AutocastHPU", c10::DispatchKey::AutocastHPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -281,6 +292,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"TESTING_ONLY_GenericWrapper",
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
+      {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
@@ -307,6 +319,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},
+      {"SparseMeta", c10::DispatchKey::SparseMeta},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
@@ -324,10 +337,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},
+      {"CompositeImplicitAutogradNestedTensor",
+       c10::DispatchKey::CompositeImplicitAutogradNestedTensor},
       {"CompositeExplicitAutograd",
        c10::DispatchKey::CompositeExplicitAutograd},
       {"CompositeExplicitAutogradNonFunctional",
        c10::DispatchKey::CompositeExplicitAutogradNonFunctional},
+      {"FuncTorchBatchedDecomposition",
+       c10::DispatchKey::FuncTorchBatchedDecomposition},
   };
   auto it = key_map.find(k);
   TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);

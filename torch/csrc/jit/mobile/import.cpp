@@ -5,6 +5,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/in_memory_adapter.h>
@@ -13,6 +14,7 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -87,19 +89,6 @@ namespace jit {
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
-
-mobile::Module (*load_flatbuffer_bytes)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>,
-    ExtraFilesMap*) = nullptr;
-
-mobile::Module (*load_flatbuffer_bytes_no_object)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>) = nullptr;
-
-uint64_t (*get_flatbuffer_bytecode_version)(char* flatbuffer_content) = nullptr;
 
 OpCode parseOpCode(const char* str);
 
@@ -586,11 +575,19 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
-  return _load_mobile_from_bytes(
-      data, size, device, extra_files, module_load_options);
+  auto format = getFileFormat(filename);
+
+  if (format == FileFormat::FlatbufferFileFormat) {
+    std::shared_ptr<char> data;
+    size_t size = 0;
+    std::tie(data, size) = get_file_content(filename.c_str());
+    return _load_mobile_from_bytes(
+        data, size, device, extra_files, module_load_options);
+  }
+
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_for_mobile_impl(
+      std::move(rai), device, extra_files, module_load_options);
 }
 
 TORCH_API mobile::Module _load_for_mobile(
@@ -598,6 +595,7 @@ TORCH_API mobile::Module _load_for_mobile(
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
+  // TODO optimize file read for non-flatbuffer models
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_rai_content(rai.get());
@@ -621,13 +619,8 @@ mobile::Module _load_mobile_from_bytes(
           std::move(rai), device, extra_files, module_load_options);
     }
     case FileFormat::FlatbufferFileFormat: {
-      if (load_flatbuffer_bytes != nullptr) {
-        return load_flatbuffer_bytes(data, size, device, &extra_files);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enabled flatbuffer");
-      }
+      return parse_and_initialize_mobile_module(
+          data, size, device, &extra_files);
     }
     default: {
       TORCH_CHECK(false, "Format error");
@@ -696,16 +689,34 @@ void _load_extra_only_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  deserializer.deserialize_only_extra(device, extra_files);
+
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<FileAdapter> rai =
+          std::make_unique<FileAdapter>(filename);
+      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      BytecodeDeserializer deserializer(std::move(reader));
+      deserializer.deserialize_only_extra(device, extra_files);
+      break;
+    }
+    case FileFormat::FlatbufferFileFormat: {
+      // TODO: the current flatbuffers implementation will always load the
+      // whole module including the extra files. Ideally it should be
+      // possible to just get the extra files given data
+      load_mobile_module_from_file(filename, c10::nullopt, &extra_files);
+      break;
+    }
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 namespace mobile {

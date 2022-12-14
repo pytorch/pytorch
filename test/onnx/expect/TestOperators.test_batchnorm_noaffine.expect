@@ -49,6 +49,11 @@ graph {
       f: 0.7
       type: FLOAT
     }
+    attribute {
+      name: "training_mode"
+      i: 0
+      type: INT
+    }
   }
   name: "torch_jit"
   initializer {
@@ -135,5 +140,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

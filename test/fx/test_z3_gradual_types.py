@@ -31,6 +31,23 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TorchDynamoUseCases(unittest.TestCase):
 
+    def test_dim(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: TensorType([1, 2])):
+                y = x.dim()
+                return y
+
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(BasicBlock())
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        y_res = z3.z3.Int(2)
+        self.assertEqual(s.model()[y_res], 2)
+
 
     def test_reshape(self):
         """
@@ -60,6 +77,29 @@ class TorchDynamoUseCases(unittest.TestCase):
 
 class HFOperations(unittest.TestCase):
 
+    def test_eq_dim(self):
+        """
+        test dimensions and equalities
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([32, 4, 4])):
+                eq = x.dim() == 3
+                return eq
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.eq:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.unsat)
 
     def test_conditional_ne_1(self):
         """
@@ -991,6 +1031,31 @@ class HFOperations(unittest.TestCase):
         self.assertEquals(s.check(), z3.sat)
 
 
+    def test_conditional_wrong_assumption(self):
+        """
+        Test condition after making the wrong assumption about the input
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                gt = x > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.gt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
     def test_conditional(self):
         """
         This test case is for the HFmodels interface.
@@ -1398,6 +1463,47 @@ class GradualTypes(unittest.TestCase):
 
 
 class TestSingleOperation(unittest.TestCase):
+
+    def test_conv_wrong_example(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels=2, out_channels=2,
+                                             kernel_size=2, stride=2,
+                                             padding=2, groups=2, bias=False, dilation=2)
+
+                self.conv2 = torch.nn.Conv2d(in_channels=4, out_channels=2,
+                                             kernel_size=2, stride=2,
+                                             padding=2, groups=2, bias=False, dilation=2)
+
+                self.relu = torch.nn.ReLU(inplace=True)
+
+            def forward(self, x: Dyn):
+                y = self.relu(self.conv1(x))
+                z = self.relu(self.conv2(x))
+                return z
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced)
+
+        solver3 = z3.Solver()
+        solver3.add(transformed)
+        print(solver3.check())
+        assert solver3.check() == z3.sat
+
+        s1, s2, s3, s4 = z3.Ints('s1 s2 s3 s4')
+        s11, s22, s33, s44 = z3.Ints('s11 s22 s33 s44')
+        d1, d2, d3, d4 = D(s11, s1), D(s22, s2), D(s33, s3), D(s44, s4),
+        x = z3.Const(1, tensor_type)
+        solver3.add(x == tensor_type.tensor4(d1, d2, d3, d4))
+        assert solver3.check() == z3.sat
+
+        solver3.add(s22 != 0)
+        assert solver3.check() == z3.unsat
+
     def test_conv_dyn(self):
 
         s1, s2, s3, s4 = z3.Ints('s1 s2 s3 s4')
@@ -1416,7 +1522,6 @@ class TestSingleOperation(unittest.TestCase):
 
             def forward(self, x: Dyn):
                 return self.conv1(x)
-
 
         BasicBlock(2, 2, 2, 2, 2, 2, 2).forward(torch.rand(4, 2, 3, 4))
 

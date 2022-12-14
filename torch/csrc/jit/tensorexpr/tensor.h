@@ -171,7 +171,16 @@ Tensor Reduce(
   std::vector<ExprHandle> output_args(vars.begin(), vars.end());
   ExprHandle init_expr = Cast::make(body.dtype(), init_func(vars));
   BufHandle func_result = Buf::make(func_name, dims, body.dtype(), init_expr);
+
   ExprHandle reduce_op = reducer(func_result, body, output_args, reduce_vars);
+  if (body.dtype() == kBFloat16) {
+    ExprHandle init_expr_acc = Cast::make(kFloat, init_func(vars));
+    BufHandle func_result_acc =
+        Buf::make(func_name + "_acc", dims, kFloat, init_expr_acc);
+    reduce_op =
+        reducer(func_result, func_result_acc, body, output_args, reduce_vars);
+  }
+
   Tensor t = Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
 }
