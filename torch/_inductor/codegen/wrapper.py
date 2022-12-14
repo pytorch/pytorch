@@ -249,7 +249,6 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
-        self.kernel_declaration = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
@@ -451,6 +450,7 @@ class WrapperCodeGen(CodeGen):
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
+        result.splice(self.prefix)
 
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
@@ -487,11 +487,6 @@ class WrapperCodeGen(CodeGen):
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
-
-        result.splice(self.prefix)
-        self.generate_kernel_init_func_ending(result)
-        result.splice(self.kernel_declaration)
-        self.generate_kernel_class_def_ending(result)
 
         with result.indent():
             result.splice(self.wrapper_call)
@@ -552,12 +547,6 @@ class WrapperCodeGen(CodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
 
-    def generate_kernel_init_func_ending(self, result):
-        return
-
-    def generate_kernel_class_def_ending(self, result):
-        return
-
     def generate_kernel_call(self, name, call_args):
         self.writeline(
             self.wrap_kernel_call(name, call_args),
@@ -605,18 +594,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
             async_compile.wait(globals())
             del async_compile
-            from torch._inductor.codecache import CppWrapperCodeCache
+            from torch.utils.cpp_extension import load_inline
             wrapper = (
             '''
             #include <dlfcn.h>
             #include <assert.h>
-            """
-        )
-        self.prefix.splice(
-            f"""
-            class LoadKernel_call{self._call_func_id}{{
-              public:
-                LoadKernel_call{self._call_func_id}() {{
             """
         )
         with self.wrapper_call.indent():
@@ -631,16 +613,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 output_types = "void"
 
             if inputs_len != 0:
-                inputs_args = ["at::Tensor&"] * len(V.graph.graph_inputs.keys())
-                inputs_args = ", ".join(inputs_args)
-                inputs_args = f"std::tuple<{inputs_args}>"
+                inputs_types = "std::vector<at::Tensor>"
 
                 self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}({inputs_args} args) {{"
+                    f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
                 )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
-                self.wrapper_call.writeline(f"std::tie({inputs_keys_str}) = args;")
+                for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
             else:
                 self.wrapper_call.writeline(
                     f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
@@ -651,9 +632,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
             V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
-            self.wrapper_call.writeline(
-                f"static LoadKernel_call{self._call_func_id} load_kernel_;"
-            )
 
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
@@ -696,33 +674,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         kernel_path = self.get_kernel_path(kernel)
-        with self.prefix.indent():
-            self.prefix.writeline(
-                f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);'
-            )
-            self.prefix.writeline(f"assert({name}_lib != nullptr);")
-            self.prefix.writeline(
-                f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");'
-            )
 
-        self.kernel_declaration.writeline(f"void (*{name})({arg_types});")
+        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
+        self.writeline(f"assert({name}_lib != nullptr);")
+        self.writeline(f"void (*{name})({arg_types});")
+        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
 
     def wrap_kernel_call(self, name, call_args):
-        return "{}({});".format("load_kernel_.%s" % name, ", ".join(call_args))
-
-    def generate_kernel_init_func_ending(self, result):
-        result.splice(
-            """
-            }
-            """
-        )
-
-    def generate_kernel_class_def_ending(self, result):
-        result.splice(
-            """
-            };
-            """
-        )
+        return "{}({});".format(name, ", ".join(call_args))
 
     def generate_return(self, output_refs):
         if output_refs:
@@ -753,7 +712,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
-            module = CppWrapperCodeCache.load(wrapper, 'call_{self._call_func_id}')
+            module = load_inline(
+                name='inline_extension_{wrapper_call_hash}',
+                cpp_sources=[wrapper],
+                functions=['call_{self._call_func_id}'],
+                extra_cflags=['{extra_cflags}'],
+                extra_ldflags=['{extra_ldflags}'],
+                extra_include_paths=['{extra_include_paths}'])
             """
         )
         # Wrap the func to support setting result._boxed_call = True
