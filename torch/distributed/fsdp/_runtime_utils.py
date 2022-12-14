@@ -17,9 +17,9 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _assert_in_training_states,
     _FSDPState,
+    _get_fsdp_handles,
     _get_fsdp_states,
     _get_module_fsdp_state,
     _get_sharding_strategy,
@@ -163,14 +163,6 @@ def _lazy_init(
     buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
     state._exec_order_data.init(state, root_module, state.process_group)
-    if _is_composable(state):
-        for handle in state._handles:
-            handle.init_flat_param_attributes()
-        # Return early since there is no need to share data structures (yet)
-        return state
-    # Initialize non-root FSDP instances and share state from the root to
-    # non-root instances
-    assert state is root_module
     _share_state_and_init_handle_attrs(state, root_module)
     return state
 
@@ -192,6 +184,8 @@ def _share_state_and_init_handle_attrs(
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
     for fsdp_state in _get_fsdp_states(root_module):
+        if root_state.rank == 0:
+            print(f"[Rank 0] {fsdp_state}")
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -508,7 +502,7 @@ def _root_pre_forward(
         state._streams["unshard"],
         state._streams["pre_unshard"],
     )
-    _clear_grads_if_needed(_all_handles(state))
+    _clear_grads_if_needed(_get_fsdp_handles(module))
 
 
 def _prepare_forward_inputs(
@@ -578,12 +572,20 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state)
-            _clear_grads_if_needed(_all_handles(state))
+            # TODO: This tensor-level pre-backward hook does not have access
+            # to the root module, so we cannot get all FSDP handles in the
+            # composable code path.
+            if not _is_composable(state):
+                _clear_grads_if_needed(_get_fsdp_handles(state))
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
                 allowed_states.append(TrainingState.FORWARD_BACKWARD)
             _assert_in_training_states(state, allowed_states)
+        if _is_composable(state):
+            # TODO: Following up from above, for the composable path, we can
+            # only clear the gradients for `_handles`.
+            _clear_grads_if_needed(_handles)
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if

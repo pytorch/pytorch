@@ -12,10 +12,10 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
-    _all_handles,
     _FSDPState,
     _is_fsdp_flattened,
 )
+from torch.distributed.fsdp._common_utils import _get_fsdp_handles
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
@@ -208,6 +208,34 @@ class TestFSDPInitialization(FSDPTest):
             )
             self.assertEqual(composable_param, fsdp_wrapped_param)
 
+    @skip_if_lt_x_gpu(2)
+    def test_nested_fully_shard_shared_state(self):
+        """
+        Tests that nested applications of ``fully_shard`` share the expected
+        data structure state.
+        """
+        device = torch.device("cuda")
+        composable_module = CompositeParamModel(device=device)
+        fully_shard(composable_module.u1)
+        fully_shard(composable_module.u2)
+        fully_shard(composable_module)
+
+        # Run a forward pass to trigger lazy initialization
+        inp = torch.randn((2, 100), device=device)
+        composable_module(inp)
+
+        # Check that all modules with `fully_shard` applied share the same data
+        # structure state for the structures with the given names
+        # NOTE: This check only requires that the data structure state is
+        # shared. Namely, sharing the FSDP state object itself is sufficient
+        # but not necessary.
+        data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
+        for data_structure_name in data_structure_names:
+            all_structures = set()
+            for module in (composable_module.u1, composable_module.u2, composable_module):
+                all_structures.add(id(getattr(fully_shard.state(module), data_structure_name)))
+            self.assertEqual(len(all_structures), 1)
+
 
 class TestFSDPRuntime(FSDPTest):
     """Tests composable FSDP runtime."""
@@ -283,8 +311,8 @@ class TestFSDPRuntime(FSDPTest):
         ) = self._init_models_and_optims(device)
         # Before checking the unshard/reshard order, sanity check that the
         # assumption about wrapper FQN being a suffix of composable FQN holds
-        all_composable_handles = _all_handles(fully_shard.state(composable_module))
-        all_wrapped_handles = _all_handles(fsdp_wrapped_model)
+        all_composable_handles = _get_fsdp_handles(composable_module)
+        all_wrapped_handles = _get_fsdp_handles(fsdp_wrapped_model)
         self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
         num_handles = len(all_composable_handles)
 
