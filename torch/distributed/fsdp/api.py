@@ -46,12 +46,21 @@ class ShardingStrategy(Enum):
       :class:`DistributedDataParallel` API. For gradients, this strategy
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
+    - ``HYBRID_SHARD``: Apply ``FULL_SHARD`` within a node, and replicate parameters across
+        nodes. This results in reduced communication volume as expensive all-gathers and
+        reduce-scatters are only done within a node, which can be more performant for medium
+        -sized models.
+    - ``_HYBRID_SHARD_ZERO2``: Apply ``SHARD_GRAD_OP`` within a node, and replicate parameters across
+        nodes. This is like ``HYBRID_SHARD``, except this may provide even higher throughput
+        since the unsharded parameters are not freed after the forward pass, saving the
+        all-gathers in the pre-backward.
     """
 
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-    # HYBRID_SHARD = auto()
+    HYBRID_SHARD = auto()
+    _HYBRID_SHARD_ZERO2 = auto()
 
 
 class BackwardPrefetch(Enum):
@@ -94,7 +103,8 @@ class MixedPrecision:
 
     Attributes:
         param_dtype (torch.dtype): This specifies the dtype for model
-            parameters, inputs, and therefore the dtype for computation.
+            parameters, inputs (when ``cast_forward_inputs`` is set to
+            ``True``), and therefore the dtype for computation.
             However, outside the forward and backward passes, parameters are in
             full precision. Model checkpointing always happens in full
             precision.
@@ -108,6 +118,10 @@ class MixedPrecision:
             gradients back to the full parameter precision after the backward
             pass. This may be set to ``False`` to save memory if using custom
             optimizers that can perform the optimizer step in ``reduce_dtype``.
+            (Default: ``False``)
+        cast_forward_inputs (bool): Cast floating point tensors in the forward
+            arguments and keyword arguments to ``param_dtype``.
+            (Default: ``True``)
 
     .. note:: This API is experimental and subject to change.
 
@@ -143,6 +157,7 @@ class MixedPrecision:
     reduce_dtype: Optional[torch.dtype] = None
     buffer_dtype: Optional[torch.dtype] = None
     keep_low_precision_grads: bool = False
+    cast_forward_inputs: bool = True
 
 
 @dataclass

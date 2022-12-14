@@ -675,6 +675,8 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    # FIXME: See https://github.com/pytorch/pytorch/issues/90497
+    @unittest.expectedFailure
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
         if torch.cuda.is_available():
@@ -948,7 +950,11 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        _test_save_load_attr(torch.nn.Parameter(t))
+        # This should start failing once Parameter
+        # supports saving Python Attribute.
+        err_msg = "'Parameter' object has no attribute"
+        with self.assertRaisesRegex(AttributeError, err_msg):
+            _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:

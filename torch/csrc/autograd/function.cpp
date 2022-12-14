@@ -99,5 +99,17 @@ void deleteNode(Node* function) {
   }
 }
 
+namespace {
+bool kAutogradFunctionExtensionEnabled = false;
+}
+
+bool isAutogradFunctionExtensionEnabled() {
+  return kAutogradFunctionExtensionEnabled;
+}
+
+void setAutogradFunctionExtensionEnabled(bool enabled) {
+  kAutogradFunctionExtensionEnabled = enabled;
+}
+
 } // namespace autograd
 } // namespace torch

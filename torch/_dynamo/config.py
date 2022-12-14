@@ -6,8 +6,7 @@ from types import ModuleType
 
 import torch
 
-# needed so that CODE is registered as a level in logging
-from . import logging as torchdynamo_logging  # noqa: F401
+from . import external_utils
 
 try:
     import torch._prims
@@ -20,18 +19,24 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
-# logging.INFO print the steps that dynamo is running
+# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
+
+# log compiled function + graphs at level INFO
+output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = False
+
+# If true, traced graph outputs will be outputted as Python GraphModule code.
+# If false, traced graph outputs will be outputted in tabular form.
+output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -55,6 +60,8 @@ constant_functions = {
     torch._C._get_tracing_state: None,
     torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
+    external_utils.is_compiling: True,
+    torch._utils.is_compiling: True,
 }
 
 
@@ -70,8 +77,22 @@ dynamic_propagation = True
 # run FX normalization passes in optimizer
 normalize_ir = False
 
-# If a tensor subclass type is in this set, torchdynamo will inline the
-# __torch_function__ logic of the subclass.
+# This feature doesn't really work.  We offer this flag for experimental
+# purposes / if you want to help us build out support.
+#
+# torchdynamo has very limited support for tensor subclasses that implement
+# __torch_function__.  Our current support is limited to tensor subclasses
+# that DO NOT store metadata on the tensor (in general, dynamo does not
+# support Python code that stores extra attributes on tensors at present).
+# If your tensor subclass purely changes function call behavior via
+# __torch_function__, you can allow torchdynamo to trace into it by
+# adding it to traceable_tensor_subclasses.  We don't do any safety checks,
+# so it is up to you to ensure that your subclass is well behaved.  See also
+# https://github.com/pytorch/torchdynamo/issues/1948
+#
+# We do NOT currently support __torch_dispatch__.  The implementation is
+# currently buggy, the main show stopper for nontrivial use is
+# https://github.com/pytorch/torchdynamo/issues/1952
 traceable_tensor_subclasses = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
@@ -82,13 +103,16 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = False
+replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Disable dynamo
+disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
@@ -166,7 +190,11 @@ if "torch." in dynamo_import:
 else:
     base_dir = dirname(dirname(abspath(__file__)))
 
-debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
+debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
+# this is to resolve a import problem in fbcode, we will be deleting
+# this very shortly
+DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
 class _AccessLimitingConfig(ModuleType):

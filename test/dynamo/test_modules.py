@@ -479,6 +479,11 @@ class SuperModule(BasicModule):
         return x + 10.0
 
 
+class SuperModule2(BasicModule):
+    def forward(self, x):
+        return BasicModule.forward(self, x)
+
+
 class ComplicatedSuperParent(torch.nn.Module):
     @classmethod
     def custom_add(cls, x):
@@ -524,6 +529,23 @@ class EnumValues(torch.nn.ModuleDict):
         features = [init_features]
         for idx, layer in enumerate(self.values()):
             new_features = layer(features)
+            features.append(new_features)
+        return torch.cat(features, 1)
+
+
+class AccessByKeys(torch.nn.ModuleDict):
+    def __init__(
+        self,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        for i in range(num_layers):
+            self.add_module("denselayer%d" % (i + 1), _Block())
+
+    def forward(self, init_features):
+        features = [init_features]
+        for k in self.keys():
+            new_features = self[k](features)
             features.append(new_features)
         return torch.cat(features, 1)
 
@@ -595,6 +617,57 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
         return self.activation(self.linear(self.initializer + x)) * self.scale
 
 
+class ModuleForwardHasGraphBreak(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = BasicModule()
+        self.layer2 = BasicModule()
+        self.layer3 = torch.nn.Sequential(BasicModule(), BasicModule())
+        self.layer4 = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+        self.layer5 = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+        self.scale = torch.randn(1, 10)
+
+    def forward(self, x):
+        """
+        This is used to test if the results of functions like `named_parameters`
+        can be reconstructed correctly after graph break.
+
+        https://github.com/pytorch/torchdynamo/issues/1931
+        """
+        x = self.layer1(x)
+        params1 = dict(self.named_parameters())
+        params2 = list(self.parameters())
+        buffers1 = dict(self.named_buffers())
+        buffers2 = list(self.buffers())
+        modules1 = dict(self.named_modules())
+        modules2 = list(self.modules())
+        torch._dynamo.graph_break()
+        y = modules2
+        y = modules1
+        y = buffers2
+        y = buffers1
+        y = params2
+        y = params1
+        x = (
+            self.layer2(x)
+            + y["layer3.1.linear1.weight"]
+            + y["layer4.2.weight"]
+            + y["layer5.0.weight"]
+        )
+        return x * self.scale
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -632,6 +705,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_modulelist = make_test(ModuleList())
     test_moduledict = make_test(ModuleDict())
     test_super1 = make_test(SuperModule())
+    test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
     test_densenet = make_test(DenseNetBlocks())
@@ -640,11 +714,20 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_parameters3 = make_test(ParametersModule3(), expected_ops=5)
     test_hasattr = make_test(HasAttrModule())
     test_enumvalues = make_test(EnumValues())
+    test_access_by_keys = make_test(AccessByKeys())
     test_module_class_method = make_test(ModuleClassMethodCall())
     test_module_property = make_test(ModuleProperty())
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+
+    def test_module_forward_has_graph_break(self):
+        m = ModuleForwardHasGraphBreak()
+        x = torch.rand([10, 10])
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
