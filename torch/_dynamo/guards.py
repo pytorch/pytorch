@@ -24,9 +24,7 @@ from .utils import (
     dict_const_keys,
     dict_param_key_ids,
     guard_failures,
-    HAS_NUMPY,
     istype,
-    np,
     orig_code_map,
     rename_implicit,
     tuple_iterator_getitem,
@@ -169,41 +167,25 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        np_types = (
-            (
-                np.int8,
-                np.int16,
-                np.int32,
-                np.int64,
-                np.uint8,
-                np.uint16,
-                np.uint32,
-                np.uint64,
-            )
-            if HAS_NUMPY
-            else ()
-        )
-
-        type_options = (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            type,
-            list,
-            tuple,
-            set,
-            slice,
-            frozenset,
-            range,
-            torch.Size,
-            torch.device,
-            torch.dtype,
-        ) + np_types
         assert istype(
             val,
-            type_options,
+            (
+                int,
+                float,
+                bool,
+                type(None),
+                str,
+                type,
+                list,
+                tuple,
+                set,
+                slice,
+                frozenset,
+                range,
+                torch.Size,
+                torch.device,
+                torch.dtype,
+            ),
         ), t.__name__
 
         if istype(val, (torch.device, torch.dtype)):

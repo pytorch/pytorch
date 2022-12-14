@@ -91,7 +91,6 @@ from .tensor import (
     FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 from .torch import (
@@ -114,8 +113,8 @@ class GraphArg:
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
-    # UnspecializedNumpyVariable and UnspecializedPythonVariable
-    # often masquerade as tensors.  We MUST NOT generate shape guard code
+    # UnspecializedPythonVariable often masquerades as a tensor.
+    # We MUST NOT generate shape guard code
     # that actually tries to access tensor properties on these values.
     # is_tensor lets us tell if this graph arg actually is a tensor
     # or not.
@@ -678,22 +677,13 @@ class VariableBuilder:
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
-            if HAS_NUMPY and isinstance(value, np.number):
-                unspec_var = wrap_fx_proxy_cls(
-                    UnspecializedNumpyVariable,
-                    tx=self.tx,
-                    proxy=proxy,
-                    example_value=wrapped_value,
-                    **options,
-                )
-            else:
-                unspec_var = wrap_fx_proxy_cls(
-                    UnspecializedPythonVariable,
-                    tx=self.tx,
-                    proxy=proxy,
-                    example_value=wrapped_value,
-                    **options,
-                )
+            unspec_var = wrap_fx_proxy_cls(
+                UnspecializedPythonVariable,
+                tx=self.tx,
+                proxy=proxy,
+                example_value=wrapped_value,
+                **options,
+            )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
                 fake_tensor_value = None
