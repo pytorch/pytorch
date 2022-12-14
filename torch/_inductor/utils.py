@@ -12,7 +12,6 @@ from io import StringIO
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
-import numpy as np
 import sympy
 
 import torch
@@ -120,8 +119,8 @@ def timed(model, example_inputs, times=1):
 
 
 def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
-    timings = [timed(fn, args, times) for _ in range(repeat)]
-    took = np.median(timings)
+    timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
+    took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
 

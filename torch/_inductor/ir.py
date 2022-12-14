@@ -25,7 +25,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -616,42 +615,64 @@ class Reduction(Loops):
             src_dtype,
             ReductionHint.DEFAULT,
         )
-        read_writes = ComputedBuffer(
-            name=None,
-            layout=FlexibleLayout(
-                device=r.get_device(),
-                dtype=r.get_dtype(),
-                size=r.get_size(),
-            ),
-            data=r,
-        ).get_read_writes()
-        # try finding the full size producer
-        # TODO this will fail for something like ((1, N) * (N, 1)).sum()
-        # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
-        # TODO maybe go over all full size producers and pick the most common one?
-        range_vars = [
-            r
-            for r in read_writes.range_vars
-            if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
-        ]
-        index = None
-        for md in read_writes.reads:
-            if all([r in md.index.free_symbols for r in range_vars]):
-                index = md.index
-                break
-        if not index:
-            # TODO determine splits when all inputs are broadcasted
+
+        def get_read_indices(r):
+            cb = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=r.get_device(),
+                    dtype=r.get_dtype(),
+                    size=r.get_size(),
+                ),
+                data=r,
+            )
+            read_writes = cb.get_read_writes()
+            # try finding the full size producer
+            # TODO this will fail for something like ((1, N) * (N, 1)).sum()
+            # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+            range_vars = [
+                r
+                for r in read_writes.range_vars
+                if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+            ]
+            indices = []
+            changed = False
+            for md in sorted(read_writes.reads, key=lambda x: x.name):
+                if all([r in md.index.free_symbols for r in range_vars]):
+                    indices.append(md.index)
+                    if md.name in V.graph.name_to_buffer:
+                        buf = V.graph.name_to_buffer[md.name]
+                        original_stride = buf.layout.stride
+                        buf.decide_layout()
+                        if buf.layout.stride != original_stride:
+                            changed = True
+            return indices, changed
+
+        indices, changed = get_read_indices(r)
+        if changed:
+            indices, _ = get_read_indices(r)
+
+        if len(indices) == 0:
+            # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
-        reduction_vars = [
-            rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
-        ]
-        strides = V.graph.sizevars.stride_hints(index, reduction_vars)
-        outer = all([s > 1 for s in strides])
-        if not outer:
+
+        _, (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+            r.get_size(), r.get_reduction_size()
+        )
+        num_outer = 0
+        num_inner = 0
+        for i in indices:
+            strides = V.graph.sizevars.stride_hints(i, reduction_vars)
+            outer = all([s > 1 for s in strides])
+            if outer:
+                num_outer += 1
+            else:
+                num_inner += 1
+        if num_inner > num_outer:
             return ReductionHint.INNER, inner_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
-        else:  # outer reduction
+        else:
             return ReductionHint.OUTER, outer_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
@@ -958,6 +979,12 @@ class Reduction(Loops):
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
+            reduction_hint = ReductionHint.OUTER_TINY
+        if (
+            split <= 1024
+            and numel_hint <= 256
+            and reduction_hint == ReductionHint.OUTER
+        ):
             reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
@@ -1757,10 +1784,11 @@ class FlexibleLayout(Layout):
         )
 
     def __init__(self, device, dtype, size, stride_order=None):
-        super(FlexibleLayout, self).__init__(
-            device, dtype, size, FlexibleLayout.contiguous_strides(size)
-        )
-        self.preferred_stride_order = stride_order
+        if stride_order:
+            strides = FlexibleLayout.fill_ordered(size, stride_order)
+        else:
+            strides = FlexibleLayout.contiguous_strides(size)
+        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -1965,6 +1993,9 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
+    def cpp_wrapper_codegen_reference(self):
+        return "at::Tensor()"
+
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -2001,9 +2032,9 @@ class ComputedBuffer(Buffer):
         else:
             return partial(self.data.store_output, self.name, indexer)
 
-    def decide_layout(self):
+    def get_fill_order(self):
         """
-        If our layout is still flexible, try to set it based on stride orders of reads.
+        If our layout is still flexible, try to determine the stride order based on stride orders of reads.
 
         TODO(jansel): A better algorithm here would look at downstream consumers of this
                       value and try to do global graph-level layout optimization.
@@ -2043,12 +2074,17 @@ class ComputedBuffer(Buffer):
                 )
                 from .scheduler import pick_loop_order
 
-                self.freeze_layout_with_fill_order(
-                    pick_loop_order(stride_lengths, self.get_size(), priority_idx)
-                )
+                return pick_loop_order(stride_lengths, self.get_size(), priority_idx)
 
+        return None
+
+    def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
-            self.freeze_layout()
+            order = self.get_fill_order()
+            if order:
+                self.freeze_layout_with_fill_order(order)
+            else:
+                self.freeze_layout()
 
     def simplify_and_reorder(self):
         """
@@ -2996,9 +3032,9 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
-            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        with context():
+        with context:
             (
                 example_output,
                 tensor_args,
@@ -3107,7 +3143,7 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
@@ -3366,7 +3402,7 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
-    with torch._subclasses.FakeTensorMode():
+    with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         bias_fake = (
@@ -3600,7 +3636,7 @@ class MKLPackedLinear(ExternKernelAlloc):
     def create(cls, x, packed_w, orig_w, bias, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
             bias_fake = (
