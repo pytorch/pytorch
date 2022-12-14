@@ -540,10 +540,21 @@ class AlgorithmSelectorCache(DiskCache):
                         choice.to_callable(), isinstance(choice, ExternKernelCaller)
                     )
                 except RuntimeError as e:
-                    log.warning(
-                        f"RuntimeError {e}, from {choices.index(choice)} {choice}"
-                    )
-                    if VERIFY:
+                    if "invalid argument" in str(e):
+                        msg = textwrap.dedent(
+                            f"""
+                            {e}
+
+                            From choice {choices.index(choice)}: {choice}
+
+                            This may mean this GPU is too small for max_autotune mode.
+                            """
+                        ).strip()
+                        if VERIFY:
+                            raise RuntimeError(msg)
+                        else:
+                            log.warning(msg)
+                    else:
                         raise
                 except AssertionError as e:
                     raise AssertionError(

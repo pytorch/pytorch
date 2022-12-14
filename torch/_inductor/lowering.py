@@ -3648,7 +3648,7 @@ def _import_ops():
 
     from . import ops
 
-    for filename in os.listdir(os.path.dirname(ops.__file__)):
+    for filename in sorted(os.listdir(os.path.dirname(ops.__file__))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{ops.__name__}.{filename[:-3]}")
 
