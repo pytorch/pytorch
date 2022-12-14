@@ -6,10 +6,10 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch._inductor import select_algorithm
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -155,7 +155,7 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._inductor.ops.mm import is_big_gpu
+    from torch._inductor.ops.mm_common import is_big_gpu
 
     if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

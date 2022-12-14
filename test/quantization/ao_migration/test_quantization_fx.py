@@ -11,6 +11,8 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             '_check_is_graph_module',
             '_swap_ff_with_fxff',
             '_fuse_fx',
+            'Scope',
+            'ScopeContextManager',
             'QuantizationTracer',
             '_prepare_fx',
             '_prepare_standalone_module_fx',
@@ -133,10 +135,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_match_utils(self):
         function_list = [
-            'MatchResult',
+            '_MatchResult',
             'MatchAllNode',
-            'is_match',
-            'find_matches'
+            '_is_match',
+            '_find_matches'
         ]
         self._test_function_import('fx.match_utils', function_list)
 

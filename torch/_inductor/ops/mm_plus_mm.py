@@ -10,7 +10,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..virtualized import V
-from .mm import mm_grid, mm_options, use_triton_template
+from .mm_common import mm_grid, mm_options, use_triton_template
 
 aten = torch.ops.aten
 
@@ -109,49 +109,34 @@ mm_plus_mm_template = TritonTemplate(
 # these have been tweaked to workaround register issues
 mm_configs = [
     triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
     ),
     triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=16
     ),
     triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+        {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
+        {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
+        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=1, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=2, num_warps=8
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 16}, num_stages=3, num_warps=8
+        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=1, num_warps=8
     ),
     triton.Config(
-        {"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 16}, num_stages=3, num_warps=8
+        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
     ),
     triton.Config(
-        {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=4, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 16}, num_stages=4, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=4, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 16}, num_stages=4, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=4, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=5, num_warps=2
+        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
     ),
 ]
 
