@@ -12,6 +12,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
