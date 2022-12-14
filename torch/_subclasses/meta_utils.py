@@ -5,7 +5,7 @@ from typing import ContextManager, Optional
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils.weak import WeakTensorRefKey
+from torch.utils.weak import WeakIdRef
 
 
 def safe_is_leaf(t):
@@ -102,7 +102,7 @@ class MetaConverter:
         )
 
     def get_tensor_memo(self, t):
-        return self.tensor_memo.get(WeakTensorRefKey(t), None)
+        return self.tensor_memo.get(WeakIdRef(t), None)
 
     def set_tensor_memo(self, t, v):
         # hold a weak ref to self, otherwise it will be kept alive
@@ -112,7 +112,7 @@ class MetaConverter:
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
-        tensor_ref_key = WeakTensorRefKey(t)
+        tensor_ref_key = WeakIdRef(t)
 
         def del_ten():
             # tensor outlives the converter

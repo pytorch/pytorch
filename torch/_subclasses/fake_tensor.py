@@ -6,11 +6,12 @@ import weakref
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from weakref import ReferenceType
 
 import torch
 from torch._ops import OpOverload
 from torch._prims_common import is_float_dtype, is_integer_dtype
-from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
+from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -18,6 +19,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
+from torch.utils.weak import WeakIdRef
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -136,7 +138,7 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
-# structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
+# structure. Like `MetaConverter`, it uses `WeakIdRef` to
 # hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
     @property
@@ -144,7 +146,7 @@ class FakeTensorConverter(object):
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
+    constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
     def __init__(self):
         self.meta_converter = MetaConverter()
@@ -182,14 +184,14 @@ class FakeTensorConverter(object):
         del self.constant_storage_mapping[weak_st]
 
     def _get_memo(self, t):
-        if WeakTensorRefKey(t) in self.tensor_memo:
-            out = self.tensor_memo[WeakTensorRefKey(t)]
+        if WeakIdRef(t) in self.tensor_memo:
+            out = self.tensor_memo[WeakIdRef(t)]
             out._fix_weakref()
             return out
         return None
 
     def set_tensor_memo(self, t, v):
-        th = WeakTensorRefKey(t)
+        th = WeakIdRef(t)
 
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
