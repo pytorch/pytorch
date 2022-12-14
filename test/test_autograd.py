@@ -3421,6 +3421,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
 
     def test_current_node(self):
         pr = []
+
         class MyMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args, kwargs=None):
                 pr.append(f"Running {func} from within {torch._C._current_autograd_node()}")
