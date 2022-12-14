@@ -1,16 +1,14 @@
-import triton
+import functools
 
 import torch
-from ..ir import FixedLayout
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    realize_inputs,
     TritonTemplate,
 )
 from ..virtualized import V
-from .mm_common import mm_grid, mm_options, use_triton_template
+from .mm_common import mm_args, mm_grid, mm_options, use_triton_template
 
 aten = torch.ops.aten
 
@@ -106,62 +104,61 @@ mm_plus_mm_template = TritonTemplate(
 """,
 )
 
-# these have been tweaked to workaround register issues
-mm_configs = [
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=16
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=1, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=1, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-    ),
-]
+
+@functools.lru_cache(None)
+def mm_configs():
+    import triton
+
+    # these have been tweaked to workaround register issues
+    return [
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=16
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=1, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=1, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
+        ),
+    ]
 
 
-def tuned_mm_plus_mm(mat1, mat2, mat3, mat4):
-    mat1, mat2, mat3, mat4 = realize_inputs(mat1, mat2, mat3, mat4)
-    m, k1 = mat1.get_size()
-    k2, n = mat2.get_size()
-    k = V.graph.sizevars.guard_equals(k1, k2)
-    layout = FixedLayout(
-        mat1.get_device(),
-        mat1.get_dtype(),
-        [m, n],
-    )
+def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
 
     if not V.graph.sizevars.maybe_guard_list_equals(
         mat1.get_size(), mat3.get_size()
     ) or not V.graph.sizevars.maybe_guard_list_equals(mat2.get_size(), mat4.get_size()):
-        # TODO(jansel): we should be able to support different K values
+        # TODO(jansel): support different K values when this is fixed:
+        # https://github.com/openai/triton/issues/967
         return lowerings[aten.addmm](lowerings[aten.mm](mat1, mat2), mat3, mat4)
 
     # options to tune from
     choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout)]
     if use_triton_template(layout):
-        for config in mm_configs:
+        for config in mm_configs():
             choices.append(
                 mm_plus_mm_template.generate(
                     (mat1, mat2, mat3, mat4),
