@@ -2575,6 +2575,23 @@ class ExternKernel(InputsKernel):
         args.extend(map(repr, self.constant_args))
         return args
 
+    def cpp_wrapper_codegen_args(self):
+        args = [x.codegen_reference() for x in self.inputs]
+        args.extend(
+            map(
+                lambda x: repr(x)
+                .replace("(", "{")
+                .replace(")", "}")
+                .replace("False", "false")
+                .replace("True", "true")
+                .replace("None", "at::Tensor()")
+                .replace("[]", "{}")
+                .replace("'", '"'),
+                self.constant_args,
+            )
+        )
+        return args
+
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
@@ -3654,10 +3671,20 @@ class MKLPackedLinear(ExternKernelAlloc):
     ):
         super().__init__(layout, inputs, constant_args)
         self.kernel = kernel
+        self.cpp_kernel = "at::_mkl_linear"
 
     def codegen(self, wrapper):
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
         wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+            wrapper.generate_mkl_packed_linear_code(
+                self.get_name(), self.kernel, self.cpp_kernel, args
+            )
         )
 
     @classmethod
