@@ -1663,10 +1663,22 @@
   self: to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
-  self: grad.to_dense()
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
-  self: grad.to_dense()
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csr(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csc(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
@@ -2743,10 +2755,6 @@
       self: grad.reshape_as(self)
     AutogradCUDA:
       self: grad.reshape_as(self) + 1
-
-- name: _test_inductor_realize(Tensor self) -> Tensor
-  self: grad
-  result: auto_linear
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
