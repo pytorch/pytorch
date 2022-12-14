@@ -1474,7 +1474,7 @@ class TestSparseCSR(TestCase):
 
             if is_ortho:
                 bsr = torch.cat((bsr, torch.zeros_like(bsr)), dim=-1)
-                dense = torch.cat((dense, torch.zeros_like(dense)), dim=-1)
+                dense = torch.cat((torch.zeros_like(dense), dense), dim=-1)
 
             bsr = bsr.to_sparse_bsr(block_size)
 
