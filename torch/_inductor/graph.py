@@ -13,6 +13,8 @@ from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
+from .._dynamo import config as dynamo_config
+
 from . import config, ir
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
@@ -402,11 +404,6 @@ class GraphLowering(torch.fx.Interpreter):
             if value.get_dtype() != torch.float32:
                 self.disable_cpp_wrapper("inputs not FP32")
 
-    def check_output_for_cpp_buffer(self):
-        for item in self.graph_outputs:
-            if isinstance(item, ir.NoneAsConstantBuffer):
-                self.disable_cpp_wrapper("NoneAsConstantBuffer")
-
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
@@ -416,7 +413,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
-        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
@@ -491,7 +487,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(logging.CODE, "Output code: %s", mod.__file__)
+        if dynamo_config.output_code:
+            log.info("Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
