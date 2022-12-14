@@ -445,6 +445,8 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_autograd_function_allowed",
       &at::functorch::getAutogradFunctionAllowed);
+  m.def("unwrap_if_dead", &unwrapIfDead);
+  m.def("is_dead_tensor_wrapper", &isDeadTensorWrapper);
   m.def("dlevel", &dlevel, "dlevel");
   m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);

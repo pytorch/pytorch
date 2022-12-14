@@ -3,7 +3,9 @@ import torch.nn as nn
 from torch.utils.checkpoint import detach_variable
 
 from contextlib import contextmanager
+from functools import partial
 from typing import Any, List, Optional, Tuple
+from weakref import ReferenceType, WeakKeyDictionary, ref
 
 from .contract import contract
 
@@ -100,8 +102,71 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
+class _Holder:
+    pass
+
+
+def _pack(
+    x: torch.Tensor,
+    *,
+    weak_holder_list: List[ReferenceType],
+) -> _Holder:
+    res = _Holder()
+    weak_holder_list.append(ref(res))
+    return res
+
+
+def _unpack(
+    holder: _Holder,
+    *,
+    storage: WeakKeyDictionary,
+    weak_holder_list: List[ReferenceType],
+    module: nn.Module,
+    inputs: Tuple[Any],
+) -> torch.Tensor:
+    holder_index = 0
+    if len(storage) == 0:
+
+        def inner_pack(inner: torch.Tensor):
+            nonlocal holder_index
+            if weak_holder_list[holder_index]() is None:
+                # If the holder went out of scope, the SavedVariable is dead
+                # and so the value will never be read from the storage. Skip
+                # filling it.
+                pass
+            else:
+                # Use detach here to ensure we don't keep the temporary
+                # autograd graph created during the second forward
+                storage[weak_holder_list[holder_index]()] = inner.detach()
+            holder_index += 1
+            return
+
+        def inner_unpack(holder: _Holder):
+            raise RuntimeError(
+                "You are calling backwards on a tensor that is never exposed. "
+                "Please open an issue."
+            )
+
+        with _no_hook(
+            module
+        ), torch.enable_grad(), torch.autograd.graph.saved_tensors_hooks(
+            inner_pack, inner_unpack
+        ):
+            _unused = module(*inputs)
+
+    if holder not in storage:
+        raise RuntimeError(
+            "Attempt to retrieve a tensor saved by autograd multiple times "
+            "without checkpoint recomputation being triggered in between, this "
+            "is not currently supported. Please open an issue with details on "
+            "your use case so that we can prioritize adding this."
+        )
+
+    return storage[holder]
+
+
 @contract
-def checkpoint(module: nn.Module) -> nn.Module:
+def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
     r"""
     This is a composable activation checkpointing API. Unlike functional
     activation checkpointing APIs, this one does not require changing model
@@ -114,6 +179,8 @@ def checkpoint(module: nn.Module) -> nn.Module:
     Args:
         module (nn.Module): the target model or sub-module to apply activation
             checkpointing.
+        use_reentrant (bool): Apply activation checkpointing using reentrant
+            autograd.
 
     Example::
         >>> import torch.nn as nn
@@ -136,20 +203,49 @@ def checkpoint(module: nn.Module) -> nn.Module:
     def forward_pre_hook(module: nn.Module, inputs: Tuple[Any]) -> None:
         if checkpoint.state(module).enable_hook:
             checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
-            torch.set_grad_enabled(False)
+            if checkpoint.state(module).use_reentrant:
+                torch.set_grad_enabled(False)
+            else:
+                # The Holder object for each of the saved object is saved
+                # directly on the SavedVariable and is cleared when reset_data()
+                # is called on it. We MUST make sure that this is the only
+                # object having an owning reference to ensure that the Tensor
+                # stored in storage is deleted as soon as the corresponding
+                # SavedVariable data is cleared.
+                storage: WeakKeyDictionary = WeakKeyDictionary()
+                weak_holder_list: List[ReferenceType] = []
+                saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
+                    partial(_pack, weak_holder_list=weak_holder_list),
+                    partial(
+                        _unpack,
+                        storage=storage,
+                        weak_holder_list=weak_holder_list,
+                        module=module,
+                        inputs=inputs,
+                    ),
+                )
+                saved_tensor_hooks.__enter__()
+                checkpoint.state(module).saved_tensor_hooks = saved_tensor_hooks
 
     def forward_hook(module: nn.Module, inputs: Tuple[Any], output: Any) -> Any:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
-            return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
-        else:
-            return output
+            if checkpoint.state(module).use_reentrant:
+                return _ModuleHookCheckpointFunction.apply(
+                    module, output, *inputs
+                )
+            else:
+                checkpoint.state(module).saved_tensor_hooks.__exit__()
+                checkpoint.state(module).saved_tensor_hooks = None
+
+        return output
 
     # This hook does the following things:
     # 1. detach outputs from the autograd graph to discard activations
     # 2. insert an autograd.Function after the forward pass to recompute
     #    activations during the backward pass.
     checkpoint.state(module).enable_hook = True
+    checkpoint.state(module).use_reentrant = use_reentrant
     module.register_forward_pre_hook(forward_pre_hook)
     # Use prepend to make sure we restore the original grad enabled state right
     # after the module forward invocation.

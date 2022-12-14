@@ -21,13 +21,15 @@ def with_temp_dir(
         # Only create temp_dir when rank is 0
         if dist.get_rank() == 0:
             temp_dir = tempfile.mkdtemp()
+            print(f"Using temp directory: {temp_dir}")
         else:
             temp_dir = ""
         object_list = [temp_dir]
+
         # Broadcast temp_dir to all the other ranks
         dist.broadcast_object_list(object_list)
         self.temp_dir = object_list[0]
-        print(f"Using temp directory: {self.temp_dir }")
+
         try:
             func(self)
         finally:

@@ -247,6 +247,7 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("sparse::qlinear"),
       TORCH_FN(QLinearInt8<false>::run));
