@@ -630,20 +630,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 output_types = "void"
 
+            inputs_types = "std::vector<at::Tensor>"
+            self.wrapper_call.writeline(
+                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
+            )
             if inputs_len != 0:
-                inputs_types = "std::vector<at::Tensor>"
-
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
-                )
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
                     self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
-            else:
-                self.wrapper_call.writeline(
-                    f"{output_types} call_{self._call_func_id}(std::tuple<> args) {{"
-                )
+
             for name in V.graph.randomness_seeds:
                 self.wrapper_call.writeline(f"at::Tensor {name};")
                 self.wrapper_call.writeline(
