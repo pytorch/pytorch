@@ -7,14 +7,6 @@ import operator
 import types
 from typing import Dict, List
 
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
-
 import torch
 from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
@@ -27,7 +19,9 @@ from ..source import AttrSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    HAS_NUMPY,
     istype,
+    np,
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
