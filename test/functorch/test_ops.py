@@ -956,7 +956,7 @@ class TestOperators(TestCase):
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
         decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
-        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
+        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
