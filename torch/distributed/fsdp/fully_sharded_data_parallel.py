@@ -29,6 +29,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_fsdp_states,
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -50,7 +51,6 @@ from torch.distributed.fsdp._init_utils import (
     ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _get_fsdp_states,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
