@@ -1,7 +1,6 @@
-import math
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -90,6 +89,29 @@ class NAdam(Optimizer):
             for s in state_values:
                 s['mu_product'] = torch.tensor(s['mu_product'])
 
+    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
+        for p in group['params']:
+            if p.grad is not None:
+                params_with_grad.append(p)
+                if p.grad.is_sparse:
+                    raise RuntimeError('NAdam does not support sparse gradients')
+                grads.append(p.grad)
+
+                state = self.state[p]
+                # Lazy state initialization
+                if len(state) == 0:
+                    state['step'] = torch.tensor(0.)
+                    state['mu_product'] = torch.tensor(1.)
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                exp_avgs.append(state['exp_avg'])
+                exp_avg_sqs.append(state['exp_avg_sq'])
+                mu_products.append(state['mu_product'])
+                state_steps.append(state['step'])
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -112,27 +134,7 @@ class NAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            for p in group['params']:
-                if p.grad is not None:
-                    params_with_grad.append(p)
-                    if p.grad.is_sparse:
-                        raise RuntimeError('NAdam does not support sparse gradients')
-                    grads.append(p.grad)
-
-                    state = self.state[p]
-                    # Lazy state initialization
-                    if len(state) == 0:
-                        state['step'] = torch.tensor(0.)
-                        state['mu_product'] = torch.tensor(1.)
-                        # Exponential moving average of gradient values
-                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
-                        state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                    exp_avgs.append(state['exp_avg'])
-                    exp_avg_sqs.append(state['exp_avg_sq'])
-                    mu_products.append(state['mu_product'])
-                    state_steps.append(state['step'])
+            self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps)
 
             nadam(params_with_grad,
                   grads,
@@ -173,6 +175,7 @@ def nadam(params: List[Tensor],
 
     See :class:`~torch.optim.NAdam` for details.
     """
+
 
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
@@ -230,7 +233,7 @@ def _single_tensor_nadam(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
+        step = _get_value(step_t)
 
         bias_correction2 = 1 - beta2 ** step
 
@@ -243,27 +246,27 @@ def _single_tensor_nadam(params: List[Tensor],
 
         # update mu_product
         mu_product *= mu
-        mu_product_next = mu_product * mu * mu_next
 
         # decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
         denom = exp_avg_sq.div(bias_correction2).sqrt()
+
         if differentiable:
             denom = denom.add(eps)
             # Make autograd track the operations
             # by updating the grad and exp_avg directly and not using the
             # scalar "value" argument of addcdiv.
+            mu_product_next = mu_product * mu * mu_next
             grad = grad * (-lr * (1. - mu) / (1. - mu_product))
             exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
-            value_grad = 1.0
-            value_exp_avg = 1.0
-            param.addcdiv_(grad, denom, value=1.0)
-            param.addcdiv_(exp_avg, denom, value=1.0)
+            param.addcdiv_(grad, denom)
+            param.addcdiv_(exp_avg, denom)
         else:
+            mu_product_next = _get_value(mu_product) * mu * mu_next
             denom.add_(eps)
-            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product.item()))
-            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next.item()))
+            param.addcdiv_(grad, denom, value=(-lr * (1. - mu) / (1. - _get_value(mu_product))))
+            param.addcdiv_(exp_avg, denom, value=(-lr * mu_next) / (1. - mu_product_next))
 
 
 def _multi_tensor_nadam(params: List[Tensor],
@@ -289,10 +292,9 @@ def _multi_tensor_nadam(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
-    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
-    mus = [beta1 * (1. - 0.5 * (0.96 ** (step.item() * momentum_decay))) for step in state_steps]
-    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step.item() + 1) * momentum_decay)))
+    bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
+    mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in state_steps]
+    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
                 for step in state_steps]
 
     # update mu_products
@@ -309,13 +311,14 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
 
     exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-    bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+    bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size_grads = [(lr * (1. - mu) / (1. - mu_product.item())) * -1
-                       for mu_product, mu in zip(mu_products, mus)]
-    step_size_expavg = [(lr * mu_next / (1. - mu_product.item() * mu_next)) * -1
-                        for mu_product, mu_next in zip(mu_products, mu_nexts)]
+    step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
+                                           for mu_product, mu in zip(mu_products, mus)])
+    step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
+                                            for mu_product, mu_next in zip(mu_products, mu_nexts)])
+
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size_expavg)

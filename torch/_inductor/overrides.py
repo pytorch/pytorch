@@ -11,6 +11,7 @@ import numpy
 import torch
 import torch.nn as nn
 from torch import _prims
+from torch._dynamo.utils import fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -19,7 +20,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
-from torch.nn.utils.fusion import fuse_conv_bn_eval
+from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
 
 from . import config
@@ -530,10 +531,13 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
 
+    fake_mode = fake_mode_from_tensors(example_inputs)
+
+    gm = sink_cat_after_pointwise(gm)
     if config.permute_fusion and not is_cpu:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
-        ShapeProp(gm).propagate(*example_inputs)
+        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
         gm = linear_permute_fusion(gm)
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
@@ -545,10 +549,12 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     if not is_cpu:
         return gm
+    gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
-    ShapeProp(gm).propagate(*example_inputs)
+
+    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
@@ -559,18 +565,78 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     return gm
 
 
+# check the pattern: (nn.module, F.function) matched.
+def matches_module_function_pattern(pattern, node, modules):
+    if len(node.args) == 0:
+        return False
+    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+        node, torch.fx.Node
+    ):
+        return False
+    # the first node is call_module
+    if node.args[0].op != "call_module":
+        return False
+    if not isinstance(node.args[0].target, str):
+        return False
+    if node.args[0].target not in modules:
+        return False
+    if type(modules[node.args[0].target]) is not pattern[0]:
+        return False
+    # the second node is call_function
+    if node.op != "call_function":
+        return False
+    if node.target != pattern[1]:
+        return False
+    # make sure node.args[0] output is only used by current node.
+    if len(node.args[0].users) > 1:
+        return False
+    return True
+
+
+def fetch_attr(target: str, mod):
+    target_atoms = target.split(".")
+    attr_itr = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
+
+def remove_identity(gm: torch.fx.GraphModule):
+    """
+    Removes all identity layers from the module.
+    """
+
+    class IdentityRemover(torch.fx.Transformer):
+        def call_module(self, target, args, kwargs):
+            if isinstance(self.submodules[target], nn.Identity):
+                assert len(args) == 1
+                return args[0]
+            else:
+                return super().call_module(target, args, kwargs)
+
+    return IdentityRemover(gm).transform()
+
+
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
     """
     Fuses Convolution/BN layers for inference purposes.
     """
-    patterns = [
+    modules_patterns = [
         (torch.nn.Conv1d, torch.nn.BatchNorm1d),
         (torch.nn.Conv2d, torch.nn.BatchNorm2d),
         (torch.nn.Conv3d, torch.nn.BatchNorm3d),
     ]
+    module_function_patterns = [
+        (torch.nn.Conv1d, F.batch_norm),
+        (torch.nn.Conv2d, F.batch_norm),
+        (torch.nn.Conv3d, F.batch_norm),
+    ]
     modules = dict(gm.named_modules())
-
-    for pattern in patterns:
+    for pattern in modules_patterns:
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
@@ -587,7 +653,46 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
                 gm.graph.lint()
+    for pattern in module_function_patterns:
+        for node in gm.graph.nodes:
+            if matches_module_function_pattern(pattern, node, modules):
+                # TODO: support kwargs.
+                if len(node.args) != 8:
+                    continue
+                conv = modules[node.args[0].target]
+                bn_training = node.args[5]
+                bn_eps = node.args[7]
+                if conv.training or bn_training:
+                    continue
+                if type(bn_eps) is not float:
+                    continue
+                bn_args_is_constant = all(
+                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                )
+                if not bn_args_is_constant:
+                    continue
+                bn_running_mean = fetch_attr(node.args[1].target, gm)
+                bn_running_var = fetch_attr(node.args[2].target, gm)
+                bn_weight = fetch_attr(node.args[3].target, gm)
+                bn_bias = fetch_attr(node.args[4].target, gm)
+                if bn_running_mean is None or bn_running_var is None:
+                    continue
+                fused_conv = copy.deepcopy(conv)
+                fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
+                    fused_conv.weight,
+                    fused_conv.bias,
+                    bn_running_mean,
+                    bn_running_var,
+                    bn_eps,
+                    bn_weight,
+                    bn_bias,
+                )
+                replace_node_module(node.args[0], modules, fused_conv)
+                node.replace_all_uses_with(node.args[0])
+                gm.graph.erase_node(node)
+                gm.graph.lint()
     gm.recompile()
+
     return gm
 
 
@@ -613,6 +718,12 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 if type(computation_node) in [nn.Conv2d] and isinstance(
                     computation_node.padding, str
                 ):
+                    continue
+                # TODO: support more conv+binary+unary fusion.
+                if type(computation_node) in [
+                    ConvBinary2d,
+                    ConvBinaryInplace2d,
+                ] and type(unary_node) not in [nn.ReLU]:
                     continue
                 # only fuse for linear when the dtype is bf16
                 if type(computation_node) in [nn.Linear] and not is_bfloat16_module(
@@ -703,6 +814,49 @@ def check_permute(node: torch.fx.Node):
     allowed_permutation[-1] = ranks - 2
     allowed_permutation[-2] = ranks - 1
     return permutation == allowed_permutation
+
+
+def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    def one_user(node):
+        users = list(node.users)
+        return users[0] if len(users) == 1 else None
+
+    def is_view(node):
+        view = {"view"}
+        return node.op == "call_method" and node.target in view
+
+    def is_pointwise_unary(node):
+        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
+        return node.op in {"call_function", "call_method"} and node.target in pointwise
+
+    g = module.graph
+    for node in g.nodes:
+        if node.op != "call_function" or node.target != torch.cat:
+            continue
+
+        cat_or_view = node
+        while True:
+            user = one_user(cat_or_view)
+            if not user or not is_view(user):
+                break
+            cat_or_view = user
+
+        if user and is_pointwise_unary(user):
+            with g.inserting_before(node):
+                new_args = (
+                    [
+                        g.create_node(
+                            user.op, user.target, args=(arg,), kwargs=user.kwargs
+                        )
+                        for arg in node.args[0]
+                    ],
+                )
+                node.args = new_args
+                user.replace_all_uses_with(cat_or_view)
+                g.erase_node(user)
+    g.lint()
+    module.recompile()
+    return module
 
 
 def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:

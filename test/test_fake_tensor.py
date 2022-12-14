@@ -20,6 +20,7 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+from torch.utils._pytree import tree_flatten
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -137,6 +138,18 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(out, FakeTensor))
 
+    def check_function_with_fake(self, fn):
+        out = fn()
+        with torch._subclasses.FakeTensorMode():
+            out_fake = fn()
+
+        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
+            if not isinstance(a, FakeTensor):
+                self.assertTrue(not isinstance(b, FakeTensor))
+                continue
+
+            prims.utils.compare_tensor_meta(a, b, check_strides=True)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_non_kwarg_device(self):
         with FakeTensorMode():
@@ -146,10 +159,17 @@ class FakeTensorTest(TestCase):
             z = x.to(torch.device("cuda"))
             self.assertEqual(z.device.type, "cuda")
 
+    def test_non_overlapping_stride_zero(self):
+        def foo():
+            x = torch.empty_strided([1, 3, 427, 640], (0, 1, 1920, 3))
+            return x.half()
+
+        self.check_function_with_fake(foo)
+
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
-        with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors"):
             with FakeTensorMode():
                 y = x[0]
 

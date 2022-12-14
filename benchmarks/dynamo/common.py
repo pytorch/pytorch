@@ -23,13 +23,13 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
+from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -101,6 +100,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -111,6 +111,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
+    "dlrm",  # Fails on CI - unable to repro locally
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
@@ -120,15 +121,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
-    "resnest101e",  # accuracy
-    "rexnet_100",  # accuracy
-    "spnasnet_100",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -191,6 +186,10 @@ class NullContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
+
+
+def nothing(f):
+    return f
 
 
 @functools.lru_cache(None)
@@ -413,6 +412,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
+    @contextlib.contextmanager
+    def maybe_mark_profile(*args, **kwargs):
+        prof: torch.profiler.profile = kwargs.pop("p", None)
+        mark = kwargs.pop("mark", None)
+        if prof:
+            with torch.profiler.record_function(mark):
+                yield
+        else:
+            yield
+
     with maybe_profile(enabled=args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
         for rep in range(args.repeat):
@@ -427,16 +436,19 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            timings[rep, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
-            )
+            with maybe_mark_profile(p=p, mark="expected"):
+                timings[rep, 0], expected_output = timed(
+                    model, model_iter_fn, inputs, return_result=True
+                )
 
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            timings[rep, 1], actual_output = timed(
-                model, frozen_model_iter_fn, inputs, return_result=True
-            )
+            with maybe_mark_profile(p=p, mark="actual"):
+                timings[rep, 1], actual_output = timed(
+                    model, frozen_model_iter_fn, inputs, return_result=True
+                )
+
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
 
@@ -979,8 +991,8 @@ class BenchmarkRunner:
 
         try:
             self.model_iter_fn(model, example_inputs)
-        except Exception:
-            raise NotImplementedError("Eager model failed to run")
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
         model = copy.deepcopy(model)
@@ -1023,9 +1035,11 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
-    def optimizer_zero_grad(self):
+    def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
+        else:
+            mod.zero_grad(True)
 
     def optimizer_step(self):
         if self.optimizer is not None:
@@ -1062,10 +1076,6 @@ class BenchmarkRunner:
             )
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
-        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
-            self.args.training, current_device, name
-        )
-
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip")
 
@@ -1074,7 +1084,7 @@ class BenchmarkRunner:
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
-                model = FSDP(model)
+                model = FSDP(model, use_orig_params=True)
                 torch._inductor.config.triton.cudagraphs = False
                 log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
@@ -1089,10 +1099,17 @@ class BenchmarkRunner:
                 )
             )
         except Exception:
-            log.warning(f"fp64 golden ref were not generated for {name}")
+            log.warning(
+                f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
+            )
+            self.args.cosine = True
             fp64_outputs = None
             if self.args.ci and self.args.training:
                 return record_status("fp64_OOM")
+
+        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+            self.args.training, current_device, name
+        )
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
@@ -1693,11 +1710,18 @@ def run(runner, args, original_dir=None):
         if args.batch_size is None:
             if runner.suite_name == "huggingface":
                 args.batch_size = 1
+            elif runner.suite_name == "torchbench":
+                args.batch_size = 4
             else:
-                args.batch_size = 2
+                # Larger batch size of TIMM models to have stable batch_norm
+                assert runner.suite_name == "timm_models"
+                args.batch_size = 8
 
         # Remove sources of randomness
-        args.use_eval_mode = True
+        if runner.suite_name != "timm_models":
+            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+            args.use_eval_mode = True
+        inductor_config.fallback_random = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -1880,7 +1904,8 @@ def run(runner, args, original_dir=None):
             nopython=args.nopython,
         )
     elif args.nothing:
-        pass
+        optimize_ctx = nothing
+        output_filename = "nothing.csv"
     elif args.backend:
         optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
@@ -2035,14 +2060,23 @@ def run(runner, args, original_dir=None):
         for name in runner.iter_model_names(args):
             current_name = name
             placeholder_batch_size = 0
-            try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
-            except subprocess.SubprocessError:
-                print("ERROR")
+
+            def write_csv():
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
+
+            try:
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                )
+            except subprocess.TimeoutExpired:
+                print("TIMEOUT", file=sys.stderr)
+                write_csv()
+            except subprocess.SubprocessError:
+                print("ERROR", file=sys.stderr)
+                write_csv()
         print_summary(output_filename)
 
 

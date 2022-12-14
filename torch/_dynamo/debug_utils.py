@@ -139,13 +139,9 @@ def _cuda_system_info_comment():
     except FileNotFoundError:
         model_str += "# nvcc not found\n"
 
-    gpu_names = subprocess.run(
-        ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
-        stdout=subprocess.PIPE,
+    gpu_names = Counter(
+        torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
     )
-    gpu_names = gpu_names.stdout.decode().split("\n")
-    gpu_names = [name for name in gpu_names if name not in ("", "name")]
-    gpu_names = Counter(gpu_names)
 
     model_str += "# GPU Hardware Info: \n"
     for name, count in gpu_names.items():
@@ -364,7 +360,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
     except OSError as e:
         log.exception(e)
-        raise NotImplementedError("Could not write to {minified_repro_path}")
+        raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -502,7 +498,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from functorch._src.aot_autograd import make_boxed_func
+    from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
@@ -529,7 +525,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-    return collect_results(gm, out, None, [])
+    return collect_results(gm, out, None, args)
 
 
 def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
@@ -762,6 +758,9 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
+# Please see NOTE: [Real Tensors in Accuracy Evaluation]
+MINIFIER_SPAWNED = False
+
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
@@ -832,6 +831,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
+torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = BACKENDS["{minifier_backend}"]
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
@@ -867,7 +867,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -884,7 +884,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(
+                        copy.deepcopy(gm), example_inputs, **kwargs
+                    )
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
