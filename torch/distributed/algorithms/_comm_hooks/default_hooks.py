@@ -116,9 +116,11 @@ def reduce_scatter_hook(state: DefaultState, grad: torch.Tensor, output: torch.T
         output.div_(state.gradient_postdivide_factor)
 
 def _low_precision_hook(prec: torch.dtype, state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor):
-    grad.data = grad.data.to(prec)
+    if grad.dtype != prec:
+        grad.data = grad.data.to(prec)
     if output is not None:
-        output.data = output.data.to(prec)
+        if output.dtype != prec:
+            output.data = output.data.to(prec)
         reduce_scatter_hook(state, grad, output)
         _decompress(state, output)
     else:
