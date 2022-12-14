@@ -26,8 +26,16 @@ from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
+c10d = torch.ops.c10d
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
+
+# HACK - it is wrong to just register c10d ops to AutogradMeta instead of Meta
+# but it seems to work (fixes basic test at least) in part becuase allreduce_ and other ops
+# are incorrectly registered as CompositeExplicit without having derivatives
+_meta_c10d_lib_dont_use_me_use_register_meta = torch.library.Library(
+    "c10d", "IMPL", "AutogradMeta"
+)
 
 
 def register_meta(op):
@@ -1930,6 +1938,11 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
+@register_meta(c10d.traceable_allreduce)
+def allreduce__meta(tensors):
+    return [torch.empty_like(t) for t in tensors]
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -1985,7 +1998,10 @@ def activate_meta():
         }:
             pass
         else:
-            _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+            if op_overload.name().startswith("c10d"):
+                _meta_c10d_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+            else:
+                _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
 activate_meta()

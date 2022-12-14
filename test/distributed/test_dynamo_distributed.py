@@ -369,7 +369,6 @@ class TestDistributedMultiProc(MultiProcessTestCase):
                 opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
                 self.assertTrue(same(correct_results, opt_results))
 
-
 @requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
     """

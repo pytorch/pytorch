@@ -41,6 +41,14 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
       std::move(tensor_vec), work);
 }
 
+// for now this op is useless in eager. we just assume we're tracing it and
+// replacing it in part, this is due to it being difficult to construct
+// ProcessGroup or ReduceOp in python in an acceptable way to pass them to the
+// dispatcher.  (Pybind classes, which are available, do not work)
+std::vector<at::Tensor> traceable_allreduce(at::TensorList tensors) {
+  return tensors.vec();
+}
+
 c10::intrusive_ptr<Work> allreduce_coalesced_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -254,6 +262,10 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
+  m.def(
+      "traceable_allreduce",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, traceable_allreduce));
   m.def(
       "allreduce_coalesced_",
       dispatch(
