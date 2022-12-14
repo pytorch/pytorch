@@ -25,7 +25,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -1998,6 +1997,9 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
+    def cpp_wrapper_codegen_reference(self):
+        return "at::Tensor()"
+
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -3034,9 +3036,9 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
-            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        with context():
+        with context:
             (
                 example_output,
                 tensor_args,
@@ -3145,7 +3147,7 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
@@ -3404,7 +3406,7 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
-    with torch._subclasses.FakeTensorMode():
+    with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         bias_fake = (
@@ -3638,7 +3640,7 @@ class MKLPackedLinear(ExternKernelAlloc):
     def create(cls, x, packed_w, orig_w, bias, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
             bias_fake = (
