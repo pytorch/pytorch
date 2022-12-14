@@ -10,8 +10,6 @@ from io import StringIO
 from typing import Any, List
 from unittest.mock import patch
 
-import jinja2
-
 import sympy
 
 import torch
@@ -299,20 +297,27 @@ class TritonTemplateKernel(TritonKernel):
         )
 
 
+def make_jinja2_env():
+    try:
+        import jinja2
+
+        return jinja2.Environment(
+            undefined=jinja2.StrictUndefined,
+        )
+    except ImportError:
+        return None
+
+
 class TritonTemplate:
     index_counter = itertools.count()
-    template_env = jinja2.Environment(
-        # trim_blocks=True,
-        # lstrip_blocks=True,
-        undefined=jinja2.StrictUndefined,
-    )
-    template_env.globals.update({})
+    template_env = make_jinja2_env()
     all_templates = dict()
 
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__()
         self.name = name
         self.grid = grid
+        assert self.template_env is not None, "requires jinja2"
         self.template = self.template_env.from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         self.all_templates[name] = self
