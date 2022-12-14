@@ -227,6 +227,21 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     "setFloat32MatmulPrecision call has no effect.");
 }
 
+Float32FastMathMode Context::float32FastMathMode() const {
+  return float32_fast_math_mode;
+}
+
+void Context::setFloat32FastMathMode(const std::string& s) {
+  if (s == "BF16") {
+    float32_fast_math_mode = at::Float32FastMathMode::BF16;
+  } else if (s == "FP32") {
+    float32_fast_math_mode = at::Float32FastMathMode::FP32;
+  } else {
+    TORCH_WARN(s, " is not one of 'FP32', or 'BF16'; the current"
+      "setFloat32FastMathMode call has no effect.");
+  }
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
   return linalg_preferred_backend;
 }

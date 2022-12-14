@@ -184,6 +184,22 @@ void gemm(
       c, ldc_);
     #else
     char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    #if defined(BLAS_HAS_SBGEMM)
+    if (at::globalContext().float32FastMathMode() == at::Float32FastMathMode::BF16) {
+      std::vector<uint16_t> bf16_a(m_ * k_);
+      std::vector<uint16_t> bf16_b(k_ * n_);
+      c10::detail::array_cvt_from_f32(a, bf16_a.data(), bf16_a.size());
+      c10::detail::array_cvt_from_f32(b, bf16_b.data(), bf16_b.size());
+      sbgemm_(&transa_, &transb_,
+              &m_, &n_, &k_,
+              &alpha_,
+              (at::BFloat16 *) bf16_a.data(), &lda_,
+              (at::BFloat16 *) bf16_b.data(), &ldb_,
+              &beta_,
+              c, &ldc_);
+      return;
+    }
+    #endif
     sgemm_(
         &transa_, &transb_,
         &m_, &n_, &k_,

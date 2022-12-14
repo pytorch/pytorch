@@ -728,6 +728,30 @@ def set_float32_matmul_precision(precision):
     """
     _C._set_float32_matmul_precision(precision)
 
+def set_float32_fast_math_mode(mode: str):
+    r"""Sets the fast math mode of float32 calculation.
+
+    Running float32 calculation in lower precision may significantly increase
+    performance, and in some programs the loss of precision has a negligible impact.
+
+    For example, bfloat16 matrix multiplications with BLAS backend. If the BLAS 
+    library not support bfloat16 operation, it will use FP32 mode (default).
+
+    Supports two settings now:
+        * "FP32"
+        * "BF16"
+    
+    Args:
+        mode(str): can be set to "FP32" (default), or "BF16".
+    """
+    _C._set_float32_fast_math_mode(mode)
+
+def get_float32_fast_math_mode() -> builtins.str:
+    r"""Returns the current value of float32 fast math mode.
+    """
+    return _C._get_float32_fast_math_mode()
+
+
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.

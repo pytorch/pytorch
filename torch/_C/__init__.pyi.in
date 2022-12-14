@@ -843,6 +843,8 @@ def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
 def _get_float32_matmul_precision() -> str: ... #THPModule_float32MatmulPrecision
 def _set_float32_matmul_precision(arg: str) -> None: ... #THPModule_setFloat32MatmulPrecision
+def _get_float32_fast_math_mode() -> str: ... #THPModule_float32FastMathMode
+def _set_float32_fast_math_mode(arg: str) -> None: ... #THPModule_setFloat32FastMathMode
 def _get_cublas_allow_fp16_reduced_precision_reduction() -> _bool: ... #THPModule_allowFP16ReductionCuBLAS
 def _set_cublas_allow_fp16_reduced_precision_reduction(arg: _bool) -> None: ... #THPModule_setAllowFP16ReductionCuBLAS
 def _set_conj(x: Tensor, conj: _bool) -> None: ...

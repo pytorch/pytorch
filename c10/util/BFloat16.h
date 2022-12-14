@@ -11,6 +11,10 @@
 #include <cuda_bf16.h>
 #endif
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -68,6 +72,30 @@ inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
     return static_cast<uint16_t>((U32 + rounding_bias) >> 16);
   }
 }
+
+inline C10_HOST_DEVICE void array_cvt_from_f32(const float *src, uint16_t *dst, size_t len) {
+#if defined(__ARM_NEON) && defined(__ARM_BF16)
+  float32x4_t s1;
+  bfloat16x4_t d1;
+  size_t rest = len % 4;
+  size_t i = 0;
+  for (i = 0; i < len - rest; i += 4) {  // 4 elems
+    s1 = vld1q_f32(src+i);
+    d1 = vcvt_bf16_f32(s1);
+    vst1_u16(dst+i, vreinterpret_u16_bf16(d1));
+  }
+  while (i < len) {  // tail case
+    bfloat16_t tmp = vcvth_bf16_f32(src[i]);
+    std::memcpy(dst+i, &tmp, sizeof(tmp));
+    i++;
+  }
+#else
+  for (size_t i = 0; i < len; i++) {
+    dst[i] = c10::detail::round_to_nearest_even(src[i]);
+  }
+#endif
+}
+
 } // namespace detail
 
 struct alignas(2) BFloat16 {

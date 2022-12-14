@@ -494,6 +494,30 @@ PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setFloat32FastMathMode(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+    THPUtils_checkString(arg),
+    "set_float32_fast_math_mode expects a str, "
+    "but got %s",
+    THPUtils_typename(arg));
+  std::string s = THPUtils_unpackString(arg);
+  at::globalContext().setFloat32FastMathMode(s);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_float32FastMathMode(
+    PyObject* _unused,
+    PyObject* noargs) {
+  std::string s = "FP32";
+  auto p = at::globalContext().float32FastMathMode();
+  if (p == at::Float32FastMathMode::BF16) {
+    s = "BF16";
+  }
+  return THPUtils_packString(s);
+}
+
 PyObject* THPModule_setFloat32MatmulPrecision(
     PyObject* _unused,
     PyObject* arg) {
@@ -1042,6 +1066,14 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_set_float32_matmul_precision",
      THPModule_setFloat32MatmulPrecision,
+     METH_O,
+     nullptr},
+    {"_get_float32_fast_math_mode",
+     THPModule_float32FastMathMode,
+     METH_NOARGS,
+     nullptr},
+    {"_set_float32_fast_math_mode",
+     THPModule_setFloat32FastMathMode,
      METH_O,
      nullptr},
     {"_get_cublas_allow_fp16_reduced_precision_reduction",

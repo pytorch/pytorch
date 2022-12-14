@@ -24,6 +24,7 @@ namespace at {
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+enum class TORCH_API Float32FastMathMode { FP32, BF16 };
 
 class TORCH_API Context {
  public:
@@ -230,6 +231,8 @@ class TORCH_API Context {
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
+  void setFloat32FastMathMode(const std::string& s);
+  Float32FastMathMode float32FastMathMode() const;
   void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
@@ -283,6 +286,7 @@ class TORCH_API Context {
 #endif
   Float32MatmulPrecision float32_matmul_precision =
       at::Float32MatmulPrecision::HIGHEST;
+  Float32FastMathMode float32_fast_math_mode = at::Float32FastMathMode::FP32;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
