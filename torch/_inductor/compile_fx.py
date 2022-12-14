@@ -174,11 +174,11 @@ def compile_fx_inner(
 
 
 def clone_preserve_strides(x):
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+    # This is *bad*, x.storage() is deprecated and emits warnings
+    # TODO: figure out a way to get "# elements in the storage, in the current dtype of x"
+    needed_size = x.storage().size()
+    buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+    return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
