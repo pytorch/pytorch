@@ -1,6 +1,15 @@
 import functools
 import warnings
-from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+)
 
 import torch
 import torch.nn as nn
@@ -127,6 +136,7 @@ def _lazy_init(
         )
         fsdp_module._is_root = False
         fsdp_module._streams = state._streams
+        fsdp_module._stream_to_name = state._stream_to_name
         fsdp_module._exec_order_data = state._exec_order_data
         if fsdp_module.limit_all_gathers != state.limit_all_gathers:
             # Prefer the root's value
@@ -165,6 +175,14 @@ def _init_streams(
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
     state._streams["pre_unshard"] = torch.cuda.Stream()
+    # Default stream for computation
+    state._streams["default"] = torch.cuda.current_stream()
+    state._stream_to_name = {
+        torch.cuda.current_stream(): "default",
+        state._streams["unshard"]: "unshard",
+        state._streams["pre_unshard"]: "pre_unshard",
+        state._streams["post_backward"]: "post_backward",
+    }
 
 
 @no_type_check
@@ -257,12 +275,14 @@ def _pre_forward(
     handles: List[FlatParamHandle],
     unshard_fn: Callable,
     module: nn.Module,
-    input: Any,
-):
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+) -> Tuple[Tuple[Any], Dict[str, Any]]:
     """
     Runs the pre-forward logic. This includes an opportunity to unshard
     currently sharded parameters such as those for the current forward and
-    registering post-backward hooks for these current parameters.
+    registering post-backward hooks for these current parameters. This function
+    also converts forward ``args`` and ``kwargs`` to the given precision.
 
     Args:
         handles (List[FlatParamHandle]): Handles giving the parameters used in
@@ -271,7 +291,8 @@ def _pre_forward(
             sharded parameters or ``None`` to not do any unsharding.
         module (nn.Module): Module whose forward this method runs right before;
             expected by the hook signature.
-        input (Any): Unused; expected by the hook signature.
+        args (Tuple[Any, ...]): Module forward ``args``.
+        kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     state.training_state = TrainingState.FORWARD_BACKWARD
     state._exec_order_data.record_pre_forward(handles, module.training)
@@ -284,6 +305,12 @@ def _pre_forward(
     # the `grad_fn` is mutated.
     _register_post_backward_hooks(state, handles)
 
+    # Recursively convert args and kwargs to specified precision.
+    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
+    args, kwargs = _prepare_forward_inputs(
+        state.compute_device, input_dtype, *args, **kwargs
+    )
+    return args, kwargs
 
 @no_type_check
 def _pre_forward_unshard(
@@ -365,15 +392,13 @@ def _post_forward_reshard(
 def _root_pre_forward(
     state: _FSDPState,
     module: nn.Module,
-    args,
-    kwargs,
-):
+    unused_args: Any,
+) -> None:
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
     before any individual module's pre-forward. This starts with an attempt at
     lazy initialization (which only runs non-vacuously once). Otherwise, if
-    this is called on a non-root FSDP instance, then the forward inputs are
-    returned directly.
+    this is called on a non-root FSDP instance, then it returns directly.
 
     Args:
         module (nn.Module): Module for which this logic tries to run. It may or
@@ -382,7 +407,7 @@ def _root_pre_forward(
     _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
-        return args, kwargs
+        return
     if state.forward_prefetch:
         handles_keys = []
         if _is_composable(state):
@@ -400,11 +425,6 @@ def _root_pre_forward(
         state._streams["pre_unshard"],
     )
     _clear_grads_if_needed(_all_handles(state))
-    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
-    args, kwargs = _prepare_forward_inputs(
-        state.compute_device, input_dtype, *args, **kwargs
-    )
-    return args, kwargs
 
 
 def _prepare_forward_inputs(
@@ -440,7 +460,7 @@ def _cast_fp_inputs_to_dtype(
     """
 
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x):
+        if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
         y = x.to(dtype)
         # Explicitly copy over `requires_grad` since this runs inside
@@ -951,9 +971,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        if module not in state._comm_module_to_handles:
-            continue
-        module_param_handles = state._comm_module_to_handles[module]
+        module_param_handles = state._comm_module_to_handles.get(module, [])
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -964,7 +982,9 @@ def _register_pre_forward_hooks(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
             state._pre_forward_handles.append(
-                module.register_forward_pre_hook(hook, prepend=True)
+                module.register_forward_pre_hook(
+                    hook, prepend=True, with_kwargs=True
+                )
             )
 
 
@@ -983,9 +1003,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        if module not in state._comm_module_to_handles:
-            continue
-        module_param_handles = state._comm_module_to_handles[module]
+        module_param_handles = state._comm_module_to_handles.get(module, [])
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,
@@ -1021,7 +1039,7 @@ def _register_root_pre_forward_hook(
     state._root_pre_forward_handles.clear()
     hook = functools.partial(_root_pre_forward, state)
     state._root_pre_forward_handles.append(
-        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
+        module.register_forward_pre_hook(hook, prepend=True)
     )
 
 
