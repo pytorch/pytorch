@@ -186,69 +186,74 @@ class TestFSDPHybridShard(FSDPTest):
             2. Process groups are the same across FSDP wrapped instances
             3. reduce_scatter and allreduce called the expected no. of times
         """
-        for sharding_strategy in [
-            ShardingStrategy.HYBRID_SHARD,
-            ShardingStrategy._HYBRID_SHARD_ZERO2,
-        ]:
-            with self.subTest(sharding_strategy=sharding_strategy):
-                auto_wrap_policy = ModuleWrapPolicy(
-                    {TransformerEncoderLayer, TransformerDecoderLayer},
-                )
-                fsdp_kwargs = {
-                    "auto_wrap_policy": auto_wrap_policy,
-                    "device_id": torch.cuda.current_device(),
-                    "sharding_strategy": sharding_strategy,
-                }
-                fsdp_model = TransformerWithSharedParams.init(
-                    self.process_group,
-                    FSDPInitMode.RECURSIVE,
-                    CUDAInitMode.CUDA_BEFORE,
-                    fsdp_kwargs,
-                )
-                # All FSDP modules should have state.process_group as the process group over which to
-                # shard (default process group), and state._inter_node_pg (process group containing only
-                # this rank)
-                intra_node_pgs = set()
-                inter_node_pgs = set()
-                for mod in fsdp_model.fsdp_modules(fsdp_model):
-                    # process_group should be across the node, which is just the
-                    # whole world here.
-                    self.assertEqual(
-                        dist.get_world_size(mod.process_group),
-                        dist.get_world_size(self.process_group),
-                    )
-                    intra_node_pgs.add(mod.process_group)
-                    inter_node_pg = mod._inter_node_pg
-                    inter_node_pgs.add(inter_node_pg)
-                    self.assertEqual(1, dist.get_world_size(inter_node_pg))
-                    self.assertFalse(_rank_not_in_group(inter_node_pg))
-                    self.assertEqual(sharding_strategy, mod.sharding_strategy)
-                # All fsdp modules should share the same process groups
-                self.assertEqual(1, len(intra_node_pgs))
-                self.assertEqual(1, len(inter_node_pgs))
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.HYBRID_SHARD,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2,
+                ]
+            },
+            self._test_fsdp_hybrid_shard_basic_setup,
+        )
 
-                orig_ar = dist.all_reduce
-                orig_rs = dist.reduce_scatter_tensor
+    def _test_fsdp_hybrid_shard_basic_setup(self, sharding_strategy: ShardingStrategy):
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer},
+        )
+        fsdp_kwargs = {
+            "auto_wrap_policy": auto_wrap_policy,
+            "device_id": torch.cuda.current_device(),
+            "sharding_strategy": sharding_strategy,
+        }
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            fsdp_kwargs,
+        )
+        # All FSDP modules should have state.process_group as the process group over which to
+        # shard (default process group), and state._inter_node_pg (process group containing only
+        # this rank)
+        intra_node_pgs = set()
+        inter_node_pgs = set()
+        for mod in fsdp_model.fsdp_modules(fsdp_model):
+            # process_group should be across the node, which is just the
+            # whole world here.
+            self.assertEqual(
+                dist.get_world_size(mod.process_group),
+                dist.get_world_size(self.process_group),
+            )
+            intra_node_pgs.add(mod.process_group)
+            inter_node_pg = mod._inter_node_pg
+            inter_node_pgs.add(inter_node_pg)
+            self.assertEqual(1, dist.get_world_size(inter_node_pg))
+            self.assertFalse(_rank_not_in_group(inter_node_pg))
+            self.assertEqual(sharding_strategy, mod.sharding_strategy)
+        # All fsdp modules should share the same process groups
+        self.assertEqual(1, len(intra_node_pgs))
+        self.assertEqual(1, len(inter_node_pgs))
 
-                def patched_collective(orig_collective, counter, *args, **kwargs):
-                    counter[orig_collective] += 1
-                    return orig_collective(*args, **kwargs)
+        orig_ar = dist.all_reduce
+        orig_rs = dist.reduce_scatter_tensor
 
-                cntr = Counter()
-                patched_allreduce = partial(patched_collective, orig_ar, cntr)
-                patched_reduce_scatter = partial(patched_collective, orig_rs, cntr)
-                with patch_allreduce(patched_allreduce), patch_reduce_scatter(
-                    patched_reduce_scatter
-                ):
-                    inp = fsdp_model.get_input(device=torch.cuda.current_device())
-                    out = fsdp_model(inp[0], inp[1])
-                    loss = fsdp_model.get_loss(inp, out)
-                    loss.backward()
+        def patched_collective(orig_collective, counter, *args, **kwargs):
+            counter[orig_collective] += 1
+            return orig_collective(*args, **kwargs)
 
-                num_flat_params = len(list(FSDP._fsdp_handles(fsdp_model)))
-                self.assertEqual(num_flat_params, cntr[orig_ar])
-                self.assertEqual(num_flat_params, cntr[orig_rs])
-                dist.barrier()
+        cntr = Counter()
+        patched_allreduce = partial(patched_collective, orig_ar, cntr)
+        patched_reduce_scatter = partial(patched_collective, orig_rs, cntr)
+        with patch_allreduce(patched_allreduce), patch_reduce_scatter(
+            patched_reduce_scatter
+        ):
+            inp = fsdp_model.get_input(device=torch.cuda.current_device())
+            out = fsdp_model(inp[0], inp[1])
+            loss = fsdp_model.get_loss(inp, out)
+            loss.backward()
+
+        num_flat_params = len(list(FSDP._fsdp_handles(fsdp_model)))
+        self.assertEqual(num_flat_params, cntr[orig_ar])
+        self.assertEqual(num_flat_params, cntr[orig_rs])
 
 
 instantiate_parametrized_tests(TestFSDPHybridShard)
