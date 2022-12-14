@@ -32,7 +32,11 @@ from typing import (
     Union,
 )
 
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -44,7 +48,7 @@ from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
-_NumericType = Union[Number, torch.Tensor, np.ndarray]
+_NumericType = Union[Number, torch.Tensor, "np.ndarray"]
 _ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
 _InputKwargsType = Mapping[str, Any]
@@ -110,7 +114,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> Union[list, np.ndarray]:
+def _to_numpy(elem) -> Union[list, "np.ndarray"]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
