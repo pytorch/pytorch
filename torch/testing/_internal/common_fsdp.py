@@ -290,11 +290,16 @@ class TransformerWithSharedParams(FSDPTestModel):
                 across constructions.
             add_bn (bool): Whether to include batch norm in the model.
         """
+
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            if isinstance(group, tuple):
+                pg = group[0]
+            else:
+                pg = group
             return TransformerWithSharedParams(
-                group, cuda_init_mode, add_bn, deterministic
+                pg, cuda_init_mode, add_bn, deterministic
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
             # Default to the `ModuleWrapPolicy`
@@ -307,11 +312,28 @@ class TransformerWithSharedParams(FSDPTestModel):
                 )
             else:
                 auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")
+
+            if (
+                "sharding_strategy" in fsdp_kwargs
+                and fsdp_kwargs["sharding_strategy"] in {
+                    ShardingStrategy.HYBRID_SHARD,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2
+                } and not isinstance(group, tuple)
+            ):
+                fsdp_pg = None
+            else:
+                fsdp_pg = group
+
+            if isinstance(group, tuple):
+                tformer_pg = group[0]
+            else:
+                tformer_pg = group
+
             fsdp_model = FSDP(
                 TransformerWithSharedParams(
-                    group, cuda_init_mode, add_bn, deterministic
+                    tformer_pg, cuda_init_mode, add_bn, deterministic
                 ),
-                group,
+                fsdp_pg,
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,
             )
@@ -1010,7 +1032,10 @@ class FSDPTest(MultiProcessTestCase):
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is None:
+        # TODO: Disable checking the parameters for pure FP16 due to floating
+        # point inaccuracy. Note that this means that the backward pass is not
+        # checked: https://github.com/pytorch/pytorch/issues/90784
+        if mixed_precision is None and not use_pure_fp16:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,

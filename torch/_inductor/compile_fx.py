@@ -127,9 +127,13 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-
+    fake_mode = fake_mode_from_tensors(example_inputs)
     graph = GraphLowering(
-        gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id
+        gm,
+        shape_env=shape_env,
+        num_static_inputs=num_fixed,
+        graph_id=graph_id,
+        fake_mode=fake_mode,
     )
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
@@ -398,13 +402,6 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            # A "tiny" graph can actually decompose into multiple
-            # operators (if it's a decomposition) and inductor can
-            # do a better job on it in this case
-            #
-            # Also, for some reason, test_comprehensive___rmatmul___cpu
-            # fails without forcing a compile lol.
-            force_compile_tiny_graphs=True,
         )(model_, example_inputs_)
 
 

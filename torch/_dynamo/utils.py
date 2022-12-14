@@ -26,11 +26,11 @@ from functools import lru_cache
 from typing import Any, Dict, List
 
 import numpy as np
-import sympy
 
 import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -699,42 +699,12 @@ from torch._subclasses import (  # noqa: F401
 )
 
 
-def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False):
-    fake_tensor = fake_mode.from_tensor(
-        e, static_shapes=static_shapes, ignore_subclass=ignore_subclass
+def make_fake_tensor(
+    e, fake_mode, static_shapes=False, tx=None, ignore_subclass=False, *, sname: str
+):
+    return fake_mode.from_tensor(
+        e, static_shapes=static_shapes, ignore_subclass=ignore_subclass, sname=sname
     )
-    if tx is not None:
-        from torch._dynamo.guards import TensorReference
-
-        def _record(tensor_ref):
-            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
-
-        def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
-            return sym_expr
-
-        def _record_ref(e, index, symbol, kind):
-            sym_expr = _extract(symbol)
-            if sym_expr:
-                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                _record(tensor_ref)
-
-        for index, symbol in enumerate(fake_tensor.size()):
-            _record_ref(e, index, symbol, "size")
-
-        for index, symbol in enumerate(fake_tensor.stride()):
-            _record_ref(e, index, symbol, "stride")
-
-        offset = fake_tensor.storage_offset()
-        _record_ref(e, None, offset, "storage_offset")
-
-    return fake_tensor
 
 
 def wrap_fake_exception(fn):
@@ -748,31 +718,24 @@ def wrap_fake_exception(fn):
         raise unimplemented(msg) from e
 
 
-def wrap_to_fake_tensor(e, fake_mode):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
-        return wrap_fake_exception(
-            lambda: make_fake_tensor(
-                e, fake_mode, static_shapes=config.dynamic_shapes is False
-            )
-        )
-    else:
-        return e
-
-
-def wrap_to_fake_tensor_and_record(e, tx, ignore_subclass=False):
-    # The not fake tensor check here is annoying - ideally, fake tensors never call this during wrapping.
-    # However, get_fake_value takes args and passes them through this, which may include fake tensors.
-    # see tree_map(fake_wrapper, args) in get_fake_value.
-    # TODO: Check if we should remove FakeTensor isinstance check when
-    # ignore_subclass
-    if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
-        static_shapes = config.dynamic_shapes is False
+def wrap_to_fake_tensor_and_record(
+    e, tx, ignore_subclass=False, *, sname: str, static_shapes=False
+):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
+        static_shapes = static_shapes or config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
             static_shapes = True
         return wrap_fake_exception(
             lambda: make_fake_tensor(
-                e, tx.fake_mode, static_shapes, tx, ignore_subclass=ignore_subclass
+                e,
+                tx.fake_mode,
+                static_shapes,
+                tx,
+                ignore_subclass=ignore_subclass,
+                sname=sname,
             )
         )
     else:
@@ -877,8 +840,11 @@ def same(
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
-                if fp64_ref.numel() < 1000 or (
-                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                if (
+                    fp64_ref.numel() < 1000
+                    or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
+                    # large tol means a benchmark has been specified as REQUIRE_HIGHER_TOLERANCE
+                    or tol >= 2 * 1e-2
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
@@ -1050,7 +1016,11 @@ def get_fake_value(node, tx):
     from .exc import TorchRuntimeError, unimplemented, Unsupported
 
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def fake_wrapper(e):
+        if isinstance(e, torch.Tensor):
+            assert isinstance(e, FakeTensor)
+        return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]

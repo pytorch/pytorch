@@ -12,11 +12,9 @@ from contextlib import contextmanager
 
 import torch
 import torch.distributed as dist
-import torch.distributed.rpc
 from torch.autograd import Function, Variable
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.utils import (
         _verify_param_shape_across_processes,
@@ -24,9 +22,6 @@ if dist.is_available():
         _to_kwargs,
     )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
-if torch.distributed.rpc.is_available():
-    RPC_AVAILABLE = True
-    from torch.distributed.rpc import RRef
 
 from torch._utils import _get_device_index
 
@@ -42,12 +37,6 @@ def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
     """
-    if RPC_AVAILABLE and isinstance(obj, RRef):
-        # If the current node is the owner of the RRef, unwrap it and try to
-        # find Tensors.
-        # TODO: Expand to remote RRefs.
-        if obj.is_owner():
-            return _find_tensors(obj.local_value())
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
