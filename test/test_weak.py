@@ -1,17 +1,20 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils.weak import WeakIdKeyDictionary
-import torch
+import copy
+import gc
+import random
+import threading
 
 import unittest
-import threading
-import copy
-import random
-import gc
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils.weak import WeakIdKeyDictionary
+
 
 def C():
     return torch.randn(1)
+
 
 # These tests are ported from cpython/Lib/test/test_weakref.py,
 # but adapted to use tensor rather than object
@@ -20,12 +23,12 @@ class WeakTest(TestCase):
 
     def test_make_weak_keyed_dict_from_dict(self):
         o = torch.randn(2)
-        dict = WeakIdKeyDictionary({o:364})
+        dict = WeakIdKeyDictionary({o: 364})
         self.assertEqual(dict[o], 364)
 
     def test_make_weak_keyed_dict_from_weak_keyed_dict(self):
         o = torch.randn(3)
-        dict = WeakIdKeyDictionary({o:364})
+        dict = WeakIdKeyDictionary({o: 364})
         dict2 = WeakIdKeyDictionary(dict)
         self.assertEqual(dict[o], 364)
 
@@ -55,13 +58,14 @@ class WeakTest(TestCase):
             self.assertIs(v, value2)
 
     def test_weak_keyed_dict_popitem(self):
-        self.check_popitem(WeakIdKeyDictionary,
-                           C(), "value 1", C(), "value 2")
+        self.check_popitem(WeakIdKeyDictionary, C(), "value 1", C(), "value 2")
 
     def check_setdefault(self, klass, key, value1, value2):
-        self.assertIsNot(value1, value2,
-                     "invalid test"
-                     " -- value parameters must be distinct objects")
+        self.assertIsNot(
+            value1,
+            value2,
+            "invalid test" " -- value parameters must be distinct objects",
+        )
         weakdict = klass()
         o = weakdict.setdefault(key, value1)
         self.assertIs(o, value1)
@@ -76,8 +80,7 @@ class WeakTest(TestCase):
         self.assertIs(weakdict[key], value1)
 
     def test_weak_keyed_dict_setdefault(self):
-        self.check_setdefault(WeakIdKeyDictionary,
-                              C(), "value 1", "value 2")
+        self.check_setdefault(WeakIdKeyDictionary, C(), "value 1", "value 2")
 
     def check_update(self, klass, dict):
         #
@@ -99,15 +102,14 @@ class WeakTest(TestCase):
             self.assertIs(v, weakdict.get(k))
 
     def test_weak_keyed_dict_update(self):
-        self.check_update(WeakIdKeyDictionary,
-                          {C(): 1, C(): 2, C(): 3})
+        self.check_update(WeakIdKeyDictionary, {C(): 1, C(): 2, C(): 3})
 
     def test_weak_keyed_delitem(self):
         d = WeakIdKeyDictionary()
         o1 = torch.randn(1)
         o2 = torch.randn(2)
-        d[o1] = 'something'
-        d[o2] = 'something'
+        d[o1] = "something"
+        d[o2] = "something"
         self.assertEqual(len(d), 2)
         del d[o1]
         self.assertEqual(len(d), 1)
@@ -120,27 +122,27 @@ class WeakTest(TestCase):
         wkd1 = WeakIdKeyDictionary({o1: 1, o2: 2})
         wkd2 = WeakIdKeyDictionary({o3: 3, o1: 4})
         wkd3 = wkd1.copy()
-        d1 = {o2: '5', o3: '6'}
+        d1 = {o2: "5", o3: "6"}
         pairs = [(o2, 7), (o3, 8)]
 
-        tmp1 = wkd1 | wkd2 # Between two WeakKeyDictionaries
+        tmp1 = wkd1 | wkd2  # Between two WeakKeyDictionaries
         self.assertEqual(dict(tmp1), dict(wkd1) | dict(wkd2))
         self.assertIs(type(tmp1), WeakIdKeyDictionary)
         wkd1 |= wkd2
         self.assertEqual(wkd1, tmp1)
 
-        tmp2 = wkd2 | d1 # Between WeakKeyDictionary and mapping
+        tmp2 = wkd2 | d1  # Between WeakKeyDictionary and mapping
         self.assertEqual(dict(tmp2), dict(wkd2) | d1)
         self.assertIs(type(tmp2), WeakIdKeyDictionary)
         wkd2 |= d1
         self.assertEqual(wkd2, tmp2)
 
-        tmp3 = wkd3.copy() # Between WeakKeyDictionary and iterable key, value
+        tmp3 = wkd3.copy()  # Between WeakKeyDictionary and iterable key, value
         tmp3 |= pairs
         self.assertEqual(dict(tmp3), dict(wkd3) | dict(pairs))
         self.assertIs(type(tmp3), WeakIdKeyDictionary)
 
-        tmp4 = d1 | wkd3 # Testing .__ror__
+        tmp4 = d1 | wkd3  # Testing .__ror__
         self.assertEqual(dict(tmp4), d1 | dict(wkd3))
         self.assertIs(type(tmp4), WeakIdKeyDictionary)
 
@@ -160,23 +162,27 @@ class WeakTest(TestCase):
 
         # If a key isn't of a weakly referencable type, __getitem__ and
         # __setitem__ raise TypeError.  __delitem__ should too.
-        self.assertRaises(TypeError, d.__delitem__,  13)
-        self.assertRaises(TypeError, d.__getitem__,  13)
-        self.assertRaises(TypeError, d.__setitem__,  13, 13)
+        self.assertRaises(TypeError, d.__delitem__, 13)
+        self.assertRaises(TypeError, d.__getitem__, 13)
+        self.assertRaises(TypeError, d.__setitem__, 13, 13)
 
     def test_make_weak_keyed_dict_repr(self):
         dict = WeakIdKeyDictionary()
-        self.assertRegex(repr(dict), '<WeakIdKeyDictionary at 0x.*>')
+        self.assertRegex(repr(dict), "<WeakIdKeyDictionary at 0x.*>")
 
     def check_threaded_weak_dict_copy(self, type_, deepcopy):
         # `deepcopy` should be either True or False.
         exc = []
 
         class DummyKey:
+            __slots__ = ["ctr"]
+
             def __init__(self, ctr):
                 self.ctr = ctr
 
         class DummyValue:
+            __slots__ = ["ctr"]
+
             def __init__(self, ctr):
                 self.ctr = ctr
 
@@ -210,7 +216,13 @@ class WeakTest(TestCase):
             del k
             del v
 
-        t_copy = threading.Thread(target=dict_copy, args=(d, exc,))
+        t_copy = threading.Thread(
+            target=dict_copy,
+            args=(
+                d,
+                exc,
+            ),
+        )
         t_collect = threading.Thread(target=pop_and_collect, args=(keys,))
 
         t_copy.start()
@@ -236,14 +248,16 @@ class WeakTest(TestCase):
 
 # Adapted from cpython/Lib/test/mapping_tests.py
 class WeakKeyDictionaryTestCase(TestCase):
-    __ref = {torch.randn(1):1, torch.randn(2):2, torch.randn(3):3}
+    __ref = {torch.randn(1): 1, torch.randn(2): 2, torch.randn(3): 3}
     type2test = WeakIdKeyDictionary
 
     def _reference(self):
         return self.__ref.copy()
+
     def _empty_mapping(self):
         """Return an empty mapping object"""
         return self.type2test()
+
     def _full_mapping(self, data):
         """Return a mapping object with the value contained in data
         dictionary"""
@@ -258,55 +272,58 @@ class WeakKeyDictionaryTestCase(TestCase):
 
         # A (key, value) pair not in the mapping
         key, value = self.reference.popitem()
-        self.other = {key:value}
+        self.other = {key: value}
 
         # A (key, value) pair in the mapping
         key, value = self.reference.popitem()
-        self.inmapping = {key:value}
+        self.inmapping = {key: value}
         self.reference[key] = value
 
     def test_read(self):
         # Test for read only operations on mapping
         p = self._empty_mapping()
-        p1 = dict(p) #workaround for singleton objects
+        p1 = dict(p)  # workaround for singleton objects
         d = self._full_mapping(self.reference)
         if d is p:
             p = p1
-        #Indexing
+        # Indexing
         for key, value in self.reference.items():
             self.assertEqual(d[key], value)
         knownkey = list(self.other.keys())[0]
-        self.assertRaises(KeyError, lambda:d[knownkey])
-        #len
+        self.assertRaises(KeyError, lambda: d[knownkey])
+        # len
         self.assertEqual(len(p), 0)
         self.assertEqual(len(d), len(self.reference))
-        #__contains__
+        # __contains__
         for k in self.reference:
             self.assertIn(k, d)
         for k in self.other:
             self.assertNotIn(k, d)
-        #cmp
-        self.assertTrue(p == p)  # NB: don't use assertEqual, that doesn't actually use ==
+        # cmp
+        self.assertTrue(
+            p == p
+        )  # NB: don't use assertEqual, that doesn't actually use ==
         self.assertTrue(d == d)
         self.assertTrue(p != d)
         self.assertTrue(d != p)
-        #bool
-        if p: self.fail("Empty mapping must compare to False")
-        if not d: self.fail("Full mapping must compare to True")
+        # bool
+        if p:
+            self.fail("Empty mapping must compare to False")
+        if not d:
+            self.fail("Full mapping must compare to True")
+
         # keys(), items(), iterkeys() ...
         def check_iterandlist(iter, lst, ref):
-            self.assertTrue(hasattr(iter, '__next__'))
-            self.assertTrue(hasattr(iter, '__iter__'))
+            self.assertTrue(hasattr(iter, "__next__"))
+            self.assertTrue(hasattr(iter, "__iter__"))
             x = list(iter)
-            self.assertTrue(set(x)==set(lst)==set(ref))
-        check_iterandlist(iter(d.keys()), list(d.keys()),
-                          self.reference.keys())
+            self.assertTrue(set(x) == set(lst) == set(ref))
+
+        check_iterandlist(iter(d.keys()), list(d.keys()), self.reference.keys())
         check_iterandlist(iter(d), list(d.keys()), self.reference.keys())
-        check_iterandlist(iter(d.values()), list(d.values()),
-                          self.reference.values())
-        check_iterandlist(iter(d.items()), list(d.items()),
-                          self.reference.items())
-        #get
+        check_iterandlist(iter(d.values()), list(d.values()), self.reference.values())
+        check_iterandlist(iter(d.items()), list(d.items()), self.reference.items())
+        # get
         key, value = next(iter(d.items()))
         knownkey, knownvalue = next(iter(self.other.items()))
         self.assertEqual(d.get(key, knownvalue), value)
@@ -316,15 +333,15 @@ class WeakKeyDictionaryTestCase(TestCase):
     def test_write(self):
         # Test for write operations on mapping
         p = self._empty_mapping()
-        #Indexing
+        # Indexing
         for key, value in self.reference.items():
             p[key] = value
             self.assertEqual(p[key], value)
         for key in self.reference.keys():
             del p[key]
-            self.assertRaises(KeyError, lambda:p[key])
+            self.assertRaises(KeyError, lambda: p[key])
         p = self._empty_mapping()
-        #update
+        # update
         p.update(self.reference)
         self.assertEqual(dict(p), self.reference)
         items = list(p.items())
@@ -332,14 +349,14 @@ class WeakKeyDictionaryTestCase(TestCase):
         p.update(items)
         self.assertEqual(dict(p), self.reference)
         d = self._full_mapping(self.reference)
-        #setdefault
+        # setdefault
         key, value = next(iter(d.items()))
         knownkey, knownvalue = next(iter(self.other.items()))
         self.assertEqual(d.setdefault(key, knownvalue), value)
         self.assertEqual(d[key], value)
         self.assertEqual(d.setdefault(knownkey, knownvalue), knownvalue)
         self.assertEqual(d[knownkey], knownvalue)
-        #pop
+        # pop
         self.assertEqual(d.pop(knownkey), knownvalue)
         self.assertNotIn(knownkey, d)
         self.assertRaises(KeyError, d.pop, knownkey)
@@ -348,11 +365,11 @@ class WeakKeyDictionaryTestCase(TestCase):
         self.assertEqual(d.pop(knownkey, default), knownvalue)
         self.assertNotIn(knownkey, d)
         self.assertEqual(d.pop(knownkey, default), default)
-        #popitem
+        # popitem
         key, value = d.popitem()
         self.assertNotIn(key, d)
         self.assertEqual(value, self.reference[key])
-        p=self._empty_mapping()
+        p = self._empty_mapping()
         self.assertRaises(KeyError, p.popitem)
 
     def test_constructor(self):
@@ -390,8 +407,9 @@ class WeakKeyDictionaryTestCase(TestCase):
 
     def test_getitem(self):
         d = self.reference
-        self.assertEqual(d[list(self.inmapping.keys())[0]],
-                         list(self.inmapping.values())[0])
+        self.assertEqual(
+            d[list(self.inmapping.keys())[0]], list(self.inmapping.values())[0]
+        )
 
         self.assertRaises(TypeError, d.__getitem__)
 
@@ -421,25 +439,32 @@ class WeakKeyDictionaryTestCase(TestCase):
         self.assertRaises((TypeError, AttributeError), d.update, 42)
 
         outerself = self
+
         class SimpleUserDict:
             def __init__(self):
                 self.d = outerself.reference
+
             def keys(self):
                 return self.d.keys()
+
             def __getitem__(self, i):
                 return self.d[i]
+
         d.clear()
         d.update(SimpleUserDict())
         i1 = sorted((id(k), v) for k, v in d.items())
         i2 = sorted((id(k), v) for k, v in self.reference.items())
         self.assertEqual(i1, i2)
 
-        class Exc(Exception): pass
+        class Exc(Exception):
+            pass
 
         d = self._empty_mapping()
+
         class FailingUserDict:
             def keys(self):
                 raise Exc
+
         self.assertRaises(Exc, d.update, FailingUserDict())
 
         d.clear()
@@ -449,40 +474,52 @@ class WeakKeyDictionaryTestCase(TestCase):
                 class BogonIter:
                     def __init__(self):
                         self.i = 1
+
                     def __iter__(self):
                         return self
+
                     def __next__(self):
                         if self.i:
                             self.i = 0
-                            return 'a'
+                            return "a"
                         raise Exc
+
                 return BogonIter()
+
             def __getitem__(self, key):
                 return key
+
         self.assertRaises(Exc, d.update, FailingUserDict())
 
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
                     def __init__(self):
-                        self.i = ord('a')
+                        self.i = ord("a")
+
                     def __iter__(self):
                         return self
+
                     def __next__(self):
-                        if self.i <= ord('z'):
+                        if self.i <= ord("z"):
                             rtn = chr(self.i)
                             self.i += 1
                             return rtn
                         raise StopIteration
+
                 return BogonIter()
+
             def __getitem__(self, key):
                 raise Exc
+
         self.assertRaises(Exc, d.update, FailingUserDict())
 
         d = self._empty_mapping()
+
         class badseq(object):
             def __iter__(self):
                 return self
+
             def __next__(self):
                 raise Exc()
 
@@ -499,10 +536,12 @@ class WeakKeyDictionaryTestCase(TestCase):
         d = self.reference
         self.assertTrue(d.get(list(self.other.keys())[0]) is None)
         self.assertEqual(d.get(list(self.other.keys())[0], 3), 3)
-        self.assertEqual(d.get(list(self.inmapping.keys())[0]),
-                         list(self.inmapping.values())[0])
-        self.assertEqual(d.get(list(self.inmapping.keys())[0], 3),
-                         list(self.inmapping.values())[0])
+        self.assertEqual(
+            d.get(list(self.inmapping.keys())[0]), list(self.inmapping.values())[0]
+        )
+        self.assertEqual(
+            d.get(list(self.inmapping.keys())[0], 3), list(self.inmapping.values())[0]
+        )
         self.assertRaises(TypeError, d.get)
         self.assertRaises(TypeError, d.get, None, None, None)
 
