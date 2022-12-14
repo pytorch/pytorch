@@ -1269,13 +1269,15 @@ int _use_vectorized_kernel_cond_2d(
       // (shape = NCHW). For a very wide range of use-cases (typically image or mask
       // resizing where we have C < 4), using upsample_generic_Nd_kernel_impl() is
       // actually faster. On top of that, benchmarks showed that this also depends on
-      // the *output* size (output_H + output_W) , for both upsampling and
+      // the *output* size (output_H + output_W), for both upsampling and
       // downsampling. The current 128 threshold was determined through benchmarks.
       return ((input.is_contiguous(at::MemoryFormat::ChannelsLast)) && (input.size(1) > 3)) || ((output.size(-2) + output.size(-1)) <= 128);
 }
 
 int _use_vectorized_kernel_cond_3d(
     // Similar to _use_vectorized_kernel_cond_2d() but for 3d resampling (e.g. videos)
+    // Note that unlike the 2d case, this is not subject to small output size
+    // overhead - hence the absence of the 128 threshold in the condition.
     const Tensor& output,
     const Tensor& input) {
       return ((input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) && (input.size(1) > 3));
