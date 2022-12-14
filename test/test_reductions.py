@@ -518,7 +518,7 @@ class TestReductions(TestCase):
             idx = torch.logical_and(~(torch.isfinite(t)), torch.real(t) < 0)
             t[idx] = torch.real(t[idx]).to(t.dtype)
             return t
-        
+
         def standardize_phase(t):
             t = torch.real(t) + 1j * (torch.imag(t) % (2 * np.pi))
             return t
@@ -575,7 +575,7 @@ class TestReductions(TestCase):
         # handle special case involving infinites and nans
         # here we don't use scipy.logsumexp as it gives confusing answer on
         # some inf cases
-        # see here: 
+        # see here:
         inf = float('inf')
         nan = float('nan')
         a3_input = torch.tensor([
