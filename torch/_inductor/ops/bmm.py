@@ -9,11 +9,15 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 
-from .mm import addmm_epilogue, mm_args, mm_configs, mm_options, use_triton_template
+from .mm_common import (
+    addmm_epilogue,
+    mm_args,
+    mm_configs,
+    mm_options,
+    use_triton_template,
+)
 
 aten = torch.ops.aten
-
-aten_bmm = ExternKernelChoice(torch.bmm)
 
 
 def bmm_grid(b, m, n, meta):
@@ -84,6 +88,9 @@ bmm_template = TritonTemplate(
 """,
 )
 
+aten_bmm = ExternKernelChoice(torch.bmm)
+aten_baddbmm = ExternKernelChoice(torch.baddbmm)
+
 
 @register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, *, layout=None):
@@ -102,9 +109,6 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             )
 
     return autotune_select_algorithm(choices, [mat1, mat2], layout)
-
-
-aten_baddbmm = ExternKernelChoice(torch.baddbmm)
 
 
 # Don't register this since it is slower than decomposing it
