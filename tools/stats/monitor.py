@@ -30,11 +30,22 @@ def get_per_process_cpu_info() -> List[Dict[str, Any]]:
             "cmd": " ".join(p.cmdline()),
             "cpu_percent": p.cpu_percent(),
             "rss_memory": p.memory_info().rss,
-            "uss_memory": p.memory_full_info().uss,
         }
-        if "pss" in p.memory_full_info():
-            # only availiable in linux
-            info["pss_memory"] = p.memory_full_info().pss
+
+        # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
+        # requires higher user privileges and could throw AccessDenied error, i.e. mac
+        try:
+            memory_full_info = p.memory_full_info()
+
+            info["uss_memory"] = memory_full_info.uss
+            if "pss" in memory_full_info:
+                # only availiable in linux
+                info["pss_memory"] = memory_full_info.pss
+
+        except psutil.AccessDenied as e:
+            # It's ok to skip this
+            pass
+
         per_process_info.append(info)
     return per_process_info
 
@@ -75,9 +86,10 @@ if __name__ == "__main__":
             }
             if handle is not None:
                 stats["per_process_gpu_info"] = get_per_process_gpu_info(handle)
-                stats["total_gpu_utilizaiton"] = pynvml.nvmlDeviceGetUtilizationRates(
-                    handle
-                ).gpu
+                # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
+                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                stats["total_gpu_utilization"] = gpu_utilization.gpu
+                stats["total_gpu_mem_utilization"] = gpu_utilization.memory
         except Exception as e:
             stats = {
                 "time": datetime.datetime.utcnow().isoformat("T") + "Z",

@@ -39,12 +39,20 @@ enum class C10_API_ENUM ActiveProfilerType {
 struct TORCH_API ExperimentalConfig {
   ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false);
+      bool profiler_measure_per_kernel = false,
+      bool verbose = false,
+      std::vector<std::string> performance_events = {});
   ~ExperimentalConfig() = default;
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;
+  bool verbose;
+  /*
+   * List of performance events to be profiled.
+   * An empty list will disable performance event based profiling altogether.
+   */
+  std::vector<std::string> performance_events;
 };
 
 struct TORCH_API ProfilerConfig {

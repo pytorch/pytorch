@@ -57,6 +57,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nested_tensor_from_mask_left_aligned",  # returns a boolean
     "_nnz",  # returns an int
     "_use_cudnn_ctc_loss",  # returns a boolean
+    "_use_cudnn_ctc_loss.Tensor",  # returns a boolean
     "_validate_compressed_sparse_indices",  # no return
     "allclose",  # returns a boolean
     "dense_dim",  # returns an int
@@ -71,6 +72,8 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
     "sparse_dim",  # returns an int
+    "_nested_tensor_offsets",  # returns a vector of ints
+    "_fused_sdp_choice",  # returns an int
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -304,6 +307,8 @@ def generate_function(
         if func.kind() == SchemaKind.out
         else cpp.name(func)
     )
+    if f.func.has_symint():
+        kernel_name += "_symint"
     backend_metadata = {
         DispatchKey.CompositeExplicitAutograd: {
             func.name: BackendMetadata(
@@ -336,6 +341,7 @@ def generate_function(
             cpp_no_default_args=set(),
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
+            has_composite_implicit_autograd_nested_tensor_kernel=False,
             has_composite_explicit_autograd_kernel=True,
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
@@ -554,7 +560,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
     return f"""
-{sig.defn()} {{
+{sig.defn(name=sig.name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   {clone_mutable_inputs_str}
   {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
   {ret_str}
@@ -614,7 +620,7 @@ def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     # Kernel name needs to follow the naming convention defined in `generate_function()`
     return f"""
-{sig.defn(name=g.out.func.name.unambiguous_name())} {{
+{sig.defn(name=g.out.func.name.unambiguous_name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call({exprs});
   {copy_outs_str}
   {return_str(g.out.func.returns, rets)}

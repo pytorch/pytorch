@@ -1,7 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
+
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -127,11 +129,24 @@ void mkldnn_matmul(
               (mat1.dim() == 2 && mat2.dim() == 1) || // aten::mv
               (mat1.dim() == 1 && mat2.dim() == 1),  // aten::dot
               "mkldnn_matmul:  unsupported dims for mat and mat2");
-  TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
-   mat2.scalar_type() == at::kBFloat16 &&
-   result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
+
   TORCH_CHECK(mkldnn_bf16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
+
+#if defined(__aarch64__)
+  if (mkldnn_bf16_device_check_arm()) {
+     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
+     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+     TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
+                 ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+                 "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  } else
+#endif
+  {
+     TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
+                 mat2.scalar_type() == at::kBFloat16 &&
+                 result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
+  }
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
@@ -209,14 +224,29 @@ bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-  return (
-      use_mkldnn_bf16_matmul() &&
-      mat1.scalar_type() == kBFloat16 &&
-      mat2.scalar_type() == kBFloat16 &&
-      (!result.defined() || result.scalar_type() == kBFloat16) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
+#if defined(__aarch64__)
+  if (mkldnn_bf16_device_check_arm()) {
+     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
+     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+     return (
+        use_mkldnn_bf16_matmul() &&
+        (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
+        ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
+        mat1.numel() != 0 &&
+        mat2.numel() != 0 &&
+        checksize(mat1, mat2));
+  } else
+#endif
+  {
+     return (
+        use_mkldnn_bf16_matmul() &&
+        mat1.scalar_type() == kBFloat16 &&
+        mat2.scalar_type() == kBFloat16 &&
+        (!result.defined() || result.scalar_type() == kBFloat16) &&
+        mat1.numel() != 0 &&
+        mat2.numel() != 0 &&
+        checksize(mat1, mat2));
+  }
 }
 
 } // namespace native

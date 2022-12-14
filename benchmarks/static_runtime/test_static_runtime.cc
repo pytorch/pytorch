@@ -325,8 +325,8 @@ TEST(StaticRuntime, ClampIntTensor) {
         a = torch.clamp(inp, min, max).clone()
         return (a)
   )JIT";
-  auto a = at::randint(0, 20, {2, 3});
-  auto b = at::randint(0, 20, {4, 3, 2});
+  auto a = at::randint(0, 20, {2, 3}, at::kFloat);
+  auto b = at::randint(0, 20, {4, 3, 2}, at::kFloat);
   auto min = 5.0f;
   auto max = 5.0f;
   testStaticRuntime(src, {a, min, max});
@@ -2164,12 +2164,7 @@ TEST(StaticRuntime, Permute) {
   c10::List<int64_t> dims_b{0, 2, 1};
   std::vector<IValue> args_b{b, dims_b};
 
-  auto c = at::randn({3, 3, 3});
-  c10::List<int64_t> dims_c{0, -1, 1};
-  std::vector<IValue> args_c{c, dims_c};
-
   testStaticRuntime(permute_script, args_a);
-  testStaticRuntime(permute_script, args_c);
   testStaticRuntime(permute_script, args_a, args_b);
 
   permute_script = R"JIT(
@@ -2523,6 +2518,15 @@ TEST(StaticRuntime, Index_Put) {
   auto indices_b = c10::List<at::Tensor>{torch::tensor({0}, at::kLong)};
   std::vector<IValue> args1{a, indices_b, values_a, false};
   testStaticRuntime(index_put_non_optional_str, args1);
+
+  const auto index_put_list_construct = R"JIT(
+    def forward(self, a: Tensor, indices: Tensor, values: Tensor, accumulate: bool):
+        indices: List[Optional[Tensor]] = [indices]
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  std::vector<IValue> args2{a, torch::tensor({0}, at::kLong), values_a, false};
+  testStaticRuntime(index_put_list_construct, args2);
 }
 
 TEST(StaticRuntime, Item) {
@@ -2551,8 +2555,8 @@ TEST(StaticRuntime, Tensor_Split) {
   std::vector<IValue> args2{at::randn({8}), torch::tensor(3), 0};
 
   const auto tensor_split_str3 = R"JIT(
-    def forward(self, a: Tensor, indicies: List[int], dim: int):
-        return torch.tensor_split(a, indicies, dim)
+    def forward(self, a: Tensor, indices: List[int], dim: int):
+        return torch.tensor_split(a, indices, dim)
   )JIT";
   std::vector<IValue> args3{at::randn({8}), c10::List<int64_t>({1, 6}), 0};
 
@@ -2845,9 +2849,9 @@ TEST(StaticRuntime, RemainderTensor) {
   )JIT";
 
   std::vector<IValue> args1 = {
-      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+      at::randint(0, 10, {2, 2}), at::randint(1, 10, {2, 2})};
   std::vector<IValue> args2 = {
-      at::randint(0, 10, {3, 6}), at::randint(0, 10, {3, 6})};
+      at::randint(0, 10, {3, 6}), at::randint(1, 10, {3, 6})};
 
   // Use allclose and equalnan since outputs may be NaN.
   testStaticRuntime(
@@ -3185,9 +3189,14 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   smodule.runtime().check_for_memory_leak();
 
   EXPECT_TRUE(expected.equal(actual));
-  EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
+
+  // Make a fresh graph to ensure the pass works in isolation
+  auto new_graph = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, new_graph.get());
+  ReplaceWithMaybeCopy(new_graph);
+  EXPECT_FALSE(hasNodeWithKind(new_graph, "aten::to"));
   EXPECT_TRUE(
-      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+      hasNodeWithKind(new_graph, "static_runtime::to_maybe_copy_out"));
 }
 
 TEST(StaticRuntime, Int) {
@@ -3665,4 +3674,18 @@ TEST(StaticRuntime, ClampNaNToNum) {
   // Non-NNC path
   testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
   testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
+}
+
+TEST(StaticRuntime, IfReturningTuple) {
+  const auto src = R"JIT(
+    def forward(self, x, y, cond: bool, idx: int):
+        if cond:
+            tup = (x, y)
+        else:
+            tup = (x, x)
+        return tup[idx]
+  )JIT";
+
+  std::vector<IValue> args{at::randn({3}), at::randn({3}), true, 0};
+  testStaticRuntime(src, args);
 }

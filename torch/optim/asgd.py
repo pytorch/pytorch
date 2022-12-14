@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['ASGD', 'asgd']
@@ -31,14 +31,16 @@ class ASGD(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0,
-                 foreach: Optional[bool] = None, maximize: bool = False):
+                 foreach: Optional[bool] = None, maximize: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
-                        weight_decay=weight_decay, foreach=foreach, maximize=maximize)
+                        weight_decay=weight_decay, foreach=foreach, maximize=maximize,
+                        differentiable=differentiable)
         super(ASGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -46,6 +48,7 @@ class ASGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('foreach', None)
             group.setdefault('maximize', False)
+            group.setdefault('differentiable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
@@ -60,7 +63,7 @@ class ASGD(Optimizer):
             for s in state_values:
                 s['mu'] = torch.tensor(float(s['mu']))
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -113,7 +116,8 @@ class ASGD(Optimizer):
                  alpha=group['alpha'],
                  weight_decay=group['weight_decay'],
                  foreach=group['foreach'],
-                 maximize=group['maximize'])
+                 maximize=group['maximize'],
+                 differentiable=group['differentiable'])
 
         return loss
 
@@ -128,6 +132,7 @@ def asgd(params: List[Tensor],
          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
          foreach: bool = None,
          maximize: bool = False,
+         differentiable: bool = False,
          *,
          lambd: float,
          lr: float,
@@ -162,7 +167,8 @@ def asgd(params: List[Tensor],
          t0=t0,
          alpha=alpha,
          weight_decay=weight_decay,
-         maximize=maximize)
+         maximize=maximize,
+         differentiable=differentiable)
 
 
 def _single_tensor_asgd(params: List[Tensor],
@@ -177,7 +183,8 @@ def _single_tensor_asgd(params: List[Tensor],
                         t0: float,
                         alpha: float,
                         weight_decay: float,
-                        maximize: bool):
+                        maximize: bool,
+                        differentiable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -186,6 +193,11 @@ def _single_tensor_asgd(params: List[Tensor],
         ax = axs[i]
         eta = etas[i]
         step_t = state_steps[i]
+
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            param = torch.view_as_real(param)
+            ax = torch.view_as_real(ax)
 
         # update step
         step_t += 1
@@ -224,19 +236,29 @@ def _multi_tensor_asgd(params: List[Tensor],
                        t0: float,
                        alpha: float,
                        weight_decay: float,
-                       maximize: bool):
+                       maximize: bool,
+                       differentiable: bool):
 
     if len(params) == 0:
         return
 
+    assert not differentiable, "_foreach ops don't support autograd"
+
     if maximize:
         grads = torch._foreach_neg(grads)
+
+    def _view_complex_as_real(tensor_list):
+        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+
+    grads = _view_complex_as_real(grads)
+    params = _view_complex_as_real(params)
+    axs = _view_complex_as_real(axs)
 
     # update step
     torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
     eta = etas[0].item()

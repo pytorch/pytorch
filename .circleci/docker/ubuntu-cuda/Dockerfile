@@ -26,6 +26,7 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
@@ -118,9 +119,14 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 # Install CUDNN
 ARG CUDNN_VERSION
+ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
 RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
+
+# Delete /usr/local/cuda-11.X/cuda-11.X symlinks
+RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
+RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
 
 USER jenkins
 CMD ["bash"]

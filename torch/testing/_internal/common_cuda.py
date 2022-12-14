@@ -173,6 +173,13 @@ def _get_torch_cuda_version():
     cuda_version = str(torch.version.cuda)
     return tuple(int(x) for x in cuda_version.split("."))
 
+def _get_torch_rocm_version():
+    if not TEST_WITH_ROCM:
+        return (0, 0)
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
+
 def _check_cusparse_generic_available():
     version = _get_torch_cuda_version()
     min_supported_version = (10, 1)

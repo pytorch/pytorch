@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import os
-import random
 from typing import Any, Mapping, Type
 
-import numpy as np
 import onnxruntime
+import pytorch_test_common
 
 import torch
 from torch.onnx import _constants, verification
-from torch.testing._internal import common_utils
 
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
@@ -54,21 +52,15 @@ def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any])
     return f"{cls.__name__}_{suffix}"
 
 
-def set_rng_seed(seed):
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-
-
-class _TestONNXRuntime(common_utils.TestCase):
-    opset_version = _constants.onnx_default_opset
+class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
+    opset_version = _constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
     check_shape = True
     check_dtype = True
 
     def setUp(self):
-        set_rng_seed(0)
+        super().setUp()
         onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)

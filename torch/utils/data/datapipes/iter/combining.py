@@ -1,5 +1,6 @@
 import warnings
 
+from abc import ABC, abstractmethod
 from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
@@ -96,7 +97,31 @@ class ForkerIterDataPipe(IterDataPipe):
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
-class _ForkerIterDataPipe(IterDataPipe):
+class _ContainerTemplate(ABC):
+    r"""
+    Abstract class for container ``DataPipes``. The followings are three required
+    methods.
+    """
+    @abstractmethod
+    def get_next_element_by_instance(self, instance_id: int):
+        ...
+
+    @abstractmethod
+    def is_every_instance_exhausted(self) -> bool:
+        ...
+
+    @abstractmethod
+    def reset(self) -> None:
+        ...
+
+    @abstractmethod
+    def get_length_by_instance(self, instance_id: int):
+        r"""
+        Raise TypeError if it's not supposed to be implemented to support `list(datapipe)`
+        """
+
+
+class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
     the state of its child DataPipes, maintains the buffer, and yields the next value
@@ -159,6 +184,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         return self.end_ptr is not None and\
             all(self.end_ptr == ptr or self.end_ptr - 1 == ptr for ptr in self.child_pointers)
 
+    def get_length_by_instance(self, instance_id: int) -> int:
+        return len(self.main_datapipe)
+
     def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
@@ -168,9 +196,6 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.end_ptr = None
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.main_datapipe,
             self.num_instances,
@@ -178,6 +203,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -196,7 +223,8 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.end_ptr = None
 
     def __del__(self):
-        self.buffer.clear()
+        if self.buffer:
+            self.buffer.clear()
 
 
 class _ChildDataPipe(IterDataPipe):
@@ -230,10 +258,8 @@ class _ChildDataPipe(IterDataPipe):
     _is_child_datapipe: bool = True
 
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
-        required_attrs = ["get_next_element_by_instance", "is_every_instance_exhausted", "reset"]
-        required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
-        if any(not callable(op) for op in required_ops):
-            raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
+        assert isinstance(main_datapipe, _ContainerTemplate)
+
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -243,7 +269,7 @@ class _ChildDataPipe(IterDataPipe):
         return self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
     def __len__(self):
-        return len(self.main_datapipe)
+        return self.main_datapipe.get_length_by_instance(self.instance_id)
 
     # This method is called by `hook_iterator` in `_typing.py`.
     def _set_main_datapipe_valid_iterator_id(self) -> int:
@@ -325,7 +351,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
-class _DemultiplexerIterDataPipe(IterDataPipe):
+class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
     the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
@@ -394,6 +420,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
+    def get_length_by_instance(self, instance_id: int) -> int:
+        raise TypeError
+
     def reset(self) -> None:
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
@@ -401,9 +430,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.main_datapipe_exhausted = False
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.main_datapipe,
             self.num_instances,
@@ -413,6 +439,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -431,8 +459,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.main_datapipe_exhausted = False
 
     def __del__(self):
-        for dq in self.child_buffers:
-            dq.clear()
+        if self.child_buffers:
+            for dq in self.child_buffers:
+                dq.clear()
 
 
 @functional_datapipe('mux')
@@ -486,15 +515,14 @@ class MultiplexerIterDataPipe(IterDataPipe):
         self.buffer = []
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.datapipes,
             self.length,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):

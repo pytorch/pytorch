@@ -44,8 +44,8 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const int64_t channels, const int64_t height,
+    const int64_t width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w, scalar_t* top_data,
@@ -83,8 +83,8 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
-                                   const int channels, const int height,
-                                   const int width, const int pooled_height, const int pooled_width,
+                                   const int64_t channels, const int64_t height,
+                                   const int64_t width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
@@ -176,8 +176,8 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
 __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
-    const int64_t* top_mask, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+    const int64_t* top_mask, const int num, const int64_t channels,
+    const int64_t height, const int64_t width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
@@ -209,8 +209,8 @@ __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int channels,
-                                    const int height, const int width, const int pooled_height,
+                                    const int64_t* top_mask, const int nbatch, const int64_t channels,
+                                    const int64_t height, const int64_t width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
@@ -242,9 +242,9 @@ __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
   int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
+  int iendH = ::min(static_cast<int64_t>(istartH)+iH, height);
   int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
+  int iendW = ::min(static_cast<int64_t>(istartW)+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
@@ -423,14 +423,14 @@ IntArrayRef stride,
 IntArrayRef padding,
 IntArrayRef dilation,
 bool ceil_mode,
-const Tensor& indices,
+const Tensor& indices_,
 const Tensor& gradInput) {
   NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
+  TensorArg indices_arg{ indices_, "indices", 4 };
 
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
@@ -473,6 +473,8 @@ const Tensor& gradInput) {
   const int64_t out_stride_c = gradOutput.stride(-3);
   const int64_t out_stride_h = gradOutput.stride(-2);
   const int64_t out_stride_w = gradOutput.stride(-1);
+
+  const Tensor indices = indices_.contiguous(memory_format);
 
   gradInput.zero_();
 

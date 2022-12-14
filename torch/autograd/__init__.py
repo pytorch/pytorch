@@ -15,7 +15,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
@@ -165,6 +165,12 @@ def backward(
             not provided, the gradient is accumulated into all the leaf Tensors that
             were used to compute the attr::tensors.
     """
+    if torch._C._are_functorch_transforms_active():
+        raise RuntimeError(
+            "backward() called inside a functorch transform. This is not "
+            "supported, please use functorch.grad or functorch.vjp instead "
+            "or call backward() outside of functorch transforms.")
+
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
         if grad_tensors is None:

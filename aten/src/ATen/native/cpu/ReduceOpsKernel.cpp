@@ -61,8 +61,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (const auto i : c10::irange(n)) {
-      (void)i; //Suppress unused variable warning
+    for (const auto i C10_UNUSED : c10::irange(n)) {
       f(
         (scalar_t*)result_data_bytes, result_dim_stride,
         (scalar_t*)self_data_bytes, self_dim_stride, init_val
@@ -185,7 +184,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)

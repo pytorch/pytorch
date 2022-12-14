@@ -1,7 +1,8 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._sparse or torch._C._special objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._sparse
+# or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -123,6 +124,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_local_scalar_dense",
     "to",
     "_to_copy",
+    "_reshape_copy",
     "copy_sparse_to_sparse_",
     "copy_",
     "numpy_T",
@@ -151,6 +153,10 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
+    "_nested_tensor_strides",  # don't want to expose this to python
+    "_nested_tensor_offsets",  # don't want to expose this to python
+    "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
+    "_nested_view_from_buffer_copy",
 ]
 
 SKIP_PYTHON_BINDINGS = list(
@@ -215,6 +221,10 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == "linalg"
+
+
+def is_py_nested_function(f: NativeFunction) -> bool:
+    return f.python_module == "nested"
 
 
 def is_py_sparse_function(f: NativeFunction) -> bool:
@@ -305,6 +315,15 @@ def gen(
     create_python_bindings(
         fm,
         functions,
+        is_py_nested_function,
+        "torch.nested",
+        "python_nested_functions.cpp",
+        method=False,
+    )
+
+    create_python_bindings(
+        fm,
+        functions,
         is_py_sparse_function,
         "torch.sparse",
         "python_sparse_functions.cpp",
@@ -386,7 +405,8 @@ def create_python_bindings(
         filename,
         filename,
         lambda: {
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
             "ops_headers": ops_headers,
             "py_forwards": py_forwards,
             "py_methods": py_methods,
@@ -424,7 +444,8 @@ def create_python_return_type_bindings(
         filename,
         filename,
         lambda: {
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
             "py_return_types": py_return_types_definition,
             "py_return_types_map": py_return_types_map,
         },
@@ -467,7 +488,8 @@ def create_python_bindings_sharded(
         filename,
         grouped.items(),
         base_env={
-            "generated_comment": "@" + f"generated from {fm.template_dir}/{filename}",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
         },
         key_fn=key_func,
         env_callable=env_func,
@@ -873,6 +895,7 @@ if(check_has_torch_function(self_)) {{
             "torch.nn": "THPNNVariableFunctionsModule",
             "torch.fft": "THPFFTVariableFunctionsModule",
             "torch.linalg": "THPLinalgVariableFunctionsModule",
+            "torch.nested": "THPNestedVariableFunctionsModule",
             "torch.sparse": "THPSparseVariableFunctionsModule",
             "torch.special": "THPSpecialVariableFunctionsModule",
         }[module]
@@ -1138,6 +1161,11 @@ def sort_overloads(
             # Prioritize IntArrayRef overload over SymIntArrayRef
             str(t1) == "SymInt[]"
             and str(t2) == "int[]"
+            or
+            # Make sure both in, SymInt are sorted consistently w.r.t. Tensor since Tensor can be implicitly
+            # converted to either int or SymInt.  Prioritize the Tensor overload since it otherwise gets shadowed.
+            (str(t1) == "SymInt" or str(t1) == "int")
+            and str(t2) == "Tensor"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:

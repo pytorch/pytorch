@@ -61,23 +61,12 @@ class AxisHaloInfo {
 class TORCH_CUDA_CU_API HaloInfo {
  public:
   //! Scan a fusion and collect all information for lowering
-  void build(Fusion* fusion);
-
-  //! Build mappings of extent information of a TensorDomain
-  void build(TensorDomain* td);
+  HaloInfo(Fusion* fusion, std::shared_ptr<const ComputeAtMap> ca_map);
 
   //! Almost exact duplicate of build(TensorDomain* td), except that
   //!  the traversal was done on loop indexing expressions.
   std::unordered_map<IterDomain*, Val*> buildConcreteHaloExtentMap(
-      const LoopIndexing& loop_indexing);
-
-  //! Set initial AxisHaloInfo of a root axis
-  //!
-  //! The axis does not need to be a root domain in the case of
-  //! reference tensors. Reference tensors get halo information from
-  //! consumer root domains, which may correspond to rfactor domains
-  //! of tensors from which reference tensors are derived.
-  void setRootAxisInfo(IterDomain* id, const AxisHaloInfo& root_axis_info);
+      const LoopIndexing& loop_indexing) const;
 
   //! Returns true if id has the root halo information set by
   //! setRootAxisInfo.
@@ -88,7 +77,6 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! This is only for root axes. It is an error to query with
   //! non-root axes.
   const AxisHaloInfo& getRootAxisInfo(IterDomain* id) const;
-  AxisHaloInfo& getRootAxisInfo(IterDomain* id);
 
   //! Query if an axis has a halo width.
   //!
@@ -139,9 +127,20 @@ class TORCH_CUDA_CU_API HaloInfo {
   std::string toString() const;
 
  private:
+  //! Build mappings of extent information of a TensorDomain
+  void build(TensorDomain* td);
+
   //! Propagate root axis information from outputs to inputs of an
   //! expression
   void propagateRootAxisInfo(Expr* expr);
+
+  //! Set initial AxisHaloInfo of a root axis
+  //!
+  //! The axis does not need to be a root domain in the case of
+  //! reference tensors. Reference tensors get halo information from
+  //! consumer root domains, which may correspond to rfactor domains
+  //! of tensors from which reference tensors are derived.
+  void setRootAxisInfo(IterDomain* id, const AxisHaloInfo& root_axis_info);
 
   //! Adds a domain to the halo inheritance map.
   //!
@@ -163,11 +162,15 @@ class TORCH_CUDA_CU_API HaloInfo {
   void initializeFromRootAxisInfo(IterDomain* id);
 
   //! Validate shift usage
-  void validate(TensorView* td) const;
+  void validate(TensorView* td, std::shared_ptr<const ComputeAtMap> ca_map)
+      const;
 
   void setHaloWidth(IterDomain* id, int halo_width);
 
  private:
+  // Copy the permissive map from the passed in compute at map
+  const DisjointSets<IterDomain*> permissive_map_;
+
   //! Halo information of root axes
   std::unordered_map<IterDomain*, AxisHaloInfo> root_axis_map_;
 
@@ -222,7 +225,7 @@ class ShiftPredicateInserter {
   //! the generated predicate. The branch structure is different from
   //! the usual predicated expression, so the insertion is also done
   //! here.
-  static void insert(
+  static Expr* insert(
       Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       Bool* thread_pred,

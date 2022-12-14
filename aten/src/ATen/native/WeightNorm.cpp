@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 
-#include <cstring>
-#include <memory>
-#include <sstream>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_weight_norm_differentiable_backward_native.h>
+#include <ATen/ops/_weight_norm_interface.h>
+#include <ATen/ops/_weight_norm_native.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/norm_except_dim.h>
+#include <ATen/ops/norm_except_dim_native.h>
+#endif
+
 #include <vector>
 
 namespace at {

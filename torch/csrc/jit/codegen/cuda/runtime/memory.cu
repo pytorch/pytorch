@@ -152,6 +152,31 @@ DEVICE_INLINE void cpAsync(
       "n"(byte_size));
 }
 
+// Global to SMEM load that is asynchronous,
+// not guaranteed to be completed until cpAsyncBarrier() is called.
+template <typename dtype, int len>
+DEVICE_INLINE void cpAsync(
+    Array<dtype, len, len>* smem_ptr,
+    void const* gmem_ptr,
+    bool predicate) {
+  unsigned smem_addr = util::toSmem(&(smem_ptr->array[0]));
+  constexpr int byte_size = sizeof(dtype) * len;
+
+  static_assert(
+      byte_size == 4 || byte_size == 8 || byte_size == 16,
+      "cp_async : unsupported byte size");
+
+  asm volatile(
+      "{\n"
+      "  .reg .pred p;\n"
+      "  setp.ne.b32 p, %3, 0;\n"
+      "@p cp.async.ca.shared.global [%0], [%1], %2;\n"
+      "}\n" ::"r"(smem_addr),
+      "l"(gmem_ptr),
+      "n"(byte_size),
+      "r"((int)predicate));
+}
+
 // TODO: Might have a different category of sync if we want to build out this:
 DEVICE_INLINE void cpAsyncBarrier() {
   asm volatile("cp.async.wait_all;");

@@ -39,7 +39,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -350,6 +350,10 @@ as they should never be created manually, but they are guaranteed to support two
 
 .. autofunction:: irecv
 
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
+
 Synchronous and asynchronous collective operations
 --------------------------------------------------
 Every collective operation function supports the following two kinds of operations,
@@ -417,6 +421,8 @@ Collective functions
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_into_tensor
+
 .. autofunction:: all_gather_object
 
 .. autofunction:: gather
@@ -428,6 +434,8 @@ Collective functions
 .. autofunction:: scatter_object_list
 
 .. autofunction:: reduce_scatter
+
+.. autofunction:: reduce_scatter_tensor
 
 .. autofunction:: all_to_all
 
@@ -463,6 +471,9 @@ Please refer to the `profiler documentation <https://pytorch.org/docs/master/pro
 
 Multi-GPU collective functions
 ------------------------------
+
+.. warning::
+    The multi-GPU functions will be deprecated. If you must use them, please revisit our documentation later.
 
 If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`
@@ -821,6 +832,13 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
+Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
+the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+
+.. autoclass:: torch.distributed.DistBackendError
+
+.. warning::
+    The DistBackendError exception type is an experimental feature is subject to change.
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.

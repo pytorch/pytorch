@@ -1,6 +1,4 @@
-if(BUILD_SPLIT_CUDA)
-  set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
-elseif(USE_CUDA)
+if(USE_CUDA)
   set(TORCHLIB_FLAVOR torch_cuda)
 elseif(USE_ROCM)
   set(TORCHLIB_FLAVOR torch_hip)
@@ -9,16 +7,15 @@ endif()
 # The list of NVFUSER runtime files
 list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array.cu
-  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
-  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fused_reduction.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fused_welford_helper.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fused_welford_impl.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
-  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_sync.cu
@@ -30,13 +27,21 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/type_traits.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
-  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp_rocm.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensorcore.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/memory.cu
   ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/swizzle.cu
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/UnpackRaw.cuh
 )
+
+if(USE_ROCM)
+list(APPEND NVFUSER_RUNTIME_FILES
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp_rocm.cu
+)
+endif()
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
 

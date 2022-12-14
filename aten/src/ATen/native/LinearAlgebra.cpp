@@ -1,27 +1,132 @@
-#include <ATen/ATen.h>
-#include <ATen/core/grad_mode.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
 
-#include <functional>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_addmm_activation_native.h>
+#include <ATen/ops/_compute_linear_combination_native.h>
+#include <ATen/ops/_linalg_check_errors.h>
+#include <ATen/ops/_linalg_det.h>
+#include <ATen/ops/_linalg_det_native.h>
+#include <ATen/ops/_linalg_slogdet.h>
+#include <ATen/ops/_linalg_slogdet_native.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/addbmm_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addr.h>
+#include <ATen/ops/addr_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/baddbmm_native.h>
+#include <ATen/ops/bmm.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/ceil.h>
+#include <ATen/ops/chain_matmul_native.h>
+#include <ATen/ops/det_native.h>
+#include <ATen/ops/diag_embed.h>
+#include <ATen/ops/dot.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/eye.h>
+#include <ATen/ops/frobenius_norm_native.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/ger_native.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/inner_native.h>
+#include <ATen/ops/is_complex_native.h>
+#include <ATen/ops/is_floating_point_native.h>
+#include <ATen/ops/kron_native.h>
+#include <ATen/ops/linalg_cond.h>
+#include <ATen/ops/linalg_cond_native.h>
+#include <ATen/ops/linalg_det.h>
+#include <ATen/ops/linalg_det_native.h>
+#include <ATen/ops/linalg_diagonal_native.h>
+#include <ATen/ops/linalg_eigh.h>
+#include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/linalg_inv.h>
+#include <ATen/ops/linalg_inv_ex.h>
+#include <ATen/ops/linalg_lu_factor_ex.h>
+#include <ATen/ops/linalg_matmul_native.h>
+#include <ATen/ops/linalg_matrix_exp.h>
+#include <ATen/ops/linalg_matrix_exp_native.h>
+#include <ATen/ops/linalg_matrix_norm.h>
+#include <ATen/ops/linalg_matrix_norm_native.h>
+#include <ATen/ops/linalg_matrix_power_native.h>
+#include <ATen/ops/linalg_matrix_rank.h>
+#include <ATen/ops/linalg_matrix_rank_native.h>
+#include <ATen/ops/linalg_multi_dot_native.h>
+#include <ATen/ops/linalg_norm.h>
+#include <ATen/ops/linalg_norm_native.h>
+#include <ATen/ops/linalg_pinv.h>
+#include <ATen/ops/linalg_pinv_native.h>
+#include <ATen/ops/linalg_slogdet.h>
+#include <ATen/ops/linalg_slogdet_native.h>
+#include <ATen/ops/linalg_solve.h>
+#include <ATen/ops/linalg_svdvals.h>
+#include <ATen/ops/linalg_tensorinv.h>
+#include <ATen/ops/linalg_tensorinv_native.h>
+#include <ATen/ops/linalg_tensorsolve.h>
+#include <ATen/ops/linalg_tensorsolve_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/log2.h>
+#include <ATen/ops/logdet_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/matmul_native.h>
+#include <ATen/ops/matrix_exp_backward_native.h>
+#include <ATen/ops/matrix_exp_native.h>
+#include <ATen/ops/matrix_power_native.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/movedim.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mv.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/norm.h>
+#include <ATen/ops/nuclear_norm_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/outer.h>
+#include <ATen/ops/outer_native.h>
+#include <ATen/ops/pinverse_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/prod.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/slogdet_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/tensordot.h>
+#include <ATen/ops/vdot_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
 #include <limits>
 #include <numeric>
 #include <string>
@@ -48,6 +153,8 @@ namespace detail {
 namespace meta {
 
 #define ADDMM_META() \
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype"); \
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype"); \
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
   TORCH_CHECK( \
@@ -55,7 +162,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -711,24 +818,6 @@ Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, tol, symmetric);
-}
-
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
-}
-
 // multi_dot helper functions
 namespace {
 
@@ -788,7 +877,7 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
 /**
  * @brief Recursively multiplies the tensors i...j using the given order
  *
- * @param tensors matrices to multiply togther
+ * @param tensors matrices to multiply together
  * @param order optimal chain multiplication order from #matrix_chain_order
  * @param i index of first tensor to be multiplied
  * @param j index of last tensor to be multiplied
@@ -2285,8 +2374,7 @@ void compute_T18_scale_square(
   for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (const auto p : c10::irange(s_val)) {
-      (void)p; //Suppress unused variable warning
+    for (const auto p C10_UNUSED : c10::irange(s_val)) {
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
@@ -2682,7 +2770,7 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Frobenius Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self) {
@@ -2728,7 +2816,7 @@ Tensor &frobenius_norm_out(const Tensor& self,
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Nuclear Norm                                //
-//             Just used in linalg.norm. It should not be removed.            //
+//              Just used in torch.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {

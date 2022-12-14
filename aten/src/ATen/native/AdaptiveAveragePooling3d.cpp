@@ -1,7 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_adaptive_avg_pool3d.h>
+#include <ATen/ops/_adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/_adaptive_avg_pool3d_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -299,20 +313,20 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
   return output;
 }
 
-Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
+Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
         "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
-  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
+  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1 && !input.is_xpu()) {
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);
     return out;
   } else {
-    return _adaptive_avg_pool3d(input, output_size);
+    return _adaptive_avg_pool3d_symint(input, output_size);
   }
 }
 

@@ -1,7 +1,7 @@
 import math
 import torch
 from torch import Tensor
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['AdamW', 'adamw']
@@ -75,7 +75,8 @@ class AdamW(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=1e-2, amsgrad=False, *, maximize: bool = False,
                  foreach: Optional[bool] = None,
-                 capturable: bool = False):
+                 capturable: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -88,7 +89,8 @@ class AdamW(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
-                        foreach=foreach, maximize=maximize, capturable=capturable)
+                        foreach=foreach, maximize=maximize, capturable=capturable,
+                        differentiable=differentiable)
         super(AdamW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -98,13 +100,14 @@ class AdamW(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
             group.setdefault('capturable', False)
+            group.setdefault('differentiable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -128,6 +131,7 @@ class AdamW(Optimizer):
             state_steps = []
             amsgrad = group['amsgrad']
             beta1, beta2 = group['betas']
+            differentiable = group['differentiable']
 
             for p in group['params']:
                 if p.grad is None:
@@ -173,7 +177,8 @@ class AdamW(Optimizer):
                   eps=group['eps'],
                   maximize=group['maximize'],
                   foreach=group['foreach'],
-                  capturable=group['capturable'])
+                  capturable=group['capturable'],
+                  differentiable=group['differentiable'])
 
         return loss
 
@@ -188,6 +193,7 @@ def adamw(params: List[Tensor],
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
           capturable: bool = False,
+          differentiable: bool = False,
           *,
           amsgrad: bool,
           beta1: float,
@@ -229,7 +235,8 @@ def adamw(params: List[Tensor],
          weight_decay=weight_decay,
          eps=eps,
          maximize=maximize,
-         capturable=capturable)
+         capturable=capturable,
+         differentiable=differentiable)
 
 
 def _single_tensor_adamw(params: List[Tensor],
@@ -246,7 +253,8 @@ def _single_tensor_adamw(params: List[Tensor],
                          weight_decay: float,
                          eps: float,
                          maximize: bool,
-                         capturable: bool):
+                         capturable: bool,
+                         differentiable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -273,7 +281,7 @@ def _single_tensor_adamw(params: List[Tensor],
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-        if capturable:
+        if capturable or differentiable:
             step = step_t
 
             # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
@@ -288,7 +296,11 @@ def _single_tensor_adamw(params: List[Tensor],
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+                if differentiable:
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i].clone()
+                else:
+                    max_exp_avg_sqs_i = max_exp_avg_sqs[i]
+                max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sqs_i, exp_avg_sq))
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
@@ -332,7 +344,8 @@ def _multi_tensor_adamw(params: List[Tensor],
                         weight_decay: float,
                         eps: float,
                         maximize: bool,
-                        capturable: bool):
+                        capturable: bool,
+                        differentiable: bool):
     if len(params) == 0:
         return
 
@@ -342,6 +355,8 @@ def _multi_tensor_adamw(params: List[Tensor],
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
+
+    assert not differentiable, "_foreach ops don't support autograd"
 
     grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
     exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]

@@ -878,7 +878,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
           data_cache, [&first_red_tv]() {
             return std::make_unique<std::vector<TensorView*>>(
                 scheduler_utils::getInputsOutputsWithInnerDim(
-                    first_red_tv, true));
+                    first_red_tv, true, true));
           });
 
   auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
@@ -888,7 +888,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
           data_cache, [&first_red_tv]() {
             return std::make_unique<std::vector<TensorView*>>(
                 scheduler_utils::getInputsOutputsWithInnerDim(
-                    first_red_tv, false));
+                    first_red_tv, false, false));
           });
 
   auto& unrollable_inputs_outputs = unrollable_inputs_outputs_entry.get();
@@ -909,7 +909,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
-  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+  vectorize_factor = vectorize_helper::expandVectorizationToContigMergedDomains(
       fusion,
       runtime_info,
       vectorizable_inputs_outputs,
@@ -992,6 +992,8 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
       scheduler_utils::getReductionTvs(fusion /*, ignore_trivial = true */);
 
   TORCH_INTERNAL_ASSERT(reduction_tvs.size());
+  // Registry assumes the reference tv is the first reduction_tv, if this
+  // changes registry needs to change.
   auto reduction_tv = reduction_tvs[0];
 
   auto dim_analysis = scheduler_utils::canonicalDimReduction(

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
-import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.quantization
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
@@ -1035,6 +1035,33 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy_ref = torch.prelu(qx, qw)
         self.assertEqual(qy_ref, qy,
                          msg="PReLU module API failed")
+
+    def test_channel_shuffle(self):
+        """Tests the correctness of the ChannelShuffle module.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 1
+        y_scale = x_scale
+        y_zero_point = x_zero_point
+
+        dims = (1, 4, 4, 8)
+        groups = 2
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.ChannelShuffle(groups).float()
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = torch.nn.ChannelShuffle(groups)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="ChannelShuffle module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):

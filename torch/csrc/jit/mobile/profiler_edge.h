@@ -55,7 +55,8 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const bool profile_memory = false,
       const bool with_stack = false,
       const bool with_flops = false,
-      const bool with_modules = false);
+      const bool with_modules = false,
+      std::vector<std::string> events = {});
 
   const std::unique_ptr<torch::autograd::profiler::ProfilerResult>&
   disableProfiler();

@@ -9,17 +9,26 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
+from torch._C._profiler import (
     _add_execution_graph_observer,
-    _remove_execution_graph_observer,
-    _enable_execution_graph_observer,
     _disable_execution_graph_observer,
+    _enable_execution_graph_observer,
+    _ExperimentalConfig,
+    _remove_execution_graph_observer,
 )
-from torch._C._profiler import _ExperimentalConfig
-from torch.autograd import ProfilerActivity, kineto_available
+from torch.autograd import kineto_available, ProfilerActivity
+from torch.profiler import _memory_profiler
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionGraphObserver",
+]
+
 
 def supported_activities():
     """
@@ -109,6 +118,17 @@ class _KinetoProfile(object):
         assert self.profiler is not None
         self.profiler._start_trace()
 
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
+
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
@@ -196,6 +216,15 @@ class _KinetoProfile(object):
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size()
         }
+
+    def _memory_profile(self) -> _memory_profiler.MemoryProfile:
+        required = ("record_shapes", "profile_memory", "with_stack")
+        missing = [f"{i}=True" for i in required if not getattr(self, i)]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required for memory profiling.")
+
+        assert self.profiler is not None and self.profiler.kineto_results is not None
+        return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
 
 
 class ProfilerAction(Enum):

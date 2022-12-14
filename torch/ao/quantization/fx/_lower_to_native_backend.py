@@ -8,7 +8,7 @@ import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from .graph_module import QuantizedGraphModule
 from .utils import (
@@ -111,6 +111,9 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        # F.channel_shuffle and torch.channel_shuffle are essentially the same thing
+        # so we only need to put one of them here
+        torch.channel_shuffle,
     ]
     method_list = [
         "clamp",
@@ -131,6 +134,7 @@ def is_copy_node(node, modules):
         torch.nn.MaxPool3d,
         torch.nn.ReLU,
         torch.nn.ReLU6,
+        torch.nn.ChannelShuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 

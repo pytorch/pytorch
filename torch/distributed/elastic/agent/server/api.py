@@ -192,7 +192,7 @@ class WorkerState(str, Enum):
       INIT - worker group object created not yet started
       HEALTHY - workers running and healthy
       UNHEALTHY - workers running and unhealthy
-      STOPPED - workers stopped (interruped) by the agent
+      STOPPED - workers stopped (interrupted) by the agent
       SUCCEEDED - workers finished running (exit 0)
       FAILED - workers failed to successfully finish (exit !0)
 

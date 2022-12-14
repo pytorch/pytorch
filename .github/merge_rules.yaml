@@ -1,24 +1,11 @@
-- name: Core Maintainers
-  patterns:
-  - '*'
-  approved_by:
-  - soumith
-  - gchanan
-  - ezyang
-  - dzhulgakov
-  mandatory_checks_name:
-  - Facebook CLA Check
-  - Lint
-  - pull
-
 - name: ONNX exporter
   patterns:
   - .jenkins/caffe2/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
+  - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
-  - test/jit/test_export_modes.py
   - test/onnx/**
   - tools/onnx/**
   - torch/_C/__init__.pyi.in
@@ -28,11 +15,13 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - third_party/onnx
+  - caffe2/python/onnx/**
   approved_by:
   - BowenBao
   - abock
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -46,9 +35,10 @@
   - csarofeen
   - ngimel
   - jjsjann123
+  - kevinstephano
   - ptrblck
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -64,7 +54,7 @@
   - dagitses
   - pytorch/pytorch-dev-infra
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -75,7 +65,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -85,7 +75,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull / linux-bionic-py3_7-clang8-xla / build
   - pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)
@@ -97,7 +87,7 @@
   approved_by:
   - svekars
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -112,7 +102,7 @@
   - dreiss
   - raziel
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -130,10 +120,10 @@
   - test/test_linalg.py
   approved_by:
   - mruberry
-  - Lezcano
+  - lezcano
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -153,7 +143,7 @@
   - mruberry
   - peterbell10
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -180,7 +170,7 @@
   - pearu
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -196,7 +186,7 @@
   - malfet
   - razarmehr
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 - name: Distributions
@@ -208,7 +198,7 @@
   - neerajprad
   - alicanb
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -242,7 +232,7 @@
   - aazzolini
   - kwen2501
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -251,11 +241,14 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
+  - cmake/Modules/FindMKLDNN.cmake
+  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
-  - yanbing-j
+  - jgong5
+  - mingfeima
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -266,8 +259,9 @@
   approved_by:
   - sanchitintel
   - chunyuan-w
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -278,11 +272,13 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
+  - test/test_mkldnn.py
   approved_by:
   - mingfeima
   - XiaobingSuper
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -293,9 +289,9 @@
   - test/test_mkldnn.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -307,9 +303,20 @@
   - test/test_autocast.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: NNC
+  patterns:
+  - torch/csrc/jit/tensorexpr/**
+  approved_by:
+  - EikanWang
+  - jgong5
+  mandatory_checks_name:
+  - EasyCLA
   - Lint
   - pull
 
@@ -318,16 +325,17 @@
   - torch/csrc/lazy/**
   - test/cpp/lazy/**
   - test/lazy/**
-  - codegen/api/lazy.py
-  - codegen/dest/lazy_ir.py
-  - codegen/dest/lazy_ts_lowering.py
-  - codegen/gen_lazy_tensor.py
+  - torchgen/api/lazy.py
+  - torchgen/dest/lazy_ir.py
+  - torchgen/dest/lazy_ts_lowering.py
+  - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
+  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -337,6 +345,30 @@
   approved_by:
   - pytorch/metamates
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Core Reviewers
+  patterns:
+  - '*'
+  approved_by:
+  - mruberry
+  - lezcano
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Core Maintainers
+  patterns:
+  - '*'
+  approved_by:
+  - soumith
+  - gchanan
+  - ezyang
+  - dzhulgakov
+  mandatory_checks_name:
+  - EasyCLA
   - Lint
   - pull

@@ -40,7 +40,7 @@ only use the subset of Python supported in TorchScript. This section documents
 what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
 part of TorchScript. See `Builtin Functions` for a complete reference of available
-Pytorch tensor methods, modules, and functions.
+PyTorch tensor methods, modules, and functions.
 
 As a subset of Python, any valid TorchScript function is also a valid Python
 function. This makes it possible to `disable TorchScript` and debug the

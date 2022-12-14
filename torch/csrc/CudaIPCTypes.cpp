@@ -195,7 +195,7 @@ CudaIPCSentData::~CudaIPCSentData() {
   try {
     if (event_sync_required_) {
       at::cuda::CUDAGuard device_guard(device_.index());
-      cudaEventDestroy(event_);
+      C10_CUDA_CHECK(cudaEventDestroy(event_));
       if (!CudaIPCGlobalEntities::alive) {
         return;
       }

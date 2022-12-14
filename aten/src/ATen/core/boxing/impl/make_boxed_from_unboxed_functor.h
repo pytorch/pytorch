@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
@@ -342,6 +343,13 @@ namespace impl {
     }
   };
 
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::ITensorListRef, AllowDeprecatedTypes> final {
+    static List<at::Tensor> call(IValue& v) {
+      return v.toTensorList();
+    }
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
@@ -360,6 +368,19 @@ namespace impl {
         return r;
       } else {
         return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      }
+    }
+  };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes> final {
+    static OptionalArray<c10::SymInt> call(IValue& v) {
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return OptionalArray<c10::SymInt>(r);
+      } else {
+        return std::move(v).to<OptionalArray<c10::SymInt>>();
       }
     }
   };

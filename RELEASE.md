@@ -14,7 +14,7 @@
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
-  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+  - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
     - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
@@ -186,7 +186,7 @@ Promotion should occur in two steps:
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
-## Additonal Steps to prepare for release day
+## Additional Steps to prepare for release day
 
 The following should be prepared for the release day
 
@@ -264,7 +264,7 @@ For versions of Python that we support we follow the [NEP 29 policy](https://num
 
 ## Accelerator Software
 
-For acclerator software like CUDA and ROCm we will typically use the following criteria:
+For accelerator software like CUDA and ROCm we will typically use the following criteria:
 * Support latest 2 minor versions
 
 ### Special support cases
@@ -281,7 +281,7 @@ need to support these particular versions of software.
 
 In the event a submodule cannot be fast forwarded and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository under the pytorch Github organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* (preferred) Fork the said repository under the pytorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us
 
 Editing submodule remotes can be easily done with: (running from the root of the git repository)

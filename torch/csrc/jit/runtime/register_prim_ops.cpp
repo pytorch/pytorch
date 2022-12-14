@@ -421,6 +421,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         sym_size_int,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_stride.int(Tensor self, int dim) -> SymInt"),
+        sym_stride_int,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
         [](Stack& stack) {
           at::Tensor arg = pop(stack).toTensor();
@@ -430,6 +435,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
         sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_storage_offset(Tensor self) -> SymInt"),
+        sym_storage_offset,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
@@ -549,6 +559,34 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
           pack(stack, result);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.is_contiguous(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        // NB: intentionally suffixed with extra _format to prevent tests for
+        // "_like" suffix from triggering on this
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_strides_like_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_strides_like(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_non_overlapping_and_dense(Tensor self) -> bool"),
+        [](Stack& stack) {
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_non_overlapping_and_dense());
         },
         aliasAnalysisFromSchema()),
     // these ops are generic over the list element type.

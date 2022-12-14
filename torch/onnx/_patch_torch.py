@@ -10,15 +10,26 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype, jit_utils
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
-# TODO(#78694): Refactor the patching process to make it more transparent to users.
+# TODO(#78694): Remove this file after PyTorch 1.14.
+# All functions in this file are deprecated and should not be used
+
+
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'g.op()' is to be removed from torch.Graph. Please open a"
+    " GitHub issue if you need this functionality.",
+)
+@_beartype.beartype
 def _graph_op(
     g: _C.Graph,
     opname: str,
-    *raw_args: _C.Value,
+    *raw_args: Union[torch.Tensor, _C.Value],
     outputs: int = 1,
     **kwargs,
 ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
@@ -59,7 +70,7 @@ def _graph_op(
     args = [_const_if_tensor(g, arg) for arg in raw_args]
 
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -76,6 +87,7 @@ def _graph_op(
     return tuple(n.outputs())
 
 
+@_beartype.beartype
 def _const_if_tensor(g: _C.Graph, arg):
     if arg is None:
         return arg
@@ -84,7 +96,14 @@ def _const_if_tensor(g: _C.Graph, arg):
     return _graph_op(g, "Constant", value_z=arg)
 
 
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'g.at()' is to be removed from torch.Graph. Please open a"
+    " GitHub issue if you need this functionality.",
+)
 # Generate an ONNX ATen op node.
+@_beartype.beartype
 def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
     return _graph_op(
         g,
@@ -96,17 +115,25 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
     )
 
 
-def _block_op(b: _C.Block, opname: str, *args, **kwargs):
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "note 'b.op()' is to be removed from torch.Block. Please open a"
+    " GitHub issue if you need this functionality.",
+)
+@_beartype.beartype
+def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
-        aten = False
-        ns_opname = opname
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
-        aten = kwargs.pop("aten", False)
-        ns = "aten" if aten else "onnx"
-        ns_opname = ns + "::" + opname
-    n = b.addNode(ns_opname, args)
+        namespace = "onnx"
+        op = opname
+
+    n = block.addNode(f"{namespace}::{op}", args)
+    aten = namespace == "aten"
+    skip_attrs = {"inplace", "aten"}
     for k, v in sorted(kwargs.items()):
-        if k == "inplace":
+        if k in skip_attrs:
             continue
         _add_attribute(n, k, v, aten=aten)
     outputs = tuple(n.outputs())
@@ -115,8 +142,9 @@ def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     return outputs
 
 
+@_beartype.beartype
 def _new_node(
-    g: _C.Graph, namespace: str, op: str, outputs: int, *args, **kwargs
+    g: _C.Graph, namespace: str, op: str, outputs: int, *args: _C.Value, **kwargs
 ) -> _C.Node:
     """Creates a new node in the graph.
 
@@ -129,15 +157,17 @@ def _new_node(
     Returns:
         The new node.
     """
-    aten = kwargs.pop("aten", False)
+    aten = namespace == "aten"
     node = g.create(f"{namespace}::{op}", args, outputs)
+    skip_attrs = {"inplace", "aten"}
     for k, v in sorted(kwargs.items()):
-        if k == "inplace":
+        if k in skip_attrs:
             continue
         _add_attribute(node, k, v, aten=aten)
     return node
 
 
+@_beartype.beartype
 def _is_onnx_list(value):
     return (
         not isinstance(value, torch._six.string_classes)
@@ -146,26 +176,29 @@ def _is_onnx_list(value):
     )
 
 
+@_beartype.beartype
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
 
 
-def _is_caffe2_aten_fallback():
+@_beartype.beartype
+def _is_caffe2_aten_fallback() -> bool:
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
+@_beartype.beartype
 def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _ATTR_PATTERN.match(key)
     if m is None:
         raise ValueError(
             f"Invalid attribute specifier '{key}' names "
-            " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
+            "must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
         )
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
@@ -188,6 +221,7 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 @_deprecation.deprecated(
     "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
 )
+@_beartype.beartype
 def _graph_constant(
     g,
     value,

@@ -13,9 +13,9 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <c10/util/CallOnce.h>
 
@@ -82,14 +82,14 @@ struct WorkEntry {
 // ProcessGroupMPI will automatically detect this support.
 class TORCH_API ProcessGroupMPI : public ProcessGroup {
  public:
-  class WorkMPI : public ProcessGroup::Work {
+  class WorkMPI : public Work {
    public:
     explicit WorkMPI(
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt)
-        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+        : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
               c10::ListType::create(c10::TensorType::get()))) {}
@@ -109,7 +109,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
     c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 
-  class AsyncWork : public ProcessGroup::Work {
+  class AsyncWork : public Work {
    public:
     AsyncWork(
         MPI_Request request,
@@ -153,80 +153,80 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
     return std::string(MPI_BACKEND_NAME);
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
+  c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+  c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
@@ -241,7 +241,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
   // Helper function that is called by the destructor
   void destroy();
 
-  c10::intrusive_ptr<ProcessGroup::Work> enqueue(
+  c10::intrusive_ptr<Work> enqueue(
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
       const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);

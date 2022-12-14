@@ -1,20 +1,123 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 
 #include <vector>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cholesky_solve_helper.h>
+#include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_check_errors.h>
+#include <ATen/ops/_linalg_check_errors_native.h>
+#include <ATen/ops/_linalg_eigh.h>
+#include <ATen/ops/_linalg_eigh_meta.h>
+#include <ATen/ops/_linalg_eigh_native.h>
+#include <ATen/ops/_linalg_solve_ex.h>
+#include <ATen/ops/_linalg_solve_ex_meta.h>
+#include <ATen/ops/_linalg_solve_ex_native.h>
+#include <ATen/ops/_linalg_svd.h>
+#include <ATen/ops/_linalg_svd_meta.h>
+#include <ATen/ops/_linalg_svd_native.h>
+#include <ATen/ops/_lu_with_info_native.h>
+#include <ATen/ops/_symeig_helper.h>
+#include <ATen/ops/_symeig_helper_native.h>
+#include <ATen/ops/all.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cholesky.h>
+#include <ATen/ops/cholesky_inverse.h>
+#include <ATen/ops/cholesky_inverse_native.h>
+#include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/cholesky_solve.h>
+#include <ATen/ops/cholesky_solve_native.h>
+#include <ATen/ops/clone.h>
+#include <ATen/ops/complex.h>
+#include <ATen/ops/cumprod.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/geqrf.h>
+#include <ATen/ops/geqrf_native.h>
+#include <ATen/ops/inverse_native.h>
+#include <ATen/ops/linalg_cholesky_ex.h>
+#include <ATen/ops/linalg_cholesky_ex_meta.h>
+#include <ATen/ops/linalg_cholesky_ex_native.h>
+#include <ATen/ops/linalg_cholesky_native.h>
+#include <ATen/ops/linalg_eig.h>
+#include <ATen/ops/linalg_eig_native.h>
+#include <ATen/ops/linalg_eigh_native.h>
+#include <ATen/ops/linalg_eigvals.h>
+#include <ATen/ops/linalg_eigvals_native.h>
+#include <ATen/ops/linalg_eigvalsh_native.h>
+#include <ATen/ops/linalg_householder_product.h>
+#include <ATen/ops/linalg_householder_product_native.h>
+#include <ATen/ops/linalg_inv.h>
+#include <ATen/ops/linalg_inv_ex.h>
+#include <ATen/ops/linalg_inv_ex_native.h>
+#include <ATen/ops/linalg_inv_native.h>
+#include <ATen/ops/linalg_ldl_factor_ex.h>
+#include <ATen/ops/linalg_ldl_factor_ex_meta.h>
+#include <ATen/ops/linalg_ldl_factor_ex_native.h>
+#include <ATen/ops/linalg_ldl_factor_native.h>
+#include <ATen/ops/linalg_ldl_solve_meta.h>
+#include <ATen/ops/linalg_ldl_solve_native.h>
+#include <ATen/ops/linalg_lstsq.h>
+#include <ATen/ops/linalg_lstsq_native.h>
+#include <ATen/ops/linalg_lu_factor_ex.h>
+#include <ATen/ops/linalg_lu_factor_ex_meta.h>
+#include <ATen/ops/linalg_lu_factor_ex_native.h>
+#include <ATen/ops/linalg_lu_factor_native.h>
+#include <ATen/ops/linalg_lu_meta.h>
+#include <ATen/ops/linalg_lu_native.h>
+#include <ATen/ops/linalg_lu_solve.h>
+#include <ATen/ops/linalg_lu_solve_meta.h>
+#include <ATen/ops/linalg_lu_solve_native.h>
+#include <ATen/ops/linalg_qr.h>
+#include <ATen/ops/linalg_qr_meta.h>
+#include <ATen/ops/linalg_qr_native.h>
+#include <ATen/ops/linalg_solve_ex.h>
+#include <ATen/ops/linalg_solve_ex_native.h>
+#include <ATen/ops/linalg_solve_native.h>
+#include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/linalg_svd.h>
+#include <ATen/ops/linalg_svd_native.h>
+#include <ATen/ops/linalg_svdvals.h>
+#include <ATen/ops/linalg_svdvals_native.h>
+#include <ATen/ops/linalg_vander_native.h>
+#include <ATen/ops/linalg_vecdot_native.h>
+#include <ATen/ops/lu_solve_native.h>
+#include <ATen/ops/lu_unpack.h>
+#include <ATen/ops/lu_unpack_meta.h>
+#include <ATen/ops/lu_unpack_native.h>
+#include <ATen/ops/orgqr_native.h>
+#include <ATen/ops/ormqr_native.h>
+#include <ATen/ops/qr_native.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/resize_as_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/svd_native.h>
+#include <ATen/ops/symeig.h>
+#include <ATen/ops/symeig_native.h>
+#include <ATen/ops/triangular_solve_meta.h>
+#include <ATen/ops/triangular_solve_native.h>
+#include <ATen/ops/tril.h>
+#include <ATen/ops/triu.h>
+#include <ATen/ops/vdot.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -1495,9 +1598,18 @@ void _linalg_check_errors(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-bool _requires_fw_or_bw_grad(const Tensor& input) {
+// If an input requires fw or bw grad then we need to go down a different
+// (slower) path to ensure that the gradients are computable.
+// That is what `_may_require_fw_or_bw_grad` is helpful for.
+//
+// Why is there a isTensorSubclassLike check here?
+// Without it, this function can lead to composite compliance problems, which
+// may lead to bugs in functorch, where a Tensor Subclass that doesn't
+// require grad may wrap a Tensor subclass that requires grad.
+bool _may_require_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined());
+          || input._fw_grad(/*level */ 0).defined()
+          || isTensorSubclassLike(input));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.inv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2006,7 +2118,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .add_owned_input(pivots.contiguous())
       .build();
 
-    unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n));
+    unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n), m);
 
     // Transform the permutation into a permutation matrix
     P.zero_();
@@ -2559,6 +2671,10 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
       "] must be equal to input.shape[-2]");
 
   TORCH_CHECK(
+      tau.size(-1) <= input.size(-1),
+      "torch.ormqr: tau.shape[-1] must be less than or equal to input.shape[-1]");
+
+  TORCH_CHECK(
       input.dim() - tau.dim() == 1,
       "torch.ormqr: ",
       "Expected tau to have one dimension less than input, but got tau.ndim equal to ",
@@ -2688,9 +2804,8 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view u
 
 
 Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
-  // See [Note: svdvals_compute_uv] for the condition in compute_v
   return std::get<0>(at::_linalg_eigh(A, uplo,
-                     /*comptue_v=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
+                     /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
 Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
@@ -3148,7 +3263,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 Tensor linalg_eigvals(const Tensor& input) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (_requires_fw_or_bw_grad(input)) {
+  if (_may_require_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
 
@@ -3158,66 +3273,6 @@ Tensor linalg_eigvals(const Tensor& input) {
   at::linalg_eigvals_outf(input, values);
 
   return values;
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-DEFINE_DISPATCH(eig_stub);
-
-std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tensor& e, Tensor& v) {
-  TORCH_WARN_ONCE(
-    "torch.eig is deprecated in favor of torch.linalg.eig and will be removed in a future ",
-    "PyTorch release.\n",
-    "torch.linalg.eig returns complex tensors of dtype cfloat or cdouble rather than real tensors ",
-    "mimicking complex tensors.\n",
-    "L, _ = torch.eig(A)\n",
-    "should be replaced with\n",
-    "L_complex = torch.linalg.eigvals(A)\n",
-    "and\n",
-    "L, V = torch.eig(A, eigenvectors=True)\n",
-    "should be replaced with\n",
-    "L_complex, V_complex = torch.linalg.eig(A)"
-  );
-  TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
-  TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
-  TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
-  checkSameDevice("torch.eig", e, self, "eigenvalues");
-  checkLinalgCompatibleDtype("torch.eig", e, self, "eigenvalues");
-  if (eigenvectors) {
-    checkSameDevice("torch.eig", v, self, "eigenvectors");
-    checkLinalgCompatibleDtype("torch.eig", v, self, "eigenvectors");
-  }
-  int64_t n = self.size(-1);
-
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-      at::native::resize_output(e, {n});
-  } else {
-      at::native::resize_output(e, {n, 2});
-  }
-  if (eigenvectors) {
-      at::native::resize_output(v, self.sizes());
-  }
-
-  // optimization: if self is empty, we can immediately return the empty
-  // tensors, instead of getting empty tensors from eig_helper
-  if (self.numel() == 0) {
-      return std::tuple<Tensor&, Tensor&>(e, v);
-  }
-
-  Tensor vals_, vecs_;
-  std::tie(vals_, vecs_) = eig_stub(self.device().type(), self, eigenvectors);
-  e.copy_(vals_);
-  if (eigenvectors) {
-    v.copy_(vecs_);
-  }
-  return std::tuple<Tensor&, Tensor&>(e, v);
-}
-
-std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
-  Tensor e = at::empty({0}, self.options());
-  Tensor v = at::empty({0}, self.options());
-  at::eig_out(e, v, self, eigenvectors);
-  return std::tuple<Tensor, Tensor>(e, v);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3318,12 +3373,8 @@ Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driv
 }
 
 Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
-  // [Note: svdvals_compute_uv]
-  // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
-  //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
-  //     a TensorWrapper requiring fw or bw grad.
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
-                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A),
+                     /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
 }
 
@@ -3568,14 +3619,16 @@ static void linalg_lstsq_out_info(
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
   }
-  solution = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+  auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+  // manually restride original
+  solution.set_(solution.storage(), solution_view.storage_offset(), solution_view.sizes(), solution_view.strides());
   if (m == 0) {
     solution.zero_();
   }
 
   // for 1-dimensional 'other', we need to squeeze the solution after "apply_lstsq"
   if (vector_case) {
-    solution = solution.squeeze_(-1);
+    solution.squeeze_(-1);
   }
 }
 
@@ -3787,106 +3840,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
   return std::make_tuple(solution, residuals, rank, singular_values);
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// This wraps Lapack's gels routine, which uses a QR or LQ factorization to
-// solve any linear system, minimizing ||A.X - B||
-// A & B must be fortran-contiguous matrixes.
-// On exit, A is overwritten with the QR/LQ factorization of input A
-//          B is overwritten with the solution vectors
-template <typename scalar_t>
-static void apply_lstsq(const Tensor& B, const Tensor& A) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_INTERNAL_ASSERT(false, "lstsq: LAPACK library not found in compilation");
-#else
-
-  int m, n, nrhs, lda, ldb, info, lwork;
-  scalar_t wkopt = 0.0;
-  lwork = -1; // work length
-  m = A.size(0);
-  n = A.size(1);
-  nrhs = B.size(1);
-  info = 0;
-  lda = m;
-  ldb = (m > n) ? m : n;
-
-  auto B_data = B.data_ptr<scalar_t>();
-  auto A_data = A.data_ptr<scalar_t>();
-
-  // get info how much space is needed
-  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, &wkopt, lwork, &info);
-
-  lwork = static_cast<int>(wkopt);
-  Tensor work_tensor = at::empty({lwork}, A.scalar_type());
-  auto work = work_tensor.data_ptr<scalar_t>();
-
-  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
-
-  TORCH_CHECK(
-      info >= 0,
-      "Lapack Error in gels : Illegal argument ", -info);
-  TORCH_CHECK(
-      info == 0,
-      "Lapack Error in gels: The ", info, "-th diagonal element of the ",
-      "triangular factor of A is zero");
-#endif
-}
-
-std::tuple<Tensor, Tensor> legacy_lstsq(const Tensor& B, const Tensor& A) {
-  TORCH_WARN_ONCE(
-    "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
-    "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
-    "the returned tuple (although it returns other information about the problem).\n",
-    "To get the qr decomposition consider using torch.linalg.qr.\n",
-    "The returned solution in torch.lstsq stored the residuals of the solution in the ",
-    "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
-    "residuals in the field 'residuals' of the returned named tuple.\n",
-    "The unpacking of the solution, as in\n",
-    "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
-    "should be replaced with\n",
-    "X = torch.linalg.lstsq(A, B).solution");
-
-  TORCH_CHECK(A.scalar_type() == B.scalar_type(), "Exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A.dim() == 2, "Expected A to have 2 dimensions, but got ", A.dim());
-  TORCH_CHECK(A.numel() != 0, "A should not be empty");
-  TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "Expected B to have 1 or 2 "
-      "dimensions, but got ", B.dim());
-  TORCH_CHECK(B.numel() != 0, "B should not be empty");
-  TORCH_CHECK(A.size(0) == B.size(0), "Expected A and B to have same size "
-      "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
-
-  const auto a_sizes = A.sizes();
-  const auto ldb = std::max(a_sizes[0], a_sizes[1]);
-
-  auto A_working = cloneBatchedColumnMajor(A);
-  auto B_working = copyBatchedColumnMajor(B.dim() == 1 ? B.unsqueeze(1) : B, ldb);
-
-  AT_DISPATCH_FLOATING_TYPES(B.scalar_type(), "lstsq_cpu", [&] {
-    apply_lstsq<scalar_t>(B_working, A_working);
-  });
-
-  return std::tuple<Tensor, Tensor>(B_working, A_working);
-}
-
-std::tuple<Tensor&,Tensor&> legacy_lstsq_out(
-    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", A_out.scalar_type());
-  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", B_out.scalar_type());
-  Tensor A_tmp, B_tmp;
-  std::tie(B_tmp, A_tmp) = native::legacy_lstsq(B, A);
-  resize_output(A_out, A_tmp.sizes());
-  A_out.copy_(A_tmp);
-  resize_output(B_out, B_tmp.sizes());
-  B_out.copy_(B_tmp);
-  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
 }
 
 DEFINE_DISPATCH(ldl_factor_stub);

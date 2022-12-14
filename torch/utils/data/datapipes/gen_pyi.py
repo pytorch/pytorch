@@ -231,5 +231,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    print("Generating Python interface file 'datapipe.pyi'...")
     main()

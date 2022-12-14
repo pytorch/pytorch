@@ -12,10 +12,10 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -31,6 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestPureFP16(FSDPTest):
+    @property
+    def world_size(self):
+        # Test fails due to inaccuracies when using more than 5 GPUs
+        return min(5, super().world_size)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(

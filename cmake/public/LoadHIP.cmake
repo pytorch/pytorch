@@ -143,9 +143,6 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
-#Disable kernel assert due to performance regression
-set(ROCM_ENABLE_KERNEL_ASSERTS FALSE CACHE BOOL "Kernel asserts are disabled by default for ROCm")
-
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")

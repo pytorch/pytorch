@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['Adadelta', 'adadelta']
@@ -54,7 +54,8 @@ class Adadelta(Optimizer):
     """
 
     def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0,
-                 foreach: Optional[bool] = None, *, maximize: bool = False):
+                 foreach: Optional[bool] = None, *, maximize: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= rho <= 1.0:
@@ -65,7 +66,8 @@ class Adadelta(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay,
-                        maximize=maximize, foreach=foreach)
+                        maximize=maximize, foreach=foreach,
+                        differentiable=differentiable)
         super(Adadelta, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -73,8 +75,9 @@ class Adadelta(Optimizer):
         for group in self.param_groups:
             group.setdefault('foreach', None)
             group.setdefault('maximize', False)
+            group.setdefault('differentiable', False)
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -92,12 +95,14 @@ class Adadelta(Optimizer):
             grads = []
             square_avgs = []
             acc_deltas = []
-            lr, rho, eps, weight_decay, foreach, maximize = (group['lr'],
-                                                             group['rho'],
-                                                             group['eps'],
-                                                             group['weight_decay'],
-                                                             group['foreach'],
-                                                             group['maximize'])
+            lr, rho, eps, weight_decay, foreach, maximize, differentiable = (
+                group['lr'],
+                group['rho'],
+                group['eps'],
+                group['weight_decay'],
+                group['foreach'],
+                group['maximize'],
+                group['differentiable'])
 
             for p in group['params']:
                 if p.grad is None:
@@ -129,7 +134,8 @@ class Adadelta(Optimizer):
                      eps=eps,
                      weight_decay=weight_decay,
                      foreach=foreach,
-                     maximize=maximize)
+                     maximize=maximize,
+                     differentiable=differentiable)
 
         return loss
 
@@ -141,6 +147,7 @@ def adadelta(params: List[Tensor],
              # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
              # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
              foreach: bool = None,
+             differentiable: bool = False,
              *,
              lr: float,
              rho: float,
@@ -172,7 +179,8 @@ def adadelta(params: List[Tensor],
          rho=rho,
          eps=eps,
          weight_decay=weight_decay,
-         maximize=maximize)
+         maximize=maximize,
+         differentiable=differentiable)
 
 
 def _single_tensor_adadelta(params: List[Tensor],
@@ -184,7 +192,8 @@ def _single_tensor_adadelta(params: List[Tensor],
                             rho: float,
                             eps: float,
                             weight_decay: float,
-                            maximize: bool):
+                            maximize: bool,
+                            differentiable: bool):
 
     for (param, grad, square_avg, acc_delta) in zip(params, grads, square_avgs, acc_deltas):
         grad = grad if not maximize else -grad
@@ -197,10 +206,15 @@ def _single_tensor_adadelta(params: List[Tensor],
             acc_delta = torch.view_as_real(acc_delta)
             grad = torch.view_as_real(grad)
 
+
         square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
         std = square_avg.add(eps).sqrt_()
-        delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+        delta = acc_delta.add(eps).sqrt_()
+        if differentiable:
+            delta = delta.clone()
+        delta.div_(std).mul_(grad)
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
+
         if torch.is_complex(param):
             delta = torch.view_as_complex(delta)
         param.add_(delta, alpha=-lr)
@@ -215,7 +229,10 @@ def _multi_tensor_adadelta(params: List[Tensor],
                            weight_decay: float,
                            rho: float,
                            eps: float,
-                           maximize: bool):
+                           maximize: bool,
+                           differentiable: bool):
+
+    assert not differentiable, "_foreach ops don't support autograd"
 
     if len(params) == 0:
         return

@@ -1,13 +1,19 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUFallback.h>
 
 #include <sstream>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_to_cpu.h>
+#endif
+
 
 namespace at { namespace native {
 

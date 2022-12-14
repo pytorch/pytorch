@@ -51,7 +51,10 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Raises:
         ValueError: If the function is not compatible with the input column.
     """
-    sig = inspect.signature(fn)
+    try:
+        sig = inspect.signature(fn)
+    except ValueError:  # Signature cannot be inspected, likely it is a built-in fn or written in C
+        return
     if isinstance(input_col, (list, tuple)):
         input_col_size = len(input_col)
     else:
@@ -224,21 +227,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
 
 
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
-_iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
-                                                      {"old_class_name": "FSSpecFileOpener",
-                                                       "deprecation_version": "0.4.0",
-                                                       "removal_version": "0.6.0",
-                                                       "old_functional_name": "open_file_by_fsspec",
-                                                       "new_functional_name": "open_files_by_fsspec",
-                                                       "deprecate_functional_name_only": True},
-                                                      "open_file_by_iopath":
-                                                      {"old_class_name": "IoPathFileOpener",
-                                                       "deprecation_version": "0.4.0",
-                                                       "removal_version": "0.6.0",
-                                                       "old_functional_name": "open_file_by_iopath",
-                                                       "new_functional_name": "open_files_by_iopath",
-                                                       "deprecate_functional_name_only": True}}
-
+_iter_deprecated_functional_names: Dict[str, Dict] = {}
 _map_deprecated_functional_names: Dict[str, Dict] = {}
 
 

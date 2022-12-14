@@ -33,6 +33,25 @@ on:
         default: "3.8"
         description: |
           The python version to be used. Will be 3.8 by default
+      environment-file:
+        required: false
+        type: string
+        description: Set the conda environment file used to setup macOS build.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+
+    outputs:
+      test-matrix:
+        value: ${{ inputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+      build-outcome:
+        value: ${{ jobs.build.outputs.build-outcome }}
+        description: The outcome of the build step. This is used to influence test filtering logic later on.
 
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID:
@@ -52,6 +71,8 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+    outputs:
+      build-outcome: ${{ steps.build.outcome }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -66,22 +87,39 @@ jobs:
           fi
 
       - name: Setup miniconda
+        if: inputs.environment-file == ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python_version }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+
+      # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
+      # environment even though the arch is x86-64
+      - name: Setup miniconda using the provided environment file
+        if: inputs.environment-file != ''
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python_version }}
+          environment-file: ${{ inputs.environment-file }}
 
       - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-          echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+            echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
 
       - name: Get workflow job id
         id: get-job-id
@@ -90,7 +128,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         env:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
@@ -98,13 +146,13 @@ jobs:
           ${CONDA_RUN} .jenkins/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
           zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on GHA
-        uses: actions/upload-artifact@v2
-        if: inputs.build-generates-artifacts
+        uses: actions/upload-artifact@v3
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14
@@ -112,9 +160,9 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats to GHA
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         # Only if sccache is installed, see above
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && steps.build.outcome != 'skipped' }}
         with:
           name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}-${{ steps.get-job-id.outputs.job-id }}
           retention-days: 14

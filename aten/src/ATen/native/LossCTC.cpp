@@ -5,15 +5,36 @@
 // 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Fill.h>
 #include <c10/util/irange.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
-#include <numeric>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss.h>
+#include <ATen/ops/_ctc_loss_backward.h>
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/_cudnn_ctc_loss.h>
+#include <ATen/ops/_use_cudnn_ctc_loss.h>
+#include <ATen/ops/ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <type_traits>
 
 namespace at {
@@ -355,6 +376,18 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& t
   });
 }
 
+std::tuple<Tensor, Tensor> ctc_loss_tensor(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, bool zero_infinity) {
+  TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
+
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+
+  return at::_ctc_loss(log_probs, targets, il, tl, BLANK, zero_infinity);
+}
+
 Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cpu", [&] {
@@ -366,10 +399,47 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
   });
 }
 
+Tensor ctc_loss_backward_tensor(
+    const Tensor& grad,
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    const Tensor& neg_log_likelihood,
+    const Tensor& log_alpha,
+    int64_t BLANK,
+    bool zero_infinity) {
+  TORCH_CHECK(
+      isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false),
+      "input_lengths must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
+
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  return at::_ctc_loss_backward(grad, log_probs, targets, il, tl, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
+}
+
+namespace {
+
+Tensor get_clamped_target_length(
+    IntArrayRef target_lengths,
+    const TensorOptions& options) {
+  return at::tensor(target_lengths, options).clamp_min(1);
+}
+
+Tensor get_clamped_target_length(
+    Tensor target_lengths,
+    const TensorOptions& options) {
+  return target_lengths.clamp_min(1);
+}
+
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+template <typename LengthsType>
+Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsType input_lengths, LengthsType target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto is_batched = log_probs_.dim() == 3;
   Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
@@ -397,8 +467,7 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
     }
   }
   if (reduction == at::Reduction::Mean) {
-    auto target_lengths_t =
-        at::tensor(target_lengths, res.options()).clamp_min(1);
+    auto target_lengths_t = get_clamped_target_length(target_lengths, res.options());
     return (res / target_lengths_t).mean();
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
@@ -406,8 +475,22 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
   return is_batched ? res : res.squeeze(0);
 }
 
+} // namespace
+
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  return ctc_loss_impl(log_probs_, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
+}
+
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  if (at::areAnyTensorSubclassLike(
+          {log_probs, targets, input_lengths, target_lengths})) {
+    // Composite Compliant path for TensorSubclasses
+    return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
+  }
+
+  // Fast path (which accesses data_ptr) and less operator dispatches for
+  // regular tensors
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
   TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 

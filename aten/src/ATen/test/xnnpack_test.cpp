@@ -5,9 +5,14 @@
 
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/native/xnnpack/Pooling.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/MemoryFormat.h>
+
+#include <atomic>
+#include <condition_variable>
+#include <thread>
 
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 
@@ -183,6 +188,92 @@ TEST(TestXNNPackOps, TestHardSwish) {
     test_hardswish(input_result.first, input_result.second);
     test_hardswish_(input_result.first, input_result.second);
   }
+}
+
+TEST(TestXNNPackOps, TestConvolution2dMultiThreaded) {
+  constexpr int64_t groups = 1;
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, 3, 8, 8};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{1, input.channels, 3, 3};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  auto context = at::native::xnnpack::XNNPackConv2dOpContext::create_context(
+      std::move(weights_cpu), std::move(bias_cpu), {1, 1}, {2, 2}, {1, 1}, groups, c10::nullopt, c10::nullopt);
+  std::atomic<int64_t> count{0};
+  int64_t num_workers = 5;
+  std::mutex lock;
+  std::condition_variable cond;
+  auto sync_and_run_conv = [&](int64_t h, int64_t w) -> at::Tensor
+  {
+    auto input_tensor = at::randn({1, 3, h, w}, at::device(at::kCPU).dtype(at::kFloat));
+    int64_t count_val = ++count;
+    if (count_val < num_workers) {
+      std::unique_lock<std::mutex> g(lock);
+      while ((count_val = count.load()) < num_workers) {
+        cond.wait(g, [&]() {
+            auto new_val = count.load();
+            return new_val >= num_workers;});
+      }
+    } else {
+      std::unique_lock<std::mutex> g(lock);
+      cond.notify_all();
+    }
+    for (int64_t i = 0; i < 30; i++) {
+      context->run(input_tensor);
+    }
+    return context->run(input_tensor);
+  };
+
+  auto conv = [sync_and_run_conv](int64_t h, int64_t w) -> at::Tensor
+  {
+    return sync_and_run_conv(h, w);
+  };
+
+  std::thread t1(conv, 16, 16);
+  std::thread t2(conv, 12, 12);
+  std::thread t3(conv, 20, 20);
+  std::thread t4(conv, 22, 22);
+  std::thread t5(conv, 8, 8);
+  t1.join();
+  t2.join();
+  t3.join();
+  t4.join();
+  t5.join();
 }
 
 TEST(TestXNNPackOps, TestGlobal) {

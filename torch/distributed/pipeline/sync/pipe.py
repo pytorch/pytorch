@@ -21,7 +21,7 @@ from .skip.layout import inspect_skip_layout
 from .skip.skippable import verify_skippables
 from .stream import AbstractStream, new_stream
 
-__all__ = ["Pipe"]
+__all__ = ["Pipe", "BalanceError", "PipeSequential", "WithDevice"]
 
 
 Device = Union[torch.device, int, str]

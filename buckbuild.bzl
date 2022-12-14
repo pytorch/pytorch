@@ -22,6 +22,8 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_cpp_srcs",
+    "torch_mobile_tracer_sources",
 )
 load(
     ":pt_ops.bzl",
@@ -95,6 +97,9 @@ def get_strip_error_messages():
     if IS_OSS:
         return True  # always strip in OSS CI to expose potential issues
     return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
+
+def get_disable_warn():
+    return read_bool("pt", "disable_warn", False)
 
 def get_enable_eager_symbolication():
     return read_bool("pt", "enable_eager_symbolication", default = False, required = False)
@@ -198,6 +203,8 @@ _COMMON_PREPROCESSOR_FLAGS = [
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
 ) + (
     ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
+) + (
+    ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
 def get_aten_preprocessor_flags():
@@ -249,6 +256,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -307,6 +315,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -327,10 +336,13 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -364,7 +376,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -502,6 +514,16 @@ def copy_template_registration_files(name, apple_sdks = None):
         default_outs = ["."],
         apple_sdks = apple_sdks,
     )
+
+def get_feature_tracer_source_list():
+    """
+    Return just the Feature specific handlers used in the model tracer.
+    """
+    sources = []
+    for s in torch_mobile_tracer_sources:
+        if s.endswith("Tracer.cpp"):
+            sources.append(s)
+    return sources
 
 def pt_operator_query_codegen(
         name,
@@ -803,6 +825,7 @@ def define_buck_targets(
             ("aten/src", "ATen/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
+            ("aten/src", "ATen/functorch/**/*.h"),
             ("aten/src", "ATen/quantized/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
@@ -865,6 +888,7 @@ def define_buck_targets(
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.
                 ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ],
             exclude = [
@@ -1083,6 +1107,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
@@ -1246,12 +1272,8 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_model_tracer",
         srcs = [
-            "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
             "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
-        ],
+        ] + get_feature_tracer_source_list(),
         header_namespace = "",
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
@@ -1349,6 +1371,19 @@ def define_buck_targets(
         exported_deps = [
             ":flatbuffers_mobile",
             ":torch_mobile_core",
+        ],
+    )
+
+    pt_xplat_cxx_library(
+        name = "torch_cpp_cpu",
+        srcs = torch_cpp_srcs,
+        headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":torch",
+            ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
         ],
     )
 
@@ -1681,7 +1716,7 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/mobile_bytecode.fbs",
         ],
         outs = {
-            "mobile_bytecode_generated.h": ["mobile_bytecode_generated.h"],
+            "mobile_bytecode_generated_fbsource.h": ["mobile_bytecode_generated.h"],
         },
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
@@ -1697,13 +1732,16 @@ def define_buck_targets(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
+            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h"): ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
         },
         # Avoid leaking implementation details by only exposing this header to
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer_mobile".format(ROOT),
+        ],
+        exported_deps = [
+            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1725,7 +1763,6 @@ def define_buck_targets(
             ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_train",
@@ -1763,7 +1800,6 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_deserialize",

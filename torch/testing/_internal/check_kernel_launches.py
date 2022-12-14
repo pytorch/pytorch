@@ -160,4 +160,4 @@ def check_cuda_kernel_launches():
 
 if __name__ == "__main__":
     unsafe_launches = check_cuda_kernel_launches()
-    sys.exit(0)
+    sys.exit(0 if unsafe_launches == 0 else 1)

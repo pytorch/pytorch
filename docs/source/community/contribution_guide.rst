@@ -73,11 +73,13 @@ here is the basic process.
 
 -  **Open a pull request.**
 
-   -  If you are not ready for the pull request to be reviewed, tag it
-      with [WIP]. We will ignore it when doing review passes. If you are
-      working on a complex change, it's good to start things off as WIP,
-      because you will need to spend time looking at CI results to see
-      if things worked out or not.
+   -  If you are not ready for the pull request to be reviewed, create a draft
+      pull request first - you can later convert it to a full PR by pressing
+      "Ready for review" button. You can also prepend the title of the PR with
+      "[WIP]" ("work in progress") while it's still in draft. We will ignore
+      draft PRs when doing review passes. If you are working on a complex change,
+      it's good to start things off as a draft, because you will need to spend
+      time looking at CI results to see if things worked out or not.
    -  Find an appropriate reviewer for your change. We have some folks
       who regularly go through the PR queue and try to review
       everything, but if you happen to know who the maintainer for a
@@ -136,7 +138,7 @@ A great deal of the tutorials on `pytorch.org <https://pytorch.org/>`__
 come from the community itself and we welcome additional contributions.
 To learn more about how to contribute a new tutorial you can learn more
 here: `PyTorch.org Tutorial Contribution Guide on
-Github <https://github.com/pytorch/tutorials/#contributing>`__
+GitHub <https://github.com/pytorch/tutorials/#contributing>`__
 
 Improving Documentation & Tutorials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

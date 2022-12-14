@@ -1,12 +1,35 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_log_softmax.h>
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_softmax.h>
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/log_softmax_native.h>
+#include <ATen/ops/softmax.h>
+#include <ATen/ops/softmax_native.h>
+#include <ATen/ops/special_log_softmax_native.h>
+#include <ATen/ops/special_softmax_native.h>
+#endif
 
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
@@ -137,10 +160,8 @@ void host_softmax(
   if (MaskedSoftMax) {
     TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
     int64_t mask_type = mask_type_.value();
-    TORCH_CHECK((mask_type == 0) || (mask_type == 1), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask)");
-
-    // TODO: Add support for TxT src_mask
-    TORCH_CHECK(mask_type != 0, "src_mask not currently supported on CPU");
+    // If mask_type == 2, then mask_.sizes() must equal input_.sizes()
+    TORCH_CHECK((mask_type == 0) || (mask_type == 1) || (mask_type == 2), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask), or 2 (default_mask)");
   }
 
   int64_t outer_size = 1;
@@ -170,8 +191,22 @@ void host_softmax(
               output_data_base + outer_idx * outer_stride + inner_idx;
           bool* mask_data = nullptr;
           if (MaskedSoftMax) {
-            mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
-          }
+            // Process mask differently depending on the type:
+            // For a generic mask of mask_type == 2, mask shape is the same as the input shape,
+            // so indexing is the same.
+            auto mask_outer_idx = outer_idx;
+            if (mask_type_ == 0) {
+                // Optimized case: attention mask of shape LxL
+                // outer_idx goes over BxHxL, mask_outer_idx goes over L.
+                mask_outer_idx = outer_idx % input.size(2);
+            } else if (mask_type_ == 1) {
+                // Optimized case: padding mask of shape BxL
+                // outer_idx goes over BxHxL, mask_outer_idx goes over B.
+                mask_outer_idx = outer_idx / (input.size(1) * input.size(2));
+            }
+
+            mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
+          };
 
           // Calc max in softmax dim
           bool is_meaningful_max = false;
@@ -553,15 +588,48 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
 }
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
-  TORCH_CHECK(
-      input_.sizes() == mask_.sizes(), "Mask shape should match input shape");
+
+  auto mask = mask_.contiguous();
+  auto mask_type = mask_type_; // Mask type might get transformed below
+
   TORCH_CHECK(
       mask_.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
 
+  if ((mask.dim() != 2) || (input_.dim() != 4)) {
+    // Mask types 0 and 1 are only allowed for 2D masks and 4D inputs
+    mask_type = 2;
+  }
+
+  if (mask_type == 2) {
+      TORCH_CHECK(input_.sizes() == mask.sizes(),
+                  "For mask_type == 2 mask shape should match input shape")
+  } else if (mask_type == 1) {
+      // Padding mask of shape (B, L)
+      TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
+                  "For mask_type == 1 mask shape should be (B, L)");
+      if (dim_ != input_.dim() - 1) {
+            // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
+            // otherwise we need to expand the mask into a generic 4D one
+            mask = mask_.view({input_.sizes()[0], 1, 1, input_.sizes()[2]});
+            mask = mask.expand(input_.sizes()).contiguous();
+            mask_type = 2;
+      }
+  } else if (mask_type == 0) {
+      // Attention mask of shape (L, L)
+      TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
+                  "For mask_type == 0 mask shape should be (L, L)");
+      if (dim_ != input_.dim() - 1) {
+            // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
+            // otherwise we need to expand the mask into a generic 4D one
+            mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
+            mask = mask.expand(input_.sizes()).contiguous();
+            mask_type = 2;
+      }
+  }
+
   Tensor output = at::empty_like(input_, input_.options());
   auto input = input_.contiguous();
-  auto mask = mask_.contiguous();
   int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
   dim = maybe_wrap_dim(dim, input_.dim());
 
@@ -575,7 +643,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>(), mask_type_);
+            output, input, dim, mask.data_ptr<bool>(), mask_type);
       });
   return output;
 }

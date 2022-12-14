@@ -69,7 +69,10 @@ install_ubuntu() {
     unzip \
     vim \
     jq \
-    libtool
+    libtool \
+    vim \
+    unzip \
+    gdb
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
@@ -133,7 +136,8 @@ install_centos() {
     sudo \
     wget \
     unzip \
-    vim
+    vim \
+    gdb
 
   if [[ $OS_VERSION == 9 ]]
   then

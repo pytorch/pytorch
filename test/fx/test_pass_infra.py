@@ -169,5 +169,5 @@ class TestPassManager(TestCase):
         pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_div_pass, pass_fail])
 
         # Comment out this line to see the actual error message
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(Exception, "pass_fail"):
             pm(traced_m)

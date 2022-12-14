@@ -22,12 +22,5 @@ chown jenkins:jenkins /usr/local
 # TODO: Maybe we shouldn't
 echo 'jenkins ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/jenkins
 
-# Work around bug where devtoolset replaces sudo and breaks it.
-if [ -n "$DEVTOOLSET_VERSION" ]; then
-  SUDO=/bin/sudo
-else
-  SUDO=sudo
-fi
-
 # Test that sudo works
-$SUDO -u jenkins $SUDO -v
+sudo -u jenkins sudo -v

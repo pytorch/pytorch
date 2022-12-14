@@ -165,9 +165,6 @@ option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
     "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
-    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -187,20 +184,13 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
-option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
-# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
-# also exists in the environment.
-# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
-cmake_dependent_option(
-    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
-    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
-option(USE_ROCM "Use ROCm" ON)
+cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
@@ -295,6 +285,7 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
   USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
@@ -348,9 +339,6 @@ cmake_dependent_option(
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
-cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
-    "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
@@ -358,6 +346,8 @@ option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers f
 cmake_dependent_option(
     BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
     "NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
 
 if(USE_CCACHE)
@@ -556,6 +546,9 @@ if(MSVC)
 
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
+
+  string(APPEND CMAKE_CXX_FLAGS " /FS")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
@@ -575,6 +568,22 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
   set(BUILD_LAZY_TS_BACKEND OFF)
 
+  # Set -ffunction-sections and -fdata-sections so that each method has its own
+  # text section. This allows the linker to remove unused section when the flag
+  # -Wl,-gc-sections is provided at link time.
+  string(APPEND CMAKE_CXX_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_C_FLAGS " -ffunction-sections")
+  string(APPEND CMAKE_CXX_FLAGS " -fdata-sections")
+  string(APPEND CMAKE_C_FLAGS " -fdata-sections")
+
+  # Please note that the use of the following flags is required when linking
+  # against libtorch_cpu.a for mobile builds.
+  # -Wl,--whole-archive -ltorch_cpu -Wl,--no-whole-archive
+  #
+  # This allows global constructors to be included and run. Global
+  # constructors are used for operator/kernel registration with the
+  # PyTorch Dispatcher.
+
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
@@ -591,18 +600,15 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
-# It's disabled for caffe2 mobile library.
-if(INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
-  set(INTERN_BUILD_ATEN_OPS OFF)
-else()
-  set(INTERN_BUILD_ATEN_OPS ON)
+set(INTERN_BUILD_ATEN_OPS ON)
+
+if(NOT DEFINED USE_BLAS)
+  set(USE_BLAS ON)
 endif()
 
-# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
-# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
-# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# Build libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE)
   if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
   endif()
@@ -612,13 +618,18 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
+  set(BUILD_FUNCTORCH OFF)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
-  set(INTERN_USE_EIGEN_BLAS ON)
+  if(USE_BLAS)
+    set(INTERN_USE_EIGEN_BLAS ON)
+  else()
+    set(INTERN_USE_EIGEN_BLAS OFF)
+  endif()
   # Disable developing mobile interpreter for actual mobile build.
   # Enable it elsewhere to capture build error.
   set(INTERN_DISABLE_MOBILE_INTERP ON)
@@ -707,6 +718,16 @@ set(BUILD_ONEDNN_GRAPH OFF)
 
 include(cmake/Dependencies.cmake)
 
+# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+cmake_dependent_option(
+  USE_FLASH_ATTENTION
+  "Whether to build the flash_attention kernel for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+if(USE_FLASH_ATTENTION)
+    ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
+ENDIF()
+
+
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
   # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
   # one call, so instead CMake calls nvcc twice with && in between.
@@ -774,7 +795,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
-if(USE_LITE_INTERPRETER_PROFILER)
+if(BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
@@ -794,27 +815,27 @@ endif()
 # ---[ Build flags
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
-  if(NOT USE_CUDNN)
-    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
-    # separate PR to cudnn_frontend is needed to address this later on
-    append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
-  endif()
+  append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=deprecated-declarations" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -870,6 +891,8 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
     if(${USE_COLORIZE_OUTPUT})
     endif()
@@ -903,14 +926,16 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
-  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
-  # This doesn't work globally so we use the test on specific
-  # target_compile_options
 endif()
 
 if(USE_ASAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
+endif()
+
+if(USE_TSAN)
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=thread")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=thread")
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -1150,7 +1175,6 @@ endif()
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
-# ---[ Torch Deploy
-if(USE_DEPLOY)
-  add_subdirectory(torch/csrc/deploy)
+if(BUILD_FUNCTORCH)
+  add_subdirectory(functorch)
 endif()

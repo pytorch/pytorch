@@ -75,15 +75,17 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = grad.new_empty_strided(base.sizes(), base.strides());
+  auto result =
+      grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
   result.copy_(grad);
 
   at::Tensor grad_slice;
   if (view_fn) {
     grad_slice = view_fn(result);
   } else {
-    auto offset = view.storage_offset() - base.storage_offset();
-    grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+    auto offset = view.sym_storage_offset() - base.sym_storage_offset();
+    grad_slice =
+        result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
   }
 
   // Adding the missing nodes to the current graph's `exec_info`.

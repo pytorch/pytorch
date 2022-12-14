@@ -1,6 +1,8 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
+#include <c10/core/ScalarTypeToTypeMeta.h>
+
 namespace at {
 namespace native {
 namespace vulkan {
@@ -24,8 +26,8 @@ namespace api {
  * always created with the corresponding VkFormat. Consequently, kHalf tensors
  * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
  */
-VkFormat vk_format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
+VkFormat vk_format(const at::ScalarType dtype) {
+  switch (dtype) {
     case kFloat:
 #ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -570,20 +572,20 @@ MemoryAllocator::~MemoryAllocator() {
   vmaDestroyAllocator(allocator_);
 }
 
-VulkanImage MemoryAllocator::create_image3d(
+VulkanImage MemoryAllocator::create_image(
     const VkExtent3D& extents,
+    const VkFormat image_format,
+    const VkImageType image_type,
+    const VkImageViewType image_view_type,
     const VulkanImage::SamplerProperties& sampler_props,
     const VkSampler sampler,
-    const caffe2::TypeMeta dtype,
-    bool allow_transfer) {
+    const bool allow_transfer) {
   VkImageUsageFlags usage =
       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
   if (allow_transfer) {
     usage |=
         (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
   }
-
-  const VkFormat image_format = vk_format(dtype);
 
   const VulkanImage::MemoryProperties mem_props{
       DEFAULT_ALLOCATION_STRATEGY,
@@ -594,13 +596,13 @@ VulkanImage MemoryAllocator::create_image3d(
   };
 
   const VulkanImage::ImageProperties image_props{
-      VK_IMAGE_TYPE_3D,
+      image_type,
       image_format,
       extents,
   };
 
   const VulkanImage::ViewProperties view_props{
-      VK_IMAGE_VIEW_TYPE_3D,
+      image_view_type,
       image_format,
   };
 
@@ -659,6 +661,21 @@ VulkanBuffer MemoryAllocator::create_staging_buffer(const VkDeviceSize size) {
   };
 
   return VulkanBuffer(allocator_, size, mem_props);
+}
+
+VulkanBuffer MemoryAllocator::create_uniform_buffer(const VkDeviceSize size) {
+  const VulkanBuffer::MemoryProperties mem_props{
+      DEFAULT_ALLOCATION_STRATEGY |
+          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+      VMA_MEMORY_USAGE_AUTO,
+      0u,
+      0u,
+      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+  };
+
+  VulkanBuffer uniform_buffer(allocator_, size, mem_props);
+
+  return uniform_buffer;
 }
 
 //

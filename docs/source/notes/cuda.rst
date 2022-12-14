@@ -349,27 +349,42 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
+.. _cuda-memory-envvars:
+
+Environment variables
+^^^^^^^^^^^^^^^^^^^^^
+
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
-The behavior of caching allocator can be controlled via environment variable
+The behavior of the caching allocator can be controlled via the environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
 The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
-* ``max_split_size_mb`` prevents the allocator from splitting blocks larger
-  than this size (in MB). This can help prevent fragmentation and may allow
-  some borderline workloads to complete without running out of memory.
-  Performance cost can range from 'zero' to 'substatial' depending on
-  allocation patterns.  Default value is unlimited, i.e. all blocks can be
-  split. The :meth:`~torch.cuda.memory_stats` and
+* ``backend`` allows selecting the underlying allocator implementation.
+  Currently, valid options are ``native``, which uses PyTorch's native
+  implementation, and ``cudaMallocAsync``, which uses
+  `CUDA's built-in asynchronous allocator`_.
+  ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
+  ``backend`` applies to all devices used by the process, and can't be
+  specified on a per-device basis.
+* ``max_split_size_mb`` prevents the native allocator
+  from splitting blocks larger than this size (in MB). This can reduce
+  fragmentation and may allow some borderline workloads to complete without
+  running out of memory. Performance cost can range from 'zero' to 'substantial'
+  depending on allocation patterns.  Default value is unlimited, i.e. all blocks
+  can be split. The
+  :meth:`~torch.cuda.memory_stats` and
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+  ``max_split_size_mb`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``max_split_size_mb`` is ignored.
 * ``roundup_power2_divisions`` helps with rounding the requested allocation
   size to nearest power-2 division and making better use of the blocks. In
-  the current CUDACachingAllocator, the sizes are rounded up in multiple
+  the native CUDACachingAllocator, the sizes are rounded up in multiple
   of blocks size of 512, so this works fine for smaller sizes. However, this
   can be inefficient for large near-by allocations as each will go to different
   size of blocks and re-use of those blocks are minimized. This might create
@@ -379,6 +394,20 @@ Available options:
   the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
   will be rounded to 1280 as the nearest ceiling of power-2 division.
+  Specify a single value to apply for all allocation sizes or specify an
+  array of key value pairs to set power-2 division individually for each
+  power of two interval. For example to set 1 division for all allocations
+  under 256MB, 2 division for allocations between 256MB and 512MB, 4 divisions
+  for allocations between 512MB and 1GB and 8 divisions for any larger allocations,
+  set the knob value to: [256:1,512:2,1024:4,>:8].
+  ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
+* ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
+  for allocation requests larger than the threshold value (in MB). This can help
+  reduce the memory footprint when making large allocations that are expected to
+  be persistent or have a large lifetime.
+  ``roundup_bypass_threshold_mb`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``roundup_bypass_threshold_mb`` is ignored.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
@@ -387,6 +416,19 @@ Available options:
   80% of the total memory allocated to the GPU application). The algorithm prefers
   to free old & unused blocks first to avoid freeing blocks that are actively being
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
+  ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
+
+.. note::
+
+    Some stats reported by the
+    :ref:`CUDA memory management API<cuda-memory-management-api>`
+    are specific to ``backend:native``, and are not meaningful with
+    ``backend:cudaMallocAsync``.
+    See each function's docstring for details.
+
+.. _CUDA's built-in asynchronous allocator:
+    https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
 
 .. _cufft-plan-cache:
 
@@ -465,6 +507,26 @@ have a flag that can be used to disable CUDA, in combination with
         args.device = torch.device('cuda')
     else:
         args.device = torch.device('cpu')
+
+.. note::
+
+    When assessing the availability of CUDA in a given environment (:meth:`~torch.cuda.is_available`), PyTorch's default
+    behavior is to call the CUDA Runtime API method `cudaGetDeviceCount`_. Because this call in turn initializes the
+    CUDA Driver API (via `cuInit`_) if it is not already initialized, subsequent forks of a process that has run
+    :meth:`~torch.cuda.is_available` will fail with a CUDA initialization error.
+
+    One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
+    :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
+    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment (`nvmlDeviceGetCount_v2`_). If the
+    NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
+    :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
+
+    If NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard CUDA Runtime
+    API assessment and the aforementioned fork constraint will apply.
+
+    Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
+    Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
+    may succeed while later CUDA initialization fails.
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
 desired device.
@@ -546,6 +608,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
+
 .. _cuda-memory-pinning:
 
 Use pinned memory buffers
@@ -596,6 +659,15 @@ by GIL of Python interpreter.
 
 If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
+
+.. _cudaGetDeviceCount:
+    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g18808e54893cfcaafefeab31a73cc55f
+
+.. _cuInit:
+    https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3
+
+.. _nvmlDeviceGetCount_v2:
+    https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d
 
 .. _cuda-graph-semantics:
 

@@ -6,6 +6,10 @@
 
 #include <ATen/NumericUtils.h>
 
+#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#include <cuda_bf16.h>
+#endif
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -164,6 +168,7 @@ Atomic##NAME##IntegerImpl<DTYPE, sizeof(DTYPE)>()(address,                      
 }                                                                                                                      \
 
 ATOMIC_INTEGER_IMPL(Add)
+GPU_ATOMIC_INTEGER(Add, a || b, bool)
 
 // Don't instantiate gpuAtomicAdd with the macro as it seems non-standard (see int32, int64)
 static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
@@ -206,10 +211,6 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #endif
 }
 
-static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
-  *address = address && val;
-}
-
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
 #if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
@@ -222,10 +223,15 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 }
 
 static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
-  return AtomicFPOp<at::BFloat16>()(address, val,
-                                    [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return bsum + val;
-                                    });
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
+return AtomicFPOp<at::BFloat16>()(address, val,
+                                  [](at::BFloat16 bsum, at::BFloat16 val) {
+                                    return bsum + val;
+                                  });
+#else
+  __nv_bfloat16 r = atomicAdd(reinterpret_cast<__nv_bfloat16*>(address), *reinterpret_cast<__nv_bfloat16*>(&val));
+  return *reinterpret_cast<c10::BFloat16*>(&r);
+#endif
 }
 
 #if defined(CUDA_VERSION) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)

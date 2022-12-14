@@ -59,7 +59,8 @@ SavedVariable::SavedVariable(
 
     auto maybe_hooks = get_default_hooks();
 
-    if (maybe_hooks) {
+    // Avoid wrapped numbers from being leaked to the user
+    if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
       return;
@@ -143,7 +144,16 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
                 : grad_fn_;
 
   if (!is_leaf_ && !grad_fn) {
-    TORCH_INTERNAL_ASSERT(saved_for, "No grad_fn for non-leaf saved tensor");
+    // This issue was introduced when we added logic to save the original
+    // because now we rely on data_.grad_fn(), but can be unreliable if the
+    // autograd_meta of that saved tensor is cleared with an in-place detach.
+    // As a simple fix, we choose to disallow that behavior here even though
+    // it makes behavior inconsistent depending on whether you are saving
+    // input or output.
+    TORCH_CHECK(
+        saved_for,
+        "Trying to use a saved tensor that has been detached in-place, i.e. with .detach_()."
+        "This is not supported, please use out-of-place `.detach()` instead");
     grad_fn = std::move(saved_for);
   }
 

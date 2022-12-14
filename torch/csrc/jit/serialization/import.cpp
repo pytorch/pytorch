@@ -444,7 +444,7 @@ Module _load_jit_module_from_bytes(
     std::shared_ptr<CompilationUnit> cu,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
-  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecorgnized data format");
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
   auto format = getFileFormat(data.get());
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {

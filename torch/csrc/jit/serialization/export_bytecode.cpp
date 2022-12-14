@@ -212,7 +212,7 @@ mobile::Code compileGraphToMobileCode(
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
                 element_type->kind() != TypeKind::ClassType,
-                "Returining a list or dictionary with pytorch class type ",
+                "Returning a list or dictionary with pytorch class type ",
                 "is not supported in mobile module "
                 "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
                 "Workaround: instead of using pytorch class as their element type, ",

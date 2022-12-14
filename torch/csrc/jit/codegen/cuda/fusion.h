@@ -53,6 +53,7 @@ class WelfordResult;
 
 class SegmentCandidateFinder;
 class SegmentedFusion;
+class KernelArgumentHolder;
 
 //! Fusion Guard is our "context manager". It holds the actrive fusion and
 //! allows it to be accessed anywhere through FusionGuard::getCurFusion()
@@ -135,6 +136,10 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! Lower the fusion and print a kernel
   void printKernel(DataType index_type = DataType::Int);
 
+  //! Lower the fusion and evaluate bank conflict info
+  std::unordered_map<std::string, std::pair<int, int>> bankConflictInfo(
+      DataType index_type = DataType::Int);
+
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.
   std::vector<Expr*> exprs();
@@ -168,18 +173,19 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   bool isStochastic();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
-  std::unique_ptr<SegmentedFusion> segment(
-      const at::ArrayRef<at::IValue>& inputs);
+  std::unique_ptr<SegmentedFusion> segment(const KernelArgumentHolder& args);
 
   const auto& inputs() const {
     return inputs_;
   }
 
+  std::vector<Val*> inputsAndCreated();
+
   const auto& outputs() const {
     return outputs_;
   }
 
-  std::vector<Val*> getTerminatingOutputs();
+  std::vector<Val*> getTerminatingOutputs() const;
 
   // Aliasing output to input value, this is a WAR to allow inplace update on
   // input tensor.

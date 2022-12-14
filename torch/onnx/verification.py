@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -22,10 +22,15 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import _beartype
+from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
+_NumericType = Union[Number, torch.Tensor, np.ndarray]
 
+
+@_beartype.beartype
 def _flatten_tuples(elem):
     flattened = []
     for t in elem:
@@ -36,7 +41,8 @@ def _flatten_tuples(elem):
     return flattened
 
 
-def _to_numpy(elem):
+# TODO(justinchuby): Add type checking by narrowing down the return type when input is None
+def _to_numpy(elem) -> Union[list, np.ndarray]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -49,12 +55,13 @@ def _to_numpy(elem):
     elif isinstance(elem, dict):
         flattened = []
         for k in elem:
-            flattened += [_to_numpy(k)] + [_to_numpy(elem[k])]
+            flattened.extend([_to_numpy(k), _to_numpy(elem[k])])
         return flattened
     return elem
 
 
-def _inline_flatten_list(inputs, res_list):
+@_beartype.beartype
+def _inline_flatten_list(inputs, res_list) -> list:
     for i in inputs:
         res_list.append(i) if not isinstance(
             i, (list, tuple)
@@ -62,7 +69,8 @@ def _inline_flatten_list(inputs, res_list):
     return res_list
 
 
-def _unpack_to_numpy(values, cast_onnx_accepted=True):
+@_beartype.beartype
+def _unpack_to_numpy(values, cast_onnx_accepted=True) -> list:
     value_unpacked = []
     for value in values:
         value_unpacked.extend(
@@ -71,6 +79,7 @@ def _unpack_to_numpy(values, cast_onnx_accepted=True):
     return [_to_numpy(v) for v in value_unpacked]
 
 
+@_beartype.beartype
 def _run_ort(ort_session, inputs):
     kw_inputs = {}
     if inputs and isinstance(inputs[-1], dict):
@@ -92,6 +101,7 @@ def _run_ort(ort_session, inputs):
     return ort_outs
 
 
+@_beartype.beartype
 def _ort_session(
     model: Union[str, io.BytesIO], ort_providers: Sequence[str] = _ORT_PROVIDERS
 ):
@@ -115,9 +125,10 @@ def _ort_session(
     return ort_session
 
 
+@_beartype.beartype
 def _compare_ort_pytorch_outputs(
-    ort_outs: Sequence[np.ndarray],
-    pt_outs: Sequence[torch.Tensor],
+    ort_outs: Union[Sequence[_NumericType], Sequence],
+    pt_outs: Optional[Union[_NumericType, Sequence[_NumericType], Sequence, Dict]],
     rtol: float,
     atol: float,
     check_shape: bool,
@@ -188,9 +199,14 @@ def _compare_ort_pytorch_outputs(
                         f"within acceptable range {acceptable_error_percentage}."
                     )
                     continue
+            if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
+                warnings.warn("ONNX output is quantized")
+            if pt_out.dtype == np.uint8 or pt_out.dtype == np.int8:
+                warnings.warn("PyTorch output is quantized")
             raise
 
 
+@_beartype.beartype
 def _prepare_input_for_pytorch(args, kwargs):
     """Prepare input for PyTorch model execution.
 
@@ -217,6 +233,7 @@ def _prepare_input_for_pytorch(args, kwargs):
     return args, kwargs
 
 
+@_beartype.beartype
 def _prepare_input_for_export(args, kwargs):
     """Prepare input for ONNX model export.
 
@@ -241,6 +258,7 @@ def _prepare_input_for_export(args, kwargs):
     return onnx_inputs
 
 
+@_beartype.beartype
 def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
     """Prepare input for ONNX model execution in ONNX Runtime.
 
@@ -266,6 +284,7 @@ def _prepare_input_for_ort(args, kwargs, remained_onnx_input_idx, flatten):
         return onnx_inputs
 
 
+@_beartype.beartype
 def _try_clone_model(model):
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -277,6 +296,7 @@ def _try_clone_model(model):
         return model
 
 
+@_beartype.beartype
 def _compare_ort_pytorch_model(
     model,
     ort_session,
@@ -301,6 +321,7 @@ def _compare_ort_pytorch_model(
             equal up to specified precision.
     """
 
+    @_beartype.beartype
     def compare_ort_pytorch_model_with_input(input_args, input_kwargs):
         pt_args, pt_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
         # TODO: remove this and treat mutating model separately. See #77679
@@ -333,6 +354,7 @@ def _compare_ort_pytorch_model(
 class _GraphDiff:
     """A class to represent the difference between two graphs."""
 
+    @_beartype.beartype
     def __init__(self, graph_a: _C.Graph, graph_b: _C.Graph):
         """Construct a _GraphDiff object.
 
@@ -343,13 +365,16 @@ class _GraphDiff:
         self.graph_a = graph_a
         self.graph_b = graph_b
 
+    @_beartype.beartype
     def __str__(self):
         """See function :func:`diff_report`."""
         return self.diff_report()
 
+    @_beartype.beartype
     def _indent(self, lines: str) -> str:
         return "\n".join(["\t" + line for line in lines.splitlines()])
 
+    @_beartype.beartype
     def diff_report(self) -> str:
         """Return a string representation of the graph difference.
 
@@ -399,6 +424,7 @@ class _GraphDiff:
         return "\n".join(graph_diff_report)
 
 
+@_beartype.beartype
 def _check_graph_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -440,6 +466,7 @@ def _check_graph_diff(
     return ""
 
 
+@_beartype.beartype
 def _traced_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -467,6 +494,7 @@ def _traced_graph_from_model(
         return jit_graph
 
 
+@_beartype.beartype
 def _onnx_graph_from_model(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     args: Tuple[Any, ...],
@@ -495,7 +523,7 @@ def _onnx_graph_from_model(
     output_names = export_options.output_names
 
     if opset_version is None:
-        opset_version = _constants.onnx_default_opset
+        opset_version = _constants.ONNX_DEFAULT_OPSET
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
@@ -534,6 +562,7 @@ def _onnx_graph_from_model(
         return onnx_graph
 
 
+@_beartype.beartype
 def check_export_model_diff(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
     test_input_groups: Sequence[Tuple[Tuple[Any, ...], Mapping[str, Any]]],
@@ -577,9 +606,10 @@ def check_export_model_diff(
     )
 
 
+@_beartype.beartype
 def verify(
     model: Union[torch.nn.Module, torch.jit.ScriptModule],
-    input_args: Tuple[Any, ...],
+    input_args: Union[torch.Tensor, Tuple[Any, ...]],
     input_kwargs: Optional[Mapping[str, Any]] = None,
     do_constant_folding: bool = True,
     dynamic_axes: Optional[
@@ -593,7 +623,9 @@ def verify(
     verbose: bool = False,
     fixed_batch_size: bool = False,
     use_external_data: bool = False,
-    additional_test_inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
+    additional_test_inputs: Optional[
+        Sequence[Union[torch.Tensor, Tuple[Any, ...]]]
+    ] = None,
     remained_onnx_input_idx: Optional[Sequence[int]] = None,
     flatten: bool = True,
     ignore_none: bool = True,

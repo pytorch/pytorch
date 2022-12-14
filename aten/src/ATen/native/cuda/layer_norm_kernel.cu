@@ -680,7 +680,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
-  
+
   if (j < N) {
     constexpr int unroll_factor = 8;
 

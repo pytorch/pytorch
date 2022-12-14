@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 

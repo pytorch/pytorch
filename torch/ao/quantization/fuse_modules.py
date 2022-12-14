@@ -11,6 +11,12 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 from typing import List, Optional
 
+__all__ = [
+    "fuse_known_modules",
+    "fuse_modules",
+    "fuse_modules_qat",
+]
+
 # Generalization of getattr
 def _get_module(model, submodule_key):
     tokens = submodule_key.split('.')
@@ -154,7 +160,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         modules_to_fuse,
         is_qat=False,
         inplace=inplace,
-        fuser_func=fuse_known_modules,
+        fuser_func=fuser_func,
         fuse_custom_config_dict=None)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
@@ -165,5 +171,5 @@ def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_know
         modules_to_fuse,
         is_qat=True,
         inplace=inplace,
-        fuser_func=fuse_known_modules,
+        fuser_func=fuser_func,
         fuse_custom_config_dict=None)

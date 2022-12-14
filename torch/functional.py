@@ -4,6 +4,7 @@ from typing import (
 
 import torch
 from torch._C import _add_docstr
+import torch.backends.opt_einsum as opt_einsum
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -205,7 +206,7 @@ def einsum(*args: Any) -> Tensor:
     Equation:
 
         The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
-        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        the input :attr:`operands` in the same order as the dimensions, separating subscripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
         repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
@@ -238,9 +239,19 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function does not optimize the given expression, so a different formula for the same computation may
-        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-        can optimize the formula for you.
+        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
+        consume less memory by optimizing contraction order. This optimization occurs when there are at least three
+        inputs, since the order does not matter otherwise. Note that finding _the_ optimal path is an NP-hard problem,
+        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
+        the default order is to contract from left to right.
+
+        To bypass this default behavior, add the following line to disable the usage of opt_einsum and skip path
+        calculation: `torch.backends.opt_einsum.enabled = False`
+
+        To specify which strategy you'd like for opt_einsum to compute the contraction path, add the following line:
+        `torch.backends.opt_einsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
+        'optimal'. Disclaimer that the runtime of 'optimal' is factorial in the number of inputs! See more details in
+        the opt_einsum documentation (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
     .. note::
 
@@ -361,7 +372,18 @@ def einsum(*args: Any) -> Tensor:
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+    if len(operands) <= 2 or not opt_einsum.enabled:
+        # the path for contracting 0 or 1 time(s) is already optimized
+        # or the user has disabled using opt_einsum
+        return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+
+    path = None
+    if opt_einsum.is_available():
+        _opt_einsum = opt_einsum.get_opt_einsum()
+        tupled_path = _opt_einsum.contract_path(equation, *operands, optimize=opt_einsum.strategy)[0]
+        # flatten path for dispatching to C++
+        path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.
@@ -590,6 +612,15 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             a real tensor with an extra last dimension for the real and
             imaginary components.
 
+            .. versionchanged:: 1.14.0
+               ``return_complex`` is now a required argument for real inputs,
+               as the default is being transitioned to ``True``.
+
+            .. deprecated:: 1.14.0
+               ``return_complex=False`` is deprecated, instead use ``return_complex=True``
+               Note that calling :func:`torch.view_as_real` on the output will
+               recover the deprecated output format.
+
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
 
@@ -647,14 +678,13 @@ of right padding. These additional values could be zeros or a reflection of the 
 IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
 Args:
-    input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
-        can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
-        (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
-        dimension is optional.
+    input (Tensor): The input tensor. Expected to be in the format of :func:`~torch.stft`,
+        output. That is a complex tensor of shape (``channel``, ``fft_size``, ``n_frame``),
+        where the ``channel`` dimension is optional.
 
-        .. deprecated:: 1.8.0
-            Real input is deprecated, use complex inputs as returned by
-            ``stft(..., return_complex=True)`` instead.
+        .. versionchanged:: 1.14.0
+            Real datatype inputs are no longer supported. Input must now have a
+            complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
     hop_length (Optional[int]): The distance between neighboring sliding window frames.
         (Default: ``n_fft // 4``)
@@ -1363,10 +1393,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         Its documentation and behavior may be incorrect, and it is no longer
         actively maintained.
 
-        Use :func:`torch.linalg.norm`, instead, or :func:`torch.linalg.vector_norm`
-        when computing vector norms and :func:`torch.linalg.matrix_norm` when
-        computing matrix norms. Note, however, the signature for these functions
-        is slightly different than the signature for torch.norm.
+        Use :func:`torch.linalg.vector_norm` when computing vector norms and
+        :func:`torch.linalg.matrix_norm` when computing matrix norms.
+        For a function with a similar behavior as this one see :func:`torch.linalg.norm`.
+        Note, however, the signature for these functions is slightly different than the
+        signature for ``torch.norm``.
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
@@ -1416,8 +1447,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. note::
         Even though ``p='fro'`` supports any number of dimensions, the true
         mathematical definition of Frobenius norm only applies to tensors with
-        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
-        with the mathematical definition, since it can only be applied across
+        exactly two dimensions. :func:`torch.linalg.matrix_norm` with ``ord='fro'``
+        aligns with the mathematical definition, since it can only be applied across
         exactly two dimensions.
 
     Example::
@@ -1450,6 +1481,42 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+
+    # NB. All the repeated code and weird python is to please TorchScript.
+    #     For a more compact implementation see the relevant function in `_refs/__init__.py`
+
+    # We don't do this for MPS or sparse tensors
+    if input.layout == torch.strided and input.device.type in ("cpu", "cuda", "meta"):
+        if dim is not None:
+            if isinstance(dim, int):
+                _dim = [dim]
+            else:
+                _dim = dim
+        else:
+            _dim = None  # type: ignore[assignment]
+
+        if isinstance(p, str):
+            if p == "fro" and (dim is None or isinstance(dim, int) or len(dim) <= 2):
+                if out is None:
+                    return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype)
+                else:
+                    return torch.linalg.vector_norm(input, 2, _dim, keepdim, dtype=dtype, out=out)
+
+            # Here we either call the nuclear norm, or we call matrix_norm with some arguments
+            # that will throw an error
+            if _dim is None:
+                _dim = list(range(input.ndim))
+            if out is None:
+                return torch.linalg.matrix_norm(input, p, _dim, keepdim, dtype=dtype)
+            else:
+                return torch.linalg.matrix_norm(input, p, _dim, keepdim, dtype=dtype, out=out)
+        else:
+            # NB. p should be Union[str, number], not Optional!
+            _p = 2.0 if p is None else p
+            if out is None:
+                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype)
+            else:
+                return torch.linalg.vector_norm(input, _p, _dim, keepdim, dtype=dtype, out=out)
 
     ndim = input.dim()
 

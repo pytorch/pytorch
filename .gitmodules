@@ -153,3 +153,6 @@
 	path = third_party/tensorpipe
 	url = https://github.com/ROCmSoftwarePlatform/tensorpipe.git
 	branch = tp_rocm_54
+[submodule "third_party/cutlass"]
+	path = third_party/cutlass
+	url = https://github.com/NVIDIA/cutlass.git

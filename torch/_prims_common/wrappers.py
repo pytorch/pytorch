@@ -4,6 +4,7 @@ from torch._prims_common import (
     NumberType,
     TensorLike,
     TensorLikeType,
+    ShapeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
@@ -11,8 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
-from functools import wraps, reduce
-import operator
+from functools import wraps
 import warnings
 from itertools import chain
 
@@ -28,7 +28,7 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
     # Passthrough None because some functions wrapped with type promotion
@@ -129,24 +129,21 @@ class elementwise_type_promotion_wrapper(object):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape):
-    if out.numel() == 0:
-        return out.resize_(shape)
-
-    if out.numel() != reduce(operator.mul, shape, 1):
-        msg = (
-            "An output with one or more elements was resized since it had shape {0} "
-            "which does not match the required output shape {1}. "
-            "This behavior is deprecated, and in a future PyTorch release outputs will not "
-            "be resized unless they have zero elements. "
-            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).".format(
-                str(out.shape), str(shape)
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+    # If the shapes are correct there's nothing to do
+    if utils.same_shape(out.shape, shape):
+        return out
+    else:
+        if out.numel() != 0:
+            msg = (
+                f"An output with one or more elements was resized since it had shape {str(out.shape)} "
+                "which does not match the required output shape {str(shape)}. "
+                "This behavior is deprecated, and in a future PyTorch release outputs will not "
+                "be resized unless they have zero elements. "
+                "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
             )
-        )
-        warnings.warn(msg)
+            warnings.warn(msg)
         return out.resize_(shape)
-
-    return out
 
 
 def _safe_copy_out(
@@ -164,7 +161,7 @@ def _safe_copy_out(
         utils.check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
-            "but got {copy_to.dtype} instead",
+            f"but got {copy_to.dtype} instead",
         )
     else:
         utils.check(
