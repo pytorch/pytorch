@@ -36,7 +36,7 @@ def _change_class(module, params_and_buffers) -> None:
     module._orig_class = cls
 
 
-def _create_tied_weights_map(module, names):
+def _create_tied_weights_map(module, params_and_buffers):
     # creates a weight map of {tied_name: name_given_by_user} for all weights where one of their tied weights is passed
     #
     # The basic algorithm looks like:
@@ -47,14 +47,15 @@ def _create_tied_weights_map(module, names):
     #   - then loop through the values of this map (name_given_by_user and set(all_tied_names))
     #     - for each element of all_tied_names, add {tied_name: name_given_by_user} to a new map
 
+    names = params_and_buffers.keys()
     weight_to_name_and_tied_names: Dict[torch.Tensor, Tuple[Optional[str], Set[str]]] = {}
 
     def add_to_name_map(name, t):
         if t in weight_to_name_and_tied_names:
-            if name in names and weight_to_name_and_tied_names[t][0]:
-                first_seen_name = weight_to_name_and_tied_names[t][0]
+            first_seen_name = weight_to_name_and_tied_names[t][0]
+            if name in names and first_seen_name and params_and_buffers[name] is not params_and_buffers[first_seen_name]:
                 raise ValueError(f"functional_call got values for both {name} and {first_seen_name}, which are tied.")
-            if name in names:
+            elif name in names:
                 weight_to_name_and_tied_names[t] = (name, weight_to_name_and_tied_names[t][1])
             else:
                 weight_to_name_and_tied_names[t][1].add(name)
@@ -78,7 +79,7 @@ def _create_tied_weights_map(module, names):
 
 
 def _create_swap_params(params_and_buffers):
-    def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Tensor) -> None:
+    def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Optional[Tensor]) -> None:
         # Changes the module class to get a new __getattr__ dunder method
         # that looks for the reparametrized tensor
         if hasattr(module, "_attr_to_path"):
@@ -101,9 +102,9 @@ def _remove_swap(module, name: str, full_path: str) -> None:
 def _reparametrize_module(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
-    tie_weights: bool,
+    tie_weights: bool = False,
 ) -> Iterator[None]:
-    tied_weights_map = _create_tied_weights_map(module, parameters_and_buffers.keys()) if tie_weights else {}
+    tied_weights_map = _create_tied_weights_map(module, parameters_and_buffers) if tie_weights else {}
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
@@ -111,7 +112,7 @@ def _reparametrize_module(
     for tied_name, user_given_name in tied_weights_map.items():
         _apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
-            module, tied_name.split("."), user_given_name, (torch.empty(()),))
+            module, tied_name.split("."), user_given_name, (None,))
     try:
         yield
     finally:
@@ -139,7 +140,7 @@ def functional_call(
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
-    tie_weights: bool = True,
+    tie_weights: bool = False,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.

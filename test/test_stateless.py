@@ -197,9 +197,8 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        out = stateless.functional_call(module, parameters, x)
-        # x * weight + bias + tied_bias + buffer + tied_buffer
-        self.assertEqual(out, x * 2. + 5. + 5. + 3. + 3.)
+        out = stateless.functional_call(module, parameters, x, tie_weights=True)
+        self.assertEqual(out, x * weight + bias + bias + buffer + buffer)
 
     def test_reparamertize_tie_some_weights(self):
         module = MockTiedModule()
@@ -209,9 +208,8 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.weight': weight,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        out = stateless.functional_call(module, parameters, x)
-        # x * weight + bias + tied_bias + buffer + tied_buffer
-        self.assertEqual(out, x * 2. + module.l1.bias + module.tied_bias + 3. + 3.)
+        out = stateless.functional_call(module, parameters, x, tie_weights=True)
+        self.assertEqual(out, x * 2. + module.l1.bias + module.tied_bias + buffer + buffer)
 
     def test_tied_weights_errors(self):
         module = MockTiedModule()
@@ -223,22 +221,41 @@ class TestStatelessFunctionalAPI(TestCase):
                       'l1.bias': bias,
                       'buffer': buffer}
         x = torch.randn(1, 1)
-        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x))
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=True))
 
         # if tied values are the same tensors, shouldn't warn
         parameters['tied_bias'] = bias
         parameters['tied_buffer'] = buffer
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=True))
         del parameters['tied_bias']
         del parameters['tied_buffer']
 
         with self.assertRaisesRegex(ValueError, "functional_call got values for both (l1.bias|tied_bias)"):
             parameters['tied_bias'] = torch.tensor([5.0])
-            stateless.functional_call(module, parameters, x)
+            stateless.functional_call(module, parameters, x, tie_weights=True)
         del parameters['tied_bias']
 
         with self.assertRaisesRegex(ValueError, "functional_call got values for both (buffer|tied_buffer)"):
             parameters['tied_buffer'] = torch.tensor([5.0])
-            stateless.functional_call(module, parameters, x)
+            stateless.functional_call(module, parameters, x, tie_weights=True)
+
+
+    def test_tied_weights_no_error_without_kwarg(self):
+        module = MockTiedModule()
+        weight = torch.tensor([[1.0]],)
+        bias = torch.tensor([0.0])
+        buffer = torch.tensor([0.0])
+
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        x = torch.randn(1, 1)
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
+        parameters['tied_bias'] = torch.tensor([5.0])
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
+        del parameters['tied_bias']
+        parameters['tied_buffer'] = torch.tensor([5.0])
+        self.assertNotWarn(lambda: stateless.functional_call(module, parameters, x, tie_weights=False))
 
 
     def test_setattr(self):

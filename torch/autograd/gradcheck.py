@@ -109,6 +109,24 @@ def _iter_tensor(x_tensor):
         elif x_tensor.layout is torch.sparse_csc:
             x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True).t()
             x_values = x_tensor.values()
+        elif x_tensor.layout is torch.sparse_bsr:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.crow_indices(), x_tensor.col_indices()) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
+        elif x_tensor.layout is torch.sparse_bsc:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
         else:
             raise NotImplementedError(f'_iter_tensor for {x_tensor.layout} input')
         x_stride = get_stride(x_size)
@@ -819,7 +837,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
         except RuntimeError as ex:
             # Rethrow to provide a better error message
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG_FWD_AD}') from ex
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
             if torch.allclose(res, exp):
@@ -861,7 +879,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
             # autograd.grad instead of the C++ traceback of what line in the
             # backward formula
             raise GradcheckError(
-                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}')
+                f'While computing batched gradients, got: {ex}\n\n{FAILED_BATCHED_GRAD_MSG}') from ex
 
     for input_idx, (res, exp) in enumerate(zip(result, expected)):
         if torch.allclose(res, exp):
@@ -977,12 +995,12 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
         try:
             grads_input = torch.autograd.grad(output_to_check, diff_input_list,
                                               grads_output, allow_unused=True)
-        except RuntimeError:
+        except RuntimeError as e:
             warn_bc_breaking()
             raise GradcheckError((
                 'Expected backward function to handle undefined output grads. '
                 'Please look at "Notes about undefined output gradients" in '
-                '"tools/autograd/derivatives.yaml"'))
+                '"tools/autograd/derivatives.yaml"')) from e
 
         for gi, i in zip(grads_input, diff_input_list):
             if (gi is not None) and (not gi.eq(0).all()):

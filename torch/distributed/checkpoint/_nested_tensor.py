@@ -19,7 +19,7 @@ from torch.distributed._shard.sharded_tensor.metadata import (
 )
 
 
-from .traverse import (
+from ._traverse import (
     OBJ_PATH,
     traverse_state_dict,
     set_element,

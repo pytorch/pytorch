@@ -69,6 +69,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b
 
     @make_test
+    def test_add_(a, b):
+        a_copy = torch.tensor(a)
+        return a_copy.add_(b, alpha=5.0)
+
+    @make_test
+    def test_addcdiv(a, b, c):
+        # dynamo decomposes this to avoid a graph break when
+        # the value kwarg is populated
+        return torch.addcdiv(a, b, c, value=5.0)
+
+    @make_test
+    def test_addcdiv_(a, b, c):
+        a_copy = torch.tensor(a)
+        return a_copy.addcdiv_(b, c, value=5.0)
+
+    @make_test
     def test_is_not_null(a, b):
         if a is not None and b is not None:
             return a + b
@@ -671,6 +687,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         m = [1, 2, 3, 4]
         m[1:] = [6] * (len(m) - 1)
         return x + 1
+
+    @make_test
+    def test_distributed_is_available(x):
+        if torch.distributed.is_available():
+            return x + 1
+        else:
+            return x - 1
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "requires distributed package"
+    )
+    @make_test
+    def test_distributed_is_initialized(x):
+        if torch.distributed.is_initialized():
+            return x + 1
+        else:
+            return x - 1
 
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
