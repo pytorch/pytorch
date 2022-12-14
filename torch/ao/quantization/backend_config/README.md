@@ -34,7 +34,7 @@ Tuple patterns are treated as sequential patterns, and currently only tuples of 
 
 ### Advanced Pattern Specification
 
-The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative "reverse nested tuple" pattern format, enabled through `BackendPatternConfig()._set_pattern_complex_format(...)`. Note that this format will be replaced in a future version of PyTorch with the one used by `torch.fx`'s subgraph rewriter.
+The above format should satisfy the vast majority of use cases. However, it does not handle more complex scenarios such as graph patterns. For these use cases, the BackendConfig API offers an alternative "reverse nested tuple" pattern format, enabled through `BackendPatternConfig()._set_pattern_complex_format(...)`. Note that this format is deprecated and will be replaced in a future version of PyTorch.
 ```
 operator = module_type | functional | torch op | native op | MatchAllNode
 Pattern = (operator, Pattern, Pattern, ...) | operator
