@@ -69,8 +69,13 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        fake_mode=None,
     ):
         super().__init__(gm)
+        if fake_mode is None:
+            self.fake_mode = torch._subclasses.FakeTensorMode()
+        else:
+            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
