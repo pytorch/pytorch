@@ -1,4 +1,4 @@
-// (c) Meta Platforms, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
 //
 // This is a very basic knob implementation that purely uses command line flags.
 // This can be replaced with a more sophisticated implementation for use in
