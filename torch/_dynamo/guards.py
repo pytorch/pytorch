@@ -1,6 +1,4 @@
 import collections
-import dataclasses
-import enum
 import logging
 import math
 import os
@@ -16,6 +14,8 @@ import numpy as np
 import sympy
 
 import torch
+
+from torch._guards import Guard, GuardBuilderBase, GuardSource
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
@@ -55,141 +55,6 @@ CLOSURE_VARS = collections.OrderedDict(
 )
 
 
-class GuardSource(enum.Enum):
-    LOCAL = 0
-    GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
-    CONSTANT = 4
-    RANDOM_VALUE = 5
-    SHAPE_ENV = 6
-
-    def select(self, locals_, globals_):
-        if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
-            return locals_
-        if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
-            return globals_
-        raise NotImplementedError()
-
-    def is_nn_module(self) -> bool:
-        return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
-
-    def is_local(self):
-        return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
-
-
-@dataclasses.dataclass
-class Guard:
-    # The name of a Guard specifies what exactly it is the guard is guarding
-    # on.  The meaning of the name is dependent on the create_fn; you must
-    # look at the use-site inside create_fn to know what name means.
-    #
-    # That being said, although you might think this is just a "name", name is
-    # usually an arbitrary Python expression that will be evaluated with all
-    # globals (and locals, if you create a LOCAL guard) to extract the Python
-    # object that we want to perform guard tests on.  This evaluation
-    # typically happens in GuardBuilder.eval.  In these cases, name is
-    # typically produced by Source.name() (not to be confused with
-    # GuardSource)--morally, we could have stored a Source here.
-    #
-    # Occasionally, name is not a valid Python expression; sometimes
-    # it is meaningless.  Example create_fns that are like this include
-    # GRAD_MODE and SYMBOL_MATCH.
-    name: str
-    source: GuardSource
-    create_fn: Callable[["GuardBuilder", "Guard"], None]
-    is_volatile: bool = False
-
-    # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[List[str]] = None
-    code_list: Optional[List[str]] = None
-    obj_weakref: Optional[object] = None
-    guarded_class_weakref: Optional[type] = None
-
-    def __hash__(self):
-        return hash((self.name, self.source, id(self.create_fn)))
-
-    def sort_key(self):
-        return (
-            self.source.value if self.source else -1,
-            len(self.name),
-            self.name,
-            self.create_fn.__code__.co_firstlineno,
-        )
-
-    def __lt__(self, other):
-        return self.sort_key() < other.sort_key()
-
-    @staticmethod
-    def weakref_to_str(obj_weakref):
-        """
-        This is a workaround of a Python weakref bug.
-
-        `obj_weakref` is instance returned by `weakref.ref`,
-        `str(obj_weakref)` is buggy if the original obj overrides __getattr__, e.g:
-
-            class MyConfig(dict):
-                def __getattr__(self, x):
-                    return self[x]
-
-            obj = MyConfig(offset=5)
-            obj_weakref = weakref.ref(obj)
-            str(obj_weakref)  # raise error: KeyError: '__name__'
-        """
-        if isinstance(obj_weakref, weakref.ReferenceType):
-            obj = obj_weakref()
-            if obj is not None:
-                return f"<weakref at {hex(id(obj_weakref))}; to '{obj.__class__.__name__}' at {hex(id(obj))}>"
-            else:
-                return f"<weakref at {hex(id(obj_weakref))}; dead>"
-        else:
-            return str(obj_weakref)
-
-    def __str__(self):
-        s = f"""
-            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
-            {{
-                'guard_types': {self.guard_types},
-                'code': {self.code_list},
-                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
-                'guarded_class': {self.guarded_class_weakref}
-            }}
-            """
-        return s
-
-    def create(self, local_builder: "GuardBuilder", global_builder: "GuardBuilder"):
-        return self.create_fn(self.source.select(local_builder, global_builder), self)
-
-    def is_nn_module(self):
-        return self.source.is_nn_module()
-
-    def is_local(self):
-        return self.source.is_local()
-
-    def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
-        if not self.guard_types:
-            self.guard_types = list()
-
-        self.guard_types.append(guard_type)
-
-        assert self.guarded_class_weakref in (
-            guarded_class,
-            None,
-        ), "Guarded class id must be identical, or None"
-        self.guarded_class_weakref = guarded_class
-
-        if not self.code_list:
-            self.code_list = code_list
-        else:
-            self.code_list.extend(code_list)
-
-        assert self.obj_weakref in (
-            obj_weakref,
-            None,
-        ), "Guarded object must be identical, or None"
-        self.obj_weakref = obj_weakref
-
-
 def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
@@ -208,7 +73,7 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
-class GuardBuilder:
+class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
         id_ref: Callable[[Type[object]], str],
@@ -565,11 +430,11 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict[str, object]] = None,
         f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
+        guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
@@ -645,10 +510,13 @@ class CheckFunctionManager:
         # shape variables to sources from GraphArgs.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
-        # TODO: What about grapharg pruning?  This could be problematic if we
-        # guarded on a tensor that isn't actually used as an input in the end.
         if self.output_graph and self.output_graph.shape_env:
-            graphargs = self.output_graph.graphargs
+            # NB: use orig_graphargs, as we can have created guards for
+            # inputs that are ultimately unused in the graph, but we
+            # are still on the hook for guarding on them (because, e.g.,
+            # Dynamo may have gone down a different conditional branch
+            # because of it.)
+            graphargs = self.output_graph.orig_graphargs
             expr_as_str = self.output_graph.shape_env.codegen_guards(
                 [a.fake_tensor for a in graphargs if a.is_tensor],
                 [a.source.name() for a in graphargs if a.is_tensor],
