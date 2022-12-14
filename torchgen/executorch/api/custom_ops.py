@@ -133,7 +133,7 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
         },
     )
     cpu_fm.write_with_template(
-        "RegisterKernelStub.cpp",
+        f"Register{dispatch_key}Stub.cpp",
         "RegisterDispatchKeyCustomOps.cpp",
         lambda: {
             "ops_headers": "",
