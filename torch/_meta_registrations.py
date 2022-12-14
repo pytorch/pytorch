@@ -1939,8 +1939,8 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 
 
 @register_meta(c10d.traceable_allreduce)
-def allreduce__meta(tensors):
-    return [torch.empty_like(t) for t in tensors]
+def allreduce__meta(x):
+    return torch.empty_like(x)
 
 
 # We must also trigger meta registrations from PrimTorch ref

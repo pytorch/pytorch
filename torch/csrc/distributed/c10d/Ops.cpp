@@ -45,8 +45,8 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
 // replacing it in part, this is due to it being difficult to construct
 // ProcessGroup or ReduceOp in python in an acceptable way to pass them to the
 // dispatcher.  (Pybind classes, which are available, do not work)
-std::vector<at::Tensor> traceable_allreduce(at::TensorList tensors) {
-  return tensors.vec();
+at::Tensor traceable_allreduce(at::Tensor x) {
+  return x;
 }
 
 c10::intrusive_ptr<Work> allreduce_coalesced_(
