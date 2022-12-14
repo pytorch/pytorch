@@ -27,12 +27,10 @@ def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_RUNTIME_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch._assert
@@ -42,12 +40,10 @@ def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 RELU_ACCURACY_ERROR_BACKEND = """\
-import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
 def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):
-    gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             node.target = torch.add
@@ -313,6 +309,8 @@ class MinifierTests(MinifierTestBase):
         self.assertIsNotNone(match)
         self.assertLess(match.group(0).count("\n"), 5)
 
+    # Test that dynamo config can be saved and restored, especially
+    # log_level (changing it should affect logger levels).
     def test_dynamo_config_serialization(self):
         run_code = textwrap.dedent(
             """\
@@ -329,6 +327,8 @@ class MinifierTests(MinifierTestBase):
         proc, _ = self._run_test_code(run_code)
         self.assertEqual(proc.returncode, 0)
 
+    # Test that launched minifier processes have the same config as
+    # the original process.
     def _test_after_dynamo_with_modified_config(
         self, repro_level, backend_code, error_name
     ):
