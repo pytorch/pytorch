@@ -4,12 +4,12 @@ reviewers:
     symbolic-shapes:
       - ezyang
       - Chillee
-      - anjali411
       - albanD
       - miladm
       - bdhirsh
       - voznesenskym
       - SherlockNoMad
+      - jbschlosser
 
   per_author:
     symbolic-shapes:
