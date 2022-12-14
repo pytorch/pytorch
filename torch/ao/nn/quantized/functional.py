@@ -12,6 +12,31 @@ from .modules.utils import _pair_from_first
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.
 
+__all__ = [
+    "avg_pool2d",
+    "avg_pool3d",
+    "adaptive_avg_pool2d",
+    "adaptive_avg_pool3d",
+    "conv1d",
+    "conv2d",
+    "conv3d",
+    "interpolate",
+    "linear",
+    "max_pool1d",
+    "max_pool2d",
+    "celu",
+    "leaky_relu",
+    "hardtanh",
+    "hardswish",
+    "threshold",
+    "elu",
+    "hardsigmoid",
+    "clamp",
+    "upsample",
+    "upsample_bilinear",
+    "upsample_nearest",
+]
+
 def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                count_include_pad=True, divisor_override=None):
     r"""

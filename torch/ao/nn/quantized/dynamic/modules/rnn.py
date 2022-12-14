@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
 __all__ = ['pack_weight_bias', 'PackedParameter', 'RNNBase', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell',
-           'GRUCell']
+           'GRUCell', "apply_permutation"]
 
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)

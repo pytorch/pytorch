@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch._jit_internal import Optional, List  # noqa: F401
 
-from .utils import hide_packed_params_repr
+from .utils import _hide_packed_params_repr
 from .utils import _quantize_weight
 
 __all__ = ['EmbeddingPackedParams', 'Embedding', 'EmbeddingBag']
@@ -122,7 +122,7 @@ class Embedding(torch.nn.Module):
         return 'QuantizedEmbedding'
 
     def __repr__(self):
-        return hide_packed_params_repr(self, EmbeddingPackedParams)
+        return _hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
         extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(

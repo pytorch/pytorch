@@ -590,13 +590,6 @@
   "torch.nn.intrinsic.modules": [
     "_FusedModule"
   ],
-  "torch.nn.intrinsic.qat.modules.linear_fused": [
-    "Parameter",
-    "fuse_linear_bn_weights"
-  ],
-  "torch.nn.intrinsic.quantized.modules.conv_relu": [
-    "fuse_conv_bn_weights"
-  ],
   "torch.nn.modules.linear": [
     "NonDynamicallyQuantizableLinear"
   ],
@@ -621,54 +614,6 @@
   ],
   "torch.nn.parameter": [
     "OrderedDict"
-  ],
-  "torch.nn.qat.dynamic.modules.linear": [
-    "_activation_is_memoryless"
-  ],
-  "torch.nn.qat.modules.conv": [
-    "Tuple",
-    "TypeVar",
-    "Union"
-  ],
-  "torch.nn.qat.modules.embedding_ops": [
-    "Tensor"
-  ],
-  "torch.nn.qat.modules.linear": [
-    "LinearReLU",
-    "is_parametrized",
-    "transfer_parametrizations_and_params",
-    "type_before_parametrizations"
-  ],
-  "torch.nn.quantizable.modules.activation": [
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.nn.quantizable.modules.rnn": [
-    "Optional",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.nn.quantized": [
-    "MaxPool2d"
-  ],
-  "torch.nn.quantized.dynamic.modules.rnn": [
-    "apply_permutation"
-  ],
-  "torch.nn.quantized.functional": [
-    "List",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.nn.quantized.modules": [
-    "MaxPool2d",
-    "_ConvNd"
-  ],
-  "torch.nn.quantized.modules.batchnorm": [
-    "Tensor"
-  ],
-  "torch.nn.quantized.modules.utils": [
-    "repeat"
   ],
   "torch.nn.utils.rnn": [
     "bind",

@@ -1,6 +1,10 @@
 import torch
 import typing
 
+__all__ = [
+    "ReferenceQuantizedModule",
+]
+
 class ReferenceQuantizedModule(torch.nn.Module):
     def _init_weight_qparams(self, weight_qparams, device):
         if weight_qparams is None:
