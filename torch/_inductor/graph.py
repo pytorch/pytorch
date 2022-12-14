@@ -173,7 +173,11 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            self.disable_cpp_wrapper("ExternKernel")
+            if not isinstance(
+                buffer,
+                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+            ):
+                self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         if config.cpp_wrapper:
