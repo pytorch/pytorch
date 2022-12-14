@@ -3424,7 +3424,9 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
 
         class MyMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                pr.append(f"Running {func} from within {torch._C._current_autograd_node()}")
+                node = torch._C._current_autograd_node()
+                node_name = node.name() if node else "None"
+                pr.append(f"Running {func} from within {node_name}")
                 return func(*args, **kwargs or {})
 
         with MyMode():
@@ -3443,11 +3445,11 @@ Running aten.div.Tensor from within None
 Running aten.sum.default from within None
 BW
 Running aten.ones_like.default from within None
-Running aten.expand.default from within <SumBackward0 object at 0x7f8a2d7c9e60>
-Running aten.div.Tensor from within <DivBackward0 object at 0x7f8a2d7c9e60>
-Running aten.mul.Tensor from within <MulBackward0 object at 0x7f8a2d7c9e60>
-Running aten.detach.default from within <AccumulateGrad object at 0x7f8a2d7c9b90>
-Running aten.detach.default from within <AccumulateGrad object at 0x7f8a2d7c9e10>
+Running aten.expand.default from within SumBackward0
+Running aten.div.Tensor from within DivBackward0
+Running aten.mul.Tensor from within MulBackward0
+Running aten.detach.default from within torch::autograd::AccumulateGrad
+Running aten.detach.default from within torch::autograd::AccumulateGrad
 Done""")
 
     def test_profiler(self):
