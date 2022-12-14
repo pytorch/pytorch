@@ -800,8 +800,8 @@ include_patterns = [
     'torch/distributed/fsdp/*.py',
     'test/distributed/fsdp/*.py',
     'torch/testing/_internal/common_fsdp.py',
-    'torch/distributed/_composable/*.py`,
-    'test/distributed/_composable/*.py`,
+    'torch/distributed/_composable/*.py',
+    'test/distributed/_composable/*.py',
 ]
 command = [
     'python3',
