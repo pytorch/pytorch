@@ -147,7 +147,7 @@ class cpp:
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = True
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
@@ -155,7 +155,7 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
-    # choose conv backend, "aten" or "triton" or "autotune"
+    # choose conv backend, "aten" or "triton"
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
@@ -168,7 +168,7 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
-    # use triton.autotune?
+    # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune = True
 
@@ -257,8 +257,6 @@ class InductorConfigContext:
                 self.static_memory = True
 
             def max_autotune():
-                self.static_memory = True
-                self.matmul_padding = True
                 self.max_autotune = True
 
             modes = {
