@@ -458,7 +458,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
-    assert chunk_size is None or chunk_size > 0, "`chunk_size` should be greater than 0."
+    if not (chunk_size is None or chunk_size > 0):
+        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
     @wraps(func)
     def wrapper_fn(*args):
@@ -506,19 +507,22 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             return flat_results
 
         def compute_jacobian_preallocate_and_copy():
-            out_vec_size = sum(flat_output_numels)
-            stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
             # Helper function to compute chunked Jacobian
             # The intermediate chunked calculation are only
             # scoped at this function level.
+            out_vec_size = sum(flat_output_numels)
+
+            # Don't pre-allocate if we have a single chunk.
+            if not (chunk_size is None or chunk_size >= out_vec_size):
+                stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
             for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
                                                                                 flat_output_numels,
                                                                                 chunk_size=chunk_size)):
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
                 chunked_result = vmap(vjp_fn)(basis)
                 flat_results, _ = tree_flatten(chunked_result)
-                # chunked_results.append(flat_results)
                 if chunk_size is None or chunk_size >= out_vec_size:
+                    # Short-circuit if we have a single chunk.
                     return flat_results
 
                 for r, sr in zip(flat_results, stacked_results):
