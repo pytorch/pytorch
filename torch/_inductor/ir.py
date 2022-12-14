@@ -3001,7 +3001,7 @@ class FallbackKernel(ExternKernelAlloc):
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        with context():
+        with context:
             (
                 example_output,
                 tensor_args,
