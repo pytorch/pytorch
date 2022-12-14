@@ -1791,6 +1791,15 @@ class AliasedLayout(Layout):
 
         return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
 
+class AsyncCollectiveLayout(Layout):
+    def __init__(self, target: IRNode):
+        super().__init__(
+            target.get_device(),
+            target.get_dtype(),
+            target.get_size(),
+            None,  # type: ignore[arg-type]
+        )
+        self.target = target
 
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
@@ -3368,14 +3377,15 @@ class AllReduce(ExternKernelAlloc):
         cls,
         x: "TensorBox",
     ):
+        breakpoint()
         x = cls.realize_input(x)
         return AllReduce(
-            layout=MutationLayout(x),
+            layout=AsyncCollectiveLayout(x),
             inputs=[x],
         )
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
+        assert isinstance(self.layout, AsyncCollectiveLayout)
         return (self.layout.target.get_name(),)
 
     # def codegen(self, wrapper):
@@ -3398,9 +3408,13 @@ class AllReduce(ExternKernelAlloc):
         wrapper.writeline(
             f"{self.get_name()}_work = dist.all_reduce({self.codegen_args()[0]}, async_op=True)"
         )
+        # now, how do we move this wait to before the first place we use our buf?
         wrapper.writeline(
             f"{self.get_name()}_work.wait()"
         )
+
+        # TODO- check InplaceBernoulliFallback as a better pattern for inplace;
+        # shouldn't have to do this.
         wrapper.writeline(
             f"{self.get_name()} = {self.codegen_args()[0]}"
         )

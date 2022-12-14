@@ -10,6 +10,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include <iostream>
 #include <cstdint>
 #include <utility>
 
@@ -90,6 +91,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     }
 
     cudaError_t err = cudaEventQuery(event_);
+    std::cout << "err: " << err << std::endl;
     if (err == cudaSuccess) {
       return true;
     } else if (err != cudaErrorNotReady) {
