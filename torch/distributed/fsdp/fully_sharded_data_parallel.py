@@ -50,6 +50,7 @@ from torch.distributed.fsdp._init_utils import (
     ProcessGroupType,
 )
 from torch.distributed.fsdp._runtime_utils import (
+    _get_fsdp_states,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
@@ -474,11 +475,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             List[FullyShardedDataParallel]: FSDP modules that are nested in
             the input ``module``.
         """
+        _fsdp_modules = _get_fsdp_states(module)
+        if not root_only:
+            return _fsdp_modules
         return [
-            submodule
-            for submodule in module.modules()
-            if isinstance(submodule, FullyShardedDataParallel)
-            and (not root_only or submodule.check_is_root())
+            fsdp_module for fsdp_module in _fsdp_modules if fsdp_module.check_is_root()
         ]
 
     @staticmethod

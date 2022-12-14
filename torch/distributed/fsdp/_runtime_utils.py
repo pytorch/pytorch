@@ -1,6 +1,16 @@
 import functools
 import warnings
-from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 import torch.nn as nn
@@ -11,6 +21,7 @@ from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
     _FSDPState,
+    _get_module_fsdp_state,
     _is_composable,
     TrainingState,
 )
@@ -1248,3 +1259,26 @@ def _cast_buffers_to_dtype_and_device(
             buffer.data = buffer.to(device=device)
         else:
             buffer.data = buffer.to(device=device, dtype=buffer_dtype)
+
+
+def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
+    """
+    Returns all ``_FSDPState`` instances in the module tree rooted at
+    ``module`` without any duplicates and following the ``module.modules()``
+    traversal order.
+
+    For the wrapper code path, this returns all ``FullyShardedDataParallel``
+    instances. For the non-wrapper code path, this returns composable state
+    instances.
+
+    NOTE: For now, we must pass an ``nn.Module`` as the argument because
+    ``_FSDPState`` does not support graph traversal.
+    """
+    fsdp_states: List[_FSDPState] = []
+    visited_fsdp_states: Set[_FSDPState] = set()
+    for submodule in module.modules():
+        optional_state = _get_module_fsdp_state(submodule)
+        if optional_state is not None and optional_state not in visited_fsdp_states:
+            visited_fsdp_states.add(optional_state)
+            fsdp_states.append(optional_state)
+    return fsdp_states
