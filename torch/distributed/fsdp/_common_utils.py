@@ -4,7 +4,16 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, Generator, List, no_type_check, Optional, Set
+from typing import (
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+)
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -121,6 +130,28 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Returns if ``module`` has parameters managed by FSDP."""
     return len(_module_handles(state, module)) > 0
+
+
+def _get_sharding_strategy(handles: Iterable):
+    """
+    Returns the sharding strategy of the group of handles given by ``handles``
+    or ``None`` if ``handles`` is empty. The input should be the handles
+    corresponding to one module, so we enforce that they all share the same
+    sharding strategy.
+    """
+    sharding_strategy = None
+    for handle in handles:
+        if sharding_strategy is None:
+            sharding_strategy = handle._sharding_strategy
+        elif (
+            sharding_strategy is not None
+            and sharding_strategy != handle._sharding_strategy
+        ):
+            raise AssertionError(
+                "Expects each group of handles to have the same sharding "
+                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
+            )
+    return sharding_strategy
 
 
 def clean_tensor_name(tensor_name: str) -> str:

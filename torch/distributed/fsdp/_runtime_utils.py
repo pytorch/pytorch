@@ -1,5 +1,4 @@
 import functools
-import warnings
 from typing import (
     Any,
     Callable,
@@ -22,6 +21,8 @@ from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
     _get_fsdp_states,
+    _get_module_fsdp_state,
+    _get_sharding_strategy,
     _is_composable,
     TrainingState,
 )
@@ -45,6 +46,14 @@ RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
     HandleShardingStrategy.HYBRID_SHARD,
 }
+
+HOMOGENEOUS_ATTR_NAMES = (
+    "process_group",
+    "backward_prefetch",
+    "forward_prefetch",
+    "_use_orig_params",
+    "limit_all_gathers",
+)
 
 
 def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
@@ -153,23 +162,50 @@ def _lazy_init(
     _init_streams(state)
     buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
-    for handle in state._handles:
-        handle.init_flat_param_attributes()
     state._exec_order_data.init(state, root_module, state.process_group)
     if _is_composable(state):
-        # Return early since there is no need to share data structures
+        for handle in state._handles:
+            handle.init_flat_param_attributes()
+        # Return early since there is no need to share data structures (yet)
         return state
-    # Initialize non-root FSDP instances and share attributes from the root to
+    # Initialize non-root FSDP instances and share state from the root to
     # non-root instances
     assert state is root_module
-    inconsistent_limit_all_gathers = False
-    inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
-    for fsdp_module in _get_fsdp_states(root_module):
-        if fsdp_module is root_module:
-            continue
+    _share_state_and_init_handle_attrs(state, root_module)
+    return state
 
-        if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-            # Share the allreduce state across FSDP units. This is not strictly necessary
+
+@no_type_check
+def _share_state_and_init_handle_attrs(
+    root_state: _FSDPState,
+    root_module: nn.Module,
+) -> None:
+    """
+    Shares data structure state from the ``root_state`` to all FSDP states in
+    ``root_module`` 's module tree, and initializes handle attributes. These
+    are done together to require a single loop over the states.
+    """
+    for handle in root_state._handles:
+        handle.init_flat_param_attributes()
+    inter_node_state = _validate_and_get_hybrid_shard_state(root_module)
+    attr_name_to_values: Dict[str, Set[Any]] = {}
+    for attr_name in HOMOGENEOUS_ATTR_NAMES:
+        attr_name_to_values[attr_name] = set()
+    for fsdp_state in _get_fsdp_states(root_module):
+        for attr_name in HOMOGENEOUS_ATTR_NAMES:
+            p_assert(
+                hasattr(fsdp_state, attr_name),
+                f"FSDP state missing attribute {attr_name}",
+            )
+            attr_name_to_values[attr_name].add(getattr(fsdp_state, attr_name))
+        if fsdp_state is root_state:
+            continue
+        handle_sharding_strategy = _get_sharding_strategy(fsdp_state._handles)
+        if handle_sharding_strategy in (
+            HandleShardingStrategy.HYBRID_SHARD,
+            HandleShardingStrategy._HYBRID_SHARD_ZERO2,
+        ):
+            # Share the all-reduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
             assert inter_node_state is not None, (
@@ -177,36 +213,30 @@ def _lazy_init(
                 "a valid inter-node state if there exists an FSDP instance "
                 "using a hybrid sharding strategy"
             )
-            fsdp_module._inter_node_state = inter_node_state
+            fsdp_state._inter_node_state = inter_node_state
 
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
         # training to run inference)
         p_assert(
-            fsdp_module._is_root is None or not fsdp_module._is_root,
+            fsdp_state._is_root is None or not fsdp_state._is_root,
             "Non-root FSDP instance's `_is_root` should not have been "
             "set yet or should have been set to `False`",
         )
-        fsdp_module._is_root = False
-        fsdp_module._streams = state._streams
-        fsdp_module._stream_to_name = state._stream_to_name
-        fsdp_module._exec_order_data = state._exec_order_data
-        if fsdp_module.limit_all_gathers != state.limit_all_gathers:
-            # Prefer the root's value
-            inconsistent_limit_all_gathers = True
-            fsdp_module.limit_all_gathers = state.limit_all_gathers
-        fsdp_module._free_event_queue = state._free_event_queue
-        fsdp_module._handles_prefetched = state._handles_prefetched
-        fsdp_module._needs_pre_backward_unshard = state._needs_pre_backward_unshard
-        for handle in fsdp_module._handles:
+        fsdp_state._is_root = False
+        fsdp_state._streams = root_state._streams
+        fsdp_state._stream_to_name = root_state._stream_to_name
+        fsdp_state._exec_order_data = root_state._exec_order_data
+        fsdp_state._free_event_queue = root_state._free_event_queue
+        fsdp_state._handles_prefetched = root_state._handles_prefetched
+        fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
+        for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
-    if inconsistent_limit_all_gathers:
-        warnings.warn(
-            "Found inconsistent `limit_all_gathers` values across FSDP "
-            f"instances on rank {state.rank}. Using the root FSDP's value of "
-            f"{state.limit_all_gathers} for all instances."
-        )
-    return state
+    for attr_name, attr_values in attr_name_to_values.items():
+        if len(attr_values) != 1:
+            raise ValueError(
+                f"Expects one homogeneous value for {attr_name} but got {attr_values}"
+            )
 
 
 @no_type_check

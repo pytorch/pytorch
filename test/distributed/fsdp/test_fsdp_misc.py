@@ -6,16 +6,19 @@ import warnings
 from collections import namedtuple
 from contextlib import suppress
 from copy import deepcopy
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import (
+    BackwardPrefetch,
     CPUOffload,
     FlatParameter,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
@@ -502,6 +505,58 @@ class TestFSDPMisc(FSDPTest):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_homogeneous_attributes(self):
+        """
+        Tests that passing heterogeneous values for attributes designated as
+        homogeneous raises an error.
+        """
+        # Manually construct this list but verify against the global list of
+        # homogeneous attribute names
+        all_attr_name_and_values = [
+            ("process_group", self.process_group, dist.new_group(backend="nccl")),
+            (
+                "backward_prefetch",
+                BackwardPrefetch.BACKWARD_PRE,
+                BackwardPrefetch.BACKWARD_POST,
+            ),
+            ("forward_prefetch", False, True),
+            ("_use_orig_params", False, True),
+            ("limit_all_gathers", False, True),
+        ]
+        self.assertEqual(
+            [
+                attr_name_and_values[0]
+                for attr_name_and_values in all_attr_name_and_values
+            ],
+            HOMOGENEOUS_ATTR_NAMES,
+        )
+
+        self.run_subtests(
+            {"attr_name_and_values": all_attr_name_and_values},
+            self._test_homogeneous_attributes,
+        )
+
+    def _test_homogeneous_attributes(self, attr_name_and_values: Tuple[str, Any, Any]):
+        model = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            {},
+        )
+        attr_name = attr_name_and_values[0]
+        fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
+        fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
+        model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
+        fsdp_model = FSDP(model, **fsdp_kwargs_outer)
+
+        # Run a forward to trigger lazy initialization and the error
+        with self.assertRaisesRegex(
+            ValueError, f"Expects one homogeneous value for {attr_name}"
+        ):
+            inp = fsdp_model.module.get_input(torch.device("cuda"))
+            fsdp_model(*inp)
 
 
 class TestFSDPMiscWorldSize1(FSDPTest):
