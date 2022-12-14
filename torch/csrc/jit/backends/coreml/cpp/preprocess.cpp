@@ -1,4 +1,8 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// (c) Meta Platforms, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the root directory of this source tree
+
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
