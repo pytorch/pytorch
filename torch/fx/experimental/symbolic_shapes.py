@@ -1,6 +1,7 @@
 import torch
 from typing import Set, Dict, List, Type, Optional, cast
 import sys
+import itertools
 import operator
 import builtins
 import math
@@ -445,32 +446,35 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-# This stub exists so we can easily add metadata to sympy symbols
-# NB: This inherits from Dummy, not Symbol, because Symbols with the same
-# name get interned.  This is bad for us as we want the metadata (snames)
-# to vary across different invocations and not leak.
-class Symbol(sympy.Dummy):
-    __slots__: List[str] = ['snames']
-    snames: List[str]
+if HAS_SYMPY:
+    # This stub exists so we can easily add metadata to sympy symbols
+    # NB: This inherits from Dummy, not Symbol, because Symbols with the same
+    # name get interned.  This is bad for us as we want the metadata (snames)
+    # to vary across different invocations and not leak.
+    class Symbol(sympy.Dummy):
+        __slots__: List[str] = ['snames', 'stack']
+        snames: List[str]
+        stack: Optional[str]
 
-    def __new__(cls, *args, **kwargs):
-        self = super().__new__(cls, *args, **kwargs)
-        self.snames = []
-        return self
+        def __new__(cls, *args, **kwargs):
+            self = super().__new__(cls, *args, **kwargs)
+            self.snames = []
+            self.stack = None
+            return self
 
 
-class ShapeGuardPrinter(StrPrinter):
-    def __init__(
-        self,
-        symbol_to_source,
-    ):
-        super().__init__()
-        self.symbol_to_source = symbol_to_source
+    class ShapeGuardPrinter(StrPrinter):
+        def __init__(
+            self,
+            symbol_to_source,
+        ):
+            super().__init__()
+            self.symbol_to_source = symbol_to_source
 
-    def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, Symbol), str(type(expr))
-        assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
-        return self.symbol_to_source[expr][0]
+        def _print_Symbol(self, expr) -> str:
+            assert isinstance(expr, Symbol), str(type(expr))
+            assert expr in self.symbol_to_source, f"{expr} (could be from {expr.snames}) not in {self.symbol_to_source}"
+            return self.symbol_to_source[expr][0]
 
 
 
@@ -489,6 +493,8 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.tls = threading.local()
+        self.unbacked_symfloat_counter = itertools.count()
+        self.unbacked_symint_counter = itertools.count()
 
     def _suppress_guards_tls(self):
         return getattr(self.tls, "suppress_guards", False)
@@ -556,6 +562,16 @@ class ShapeEnv(object):
 
     def create_symintnode(self, sym: "sympy.Expr"):
         return SymInt(SymNode(sym, self, int))
+
+    def create_unbacked_symfloat(self):
+        symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        return SymFloat(SymNode(symbol, self, float))
+
+    def create_unbacked_symint(self):
+        symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        return SymInt(SymNode(symbol, self, int))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
@@ -776,6 +792,8 @@ class ShapeEnv(object):
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
+            # Do not assume unbacked symints are > 1
+            if k in self.var_to_val
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
@@ -823,8 +841,26 @@ class ShapeEnv(object):
         your code is still valid for arbitrary shapes (such as optimization decisions)
         """
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
-        assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
+        if len(result_expr.free_symbols) != 0:
+            raise self._make_data_dependent_error(result_expr)
         return result_expr
+
+    def _make_data_dependent_error(self, expr):
+        # TODO: in a Dynamo context, having user code, and having the
+        # name of the local, will be much better
+        accesses = '\n\n'.join(
+            f"Data dependent variable '{s}' allocated at:\n{s.stack}"
+            for s in expr.free_symbols
+        )
+        return RuntimeError(
+            f"\n\n{accesses}\n"
+            "RuntimeError: It appears that you're trying to get a value out of symbolic int/float "
+            "whose value is data-dependent (and thus we do not know the true value.)  "
+            f"The expression we were trying to evaluate is {expr}.  "
+            "Scroll up to see where each of these data-dependent accesses originally occurred."
+            # TODO: Help text about how to use our runtime tests to fix this
+            # problem
+        )
 
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
