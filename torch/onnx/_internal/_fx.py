@@ -113,7 +113,7 @@ def _retrieve_or_wrap_scalar_as_constant(
         #  2. write type promotion logic for each operator.
         # TODO(wechi): the called exporting function should tell all allowed input and output types.
         # Then, here we can try type-casting if type-mismatch happens.
-        ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.float))
+        ts_value = g.op("Constant", value_t=torch.tensor(ts_value, dtype=torch.int64))
     elif ts_value is None:
         ts_value = g.op("prim::Constant")
         ts_value.setType(torch._C.OptionalType.ofTensor())
@@ -185,7 +185,10 @@ def _export_fx_to_ts(fx_module_with_metadata):
     ts_name_to_real_tensor: Dict[
         str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
     ] = {}
+    #fx_module_with_metadata.print_readable()
     for node in fx_module_with_metadata.graph.nodes:
+        #print(f"Export {node}, {node.target}:")
+        #print(g)
         if node.op == "placeholder":
             # Input of graph.
             v = g.addInput(node.name)
@@ -227,8 +230,11 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 assert (
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
-                # Assign type and shape obtained from FakeTensorProp.
-                _fill_tensor_types(v, node.meta["val"])
+
+                # TODO(wechi) Assign type and shape obtained from FakeTensorProp.
+                # This is commented because it will cause wrong type for seq<tensor>.
+                # _fill_tensor_types(v, node.meta["val"])
+
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -331,6 +337,11 @@ def _export_fx_to_ts(fx_module_with_metadata):
         else:
             # TODO(wechi): Support get_attr, call_module, call_method.
             raise RuntimeError("Found node type not defined in torch.fx: " + node.op)
+
+    torch._C._jit_pass_onnx_scalar_type_analysis(
+        g, True, 14
+    )
+
     return g, ts_name_to_real_tensor
 
 
