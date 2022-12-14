@@ -819,7 +819,8 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         float16 = MixedPrecision(param_dtype=torch.float16)
 
         model = SaveForwardInputsModel(
-            forward_inputs, cast_forward_inputs=False,
+            forward_inputs,
+            cast_forward_inputs=False,
         ).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
@@ -837,9 +838,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs(self):
         forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(
-            param_dtype=torch.float16, cast_forward_inputs=False
-        )
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=False)
 
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=True
@@ -860,9 +859,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule_skip_inputs_error(self):
         forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(
-            param_dtype=torch.float16, cast_forward_inputs=False
-        )
+        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=False)
 
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
@@ -875,8 +872,7 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
         fsdp = FSDP(model)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "mat1 and mat2 must have the same dtype"
+            RuntimeError, "mat1 and mat2 must have the same dtype"
         ):
             fsdp(x).sum().backward()
 
