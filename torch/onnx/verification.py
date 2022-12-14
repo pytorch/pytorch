@@ -32,11 +32,7 @@ from typing import (
     Union,
 )
 
-try:
-    import numpy as np
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
+import numpy as np
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -48,7 +44,7 @@ from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
-_NumericType = Union[Number, torch.Tensor, "np.ndarray"]
+_NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
 _InputKwargsType = Mapping[str, Any]
@@ -114,7 +110,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> Union[list, "np.ndarray"]:
+def _to_numpy(elem) -> Union[list, np.ndarray]:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -1242,28 +1238,28 @@ class GraphInfo:
         The id of the subgraph is shown under the node. The `GraphInfo` object for any
         subgraph can be retrieved by calling `graph_info.find_partition(id)`.
 
-        Example:
-        ```
-        ==================================== Tree: =====================================
-        5 X   __2 X    __1 ✓
-        id:  |  id: 0 |  id: 00
-             |        |
-             |        |__1 X (aten::relu)
-             |           id: 01
-             |
-             |__3 X    __1 ✓
-                id: 1 |  id: 10
-                      |
-                      |__2 X     __1 X (aten::relu)
-                         id: 11 |  id: 110
-                                |
-                                |__1 ✓
-                                   id: 111
-        =========================== Mismatch leaf subgraphs: ===========================
-        ['01', '110']
-        ============================= Mismatch node kinds: =============================
-        {'aten::relu': 2}
-        ```
+        Example::
+
+            ==================================== Tree: =====================================
+            5 X   __2 X    __1 ✓
+            id:  |  id: 0 |  id: 00
+                 |        |
+                 |        |__1 X (aten::relu)
+                 |           id: 01
+                 |
+                 |__3 X    __1 ✓
+                    id: 1 |  id: 10
+                          |
+                          |__2 X     __1 X (aten::relu)
+                             id: 11 |  id: 110
+                                    |
+                                    |__1 ✓
+                                       id: 111
+            =========================== Mismatch leaf subgraphs: ===========================
+            ['01', '110']
+            ============================= Mismatch node kinds: =============================
+            {'aten::relu': 2}
+
         """
         GraphInfoPrettyPrinter(self).pretty_print()
 
@@ -1631,10 +1627,10 @@ class GraphInfo:
 
         Returns:
             error: The AssertionError raised during the verification. Returns None if no
-                error is raised.
+            error is raised.
             onnx_graph: The exported ONNX graph in TorchScript IR format.
             onnx_outs: The outputs from running exported ONNX model under the onnx
-                backend in `options`.
+            backend in `options`.
             pt_outs: The outputs from running the TorchScript IR graph.
         """
         return verify_aten_graph(
