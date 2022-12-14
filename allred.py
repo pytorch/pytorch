@@ -21,10 +21,13 @@ def compile(func, example_inputs):
     return inductor_compile_fx(graph, example_inputs)
 
 if __name__ == '__main__':
-    os.environ["RANK"] = "0"
-    os.environ["WORLD_SIZE"] = "1"
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12345"
+    os.environ["RANK"] = os.getenv("RANK", "0")
+    os.environ["WORLD_SIZE"] = os.getenv("WORLD_SIZE", "1")
+    os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
+    os.environ["MASTER_PORT"] = os.getenv("MASTER_PORT", "12345")
+    for _ in range(int(os.getenv("RANK"))):
+        # advance random seed to a unique seed per rank        
+        torch.randn(1)
     inputs = (torch.randn(4,4, device="cuda"),) * 6
     torch.distributed.init_process_group(backend='nccl')
     correct_out = matmul_cat_col(*inputs)

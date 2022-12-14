@@ -3350,12 +3350,11 @@ class Convolution(ExternKernelAlloc):
 
 
 class AllReduce(ExternKernelAlloc):
-    kernel = "torch.ops.c10d.traceable_allreduce"
-    #1 constant_args show up in codegen, use those if needed
-    #2 allreduce_ can't be called from python, without fixing bindings
-    #3 try implementing traceable_allreduce and adding POD types to api for rank/size?
-    #4 think about what to do for cpu
-    #  also how to handle comm stream
+    # allreduce_ can't be called from python, without fixing bindings
+    #  --> try implementing traceable_allreduce and adding POD types to api for rank/size?
+    # constant_args show up in codegen, use those if needed
+    # think about what to do for cpu
+    # also how to handle comm stream
     def __init__(
         self,
         layout,
@@ -3380,14 +3379,31 @@ class AllReduce(ExternKernelAlloc):
         return (self.layout.target.get_name(),)
 
     # def codegen(self, wrapper):
-    #     args = self.codegen_args()
-    #     # allreduce_ expects a list of tensor inputs...
-    #     args[0] = f"[{args[0]}]"
-    #     wrapper.writeline(
-    #         f"{self.get_name()}, _ = {self.kernel}({', '.join(args)})"
+    #     wrapper.header.writeline(
+    #         f"import torch.cuda.nccl as nccl"
     #     )
-    #     if isinstance(self.layout, Layout):
-    #         self.codegen_size_asserts(wrapper)
+    #     # comm_stream = wrapper.write_get_cuda_stream(10)
+    #     wrapper.writeline(
+    #         # streams=[...]
+    #         f"nccl.all_reduce([{', '.join(self.codegen_args())}], op=nccl.SUM)"
+    #     )
+    #     wrapper.writeline(
+    #         f"{self.get_name()} = {self.codegen_args()[0]}"
+    #     )
+
+    def codegen(self, wrapper):
+        wrapper.header.writeline(
+            f"import torch.distributed as dist"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work = dist.all_reduce({self.codegen_args()[0]}, async_op=True)"
+        )
+        wrapper.writeline(
+            f"{self.get_name()}_work.wait()"
+        )
+        wrapper.writeline(
+            f"{self.get_name()} = {self.codegen_args()[0]}"
+        )
 
 def _prepare_convolution_fusion_create(
     cls,
