@@ -9,14 +9,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
-
 import sympy
 
 import torch
@@ -32,7 +24,9 @@ from .utils import (
     dict_const_keys,
     dict_param_key_ids,
     guard_failures,
+    HAS_NUMPY,
     istype,
+    np,
     orig_code_map,
     rename_implicit,
     tuple_iterator_getitem,

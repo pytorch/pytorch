@@ -6,14 +6,6 @@ import types
 from collections import OrderedDict
 from typing import Dict, List
 
-try:
-    import numpy
-
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    numpy = None  # type: ignore[assignment]
-    HAS_NUMPY = False
-
 import torch._C
 import torch.fx
 import torch.nn
@@ -26,7 +18,9 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    HAS_NUMPY,
     istype,
+    np,
     product,
     proxy_args_kwargs,
     specialize_args_kwargs,
@@ -435,7 +429,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 and args[0].is_python_constant()
             ):
                 for x in args[0].items:
-                    if isinstance(x.value, numpy.generic):
+                    if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.

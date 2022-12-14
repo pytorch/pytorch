@@ -11,14 +11,6 @@ import types
 from abc import ABCMeta
 from typing import Any, Optional, Union
 
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
-
 from functorch.experimental.ops import PyOperator
 
 import torch
@@ -49,11 +41,13 @@ from ..utils import (
     get_fake_value,
     getfile,
     global_key_name,
+    HAS_NUMPY,
     is_namedtuple,
     is_numpy_int_type,
     is_typing,
     istensor,
     istype,
+    np,
     odict_values,
     preserve_rng_state,
     tuple_iterator,
