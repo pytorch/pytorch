@@ -303,11 +303,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def fx_passes(gm: torch.fx.GraphModule):
-    # TODO(jansel): flag for this
-    gm.graph.eliminate_dead_code()
+    if config.dce:
+        gm.graph.eliminate_dead_code()
 
-    # TODO(jansel): flag for this
-    reorder_for_locality(gm.graph)
+    if config.reordering:
+        reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
         replace_matched_patterns(gm.graph)

@@ -39,6 +39,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# enable reordering pass
+reordering = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
