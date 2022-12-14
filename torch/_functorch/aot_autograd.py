@@ -502,10 +502,8 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         reshaped_base_tensor = aliased_base_tensor.as_strided(
             b.size(), b.stride(), b.storage_offset()
         )
-        if torch.Tensor._has_same_metadata(
-            target_meta_tensor._base, reshaped_base_tensor
-        ):
-            out = target_meta_tensor._view_func(reshaped_base_tensor)
+        out = target_meta_tensor._view_func(reshaped_base_tensor)
+        if out is not None:
             out.requires_grad_(target_requires_grad)
             return out
     size = target_meta_tensor.size()
