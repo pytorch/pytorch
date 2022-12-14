@@ -1138,21 +1138,26 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            reset_rng_state()
-            torch._dynamo.reset()
-            try:
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
-                )
-            except Exception as e:
-                accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                log.exception(e)
-                return record_status(accuracy_status)
+            for i in range(self.args.retries + 1):
+                reset_rng_state()
+                torch._dynamo.reset()
+                try:
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    new_result = optimized_model_iter_fn(
+                        deepcopy_and_maybe_ddp(model), example_inputs
+                    )
+                    break
+                except Exception as e:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    log.exception(e)
+                    if i == self.args.retries:
+                        accuracy_status = "fail_to_run"
+                        return record_status(accuracy_status)
+                    else:
+                        time.sleep((i + 1) * 30)
+                        print("Retrying...")
 
             if not same(
                 correct_result,
@@ -1414,6 +1419,12 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        help="how many times to retry after fail",
+    )
+    parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
@@ -1673,6 +1684,9 @@ def run(runner, args, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
+        # Occasionally CI runs may fail with some PTX toolchain error which often
+        # goes away after retry
+        args.retries = 2
         if args.backend == "aot_eager":
             args.exclude = (
                 CI_SKIP_AOT_EAGER_TRAINING
