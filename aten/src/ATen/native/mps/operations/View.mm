@@ -155,7 +155,7 @@ MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph *graph, MPSGraphTensor
     NSUInteger targetDimLength =  currSrcDimLength;
     if (currDimLength != targetDimLength)
       targetDimLength = 1;
-    if (currDimLength != targetDimLength && currStride != currSrcStride)
+    if (currDimLength != targetDimLength || currStride != currSrcStride)
       isValidExpand = NO;
     if (currSrcDim >= 0 && currSrcDimLength == targetDimLength) {
       currSrcStride *= currSrcDimLength;
