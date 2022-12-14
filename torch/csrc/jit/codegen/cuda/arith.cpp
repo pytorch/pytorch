@@ -711,7 +711,9 @@ TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
   }
   // Make sure no negative value is passed to ceilDiv as the device
   // implementation of ceilDiv assumes positive inputs
-  auto size = ceilDiv(abs(sub(end, start)), abs(step));
+  auto distance = abs(sub(end, start));
+  auto abs_step = abs(step);
+  auto size = ceilDiv(distance, abs_step);
   if (size->getDataType() != DataType::Int) {
     size = castOp(DataType::Int, size);
   }
