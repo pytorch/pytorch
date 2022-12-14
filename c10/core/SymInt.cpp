@@ -3,6 +3,7 @@
 #include <c10/core/SymNodeImpl.h>
 #include <array>
 #include <utility>
+#include <iostream>
 
 namespace c10 {
 

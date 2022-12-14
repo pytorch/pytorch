@@ -1,12 +1,15 @@
 #pragma once
 
-#include <Exceptions.h>
-#include <c10/core/SymInt.h>
-#include <pyport.h>
+#include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <sys/types.h>
+#include <pyport.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
+#include <Exceptions.h>
+#include <c10/core/SymInt.h>
 #include <utils/python_symnode.h>
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace autograd {
@@ -30,34 +33,32 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   if (r->step == Py_None) {
     step_sym = c10::SymInt(1);
   } else {
-    TORCH_CHECK(
-        py::isinstance(r->step, torch::get_symint_class()),
-        "Slicing step can't be symint")
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t step;
-    bool result = _PyEval_SliceIndex(r->step, &step);
-    TORCH_CHECK(!result, "Failed parsing slicing step to integer")
-    TORCH_CHECK(step != 0, "Slicing step size can't be zero");
+    if (torch::is_symint(r->step)) {
+        auto step_sym = py::handle(r->step).cast<c10::SymInt>();
+    } else {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+        Py_ssize_t step;
+        bool result = _PyEval_SliceIndex(r->step, &step);
+        TORCH_CHECK(!result, "Failed parsing slicing step to integer")
+        TORCH_CHECK(step != 0, "Slicing step size can't be zero");
 
-    /* Here *step might be -PY_SSIZE_T_MAX-1; in this case we replace it
-     * with -PY_SSIZE_T_MAX.  This doesn't affect the semantics, and it
-     * guards against later undefined behaviour resulting from code that
-     * does "step = -step" as part of a slice reversal.
-     */
-    if (step < -PY_SSIZE_T_MAX) {
-      step = -PY_SSIZE_T_MAX;
+        /* Here *step might be -PY_SSIZE_T_MAX-1; in this case we replace it
+         * with -PY_SSIZE_T_MAX.  This doesn't affect the semantics, and it
+         * guards against later undefined behaviour resulting from code that
+         * does "step = -step" as part of a slice reversal.
+         */
+        if (step < -PY_SSIZE_T_MAX) {
+            step = -PY_SSIZE_T_MAX;
+        }
+        step_sym = c10::SymInt(step);
     }
-    step_sym = c10::SymInt(step);
   }
-
-  if (py::isinstance(r->start, torch::get_symint_class())) {
-    auto new_obj = py::reinterpret_borrow<py::object>(r->start);
-    start_sym = new_obj.cast<c10::SymInt>();
+  
+  
+  if (torch::is_symint(py::handle(r->start))) {
+    start_sym = py::handle(r->start).cast<c10::SymInt>();
   } else if (r->start == Py_None) {
-    TORCH_CHECK(
-        !step_sym.is_symbolic(),
-        "Can't use symbolic step size to determine slicing start index")
-    start_sym = c10::SymInt(step_sym.expect_int() < 0 ? PY_SSIZE_T_MAX : 0);
+    start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX: 0);
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start;
@@ -66,21 +67,16 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     start_sym = c10::SymInt(start);
   }
 
-  if (py::isinstance(r->stop, torch::get_symint_class())) {
-    auto new_obj = py::reinterpret_borrow<py::object>(r->stop);
-    stop_sym = new_obj.cast<c10::SymInt>();
+  if (torch::is_symint(py::handle(r->stop))) {
+    stop_sym = py::handle(r->stop).cast<c10::SymInt>();
   } else if (r->stop == Py_None) {
-    TORCH_CHECK(
-        !step_sym.is_symbolic(),
-        "Can't use symbolic step size to determine slicing stop index")
-    stop_sym = c10::SymInt(
-        step_sym.expect_int() < 0 ? PY_SSIZE_T_MIN : PY_SSIZE_T_MAX);
+    stop_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MIN : PY_SSIZE_T_MAX);
   } else {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t stop;
     bool result = _PyEval_SliceIndex(r->stop, &stop);
     TORCH_CHECK(result, "Failed parsing slicing stop index to integer")
-    stop_sym = c10::SymInt(stop);
+    stop_sym = c10::SymInt(stop); 
   }
 
   return UnpackedSlice{start_sym, stop_sym, step_sym};

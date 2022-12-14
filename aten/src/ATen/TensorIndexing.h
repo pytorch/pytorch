@@ -46,37 +46,24 @@ struct TORCH_API Slice final {
       step_ = c10::SymInt(1);
     } else {
       step_ = step_index.value();
-      if (!step_.is_symbolic()) {
-        TORCH_CHECK_VALUE(step_.expect_int() != 0, "slice step cannot be zero");
-        // Here step might be -INDEX_MAX-1; in this case we replace it
-        // with -INDEX_MAX.  This doesn't affect the semantics, and it
-        // guards against later undefined behaviour resulting from code that
-        // does "step = -step" as part of a slice reversal.
-        if (step_.expect_int() < -INDEX_MAX) {
-          step_ = c10::SymInt(-INDEX_MAX);
-        }
+      TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
+      // Here step might be -INDEX_MAX-1; in this case we replace it
+      // with -INDEX_MAX.  This doesn't affect the semantics, and it
+      // guards against later undefined behaviour resulting from code that
+      // does "step = -step" as part of a slice reversal.
+      if (step_ < -INDEX_MAX) {
+        step_ = c10::SymInt(-INDEX_MAX);
       }
     }
+
     if (!start_index.has_value()) {
-      TORCH_CHECK_VALUE(!step_.is_symbolic(), "slice step cannot be symbolic");
-
-      if (step_.expect_int() < 0) {
-        start_ = c10::SymInt(INDEX_MAX);
-      } else {
-        start_ = c10::SymInt(0);
-      }
-
+      start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
     } else {
       start_ = start_index.value();
     }
-    if (!stop_index.has_value()) {
-      TORCH_CHECK_VALUE(!step_.is_symbolic(), "slice step cannot be symbolic");
 
-      if (step_.expect_int() < 0) {
-        stop_ = c10::SymInt(INDEX_MIN);
-      } else {
-        stop_ = c10::SymInt(INDEX_MAX);
-      }
+    if (!stop_index.has_value()) {
+      stop_ = c10::SymInt(step_ < 0 ? INDEX_MIN : INDEX_MAX);
     } else {
       stop_ = stop_index.value();
     }
@@ -235,7 +222,7 @@ static inline Tensor applySlice(
     const at::Device& self_device,
     const c10::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
-  TORCH_CHECK_VALUE(step.expect_int() > 0, "step must be greater than zero");
+  TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {

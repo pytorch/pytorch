@@ -8,6 +8,7 @@
 #include <memory>
 #include <numeric>
 #include <utility>
+#include <iostream>
 
 namespace c10 {
 
