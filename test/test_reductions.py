@@ -551,9 +551,6 @@ class TestReductions(TestCase):
                 # really matter if we take the exp of the output
                 actual = zero_out_neg_inf(actual)
                 expected2 = zero_out_neg_inf(expected2)
-                # print("Results")
-                # print(actual)
-                # print(expected2)
                 self.assertEqual(expected2.shape, actual.shape)
                 self.assertEqual(expected2, actual)
 
@@ -562,15 +559,9 @@ class TestReductions(TestCase):
         a1 = torch.randn((5, 10), dtype=dtype, device=device)
         compare_logcumsumexp(a1)
 
-        # test with extreme values
-        a2 = torch.tensor([1e-18 + 0j, 1e-18 + 1e4j, 1e2 + 1e-8j], dtype=dtype, device=device)
-        # hard-coding the result here, computed from mpmath with dps=125
-        a2_expected = torch.tensor([
-            1e-18 + 0j,
-            -1.173324588 - 1.41550451495j,  # scipy's logsumexp lacks the precision on the imag
-            100 + 1e-8j,
-        ])
-        compare_logcumsumexp(a2, a2_expected)
+        # test with some non-normal values
+        a2 = torch.tensor([1e3 + 0j, 1e-18 + 1e4j, 1e2 + 1e-8j], dtype=dtype, device=device)
+        compare_logcumsumexp(a2)
 
         # handle special case involving infinites and nans
         # here we don't use scipy.logsumexp as it gives confusing answer on
