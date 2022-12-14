@@ -51,6 +51,7 @@ try:
         linear_transpose,
         permute_linear_fusion,
         permute_matmul_fusion,
+        sink_cat_after_pointwise,
         transpose_linear,
         transpose_matmul,
     )
@@ -143,13 +144,18 @@ def chain_passes(*passes: PassFunc) -> PassFunc:
     return parent_pass
 
 
-def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+def count_call(module: torch.fx.GraphModule, op: str, target_op: Any) -> int:
     return sum(
-        [
-            1 if (n.op == "call_function" and n.target == target_op) else 0
-            for n in module.graph.nodes
-        ]
+        [1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes]
     )
+
+
+def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_function", target_op)
+
+
+def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return count_call(module, "call_method", target_op)
 
 
 class TestCase(TorchTestCase):
@@ -4914,6 +4920,7 @@ class CommonTemplate:
         for name in [
             "test_as_strided",  # buffer reuse
             "test_cat",  # alias
+            "test_lowmem_dropout1",  # None as output
             "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
             "test_relu",  # multiple inputs
             "test_silu",  # single input, single output
@@ -5346,6 +5353,21 @@ if HAS_CUDA:
             self.common(
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
+
+        def test_sink_cat_after_pointwise(self):
+            class TestModule(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
+            inputs = [
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+            ]
+            module = TestModule()
+            traced = trace_func(module, inputs)
+            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
+            self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
