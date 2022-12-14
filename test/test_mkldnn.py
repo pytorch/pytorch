@@ -19,7 +19,8 @@ import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
+    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    skipIfTorchDynamo
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
