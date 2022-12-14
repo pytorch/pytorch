@@ -651,7 +651,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         ext = "so"
         extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
         # \n is required to match with the CodeCache behavior
-        source_code = "\n" + code.getvalue()
+        #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
+        # at the end of lines for readability purpose:
+        #       #pragma omp declare reduction(xxx :\
+        #                       omp_out.value = xxx,\
+        # While the code string loaded during the execution will escape the backslash '\':
+        #       #pragma omp declare reduction(xxx :                omp_out.value = xxx,
+        # Use code.getrawvalue() here to escape the backslash to
+        # make sure the same code string is used during compilation and execution,
+        # so that the hash value is the same.
+        source_code = "\n" + code.getrawvalue()
         _, _, kernel_path = get_code_path(source_code, ext, extra)
         return kernel_path
 
