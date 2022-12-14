@@ -4,10 +4,9 @@ import logging
 import os
 import traceback
 import types
-import typing
 import weakref
 from traceback import FrameSummary
-from typing import Callable, cast, Dict, List, Optional
+from typing import cast, Dict, List, Optional, Set
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -25,7 +24,8 @@ from .exc import (
     Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
-from .output_graph import OutputGraph
+from .hooks import Hooks
+from .output_graph import CompilerFn, OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -266,13 +266,15 @@ def exception_handler(e, code, frame=None):
 
 
 def convert_frame_assert(
-    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
+    compiler_fn: CompilerFn,
+    one_graph: bool = True,
+    export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
 
     @dynamo_timed
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int):
+    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -342,7 +344,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
-            guard_export_fn,
+            hooks,
             frame,
         )
 
@@ -352,16 +354,18 @@ def convert_frame_assert(
 
 def _compile(
     code: types.CodeType,
-    globals,
-    locals,
-    builtins,
-    compiler_fn,
-    one_graph,
-    export,
-    guard_export_fn=None,
-    frame=None,
+    globals: Dict[str, object],
+    locals: Dict[str, object],
+    builtins: Dict[str, object],
+    compiler_fn: CompilerFn,
+    one_graph: bool,
+    export: bool,
+    hooks: Hooks,
+    frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
+    # This is shared across restarts
+    mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -376,6 +380,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            mutated_closure_cell_contents,
         )
         tracer.run()
         output = tracer.output
@@ -407,40 +412,48 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        log.log(
-            logging.CODE,  # type: ignore[attr-defined]
-            format_bytecode(
-                "ORIGINAL BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            ),
-        )
-        log.log(
-            logging.CODE,  # type: ignore[attr-defined]
-            format_bytecode(
-                "MODIFIED BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                out_code,
-            ),
-        )
+        if config.output_code:
+            log.info(
+                format_bytecode(
+                    "ORIGINAL BYTECODE",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    code,
+                ),
+            )
+            log.info(
+                format_bytecode(
+                    "MODIFIED BYTECODE",
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    out_code,
+                ),
+            )
 
         assert output is not None
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(output, output.guards, locals, globals)
+        check_fn = CheckFunctionManager(
+            output,
+            output.guards,
+            locals,
+            globals,
+            hooks.guard_fail_fn if hooks else None,
+        )
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
-        guard_str = "GUARDS:\n"
-        guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(logging.CODE, guard_str)  # type: ignore[attr-defined]
+        if config.output_code:
+            guard_str = "GUARDS:\n"
+            guard_str += "\n".join(
+                [f" - {str(guard)}" for guard in sorted(output.guards)]
+            )
+            log.info(guard_str)
 
-        if guard_export_fn is not None:
-            guard_export_fn(output.guards)
+        if hooks.guard_export_fn is not None:
+            hooks.guard_export_fn(output.guards)
 
         return guarded_code
     except (
@@ -456,21 +469,22 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, guard_export_fn, one_graph=False)
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int):
+    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size)
+            result = inner_convert(frame, cache_size, hooks)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
-            pass
+            logging.info("converting frame raised unsupported, leaving it unconverted")
         except Exception:
             if not config.suppress_errors:
                 raise
+            logging.info("converting frame raised error, suppressing error")
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -496,11 +510,11 @@ def replay(filename):
             record.globals,
             record.locals,
             record.builtins,
-            eager,
-            False,  # one_graph
-            None,  # export_fn
-            None,  # frame
-            False,  # Export
+            compiler_fn=eager,
+            one_graph=False,
+            export=False,
+            hooks=Hooks(),
+            frame=None,
         )
     except Exception:
         pass

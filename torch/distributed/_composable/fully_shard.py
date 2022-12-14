@@ -34,6 +34,7 @@ def fully_shard(
     *,
     process_group: Optional[dist.ProcessGroup] = None,
     policy: Optional[_FSDPPolicy] = None,
+    strategy: Optional[ShardingStrategy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -49,14 +50,14 @@ def fully_shard(
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
-    state = _init_process_group_state(state, process_group)
+    state = _init_process_group_state(state, process_group, ShardingStrategy.FULL_SHARD, policy)
     limit_all_gathers = True
     use_orig_params = True
     backward_prefetch_limit = 1
     forward_prefetch_limit = 1
     state = _init_core_state(
         state,
-        ShardingStrategy.FULL_SHARD,
+        strategy or ShardingStrategy.FULL_SHARD,
         mixed_precision,
         cpu_offload,
         limit_all_gathers,

@@ -101,13 +101,22 @@ exclude_patterns = [
     'torch/csrc/**',
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
+    'torch/_functorch/aot_autograd.py',
+    'torch/_functorch/benchmark_utils.py',
+    'torch/_functorch/compile_utils.py',
+    'torch/_functorch/compilers.py',
+    'torch/_functorch/eager_transforms.py',
+    'torch/_functorch/fx_minifier.py',
+    'torch/_functorch/partitioners.py',
+    'torch/_functorch/make_functional.py',
+    'torch/_functorch/top_operators_github_usage.py',
+    'torch/_functorch/vmap.py',
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
     'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
-    'torch/distributed/fsdp/flatten_params_wrapper.py',
     'torch/ao/quantization/fx/convert.py',
     'torch/ao/quantization/_dbr/function_fusion.py',
     'test/test_datapipe.py',
@@ -146,8 +155,11 @@ code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/output_graph.py',
+    'torch/_dynamo/guards.py',
+    'torch/_dynamo/side_effects.py',
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
@@ -159,6 +171,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-nofollow.ini',
+    '--code=MYPYNOFOLLOW',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -188,6 +201,7 @@ command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
     '--config=mypy-strict.ini',
+    '--code=MYPYSTRICT',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -779,6 +793,7 @@ include_patterns = [
     'torchgen/**/*.py',
     'functorch/functorch/_src/aot_autograd.py',
     'functorch/functorch/_src/compilers.py',
+    'torch/testing/*.py',
 ]
 command = [
     'python3',

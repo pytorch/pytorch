@@ -24,7 +24,7 @@ from torch.ao.quantization.quantize_fx import (
 )
 
 
-from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
+from torch.ao.quantization.fx.quantize_handler import DefaultNodeQuantizeHandler
 
 from torch.ao.quantization.fx.match_utils import (
     is_match,
@@ -99,10 +99,11 @@ from torch.ao.quantization.qconfig_mapping import (
     QConfigMapping,
 )
 
-from torch.ao.quantization.qconfig_mapping_utils import (
+from torch.ao.quantization.fx.qconfig_mapping_utils import (
     _get_object_type_qconfig,
     _get_module_name_qconfig,
     _get_module_name_regex_qconfig,
+    maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.pattern_utils import (
@@ -129,10 +130,6 @@ from torch.ao.quantization.fx.custom_config import (
     ConvertCustomConfig,
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
-)
-
-from torch.ao.quantization.fx.qconfig_mapping_utils import (
-    maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.utils import (
@@ -714,6 +711,22 @@ class TestQuantizeFx(QuantizationTestCase):
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
             if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
+    def test_pattern_match_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x, _ = torch.ops.aten.max_pool2d_with_indices.default(x)
+                return x
+
+        pattern = (operator.getitem, torch.ops.aten.max_pool2d_with_indices.default, 0)
+        m = torch.fx.symbolic_trace(M())
+        # eliminate the code that get the second output of maxpool, so that the pattern
+        # can be matched
+        m.graph.eliminate_dead_code()
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == operator.getitem:
                 self.assertTrue(is_match(modules, n, pattern))
 
     def test_fused_module_qat_swap(self):
@@ -2040,6 +2053,34 @@ class TestQuantizeFx(QuantizationTestCase):
             .set_module_name_object_type_order("foofoo", torch.nn.ReLU, 1, qconfig2)
         qconfig_dict = self._get_qconfig_dict_for_qconfig_mapping_test(global_qconfig, qconfig1, qconfig2)
         self.assertEqual(qconfig_mapping.to_dict(), qconfig_dict)
+
+    def test_qconfig_mapping_repr(self):
+        self.assertTrue(isinstance(get_default_qconfig_mapping().__repr__(), str))
+
+    def test_default_qconfig_mapping_override_global(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        my_qconfig = QConfig(activation=MinMaxObserver, weight=default_weight_observer)
+        qconfig_mapping = get_default_qconfig_mapping()
+        # Override global qconfig
+        old_global_qconfig = qconfig_mapping.global_qconfig
+        qconfig_mapping.set_global(my_qconfig)
+        # Verify the correct qconfig was used
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        self.assertTrue(isinstance(old_global_qconfig.activation(), HistogramObserver))
+        self.assertTrue(isinstance(my_qconfig.activation(), MinMaxObserver))
+        self.assertTrue(hasattr(m, "activation_post_process_0"))
+        self.assertTrue(hasattr(m, "activation_post_process_1"))
+        self.assertTrue(isinstance(m.activation_post_process_0, MinMaxObserver))
+        self.assertTrue(isinstance(m.activation_post_process_1, MinMaxObserver))
 
     # Dummy classes for PrepareCustomConfig testing
 
@@ -5478,6 +5519,56 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+
+    def test_match_pattern_with_multiple_args(self):
+        """ Test that we can match a pattern that has multiple arguments
+        Pattern:
+                           shape \
+        transpose (observed) -> reshape -> output (observed) ->
+
+        where `reshape` has two arguments
+        """
+
+        def _get_pattern_configs():
+            backend_pattern_configs = []
+            observation_type = ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
+            weighted_op_quint8_dtype_config = DTypeConfig(
+                input_dtype=torch.quint8,
+                output_dtype=torch.quint8,
+                weight_dtype=torch.qint8,
+                bias_dtype=torch.float,
+            )
+            dtype_configs = [weighted_op_quint8_dtype_config]
+
+            def root_node_getter(node_pattern):
+                reshape, transpose, shape = node_pattern
+                return transpose
+
+            backend_pattern_configs.append(
+                BackendPatternConfig((torch.reshape, torch.transpose, MatchAllNode))
+                .set_observation_type(observation_type)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                ._set_root_node_getter(root_node_getter))
+            return backend_pattern_configs
+
+        backend_config = BackendConfig().set_backend_pattern_configs(_get_pattern_configs())
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.transpose(x, 0, 1)
+                x = torch.reshape(x, (-1,))
+                return x
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
+        node_occurrence = {
+            # one for input of the pattern and one for output of the pattern
+            ns.call_module(MinMaxObserver): 2
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

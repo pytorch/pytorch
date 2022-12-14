@@ -7,7 +7,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 
 from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.fx.quantization_patterns import _get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
 from torch.ao.quantization import (

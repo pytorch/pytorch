@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, no_type_check, Union
+from typing import Any, Callable, Dict, List, no_type_check, Set, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -200,3 +200,27 @@ def _assert_in_training_states(
             print(f"ERROR: {msg}")
             traceback.print_stack()
         raise ValueError(msg)
+
+
+def _get_root_modules(modules: Set[nn.Module]) -> Set[nn.Module]:
+    """
+    Returns:
+        Set[nn.Module]: The subset of ``modules`` that are root modules (i.e.
+        parent-less) with respect to the modules in the set itself. In other
+        words, these are the modules in ``modules`` that are not the child of
+        any other module in ``modules``.
+    """
+    root_modules: Set[nn.Module] = set()
+    module_to_submodules = {module: set(module.modules()) for module in modules}
+    for candidate_module in modules:
+        is_root_module = True
+        for module, submodules in module_to_submodules.items():
+            is_child_module = (
+                candidate_module is not module and candidate_module in submodules
+            )
+            if is_child_module:
+                is_root_module = False
+                break
+        if is_root_module:
+            root_modules.add(candidate_module)
+    return root_modules

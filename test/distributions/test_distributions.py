@@ -2975,6 +2975,9 @@ class TestDistributions(DistributionsTestCase):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
+                # We do not need grads wrt params here, e.g. shape of gamma distribution.
+                param = {key: value.detach() if isinstance(value, torch.Tensor) else value
+                         for key, value in param.items()}
                 dist = Dist(**param)
                 samples = dist.sample()
                 if not dist.support.is_discrete:
@@ -3185,8 +3188,6 @@ class TestDistributions(DistributionsTestCase):
             self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
 
     def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
-        if isinstance(dist, Wishart):
-            return
         # We perturb the mode in the unconstrained space and expect the log probability to decrease.
         num_points = 10
         transform = transform_to(dist.support)

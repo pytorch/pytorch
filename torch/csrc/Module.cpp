@@ -9,10 +9,10 @@
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/VmapMode.h>
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>

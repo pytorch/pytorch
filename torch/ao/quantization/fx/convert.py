@@ -23,14 +23,12 @@ from ..qconfig import (
     qconfig_equals
 )
 from ..qconfig_mapping import QConfigMapping
-from ..qconfig_mapping_utils import (
-    _update_qconfig_for_qat,
-)
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
     compare_prepare_convert_qconfig_mappings,
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
+    _update_qconfig_for_qat,
 )
 from torch.ao.quantization.backend_config.utils import (
     get_root_module_to_quantized_reference_module,

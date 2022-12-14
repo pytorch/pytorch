@@ -133,6 +133,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.blackman_window,
         torch.broadcast_shapes,
         torch.can_cast,
+        torch.compile,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
         torch.cudnn_convolution,
@@ -1688,7 +1689,7 @@ def resolve_name(f):
 
     Arguments
     ---------
-    callable : Callable
+    f : Callable
         Function to resolve the name of.
 
     Returns
