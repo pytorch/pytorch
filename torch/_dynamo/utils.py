@@ -774,6 +774,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    relax_numpy_equality=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -781,7 +782,16 @@ def same(
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
         return len(ref) == len(res) and all(
-            same(ai, bi, fp64_refi, cos_similarity, tol, equal_nan, exact_dtype)
+            same(
+                ai,
+                bi,
+                fp64_refi,
+                cos_similarity,
+                tol,
+                equal_nan,
+                exact_dtype,
+                relax_numpy_equality,
+            )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
     elif isinstance(ref, dict):
@@ -799,6 +809,7 @@ def same(
                     tol=tol,
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
+                    relax_numpy_equality=relax_numpy_equality,
                 )
             ):
                 log.error(f"Accuracy failed for key name {k}")
@@ -877,6 +888,8 @@ def same(
     elif isinstance(ref, float):
         return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
+        if relax_numpy_equality:
+            ref = ref.item()
         return (type(ref) is type(res)) and (ref == res)
     elif type(ref).__name__ in (
         "MaskedLMOutput",
@@ -901,6 +914,7 @@ def same(
                 tol=tol,
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
+                relax_numpy_equality=relax_numpy_equality,
             )
             for key in ref.__dict__.keys()
         )
