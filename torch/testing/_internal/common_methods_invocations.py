@@ -3032,40 +3032,29 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                          error_regex=error_msg)
 
         # error inputs for empty input with stride=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'stride must be greater than zero, but got 0' if torch.device(
-            device).type == 'cpu' and not requires_grad else 'stride should not be zero'
+        error_msg = 'stride must be greater than zero, but got 0'
         yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
                          error_regex=error_msg)
 
         # error inputs for empty input with dilation=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
-            device).type == 'cpu' and not requires_grad else 'dilation should be greater than zero, but got dilation'
+        error_msg = 'dilation must be greater than zero, but got 0'
         yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
                                      kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                          error_regex=error_msg)
 
         # error inputs for invalid output size
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
-            else \
-            r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
+        error_msg = 'Invalid computed output size: -2'
         yield ErrorInput(SampleInput(make_arg((2, 2, 2)),
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                          error_regex=error_msg)
 
         # error inputs when kernel_size=0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'kernel_size must be greater than zero' if torch.device(
-            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
                          error_regex=error_msg)
 
         # error inputs for strides > 0
-        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
-        error_msg = 'stride must be greater than zero' if torch.device(
-            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        error_msg = 'stride must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
                          error_regex=error_msg)
 
