@@ -7,6 +7,8 @@ on:
   push:
     tags:
       - ciflow/periodic/*
+    paths:
+      - .github/workflows/periodic-a100.yml
   workflow_dispatch:
 
 concurrency:
