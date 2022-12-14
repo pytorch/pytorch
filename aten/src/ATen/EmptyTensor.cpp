@@ -108,8 +108,8 @@ size_t computeStorageNbytes(
 
 SymInt computeStorageNbytesContiguous(
     SymIntArrayRef sizes,
-    SymInt itemsize_bytes,
-    SymInt storage_offset
+    const SymInt& itemsize_bytes,
+    const SymInt& storage_offset
   ) {
   const auto numel = c10::multiply_integers(sizes);
   return itemsize_bytes * (storage_offset + numel);
@@ -120,8 +120,8 @@ SymInt computeStorageNbytesContiguous(
 SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
-    SymInt itemsize_bytes,
-    SymInt storage_offset
+    const SymInt& itemsize_bytes,
+    const SymInt& storage_offset
   ) {
   TORCH_CHECK(
     sizes.size() == strides.size(),

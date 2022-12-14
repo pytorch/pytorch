@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
-from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
+from ..utils import cache_on_self, dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
@@ -312,6 +312,10 @@ class WrapperCodeGen(CodeGen):
             self.write_get_cuda_stream
         )
 
+    @cache_on_self
+    def get_output_refs(self):
+        return [x.codegen_reference() for x in V.graph.graph_outputs]
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -323,6 +327,8 @@ class WrapperCodeGen(CodeGen):
             """
         )
         with self.wrapper_call.indent():
+            if config.triton.debug_sync_graph:
+                self.wrapper_call.writeline("torch.cuda.synchronize()")
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -468,7 +474,9 @@ class WrapperCodeGen(CodeGen):
                 else:
                     self.wrapper_call.writeline(line)
 
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            output_refs = self.get_output_refs()
+            if config.triton.debug_sync_graph:
+                self.wrapper_call.writeline("torch.cuda.synchronize()")
             self.generate_return(output_refs)
 
         with result.indent():
@@ -558,6 +566,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
 
+    @cache_on_self
+    def get_output_refs(self):
+        def has_cpp_codegen_func(x):
+            return hasattr(x, "cpp_wrapper_codegen_reference") and callable(
+                x.cpp_wrapper_codegen_reference
+            )
+
+        return [
+            x.cpp_wrapper_codegen_reference()
+            if has_cpp_codegen_func(x)
+            else x.codegen_reference()
+            for x in V.graph.graph_outputs
+        ]
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -572,7 +594,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         with self.wrapper_call.indent():
             inputs_len = len(V.graph.graph_inputs.keys())
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
+            output_refs = self.get_output_refs()
             if output_refs:
                 if len(output_refs) == 1:
                     output_types = "at::Tensor"
