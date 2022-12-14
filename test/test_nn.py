@@ -9942,7 +9942,7 @@ class TestNNDeviceType(NNTestCase):
                 out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=False)
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros', align_corners=False)
 
-                self.assertEqual(out_half, out_double.half(), msg=f"grid_sample with {mode=} doesn't match")
+                self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
 
         helper((32, 64, 16, 16), (32, 8, 8, 2))
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3))
