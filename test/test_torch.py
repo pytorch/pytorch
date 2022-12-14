@@ -8460,6 +8460,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         called = False
 
         a = torch.randn(1)
+
         def callback(w):
             nonlocal called
             called = True
