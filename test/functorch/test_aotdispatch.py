@@ -387,6 +387,18 @@ def forward(self, primals_1):
         out_test = f_compiled(*inp)
         self.assertEqual(out_ref, out_test)
 
+    def test_input_mutation_of_leaf_in_no_grad_doesnt_error(self):
+        def f(a):
+            with torch.no_grad():
+                a.add_(1)
+            return a
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        f_compiled = aot_function(f, nop)
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+        self.assertEqual(out_ref, out_test)
+
     def test_input_mutation_is_output(self):
         def f(a):
             a.mul_(2)

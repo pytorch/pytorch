@@ -132,6 +132,19 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
 
+    def test_input_mutation_of_leaf_errors(self):
+        @torch.compile(backend="aot_eager")
+        def f(a, b):
+            with torch.no_grad():
+                a.add_(1)
+            # errors
+            b.add_(1)
+            return a + b
+
+        inp = [torch.ones(3, requires_grad=True), torch.ones(3, requires_grad=True)]
+        with self.assertRaises(RuntimeError):
+            out = f(*inp)
+
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):

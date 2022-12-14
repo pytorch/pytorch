@@ -1803,7 +1803,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                             updated_inpt.stride(),
                             updated_inpt.storage_offset(),
                         )
-                    original_inpt.copy_(updated_inpt)
+                    with torch.no_grad():
+                        original_inpt.copy_(updated_inpt)
         else:
             fw_outs = outs
 
