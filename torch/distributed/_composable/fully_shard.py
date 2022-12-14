@@ -98,7 +98,8 @@ def fully_shard(
     for submodule in module.modules():
         if (
             submodule not in state._ignored_modules
-            and _get_module_state(submodule) is None
+            and _get_module_state(submodule)
+            is not state  # either `None`or different state
         ):
             _insert_module_state(submodule, state)
     return module
