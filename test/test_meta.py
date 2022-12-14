@@ -614,7 +614,7 @@ meta_function_expected_failures = {
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.logcumsumexp : {f64, bf16, f32},
+    torch.logcumsumexp : {f64, bf16, f32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
