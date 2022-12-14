@@ -2756,10 +2756,6 @@
     AutogradCUDA:
       self: grad.reshape_as(self) + 1
 
-- name: _test_inductor_realize(Tensor self) -> Tensor
-  self: grad
-  result: auto_linear
-
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
 
