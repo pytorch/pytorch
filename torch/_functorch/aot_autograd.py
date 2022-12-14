@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import warnings
 import itertools
@@ -1803,7 +1804,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                             updated_inpt.stride(),
                             updated_inpt.storage_offset(),
                         )
-                    with torch.no_grad():
+                    if original_inpt.is_leaf:
+                        # We assume that if a user tried to mutate a leaf tensor, we must have been in no_grad() mode,
+                        # otherwise compilation would have failed.
+                        ctx = torch.no_grad()
+                    else:
+                        ctx = contextlib.nullcontext()
+
+                    with ctx:
                         original_inpt.copy_(updated_inpt)
         else:
             fw_outs = outs
