@@ -3367,6 +3367,7 @@ class AllReduce(ExternKernelAlloc):
         cls,
         x: "TensorBox",
     ):
+        x = cls.realize_input(x)
         return AllReduce(
             layout=MutationLayout(x),
             inputs=[x],
