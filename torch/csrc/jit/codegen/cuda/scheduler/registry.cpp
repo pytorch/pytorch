@@ -1807,54 +1807,73 @@ class PersistentKernelScheduler : public SchedulerEntry {
               persistent_buffer_size_info.persistent_buffer_size,
               persistent_buffer_size_info.projected_persistent_buffer_size);
 
-    if (persistent_buffer_size > scheduler_utils::register_file_size) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent,
-          "not enough registers for persistence");
-      return false;
-    }
+    const int64_t device_multiprocessor_count =
+        (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
     // If there's a small iteration dimension but a large reduction dimension it
     // may not make sense to make a persistent kernel
     auto properties =
         scheduler_utils::getProperties(fusion, runtime_info, reduction_tvs[0]);
 
+    // TODO: Enable grid persistence
+    const auto available_persistent_buffer_size =
+        scheduler_utils::register_file_size;
+
+    if (persistent_buffer_size > available_persistent_buffer_size) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "no enough registers for persistece");
+      return false;
+    }
+
     const int64_t device_max_threads_per_multiprocessor =
         (int64_t)at::cuda::getCurrentDeviceProperties()
             ->maxThreadsPerMultiProcessor;
-
-    const int64_t device_multiprocessor_count =
-        (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
     const int64_t warp_size = at::cuda::warp_size();
 
     // Maximum number of iteration dimensions we can have and still be
     // persistent.
-    const int64_t max_multi_reduction_factor = std::max(
-        scheduler_utils::register_file_size / persistent_buffer_size,
-        (int64_t)1);
+    const int64_t max_multi_reduction_factor = scheduler_utils::safeDiv(
+        available_persistent_buffer_size, persistent_buffer_size);
 
-    // If outer reduction, and we have few iteration numel but large reduction
-    // numel, don't generate kernel because we don't support cross grid
-    // persistence
-    if (
-        // Don't go persistent if we can't fit half a warp on an SM
-        (!properties.fastest_dim_reduction &&
-         max_multi_reduction_factor < warp_size / 2) ||
-        ( // Don't go persistent if we can't use a small fraction of the
-          // available SMs yet have a large reduction size
-            properties.total_iteration_numel <
-                (properties.fastest_dim_reduction
-                     ? std::max(device_multiprocessor_count / 8, (int64_t)1)
-                     // Make sure we at least use a quarter of the device * a
-                     // half warp
-                     : (warp_size / 8) * device_multiprocessor_count) &&
-            // Reduction count is larger than max thread count * 4
-            properties.total_reduction_numel >=
-                device_max_threads_per_multiprocessor * 4)) {
+    const int64_t required_sm_per_norm =
+        ceilDiv(persistent_buffer_size, scheduler_utils::register_file_size);
+
+    // If the persistence requires over half the device don't do grid
+    // persistence as we can't overlap the grid comms.
+    if (required_sm_per_norm >
+        scheduler_utils::safeDiv(device_multiprocessor_count, 3)) {
       scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "unsupported cross grid persistence");
+          ScheduleHeuristic::Persistent, "requires over half GPU persistence.");
+      return false;
+    }
 
+    const int64_t norm_per_sm =
+        ceilDiv(scheduler_utils::register_file_size, persistent_buffer_size);
+
+    // If outer reduction, don't go persistent if we can't fit half a warp in
+    // the iter domain of the persistent reduction.
+    if (!properties.fastest_dim_reduction &&
+        !(norm_per_sm >= warp_size / 2 ||
+          max_multi_reduction_factor >= warp_size)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "not enough threads");
+      return false;
+    }
+
+    // Don't go persistent if we can't use a small fraction of the
+    // available SMs yet have a large reduction size.
+    if ( // Large reduction dim
+        properties.total_reduction_numel >=
+            device_max_threads_per_multiprocessor * 4 &&
+        properties.total_iteration_numel <
+            (properties.fastest_dim_reduction
+                 ? scheduler_utils::safeDiv(device_multiprocessor_count, 8)
+                 // Make sure we at least use a quarter of the device * a
+                 // half warp
+                 : (warp_size / 8) * device_multiprocessor_count)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "not enough blocks");
       return false;
     }
 

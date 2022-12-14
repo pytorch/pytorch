@@ -552,22 +552,7 @@ TvProperties getProperties(
 
   TORCH_INTERNAL_ASSERT(tv != nullptr);
 
-  auto root_dom = tv->getRootDomain();
-  bool fastest_dim_reduction = true;
-
-  // Is there a reduction on the inner most dimension or is there an
-  // iteration domain.
-  for (size_t i = root_dom.size(); i > 0; i--) {
-    if (root_dom[i - 1]->isBroadcast()) {
-      continue;
-    } else if (root_dom[i - 1]->isReduction()) {
-      fastest_dim_reduction = true;
-      break;
-    } else {
-      fastest_dim_reduction = false;
-      break;
-    }
-  }
+  bool fastest_dim_reduction = isFastestDimReduction(tv);
 
   // Tracks the dimensionality of the problem starts on inner most dim and works
   // outward
@@ -581,6 +566,7 @@ TvProperties getProperties(
   // Start from the inner most dimension, and work outwards. If this is a 3D
   // pattern, i.e. theres a pattern like [r0, r1, i2, r3] or [i0, r1, r2, i3,
   // i4] then compute the inner most dimension to compute separately.
+  const auto& root_dom = tv->getMaybeRFactorDomain();
   for (size_t i = root_dom.size(); i > 0; i--) {
     auto id = root_dom[i - 1];
     if (id->isBroadcast()) {
@@ -605,7 +591,7 @@ TvProperties getProperties(
   // Reduction element count
   int64_t total_reduction_numel = 1;
 
-  for (auto id : tv->getRootDomain()) {
+  for (auto id : root_dom) {
     auto inferred_val =
         runtime_info.expressionEvaluator().evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
@@ -2299,6 +2285,23 @@ void propagateViewTransforms(Fusion* fusion, const ComputeAtMap& ca_map) {
     //! Propagate current transformations on from_tv to all graphs
     transformPropagateToAllFrom(tv, old2new.size());
   }
+}
+
+bool isFastestDimReduction(TensorView* tv) {
+  for (auto it = tv->getMaybeRFactorDomain().rbegin();
+       it != tv->getMaybeRFactorDomain().rend();
+       ++it) {
+    auto root_id = *it;
+    if (root_id->isBroadcast()) {
+      continue;
+    } else if (root_id->isReduction()) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 } // namespace scheduler_utils
