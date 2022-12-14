@@ -37,17 +37,6 @@ constexpr auto exclude_keys_for_meta_dispatch =
         c10::DispatchKey::Python
     });
 
-inline c10::Storage to_meta(const c10::Storage& t) {
-    auto *allocator = c10::GetAllocator(c10::kMeta);
-    auto storage_impl = c10::make_intrusive<StorageImpl>(
-        c10::StorageImpl::use_byte_size_t(),
-        t.nbytes(),
-        allocator->allocate(t.nbytes()),
-        allocator,
-        /*resizeable=*/t.resizable());
-    return c10::Storage(storage_impl);
-}
-
 
 inline Tensor to_meta(const Tensor& t) {
     if (!t.defined()) return t;
