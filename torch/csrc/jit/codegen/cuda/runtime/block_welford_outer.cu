@@ -79,16 +79,17 @@ __inline__ __device__ WelfordTriplet<DataType> blockWelfordOuter(
   constexpr int smem_N_offset = num_warps * BDIMX * NumVals * 2;
 
   // We define a chunk as a value in a group and a chunk size as the
-  // number of group values per thread. Initiall, the chunk size is
+  // number of group values per thread. Initially, the chunk size is
   // NumVals. After the initial warp reduction, the chunk size is
-  // reduced to NumVals/wdimy. For example, support NumVals=8,
-  // blockDim.x=8, blockDim.y=32, then wdimy=4, so afer the initial
+  // reduced to NumVals/wdimy. For example, suppose NumVals=8,
+  // blockDim.x=8, blockDim.y=32, then wdimy=4, so after the initial
   // warp reduction, the chunk size is 2. This is the number of
   // elements each thread stores to shared memory.
 
   int chunk_size = NumVals;
 
-  // Butterfly reduction
+  // Butterfly reduction, a.k.a. recursive halving as each iteration
+  // halves the number of values
 #pragma unroll
   for (int lane_mask = 16; lane_mask >= BDIMX; lane_mask /= 2) {
     chunk_size /= 2;
@@ -159,7 +160,7 @@ __inline__ __device__ WelfordTriplet<DataType> blockWelfordOuter(
   // a value of the group). The wdimy threads of the same threadId.x
   // collectively reduce num_warps partial results, each of which is
   // stored with stride 32. This means that there will be wdimy-way
-  // bank conflicts, so to avoid that, swizziling is also employed.
+  // bank conflicts, so to avoid that, swizzling is also employed.
 #pragma unroll
   for (int i = 0; i < chunk_size; ++i) {
     // Accumulating smem offset from the innermost dimension
@@ -245,9 +246,8 @@ __inline__ __device__ WelfordTriplet<DataType> blockWelfordOuter(
     return out;
   }
 
-  // Standard binary-tree reduction within wdimy intra-warp
-  // threads. After this step, only threads with warp_tidy == 0 have
-  // the valid final results
+  // Standard binary-exchange reduction within wdimy intra-warp
+  // threads.
 #pragma unroll
   for (int lane_mask = 16; lane_mask >= BDIMX; lane_mask /= 2) {
     auto avg_peer = __shfl_xor_sync(0xffffffff, avg, lane_mask);
