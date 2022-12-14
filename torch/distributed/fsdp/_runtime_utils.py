@@ -67,6 +67,7 @@ def _validate_and_get_hybrid_shard_state(
     for fsdp_module in _get_fsdp_states(root_module):
         # TODO: Change this to handle's sharding strategy if we deprecate
         # `ShardingStrategy` internally.
+        # https://github.com/pytorch/pytorch/issues/90857
         if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
             intra_node_pgs.add(fsdp_module.process_group)
             inter_node_pgs.add(fsdp_module._inter_node_pg)
