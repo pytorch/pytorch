@@ -160,11 +160,14 @@ class DefaultsSource(Source):
         self.base = base
         self.idx_key = idx_key
         self.is_kw = is_kw
-        self.field = "__kwdefaults__" if is_kw else "__defaults__"
-        if not is_kw:
-            assert isinstance(idx_key, int)
-        else:
+        if self.is_kw:
             assert isinstance(idx_key, str)
+            self.field = "__kwdefaults__"
+            self._name = f"{self.base.name()}.{self.field}['{self.idx_key}']"
+        else:
+            assert isinstance(idx_key, int)
+            self.field = "__defaults__"
+            self._name = f"{self.base.name()}.{self.field}[{self.idx_key}]"
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -181,10 +184,7 @@ class DefaultsSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        if self.is_kw:
-            return f"{self.base.name()}.__kwdefaults__['{self.idx_key}']"
-        else:
-            return f"{self.base.name()}.__defaults__[{self.idx_key}]"
+        return self._name
 
 
 @dataclasses.dataclass

@@ -31,7 +31,6 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif isinstance(val, (type, abc.ABCMeta)):
         return variables.UserDefinedClassVariable(val, **options)
     elif istensor(val):
-        # Circular import...
         from torch._dynamo.variables.builder import VariableBuilder
 
         assert (
@@ -389,7 +388,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def bind_args(self, parent, args, kwargs):
         code = self.get_code()
-        tx = parent.output.root_tx
         func = types.FunctionType(
             code,
             self.f_globals,
@@ -403,7 +401,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-        wrap_args_kwargs(tx, result, VariableTracker.propagate(self))
+        wrap_args_kwargs(parent.output.root_tx, result, VariableTracker.propagate(self))
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
