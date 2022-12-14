@@ -1345,9 +1345,7 @@ def native_batch_norm_helper(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = _squeeze_multiple(biased_var, reduction_dims) * (
-               n / (n - 1)
-            )
+            unbiased_var = _squeeze_multiple(biased_var, reduction_dims) * (n / (n - 1))
             new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
             if not functional:
                 running_var.copy_(new_running_var)
