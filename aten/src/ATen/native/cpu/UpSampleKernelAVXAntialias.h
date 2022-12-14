@@ -16,6 +16,11 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 #pragma once
 #ifdef CPU_CAPABILITY_AVX2
+// TODO: This file only supports AVX2. We could split the AVX kernels into
+// smaller logical blocks in order to port them into the Vec.h logic. This would
+// allow to support other vectorization architectures and perhaps also support
+// the non-vectorized fallback (we'd need to make sure it's not slower than the
+// current fallback).
 
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/intrinsics.h>
@@ -27,10 +32,17 @@ static __m128i inline mm_cvtepu8_epi32(void* ptr) {
   return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
 }
 
+// TODO: We may want to hard-code an unrolled version for the case where
+// num_channels=3 to hint the compiler to vectorize this (looks at original
+// PIL-SIMD's code).
 void unpack_rgb(
     uint8_t* unpacked, // OUT
     const at::Tensor& packed_tensor, // IN
     bool is_channels_last) {
+  // Convert a "packed" tensor (typically RGBRGBRGB if channels_last) into
+  // RGBARGBARGBA format where A is hard-coded to 255. Each pixel is encoded
+  // into as 32bits. This generalizes to num_channels <= 4 and also works for
+  // non-channels_last tensors.
   const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
@@ -53,6 +65,8 @@ void pack_rgb(
     const uint8_t* unpacked, // IN
     const at::Tensor& packed_tensor, // OUT
     bool is_channels_last) {
+  // This is the reverse operation of unpack_rgb() above.
+  // Same TODO as above.
   uint8_t* packed = (uint8_t*)packed_tensor.data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
@@ -98,7 +112,7 @@ void ImagingResampleVerticalConvolution8u(
     int coefs_precision,
     int xin);
 
-void ImagingResampleHorizontal_8bpc(
+void ImagingResampleHorizontal(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
@@ -107,6 +121,10 @@ void ImagingResampleHorizontal_8bpc(
     int xout,
     int yout,
     int xin) {
+  // TODO: we may want to merge that into the fallback code (currently called
+  // basic_loop_aa_horizontal<uint8_t>)
+  // Although this may not be needed if / when we port all this code to use
+  // Vec.h since this would potentially give us another fall-back implem
   int yy;
 
   int16_t* kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
@@ -150,7 +168,7 @@ void ImagingResampleHorizontal_8bpc(
   }
 }
 
-void ImagingResampleVertical_8bpc(
+void ImagingResampleVertical(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
@@ -158,6 +176,10 @@ void ImagingResampleVertical_8bpc(
     unsigned int vert_weights_precision,
     int xout,
     int yout) {
+  // TODO: we may want to merge that into the fallback code (currently called
+  // basic_loop_aa_vertical<uint8_t>)
+  // Although this may not be needed if / when we port all this code to use
+  // Vec.h since this would potentially give us another fall-back implem
   int ymin, ymax;
   int16_t* k = nullptr;
   int16_t* kk = (int16_t*)(vert_indices_weights[3].data_ptr<double>());
@@ -212,7 +234,7 @@ uint32_t* ImagingResampleInner(
             /*antialias=*/antialias);
 
     unpacked_output_temp_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yin);
-    ImagingResampleHorizontal_8bpc(
+    ImagingResampleHorizontal(
         unpacked_output_temp_p,
         unpacked_input_p,
         ksize_horiz,
@@ -237,7 +259,7 @@ uint32_t* ImagingResampleInner(
             /*antialias=*/antialias);
 
     unpacked_output_p = (uint32_t*)malloc(sizeof(uint32_t) * xout * yout);
-    ImagingResampleVertical_8bpc(
+    ImagingResampleVertical(
         unpacked_output_p,
         unpacked_input_p,
         ksize_vert,
@@ -260,6 +282,17 @@ uint32_t* ImagingResampleInner(
   return unpacked_output_p;
 }
 
+// This is the only public entry point in this file.  It supports bilinear and
+// bicubic modes for uint8 dtype when C <= 4, with or without antialias. The
+// implem is based on PIL-SIMD.
+// Its equivalent implementation (fallback) for when AVX isn't supported or when
+// C > 4 is separable_upsample_generic_Nd_kernel_impl()  There are a bunch of
+// future improvement that can be done: look for the TODOs in this file.
+// For details on how the weights are computed and how the multiplications are
+// run on int (instead of float weights), see
+// [ Weights computation for uint8_t and multiplication trick ]
+// For details on how the AVX kernels are implemented, see
+// https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 template <typename scale_type, class F>
 void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& input,
@@ -283,6 +316,10 @@ void upsample_avx_bilinear_or_bicubic(
     return;
   }
 
+  // TODO: The unpack / pack operations create a copy of the original input and
+  // ouptut tensor. There should be a way to avoid these copies by instead
+  // modifying the low-level kernels. Or maybe at least avoid copying the entire
+  // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
     unpack_rgb(
         (uint8_t*)unpacked_input_p,
@@ -310,6 +347,7 @@ void upsample_avx_bilinear_or_bicubic(
   free(unpacked_input_p);
 }
 
+// https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleHorizontalConvolution8u4x(
     uint32_t* lineOut0,
     uint32_t* lineOut1,
@@ -431,6 +469,7 @@ void ImagingResampleHorizontalConvolution8u4x(
   }
 }
 
+// https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleHorizontalConvolution8u(
     uint32_t* lineOut,
     uint32_t* lineIn,
@@ -526,6 +565,7 @@ void ImagingResampleHorizontalConvolution8u(
   }
 }
 
+// https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleVerticalConvolution8u(
     uint32_t* lineOut,
     uint32_t* imIn,

@@ -24,12 +24,36 @@ namespace {
 
 using scale_t = std::vector<c10::optional<double>>;
 
+// TODO: this file could benefit from a global renaming of its functions /
+// classes and terms, as well as from adding more comments. In particular:
+// - the term "horizontal" or "within dims" or "contiguous dim" refers to the
+//   last dimension.
+//   It's not specific to 2D images and applies to 3D (and 1D??) inputs as well.
+//   Similarly "vertical" or "across dims" refers to all dims that aren't the
+//   last one. In other kernels these are also referred to as "zero-stride" and
+//   "non-zero-stride" - we should unify all this.
+// - the terms "zero-stride" and "non-zero strides" refer to the weights and
+//   indices, not to the contiguity of input or output
+// - It's not always clear which kernel is vectorized and which one isn't.
+// - It's not always clear which code is part of a "separable interpolation"
+//   code-path.
+// - Some names need to be more specific. For example
+//   "cpu_upsample_generic_aa()" looks like a super generic name, but the function
+//   is instead fairly specific - we need to make that clearer.
+// - Some functions have a "aa" suffix but it doesn't mean that they only
+//   support antialias. Some of them also support antialias=False now.
+// - Various comments are outdated. Case in point: the one just below about the
+//   `Interpolate` struct being used for cpu_upsample_linear:
+//   cpu_upsample_linear doesn't exist anymore, and these structs are used for
+//   various modes, *not* just linear.
+
+
 // Helper structs and methods for cpu_upsample_linear
 //
 // Interpolation methods that used below are separable, and as such we can compute the interpolation
 // independently per dimension in a recursive way. Please, refer to #10482 for more context.
 //
-// Linear Interpolation structure to compute output value in n-dimensional case.
+// Interpolation structure to compute output value in n-dimensional case.
 // - recursively compute interpolated output for each dimension
 // - we rely a lot on compiler's code optimization such that implemented operations
 //   can be automatically factorized and vectorized using SSE and AVX2
@@ -281,6 +305,7 @@ inline void basic_loop_aa_vertical<uint8_t>(
     const int64_t* strides,
     int64_t n,
     unsigned int weights_precision) {
+  // See Note [ Weights computation for uint8_t and multiplication trick ]
   char* dst = data[0];
   char* src = data[1];
 
@@ -301,7 +326,7 @@ inline void basic_loop_aa_vertical<uint8_t>(
     int16_t wts = wts_ptr[0];
 
     // Intermediate computations are using integer type
-    int output = 1 << (weights_precision - 1);
+    int output = 1 << (weights_precision - 1);  // accounts for the +0.5 part
     output += t * wts;
     for (const auto j : c10::irange(1, ids_size)) {
       wts = wts_ptr[j];
@@ -344,6 +369,7 @@ inline void basic_loop_aa_horizontal<uint8_t>(
     const int64_t* strides,
     int64_t n,
     unsigned int weights_precision) {
+  // See Note [ Weights computation for uint8_t and multiplication trick ]
   char* dst = data[0];
   char* src = data[1];
   // index stride is constant for the given dimension
@@ -367,7 +393,7 @@ inline void basic_loop_aa_horizontal<uint8_t>(
     int16_t wts = wts_ptr[0];
 
     // Intermediate computations are using integer type
-    int output = 1 << (weights_precision - 1);
+    int output = 1 << (weights_precision - 1);  // accounts for the +0.5 part
     output += t * wts;
     for (const auto j : c10::irange(1, ids_size)) {
       wts = wts_ptr[j];
@@ -803,6 +829,47 @@ struct HelperInterpBase {
     return {output, max_interp_size};
   }
 
+  /*
+  NOTE [ Weights computation for uint8_t and multiplication trick ]
+  When the input/output dtype is uint8_t, we still compute the interpolation
+  weights as double, but then convert them to int16 via some conversion logic
+  detailed below. This allows us to compute all interpolation operation (sum of
+  multiplications) as ints instead of floats. The result is converted back into
+  uint8 in basic_loop_aa_horizontal<uint8_t> (and vertical)
+
+  In essence the idea is to avoid a multiplication between a float (the
+  weight) and an int (the pixel value) and instead run a multpilication between
+  2 ints:
+
+  ```py
+  COEF_PREC = 16
+
+  def mul(a:float, b:int) -> Tuple[float, int]:
+    # return a * b, round(a * b)
+    actual = a * b
+
+    assert a > 0  # I'm lazy
+    int_a = floor(0.5 + a * (1 << COEF_PREC))
+    with_trick = ((int_a * b) + (1 << (COEF_PREC - 1))) >> COEF_PREC
+
+    return actual, with_trick  # round(actual) == with_trick!!
+  ```
+
+  Here's how it works:
+  N == COEFF_PREC
+  1 << N == 2**N
+  floor(0.5 + x) == round(x)
+
+  So the operation is something like
+
+  int_a = round(a * 2**N)  -- let's just say it's `a * 2**N` for simplicity
+
+  res = ((int_a * b) + (1 << (N - 1))) >> N
+      = ((a * 2**N * b + 2**(N - 1)) / 2**N
+      = a * b + 0.5
+      = round(a * b)
+      = what we wanted
+  */
   template <typename aa_filter_fn_t>
   static inline std::tuple<std::vector<Tensor>, int, unsigned int> _compute_indices_int16_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
@@ -1368,7 +1435,6 @@ void cpu_upsample_generic_aa(at::TensorIterator& iter, unsigned int weights_prec
   iter.for_each(loop);
 }
 
-// Generic separable upsampling interpolation kernels for N-d case with anti-aliasing
 template <int out_ndims, typename scale_type, class F, bool is_horizontal>
 void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const Tensor& output,
@@ -1434,6 +1500,10 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
       });
 }
 
+// Generic separable upsampling interpolation kernel for N-d case with anti-aliasing.
+// It also supports antialias=False iff
+// (dtype == uint8 and mode in ("bilinear", "bicubic")): this is used as
+// fallback in these settings when AVX isn't supported.
 template <int out_ndims, typename scale_type, class F>
 void separable_upsample_generic_Nd_kernel_impl(
     const Tensor& output,
