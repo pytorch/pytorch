@@ -1213,6 +1213,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(x.to_mkldnn().is_mkldnn)
 
     # legacy constructor/new doesn't support mkldnn tensors
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     def test_legacy_new_failure(self):
         x = torch.randn(1, dtype=torch.float32)
         x_mkldnn = x.to_mkldnn()
