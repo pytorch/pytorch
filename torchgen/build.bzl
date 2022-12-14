@@ -5,6 +5,7 @@ def define_targets(rules):
         deps = [
             rules.requirement("PyYAML"),
             rules.requirement("typing-extensions"),
+            rules.requirement("mypy-extensions"),
         ],
         visibility = ["//visibility:public"],
     )
