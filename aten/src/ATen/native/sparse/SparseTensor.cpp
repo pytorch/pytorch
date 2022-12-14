@@ -396,8 +396,9 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
-
-  at::native::_validate_sparse_coo_tensor_args(indices, values, size);
+  if (at::globalContext().checkSparseTensorInvariants()) {
+    at::native::_validate_sparse_coo_tensor_args(indices, values, size);
+  }  // otherwise arguments are validated in _sparse_coo_tensor_unsafe
   return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
@@ -413,20 +414,10 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
-
-  Tensor values = expand_values_if_needed(values_);
-
-  auto sparse_dim = indices.size(0);
-  auto dense_dim = values.dim() - 1;
-
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      size,
-      indices,
-      values,
-      values.options().layout(kSparse));
+  if (at::globalContext().checkSparseTensorInvariants()) {
+    at::native::_validate_sparse_coo_tensor_args(indices, values_, size);
+  }
+  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()

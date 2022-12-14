@@ -865,6 +865,8 @@ def _get_qengine() -> _int: ...  # THPModule_qEngine
 def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
+def _check_sparse_tensor_invariants() -> _bool: ...  # THPModule_checkSparseTensorInvariants
+def _set_check_sparse_tensor_invariants(arg: _bool) -> None: ...  # THPModule_setCheckSparseTensorInvariants
 def _set_default_mobile_cpu_allocator() -> None: ...  # THPModule_setDefaultMobileCPUAllocator
 def _unset_default_mobile_cpu_allocator() -> None: ...  # THPModule_unsetDefaultMobileCPUAllocator
 def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFunction
