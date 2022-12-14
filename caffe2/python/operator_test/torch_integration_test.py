@@ -11,6 +11,7 @@ from caffe2.python import core, workspace
 from hypothesis import given, settings
 from scipy.stats import norm
 
+# pyre-fixme[21]: Could not find module `caffe2.caffe2.python.operator_test._utils`.
 from ._utils import assert_allclose
 
 
