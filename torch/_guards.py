@@ -1,10 +1,18 @@
 import dataclasses
 import enum
+import logging
 import weakref
-from contextlib import contextmanager
-from typing import Callable, List, NamedTuple, Optional, Set
-
 import sympy
+from abc import ABC
+from contextlib import contextmanager
+from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+
+# TODO(voz): Stolen pattern, not sure why this is the case,
+# but mypy complains.
+try:
+    import sympy  # type: ignore[import]
+except ImportError:
+    logging.warning("No sympy found")
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -172,15 +180,105 @@ class Guard:
         self.obj_weakref = obj_weakref
 
 
-class GuardsContext:
+T = TypeVar("T")
+
+"""
+Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
+
+copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
+can also be taken in at restore_graphstate(T) calls.
+
+When to snapshot, is, at the moment, an implementation detail of upstream callers. Checkpointable
+does not provide any garuantees around consistency, idempotency, or safety of calling its APIs, yet.
+
+In the future, it will have a closer coupling to a generic Checkpoint management system.
+"""
+
+
+class Checkpointable(ABC, Generic[T]):
+    def copy_graphstate(self) -> T:
+        pass
+
+    def restore_graphstate(self, state: T):
+        pass
+
+
+"""
+The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
+"""
+
+
+class GuardsCheckpointState:
+    dynamo_guards: Set[Guard] = set()
+
+    def __init__(self, dynamo_guards):
+        self.dynamo_guards = dynamo_guards
+
+    """
+    Produces a delta against another GuardsCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    Guard type objects.
+    """
+
+    def diff(self, other):
+        r = self.dynamo_guards.difference(other.dynamo_guards)
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+"""
+A GuardsContext is a checkpointable representation of all the guards in the current tracing
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+directly outside of it. For passing around internal state representations of this object,
+prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
+"""
+
+
+class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+
+    def copy_graphstate(self):
+        return GuardsCheckpointState(set(self.dynamo_guards))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, GuardsCheckpointState)
+        self.dynamo_guards = state.dynamo_guards
 
 
 _CURRENT_TRACING_CONTEXT = None
 
+"""
+TracingContext is the source of truth for all currently accumulated information
+needed to trace. Its lifecycle is kept 1:1 when using TorchDynamo, but other systems
+are open to managing their own TracingContext with that in mind.
+
+Currently, only guards live on the TracingContext, in the form of a GuardsContext.
+However, future implementations will move FakeTensorMode (and its owned ShapeEnv), as well
+as other structures into it.
+
+The purpose of TracingContext is not to be a dumping ground, or god object, but rather to avoid
+having to plumb complex subsystems across multiple verticals.
+
+Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
+Accessing the current tracing context via
+TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
+to plumb objects back up to where frame interpretation happend.
+"""
+
 
 class TracingContext:
+    """
+    Provides the currently installed TracingContext, or None.
+
+    Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
+    will return NoNe.
+    """
     @staticmethod
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
@@ -190,6 +288,11 @@ class TracingContext:
         self.fake_mode = fake_mode
 
 
+"""
+This function installs the passed in tracing context as a dynamic scoped global variable.
+
+Calls to TracingContext.get() while not under a `with tracing()` context will return None.
+"""
 @contextmanager
 def tracing(context: TracingContext):
     global _CURRENT_TRACING_CONTEXT
