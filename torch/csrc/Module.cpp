@@ -1517,7 +1517,6 @@ Call this whenever a new thread is created in order to propagate values from
     return false;
 #endif
   });
-  py_module.def("_is_mps_on_macos_13_or_newer", []() { return false; });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
