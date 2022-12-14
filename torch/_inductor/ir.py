@@ -3349,6 +3349,34 @@ class Convolution(ExternKernelAlloc):
         )
 
 
+class AllReduce(ExternKernelAlloc):
+    kernel = "torch.ops.c10d.traceable_allreduce"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.c10d.traceable_allreduce",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+    ):
+        return AllReduce(
+            layout=MutationLayout(x),
+            inputs=[x],
+        )
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
