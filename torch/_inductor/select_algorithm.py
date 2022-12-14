@@ -13,7 +13,6 @@ from unittest.mock import patch
 import jinja2
 
 import sympy
-from triton.testing import do_bench
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -25,7 +24,7 @@ from .codecache import code_hash, DiskCache, PyCodeCache
 from .codegen.common import IndentedBuffer
 from .codegen.triton import config_of, signature_of, texpr, TritonKernel, TritonPrinter
 
-from .utils import sympy_dot, sympy_product
+from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)

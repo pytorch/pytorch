@@ -27,6 +27,17 @@ dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
 dynamo_testing = import_module(f"{config.dynamo_import}.testing")
 dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
+try:
+    from triton.testing import do_bench
+except ImportError:
+
+    def do_bench(*args, **kwargs):
+        raise NotImplementedError("requires Triton")
+
+
+def cdiv(x, y):
+    return (x + y - 1) // y
+
 
 @functools.lru_cache(None)
 def has_triton():
