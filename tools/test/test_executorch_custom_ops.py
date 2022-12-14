@@ -1,9 +1,7 @@
-import unittest
-
+import expecttest
 from typing import Any, Dict
 
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
-
 from torchgen.model import Location, NativeFunction
 
 SPACES = "    "
@@ -18,7 +16,7 @@ def _get_native_function_from_yaml(yaml_obj: Dict[str, object]) -> NativeFunctio
     return native_function
 
 
-class TestComputeNativeFunctionStub(unittest.TestCase):
+class TestComputeNativeFunctionStub(expecttest.TestCase):
     """
     Could use torch.testing._internal.common_utils to reduce boilerplate.
     GH CI job doesn't build torch before running tools unit tests, hence
@@ -32,7 +30,7 @@ class TestComputeNativeFunctionStub(unittest.TestCase):
 
         gen = ComputeNativeFunctionStub()
         res = gen(func)
-        self.assertEquals(
+        self.assertExpectedInline(
             res,
             expected,
         )
