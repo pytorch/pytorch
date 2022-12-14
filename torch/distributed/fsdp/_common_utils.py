@@ -68,7 +68,7 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _all_handles(state: _FSDPState) -> List[flat_param_file.FlatParamHandle]:
+def _all_handles(state: _FSDPState) -> List:
     """
     Returns all ``FlatParamHandle`` s managed by ``state``.
     """
@@ -80,9 +80,7 @@ def _all_handles(state: _FSDPState) -> List[flat_param_file.FlatParamHandle]:
 
 
 @no_type_check
-def _module_handles(
-    state: _FSDPState, module: nn.Module
-) -> List[flat_param_file.FlatParamHandle]:
+def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
     Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
     the handles that contain some parameter in ``module``.
