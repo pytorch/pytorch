@@ -168,7 +168,7 @@ class TestFSDPHybridShard(FSDPTest):
                     ShardingStrategy.HYBRID_SHARD,
                     ShardingStrategy._HYBRID_SHARD_ZERO2,
                 ],
-                "init_mode": ["mixed"],
+                "init_mode": ["uniform", "mixed"],
             },
             self._test_fsdp_hybrid_shard_basic_setup,
         )
