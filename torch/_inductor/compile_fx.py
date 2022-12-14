@@ -127,9 +127,9 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-
+    fake_mode = fake_mode_from_tensors(example_inputs)
     graph = GraphLowering(
-        gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id
+        gm, shape_env=shape_env, num_static_inputs=num_fixed, graph_id=graph_id, fake_mode=fake_mode
     )
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
