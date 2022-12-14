@@ -166,7 +166,7 @@ class TestFSDPHybridShard(FSDPTest):
             {
                 "hsdp_sharding_strategy": [
                     ShardingStrategy.HYBRID_SHARD,
-                    # ShardingStrategy._HYBRID_SHARD_ZERO2,
+                    ShardingStrategy._HYBRID_SHARD_ZERO2,
                 ],
                 "init_mode": ["mixed"],
             },
