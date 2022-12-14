@@ -1207,8 +1207,10 @@ def insert_observers_for_model(
 
             this_node_dtype_info = node_name_to_target_dtype_info[node.name]
             if hasattr(node, "meta") and "val" in node.meta:
-                output_is_a_tensor = this_node_dtype_info is not None and \
+                output_is_a_tensor = (
+                    this_node_dtype_info is not None and
                     isinstance(node.meta["val"], FakeTensor)
+                )
             else:
                 output_is_a_tensor = this_node_dtype_info is not None
 

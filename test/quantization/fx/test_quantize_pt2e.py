@@ -16,7 +16,7 @@ from torch.ao.quantization import (
 from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
 )
-from torch.ao.quantization.backend_config._pt2e import get_pt2e_backend_config
+from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx
 from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
@@ -43,7 +43,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
 
             print("after program capture:", m)
 
-            backend_config = get_pt2e_backend_config()
+            backend_config = get_qnnpack_pt2e_backend_config()
             # TODO: define qconfig_mapping specifically for executorch
             qconfig = get_default_qconfig("qnnpack")
             qconfig_mapping = QConfigMapping().set_global(qconfig)

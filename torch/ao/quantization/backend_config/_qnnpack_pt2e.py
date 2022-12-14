@@ -142,10 +142,12 @@ def get_binary_op_configs():
 
     return binary_op_configs
 
-def get_pt2e_backend_config():
-    return BackendConfig("pytorch_2.0_export")  \
-        .set_backend_pattern_configs(get_linear_configs()) \
-        .set_backend_pattern_configs(get_binary_op_configs()) \
-        .set_backend_pattern_configs(get_conv_configs()) \
-        .set_backend_pattern_configs(get_pooling_configs()) \
+def get_qnnpack_pt2e_backend_config():
+    return (
+        BackendConfig("qnnpack_pytorch_2.0_export")
+        .set_backend_pattern_configs(get_linear_configs())
+        .set_backend_pattern_configs(get_binary_op_configs())
+        .set_backend_pattern_configs(get_conv_configs())
+        .set_backend_pattern_configs(get_pooling_configs())
         .set_backend_pattern_configs(get_relu_configs())
+    )
