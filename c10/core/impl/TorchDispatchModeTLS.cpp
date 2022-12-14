@@ -7,26 +7,24 @@ namespace impl {
 
 thread_local TorchDispatchModeTLS torchDispatchModeState;
 
-void TorchDispatchModeTLS::push_onto_stack(
-    std::shared_ptr<c10::ModePyObjTrampoline> mode) {
+void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<c10::SafePyObject> mode) {
   if (torchDispatchModeState.stack_.size() == 0) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonTLSSnapshot, true);
   }
-  mode->mode_state_push_trampoline();
+  mode->pyinterpreter()->mode_state_push_trampoline(mode);
   torchDispatchModeState.stack_.push_back(std::move(mode));
 }
 
-const std::shared_ptr<c10::ModePyObjTrampoline> TorchDispatchModeTLS::
-    pop_stack() {
+const std::shared_ptr<c10::SafePyObject> TorchDispatchModeTLS::pop_stack() {
   TORCH_CHECK(
       torchDispatchModeState.stack_.size() > 0,
       "trying to pop from empty mode stack");
-  const std::shared_ptr<c10::ModePyObjTrampoline> out =
+  const std::shared_ptr<c10::SafePyObject> out =
       torchDispatchModeState.stack_.back();
   torchDispatchModeState.stack_.pop_back();
-  out->mode_state_pop_trampoline();
+  out->pyinterpreter()->mode_state_pop_trampoline(out);
 
   if (torchDispatchModeState.stack_.size() == 0) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
@@ -36,8 +34,7 @@ const std::shared_ptr<c10::ModePyObjTrampoline> TorchDispatchModeTLS::
   return out;
 }
 
-const std::shared_ptr<c10::ModePyObjTrampoline>& TorchDispatchModeTLS::
-    get_stack_at(int64_t idx) {
+const std::shared_ptr<c10::SafePyObject>& TorchDispatchModeTLS::get_stack_at(int64_t idx) {
   TORCH_CHECK(
       idx < static_cast<int64_t>(torchDispatchModeState.stack_.size()),
       "Tried to get stack at idx that's too big");
@@ -53,12 +50,11 @@ const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
 }
 
 void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
-  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state :
-       torchDispatchModeState.stack_) {
-    state->mode_state_pop_trampoline();
+  for (const std::shared_ptr<c10::SafePyObject>& state : torchDispatchModeState.stack_) {
+    state->pyinterpreter()->mode_state_pop_trampoline(state);
   }
-  for (const std::shared_ptr<c10::ModePyObjTrampoline>& state : state.stack_) {
-    state->mode_state_push_trampoline();
+  for (const std::shared_ptr<c10::SafePyObject>& state : state.stack_) {
+    state->pyinterpreter()->mode_state_push_trampoline(state);
   }
   torchDispatchModeState = state;
 

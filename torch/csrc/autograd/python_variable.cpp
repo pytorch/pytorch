@@ -276,6 +276,9 @@ struct ConcretePyInterpreterVTable final
     CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
+  void mode_state_push_trampoline(std::shared_ptr<c10::SafePyObject> mode) const override;
+  void mode_state_pop_trampoline(std::shared_ptr<c10::SafePyObject> mode) const override;
+
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
     return &s;
@@ -2803,6 +2806,42 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
 
   return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
+}
+
+void ConcretePyInterpreterVTable::mode_state_push_trampoline(const std::shared_ptr<SafePyObject> mode) const {
+  PyObject* mode_obj = mode->ptr(getPyInterpreter());
+  const char* check_mode_push_name = "check_mode_state_push";
+  py::gil_scoped_acquire acquire;
+
+  py::object run_function =
+      PyObject_FastGetAttrString(mode_obj, check_mode_push_name);
+  if (!run_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+
+  const auto ret = py::reinterpret_steal<py::object>(
+      PyObject_CallMethod(mode_obj, check_mode_push_name, ""));
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
+}
+
+void ConcretePyInterpreterVTable::mode_state_pop_trampoline(const std::shared_ptr<SafePyObject> mode) const {
+  PyObject* mode_obj = mode->ptr(getPyInterpreter());
+  const char* check_mode_pop_name = "check_mode_state_pop";
+  py::gil_scoped_acquire acquire;
+
+  const auto run_function =
+      PyObject_FastGetAttrString(mode_obj, check_mode_pop_name);
+  if (!run_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+
+  const auto ret = py::reinterpret_steal<py::object>(
+      PyObject_CallMethod(mode_obj, check_mode_pop_name, ""));
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
 }
 
 } // anonymous namespace

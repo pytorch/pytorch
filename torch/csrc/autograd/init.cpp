@@ -703,8 +703,7 @@ static PyObject* push_on_torch_dispatch_stack(
   if (arg != Py_None) {
     Py_INCREF(arg);
     c10::impl::TorchDispatchModeTLS::push_onto_stack(
-        std::make_shared<torch::ConcreteModePyObjTrampoline>(
-            arg, getPyInterpreter()));
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

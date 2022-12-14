@@ -1,8 +1,7 @@
 #pragma once
 
-#include <c10/core/ModePyObjTrampoline.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/utils/ConcreteModePyObjTrampoline.h>
 
 namespace torch {
 namespace torch_dispatch_mode {
@@ -25,12 +24,12 @@ struct StashTorchDispatchModeGuard {
     PyErr_Restore(type, value, traceback);
   }
 
-  const std::shared_ptr<c10::ModePyObjTrampoline>& get_cur_mode() {
+  const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
     return saved_mode_;
   }
 
  private:
-  std::shared_ptr<c10::ModePyObjTrampoline> saved_mode_;
+  std::shared_ptr<c10::SafePyObject> saved_mode_;
 };
 
 struct StashTorchDispatchStackGuard {
