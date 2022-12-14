@@ -15,6 +15,7 @@ class HeuristicParams : public PolymorphicBase {
   std::string tag = "";
 
   LaunchParams lparams;
+  int maxrregcount = 255;
 
   virtual std::string toString() const {
     return "Undefined Heuristic Params";

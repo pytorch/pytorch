@@ -345,7 +345,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   auto group_id = sg->groupId();
 
   LaunchParams launch_params;
-
+  int maxrregcount = 255;
   auto scheduler_entry = schedulers()[group_id].get();
 
   // Check that the heuristics are matched, in the case of segmented fusion
@@ -361,10 +361,12 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     FusionGuard fg(fusion_to_run.get());
     scheduler_entry->schedule(fusion_to_run.get());
     launch_params = scheduler_entry->params()->lparams;
+    maxrregcount = scheduler_entry->params()->maxrregcount;
     executors_[group_id].compileFusion(
-        fusion_to_run.get(), args, launch_params);
+        fusion_to_run.get(), args, launch_params, maxrregcount);
   } else {
     launch_params = scheduler_entry->params()->lparams;
+    maxrregcount = scheduler_entry->params()->maxrregcount;
   }
 
   if (profiling_) {
@@ -377,7 +379,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     executor.setMeasureKernelTimeFlag(true);
   }
 
-  auto outputs = executor.runFusion(args, launch_params);
+  auto outputs = executor.runFusion(args, launch_params, maxrregcount);
 
   // Print relevant information all at once for easy debuging of perf
   if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {

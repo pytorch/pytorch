@@ -44,12 +44,16 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
   auto layer_norm_results = layer_norm(input, 1, weight, bias, eps_ptr);
 
   auto output = layer_norm_results.output;
+  auto mean   = layer_norm_results.mean;
+  auto invstd = layer_norm_results.invstd;
 
   if (dtype != DataType::Float) {
     output = castOp(dtype, output);
   }
 
   fusion->addOutput(output);
+  fusion->addOutput(mean);
+  fusion->addOutput(invstd);
 }
 
 static void NvFuserScheduler_LayerNorm(

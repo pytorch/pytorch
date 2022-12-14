@@ -45,7 +45,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   void compileFusion(
       Fusion* fusion,
       const KernelArgumentHolder& args,
-      const LaunchParams& launch_constraints = LaunchParams());
+      const LaunchParams& launch_constraints = LaunchParams(),
+      const int maxrregcount = 255);
 
   // TODO: merge it with the overload above.
   //! This API is merely here so we don't have to go back and update all cpp
@@ -53,35 +54,39 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   void compileFusion(
       Fusion* fusion,
       const at::ArrayRef<IValue>& inputs = {},
-      const LaunchParams& launch_constraints = LaunchParams()) {
+      const LaunchParams& launch_constraints = LaunchParams(),
+      const int maxrregcount = 255) {
     KernelArgumentHolder args =
         KernelArgumentHolder::createKernelArgumentHolder(inputs);
-    compileFusion(fusion, args, launch_constraints);
+    compileFusion(fusion, args, launch_constraints, maxrregcount);
   }
 
   std::vector<at::Tensor> runFusion(
       KernelArgumentHolder& args,
       const LaunchParams& launch_constraints = LaunchParams(),
+      const int maxrregcount = 255,
       const std::vector<at::Tensor>& outputs = {});
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const std::vector<at::Tensor>& outputs,
       const LaunchParams& launch_constraints = LaunchParams(),
+      const int maxrregcount = 255,
       const c10::optional<size_t>& opt_code = c10::nullopt) {
     KernelArgumentHolder args =
         KernelArgumentHolder::createKernelArgumentHolder(inputs);
     if (opt_code.has_value()) {
       args.setCacheId(*opt_code);
     }
-    return runFusion(args, launch_constraints, outputs);
+    return runFusion(args, launch_constraints, maxrregcount, outputs);
   }
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const LaunchParams& launch_constraints = LaunchParams(),
+      const int maxrregcount = 255,
       const c10::optional<size_t>& opt_code = c10::nullopt) {
-    return runFusion(inputs, {}, launch_constraints, opt_code);
+    return runFusion(inputs, {}, launch_constraints, maxrregcount, opt_code);
   }
 
   // function to query whether a `FusionExecutor` has a compiled kernel to
@@ -281,6 +286,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // Track the block size this kernel was compiled with. If the block size
   // increases, recompile to adjust maxregister count.
   int64_t block_size_high_water_mark = 1;
+  int maxrregcount_high_water_mark = 255;
 
   // lookup table to take short cut to retrieve recorded information in order to
   // launch kernels without re-inference parameters.

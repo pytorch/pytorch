@@ -56,7 +56,8 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id,
-    c10::optional<int> opt_block_size = c10::nullopt);
+    c10::optional<int> opt_block_size = c10::nullopt,
+    const int max_register_heuristic = 255);
 
 namespace caching {
 // TODO: Could consider putting some of

@@ -139,7 +139,8 @@ class ReductionParams : public HeuristicParams {
         other.split_grid_dim_outer_reduction ==
             split_grid_dim_outer_reduction &&
         other.batches_per_block_outer_reduction ==
-            batches_per_block_outer_reduction;
+            batches_per_block_outer_reduction &&
+        other.maxrregcount == maxrregcount;
     return attr_equal;
   }
 
