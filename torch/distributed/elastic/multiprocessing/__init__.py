@@ -221,8 +221,8 @@ def start_processes(
 
     for local_rank in range(nprocs):
         if log_dir == os.devnull:
-            stdouts[local_rank] = os.devnull
-            stderrs[local_rank] = os.devnull
+            stdouts[local_rank] = Std.OUT
+            stderrs[local_rank] = Std.ERR
             tee_stdouts[local_rank] = os.devnull
             tee_stderrs[local_rank] = os.devnull
             error_files[local_rank] = os.devnull
