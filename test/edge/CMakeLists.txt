@@ -34,7 +34,7 @@ add_custom_command(
 )
 add_custom_target(unbox_target DEPENDS ${GEN_COMMAND_sources})
 
-add_library(unbox_lib STATIC
+add_library(unbox_lib SHARED
         ${GEN_COMMAND_sources}
         ${TEST_ROOT}/operator_registry.cpp
         )
