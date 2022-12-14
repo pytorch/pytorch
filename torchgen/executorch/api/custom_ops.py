@@ -1,18 +1,16 @@
 from collections import defaultdict
+
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from torchgen import dest
-
-from torchgen.context import method_with_native_function
-
-from torchgen.gen import get_native_function_schema_registrations
-from torchgen.model import BackendIndex, DispatchKey, NativeFunction, Variant
-
 # disable import sorting to avoid circular dependency.
 from torchgen.api.types import DispatcherSignature  # isort:skip
+from torchgen.context import method_with_native_function
+from torchgen.model import BackendIndex, DispatchKey, NativeFunction, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, FileManager, mapMaybe, Target
+from torchgen.utils import concatMap, Target
+
 
 # Generates RegisterKernelStub.cpp, which provides placeholder kernels for custom operators. This will be used at
 # model authoring side.
@@ -62,17 +60,23 @@ class ComputeNativeFunctionStub:
     """
 
 
-def gen_custom_ops(
+def gen_custom_ops_registration(
     *,
     native_functions: Sequence[NativeFunction],
     selector: SelectiveBuilder,
-    backend_indices: Dict[DispatchKey, BackendIndex],
-    cpu_fm: FileManager,
+    backend_index: BackendIndex,
     rocm: bool,
-) -> None:
+) -> Tuple[str, str]:
+    """
+    Generate custom ops registration code for dest.RegisterDispatchKey.
 
+    :param native_functions: a sequence of `NativeFunction`
+    :param selector: for selective build.
+    :param backend_index: kernels for all the ops.
+    :param rocm: bool for dest.RegisterDispatchKey.
+    :return: generated C++ code to register custom operators into PyTorch
+    """
     dispatch_key = DispatchKey.CPU
-    backend_index = backend_indices[dispatch_key]
 
     static_init_dispatch_registrations = ""
     ns_grouped_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
@@ -85,7 +89,6 @@ def gen_custom_ops(
         dispatch_registrations_body = "\n".join(
             list(
                 concatMap(
-                    # pyre-fixme[19]: Expected 2 positional arguments.
                     dest.RegisterDispatchKey(
                         backend_index,
                         Target.REGISTRATION,
@@ -103,61 +106,20 @@ def gen_custom_ops(
 TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
 {dispatch_registrations_body}
 }};"""
-
-    cpu_fm.write_with_template(
-        f"Register{dispatch_key}CustomOps.cpp",
-        "RegisterDispatchKeyCustomOps.cpp",
-        lambda: {
-            "ops_headers": '#include "NativeFunctions.h"',
-            "DispatchKey": dispatch_key,
-            "dispatch_namespace": dispatch_key.lower(),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": list(
-                concatMap(
-                    # pyre-fixme[19]: Expected 2 positional arguments.
-                    dest.RegisterDispatchKey(
-                        backend_index,
-                        # pyre-fixme[16]: `Enum` has no attribute
-                        #  `ANONYMOUS_DEFINITION`.
-                        Target.ANONYMOUS_DEFINITION,
-                        selector,
-                        rocm=rocm,
-                        symint=False,
-                        class_method_name=None,
-                        skip_dispatcher_op_registration=False,
-                    ),
-                    native_functions,
-                )
-            ),
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-        },
+    anonymous_definition = "\n".join(
+        list(
+            concatMap(
+                dest.RegisterDispatchKey(
+                    backend_index,
+                    Target.ANONYMOUS_DEFINITION,
+                    selector,
+                    rocm=rocm,
+                    symint=False,
+                    class_method_name=None,
+                    skip_dispatcher_op_registration=False,
+                ),
+                native_functions,
+            )
+        )
     )
-    cpu_fm.write_with_template(
-        f"Register{dispatch_key}Stub.cpp",
-        "RegisterDispatchKeyCustomOps.cpp",
-        lambda: {
-            "ops_headers": "",
-            "DispatchKey": dispatch_key,
-            "dispatch_namespace": dispatch_key.lower(),
-            "dispatch_namespaced_definitions": "",
-            "dispatch_anonymous_definitions": list(
-                mapMaybe(ComputeNativeFunctionStub(), native_functions)
-            ),
-            "static_init_dispatch_registrations": static_init_dispatch_registrations,
-        },
-    )
-
-    (
-        aten_schema_registrations,
-        schema_registrations,
-    ) = get_native_function_schema_registrations(
-        native_functions=native_functions,
-        schema_selector=selector,
-    )
-    cpu_fm.write(
-        "RegisterSchema.cpp",
-        lambda: {
-            "schema_registrations": schema_registrations,
-            "aten_schema_registrations": aten_schema_registrations,
-        },
-    )
+    return anonymous_definition, static_init_dispatch_registrations
