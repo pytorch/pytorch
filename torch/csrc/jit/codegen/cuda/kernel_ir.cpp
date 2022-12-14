@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/expr_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
@@ -447,6 +448,10 @@ Val* ForLoop::stop() const {
 Val* ForLoop::step() const {
   TORCH_INTERNAL_ASSERT(attributeVal(2) != nullptr);
   return attributeVal(2);
+}
+
+Val* ForLoop::simplifiedStop() const {
+  return simplifyExpr(stop(), {});
 }
 
 bool ForLoop::isTrivial() const {

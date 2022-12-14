@@ -460,6 +460,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   Val* step() const;
 
+  Val* simplifiedStop() const;
+
   // [pre | vectorize | post] <= inner-most, merged root domain
   // shift_ is applied to vectorize and post sections.
   Val* vectorize_shift() const {

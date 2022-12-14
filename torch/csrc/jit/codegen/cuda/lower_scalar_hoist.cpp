@@ -189,8 +189,7 @@ std::pair<Val*, bool> CommonScalarMap::hoistScalarImpl(
 
 namespace {
 
-std::list<ValInfo> getVariablesFromLoops(
-    const std::vector<kir::ForLoop*>& loops) {
+std::list<ValInfo> getLoopIndices(const std::vector<kir::ForLoop*>& loops) {
   std::list<ValInfo> variables;
   for (auto loop : loops) {
     if (loop->isTrivial()) {
@@ -212,7 +211,7 @@ Val* CommonScalarMap::hoistScalar(
   if (isOptionDisabled(DisableOption::IndexHoist)) {
     return value;
   }
-  value = simplifyExpr(value, getVariablesFromLoops(loops));
+  value = simplifyExpr(value, getLoopIndices(loops));
   std::vector<Val*> seen_subexprs;
   return hoistScalarImpl(
              value,

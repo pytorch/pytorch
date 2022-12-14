@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+#include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 
 #include <unordered_set>
 #include <vector>
@@ -26,17 +27,6 @@ bool hasSimilarType(DataType t1, DataType t2) {
   }
   if (isComplexType(t1) && isComplexType(t2)) {
     return true;
-  }
-  return false;
-}
-
-bool isMagicZeroProtectedVariable(Val* value) {
-  auto def = dynamic_cast<BinaryOp*>(value->definition());
-  if (def != nullptr && def->getBinaryOpType() == BinaryOpType::Add) {
-    auto rhs = dynamic_cast<NamedScalar*>(def->rhs());
-    if (rhs != nullptr && rhs->name() == "nvfuser_zero") {
-      return true;
-    }
   }
   return false;
 }
@@ -286,7 +276,7 @@ class FlattenedAssocCommOp : public Expr {
 NVFUSER_DEFINE_CLONE_AND_CREATE(FlattenedAssocCommOp)
 
 // Recursively convert expressions like AddOp(AddOp(a, b), AddOp(c, d)) into
-// FlattenedAdd(a, b, c, d). This function recursives transforms the entire
+// FlattenedAdd(a, b, c, d). This function recursively transforms the entire
 // expression, so divOp(AddOp(AddOp(a, b), AddOp(c, d)), addOp(e, f)) will
 // become divOp(FlattenAdd(a, b, c, d), FlattenAdd(e, f))
 Val* flatten(Val* value) {
@@ -294,7 +284,7 @@ Val* flatten(Val* value) {
   if (def == nullptr) {
     return value;
   }
-  if (isMagicZeroProtectedVariable(value)) {
+  if (isProtectedWithMagicZero(value)) {
     return value;
   }
   value = foldConstants(value);
@@ -365,7 +355,7 @@ Val* unflatten(Val* value, const std::list<ValInfo>& variables) {
   if (def == nullptr) {
     return value;
   }
-  if (isMagicZeroProtectedVariable(value)) {
+  if (isProtectedWithMagicZero(value)) {
     return value;
   }
 
@@ -428,6 +418,7 @@ Val* unflatten(Val* value, const std::list<ValInfo>& variables) {
 } // namespace assoc_comm_reordering
 
 Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
+  FusionGuard fg(value->fusion());
   auto flattened = assoc_comm_reordering::flatten(value);
   return assoc_comm_reordering::unflatten(flattened, variables);
 }

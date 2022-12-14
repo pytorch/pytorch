@@ -321,11 +321,31 @@ Val* SimplifyingIrBuilder::divExpr(Val* lhs, Val* rhs) {
   return IrBuilder::divExpr(lhs, rhs);
 }
 
-Val* SimplifyingIrBuilder::ceilDivExpr(Val* lhs, Val* rhs) {
+Val* SimplifyingIrBuilder::ceilDivExpr(Int* lhs, Int* rhs) {
   if (rhs->isOneInt()) {
     return lhs;
+  } else if (lhs->isConst() && rhs->isConst()) {
+    auto l = lhs->value().value();
+    auto r = rhs->value().value();
+    if (r > 0) {
+      return IrBuilder::IrBuilder::create<Int>((l + r - 1) / r);
+    } else {
+      return IrBuilder::IrBuilder::create<Int>((l + r + 1) / r);
+    }
+  } else {
+    return IrBuilder::ceilDivExpr(lhs, rhs);
   }
-  return IrBuilder::ceilDivExpr(lhs, rhs);
+}
+
+Val* SimplifyingIrBuilder::ceilDivExpr(Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr && rhs != nullptr);
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  auto rhs_int = dynamic_cast<Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return ceilDivExpr(lhs_int, rhs_int);
+  } else {
+    return IrBuilder::ceilDivExpr(lhs, rhs);
+  }
 }
 
 Val* SimplifyingIrBuilder::modExpr(Val* lhs, Val* rhs) {

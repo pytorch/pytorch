@@ -2529,7 +2529,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     const auto gen_index = gen(loop->index());
     const auto gen_start = genInline(loop->start());
-    const auto gen_stop = genInline(loop->stop());
+    const auto gen_stop = genInline(loop->simplifiedStop());
     const auto gen_step = genInline(loop->step());
 
     std::stringstream step_code;
