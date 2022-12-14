@@ -13222,12 +13222,6 @@
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
 
-# Note: this function is only for testing.
-- func: _test_inductor_realize(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA, Meta: _test_inductor_realize
-
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
@@ -13699,6 +13693,7 @@
   variants: function
   autogen: _scaled_dot_product_attention.out
 
+# This aten function is kept so that we can test the choice function from Python
 - func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> int
   dispatch:
     CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp
