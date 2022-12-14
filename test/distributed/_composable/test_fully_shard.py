@@ -4,7 +4,7 @@ import contextlib
 import copy
 import functools
 import sys
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -412,17 +412,19 @@ class TestFSDPRuntime(FSDPTest):
 
 
 class TestMixedPrecision(FSDPTest):
-
     @property
     def world_size(self):
         return 2
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
-        forward_inputs: Dict[str, nn.Module] = {}
+        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
         float16 = MixedPrecision(param_dtype=torch.float16)
 
-        model = SaveForwardInputsModel(forward_inputs).cuda()
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs,
+            cast_forward_inputs=False,
+        ).cuda()
         c1, c2 = model.c1, model.c2
         x = torch.zeros(2, 100, device="cuda")
 
@@ -440,6 +442,54 @@ class TestMixedPrecision(FSDPTest):
             self.assertEqual(forward_inputs[model].dtype, torch.float32)
             self.assertEqual(forward_inputs[c1].dtype, torch.float32)
             self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+
+
+class TestFSDPModelCheckpointing(FSDPTest):
+    """Tests composable FSDP model checkpointing."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_root_fully_shard(self):
+        """
+        Tests that the full state dict saved from a module with ``fully_shard``
+        applied to the global root matches that of an equivalent local module.
+        """
+        local_model = CompositeParamModel(device=torch.device("cuda"))
+        composable_module = copy.deepcopy(local_model)
+        fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        local_sd = local_model.state_dict()
+        composable_sd = composable_module.state_dict()
+        self._check_state_dict_parity(local_sd, composable_sd)
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_submodule_fully_shard(self):
+        """
+        Tests that the full state dict saved from a module with ``fully_shard``
+        applied on submodules matches that of an equivalent local module.
+        """
+        local_model = CompositeParamModel(device=torch.device("cuda"))
+        composable_module = copy.deepcopy(local_model)
+        fully_shard(composable_module.u1)
+        fully_shard(composable_module.u2)
+        local_sd = local_model.state_dict()
+        composable_sd = composable_module.state_dict()
+        self._check_state_dict_parity(local_sd, composable_sd)
+
+    def _check_state_dict_parity(self, local_sd: Dict, composable_sd: Dict):
+        """Checks that ``local_sd`` and ``composable_sd`` are the same."""
+        # Check that all keys match
+        for k1, k2 in zip(composable_sd.keys(), local_sd.keys()):
+            self.assertEqual(k1, k2)
+        # Check that all values match
+        for v1, v2 in zip(composable_sd.values(), local_sd.values()):
+            self.assertEqual(v1.shape, v2.shape)
+        # Check that all keys and values are aligned
+        for (k1, v1), (k2, v2) in zip(composable_sd.items(), local_sd.items()):
+            self.assertEqual(k1, k2)
+            self.assertEqual(v1, v2)
 
 
 if __name__ == "__main__":

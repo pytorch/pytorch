@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import (
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable import contract
+from torch.distributed._composable import _get_registry, contract
 
 from copy import deepcopy
 from typing import Tuple
@@ -54,7 +54,7 @@ class TestContract(TestCase):
         ) -> Tuple[torch.Tensor]:
             return grad_input
 
-        @contract
+        @contract()
         def noop_api(module: nn.Module) -> nn.Module:
             module.register_forward_pre_hook(forward_pre_hook)
             module.register_forward_hook(forward_hook)
@@ -84,7 +84,7 @@ class TestContract(TestCase):
             def forward(self, x):
                 return self.module(x)
 
-        @contract
+        @contract()
         def wrap_module(module: nn.Module) -> nn.Module:
             return ModelWrapper(module)
 
@@ -104,7 +104,7 @@ class TestContract(TestCase):
 
         # FIXME: circular reference looks a bit weird. Shall we make .state a
         # top-level API instead attached to contract API?
-        @contract
+        @contract()
         def api(module: nn.Module) -> nn.Module:
             api.state(module).dummy_state = 7
             module.register_forward_pre_hook(check_and_update_state_hook)
@@ -116,6 +116,29 @@ class TestContract(TestCase):
         self.assertEqual(api.state(model.seq1).dummy_state, 7)
         model(torch.zeros(10, 10), torch.zeros(10, 10))
         self.assertEqual(api.state(model.seq1).dummy_state, 8)
+
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    def test_registry(self):
+        @contract()
+        def api1(module: nn.Module) -> nn.Module:
+            return module
+
+        @contract()
+        def api2(module: nn.Module) -> nn.Module:
+            return module
+
+        model = ToyModel()
+        model = api1(model)
+        self.assertEqual(1, len(_get_registry(model)))
+        self.assertTrue("api1" in _get_registry(model))
+        model = api2(model)
+        self.assertEqual(2, len(_get_registry(model)))
+        self.assertTrue([_get_registry(model).keys()], ["api1", "api2"])
+
+        with self.assertRaisesRegex(
+            AssertionError, "api1 has already been applied"
+        ):
+            model = api1(model)
 
 
 if __name__ == "__main__":
