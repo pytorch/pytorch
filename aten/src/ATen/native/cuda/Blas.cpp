@@ -9,6 +9,10 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 
+// Required for checking whether Triton kernels are available
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -28,6 +32,7 @@
 #include <ATen/ops/relu.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
+#include <ATen/ops/_triton_addmm_native.h>
 #endif
 
 namespace at { namespace native {
@@ -153,6 +158,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   bool useLtInterface = false;
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
+
   if (&result != &self) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
     // Strangely, if mat2 has only 1 row or column, we get
@@ -409,8 +415,15 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
 } // anonymous namespace
 
-TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
-  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
+TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result_) {
+  Tensor& result = const_cast<Tensor&>(result_);
+  if (result.scalar_type() == at::ScalarType::Int) {
+    const auto triton_kernel = c10::Dispatcher::singleton().findOp(torch::jit::parseName("aten::_triton_addmm"));
+    TORCH_CHECK(triton_kernel->hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA), "CUDA addmm for int32 requires Triton.");
+    at::native::_triton_addmm_out(self, mat1, mat2, beta, alpha, result);
+  } else {
+    addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha);
+  }
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {

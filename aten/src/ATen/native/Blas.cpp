@@ -109,6 +109,11 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
   }
 }
 
+Tensor triton_addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  TORCH_CHECK(false, "Triton variant does not run on CPU.");
+  return self;
+}
+
 Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //self arg sent to addmv_out cannot be resized
   //here we use result as self argument for addmv, and result is user supplied and can be wrong size
