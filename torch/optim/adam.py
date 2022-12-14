@@ -118,7 +118,7 @@ class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  weight_decay=0, amsgrad=False, *, foreach: Optional[bool] = None,
                  maximize: bool = False, capturable: bool = False,
-                 differentiable: bool = False, fused: bool = False):
+                 differentiable: bool = False, fused: bool = True):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -129,6 +129,18 @@ class Adam(Optimizer):
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+        
+        # The fused implementation is fastest but is only available when the parameters are floats on CUDA.
+        # The foreach implementation is faster than the default on CUDA. 
+        # Both are not differentiable (whereas the default implementation is)
+        if not differentiable and all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+            fused = True
+        elif not differentiable and all(p.is_cuda for pg in self.param_groups for p in pg['params']):
+            foreach = True
+
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
