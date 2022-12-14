@@ -1,9 +1,7 @@
 from dataclasses import dataclass
-from typing import Callable, List, Sequence, Tuple, Union
+from typing import Callable, List, Sequence, Tuple
 
-from mypy_extensions import DefaultNamedArg, NamedArg
-
-from torchgen.api.types import Binding, CType, NamedCType, SpecialArgName
+from torchgen.api.types import Binding, CType, NamedCType
 from torchgen.model import (
     Argument,
     BaseTy,
@@ -46,12 +44,7 @@ class Unboxing:
     # this is a callable that converts a JIT argument, into its C++ type.
     # Translates (type, mutability, binds) to NamedCType. E.g., torchgen.api.cpp.argumenttype_type.
     argument_type_gen: Callable[
-        [
-            Type,
-            NamedArg(bool, "mutable"),
-            NamedArg(Union[str, SpecialArgName], "binds"),
-            DefaultNamedArg(bool, "remove_non_owning_ref_types"),
-        ],
+        ...,
         NamedCType,
     ]
 
