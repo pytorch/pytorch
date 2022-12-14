@@ -2,61 +2,67 @@ import functools
 import logging
 
 import sympy
-import triton
 
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
+from ..utils import cdiv
+
 
 log = logging.getLogger(__name__)
 
-mm_configs = [
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=5, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=5, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=3, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=2, num_warps=8
-    ),
-    triton.Config(
-        {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
-    ),
-    triton.Config(
-        {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-    ),
-]
+
+@functools.lru_cache(None)
+def mm_configs():
+    import triton
+
+    return [
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=5, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=5, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=3, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=2, num_warps=8
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
+        ),
+    ]
 
 
 def mm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
     """
-    return (triton.cdiv(m, meta["BLOCK_M"]) * triton.cdiv(n, meta["BLOCK_N"]), 1, 1)
+    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
 def acc_type(dtype):
