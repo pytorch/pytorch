@@ -955,7 +955,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
-        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS)),
+        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
         decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
