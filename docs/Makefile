@@ -21,6 +21,9 @@ onnx:
 	@$(PYCMD) source/scripts/onnx/build_onnx_supported_aten_op_csv_table.py
 	@$(PYCMD) source/scripts/onnx/build_onnx_diagnostics_rules_md.py $(SOURCEDIR)/generated/onnx_diagnostics_rules
 
+opset:
+	@$(PYCMD) source/scripts/build_opsets.py
+
 docset: html
 	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url https://pytorch.org/docs/ --force $(BUILDDIR)/html/
 
@@ -39,7 +42,7 @@ html-stable:
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile figures onnx
+%: Makefile figures onnx opset
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
