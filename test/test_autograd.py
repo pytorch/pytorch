@@ -43,6 +43,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
 import weakref
 
 import pickle
@@ -3417,6 +3418,36 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         t.register_hook(hook)
         with self.assertRaisesRegex(RuntimeError, "expects the current backward to be executed with multithreading disabled"):
             t.backward()
+
+    def test_current_node(self):
+        pr = []
+        class MyMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                pr.append(f"Running {func} from within {torch._C._current_autograd_node()}")
+                return func(*args, **kwargs or {})
+
+        with MyMode():
+            pr.append("FW")
+            a = torch.rand(10, requires_grad=True)
+            b = a.mul(2).div(3).sum()
+            pr.append("BW")
+            b.backward()
+            pr.append("Done")
+
+        self.assertExpectedInline("\n".join(pr), """\
+FW
+Running aten.rand.default from within None
+Running aten.mul.Tensor from within None
+Running aten.div.Tensor from within None
+Running aten.sum.default from within None
+BW
+Running aten.ones_like.default from within None
+Running aten.expand.default from within <SumBackward0 object at 0x7f8a2d7c9e60>
+Running aten.div.Tensor from within <DivBackward0 object at 0x7f8a2d7c9e60>
+Running aten.mul.Tensor from within <MulBackward0 object at 0x7f8a2d7c9e60>
+Running aten.detach.default from within <AccumulateGrad object at 0x7f8a2d7c9b90>
+Running aten.detach.default from within <AccumulateGrad object at 0x7f8a2d7c9e10>
+Done""")
 
     def test_profiler(self):
         x = torch.randn(10, 10)
