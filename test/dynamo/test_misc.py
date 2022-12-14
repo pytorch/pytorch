@@ -3107,6 +3107,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
+    # Note - here be mild dragons.
+    # This test relies a ton on internal implementation. Future refactor efforts
+    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
+    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
     def test_restore_graphstate_internals(self):
         def fn(x, y):
             x = x + 1
