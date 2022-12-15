@@ -582,6 +582,17 @@ class BuiltinVariable(VariableTracker):
             unimplemented(
                 f"isinstance called on UserDefinedClass {arg} {isinstance_type}"
             )
+        # handle __instancecheck__ defined in user class
+        if (
+            isinstance(arg, variables.UserDefinedObjectVariable)
+            and "__instancecheck__" in isinstance_type.__class__.__dict__
+        ):
+            return variables.ConstantVariable(
+                isinstance_type.__class__.__instancecheck__(
+                    isinstance_type, arg.as_python_constant()
+                )
+            )
+
         try:
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
