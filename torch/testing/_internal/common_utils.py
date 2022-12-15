@@ -937,7 +937,8 @@ TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WIT
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
-    # Do not spend time on helper functions that are called with different inputs
+    # Do not spend time on helper functions that are called with different
+    # inputs.  Unfortunately, this affects test reproducibility.
     torch._dynamo.config.cache_size_limit = 8
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
