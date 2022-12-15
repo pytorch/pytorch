@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils.stateless import functional_call
 import os
 import subprocess
 import sys
@@ -31,10 +30,11 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx
+    combine_state_for_ensemble, make_fx, functional_call,
+    params_and_buffers_no_grad_tracking
 )
 from torch._functorch.make_functional import (
-    functional_init, functional_init_with_buffers, combine_weights_for_ensemble
+    functional_init, functional_init_with_buffers
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
@@ -2863,6 +2863,25 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
+    def test_params_and_buffers_no_grad_tracking(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.register_buffer('buffer', torch.randn(3))
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + self.buffer
+                return x
+
+        mod = Foo()
+        params, buffers = params_and_buffers_no_grad_tracking(mod)
+        self.assertEqual(len(params), 2)
+        self.assertEqual(len(buffers), 1)
+        for param in params.values():
+            self.assertEqual(param.requires_grad, False)
+
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
             def __init__(self):
@@ -2988,7 +3007,8 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
-    def test_state_correctly_returned_after_forward(self):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2998,21 +3018,32 @@ class TestMakeFunctional(TestCase):
                 x = self.linear(x)
                 return x
 
+        def get_module_info(mod):
+            if mechanism == "make_functional":
+                return make_functional(mod)
+            else:
+                return mod, dict(mod.named_parameters())
+
         mod = Net()
-        func, params = make_functional(mod)
+        func_mod, params = get_module_info(mod)
 
         # state in func.names_map
-        old_state_linear_weight = func.stateless_model.linear.weight
-        old_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        old_state_linear_weight = mod.linear.weight
+        old_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(old_state_linear_weight)
         self.assertIsNotNone(old_state_linear_bias)
 
         x = torch.randn(4, 3)
-        func(params, x)
+        if mechanism == "make_functional":
+            func_mod(params, x)
+        else:
+            functional_call(func_mod, params, x)
 
-        new_state_linear_weight = func.stateless_model.linear.weight
-        new_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        new_state_linear_weight = mod.linear.weight
+        new_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(new_state_linear_weight)
         self.assertIsNotNone(new_state_linear_bias)
@@ -3304,8 +3335,7 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result, expected)
 
-    @parametrize('mechanism', ["make_functional", "functional_call"])
-    def test_ensemble_regression(self, device, mechanism):
+    def test_ensemble_regression(self, device):
         def make_spirals(n_samples, noise_std=0., rotations=1.):
             ts = torch.linspace(0, 1, n_samples)
             rs = ts ** 0.5
@@ -3338,7 +3368,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
+        func_model, weights = make_functional(MLPClassifier().to(device))
 
         def train_step_fn(use_transform, weights, batch, targets, lr=0.2):
             def compute_loss(weights, batch, targets):
@@ -3350,13 +3380,12 @@ class TestExamplesCorrectness(TestCase):
                 grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             else:
                 loss = compute_loss(weights, batch, targets)
-                list_weights = weights if mechanism == "make_functional" else list(weights.values())
-                grad_weights = torch.autograd.grad(loss, list_weights)
-                grad_weights = grad_weights if mechanism == "make_functional" else dict(zip(weights.keys(), grad_weights))
+                grad_weights = torch.autograd.grad(loss, weights)
 
-            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
-            if mechanism != "make_functional":
-                new_weights = list(new_weights.values())
+            new_weights = []
+            with torch.no_grad():
+                for grad_weight, weight in zip(grad_weights, weights):
+                    new_weights.append(weight - grad_weight * lr)
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3365,16 +3394,13 @@ class TestExamplesCorrectness(TestCase):
 
         def init_fn(num_models):
             models = tuple(MLPClassifier().to(device) for _ in range(num_models))
-            if mechanism == "make_functional":
-                return combine_state_for_ensemble(models)[1]
-            else:
-                return combine_weights_for_ensemble(models)[0]
+            weights = tuple(make_functional(model)[1] for model in models)
+            weights = tuple(zip(*weights))
+            weights = tuple(torch.stack(shards).detach() for shards in weights)
+            return weights
 
         def slice_weights(batched_weights, index):
-            if mechanism == "make_functional":
-                return tuple(weight[index].detach().requires_grad_() for weight in batched_weights)
-            else:
-                return {k: weight[index].detach().requires_grad_() for k, weight in batched_weights.items()}
+            return tuple(weight[index].detach().requires_grad_() for weight in batched_weights)
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(partial(train_step_fn, True), in_dims=(0, None, None))
@@ -3394,8 +3420,7 @@ class TestExamplesCorrectness(TestCase):
         subtest(nn.AlphaDropout, 'AlphaDropout'),
         subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
     ])
-    @parametrize('mechanism', ["make_functional", "functional_call"])
-    def test_find_learning_rate_ensembling(self, device, dropout_layer, mechanism):
+    def test_find_learning_rate_ensembling(self, device, dropout_layer):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
@@ -3422,7 +3447,7 @@ class TestExamplesCorrectness(TestCase):
 
         loss_fn = nn.NLLLoss()
 
-        func_model, weights = _get_weights_and_functional_call(MLPClassifier().to(device), mechanism)
+        func_model, weights = make_functional(MLPClassifier().to(device))
 
         def train_step_fn(weights, batch, targets, lr):
             def compute_loss(weights, batch, targets):
@@ -3431,9 +3456,10 @@ class TestExamplesCorrectness(TestCase):
                 return loss
 
             grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
-            new_weights = self._update_params(weights, grad_weights, lr, mechanism)
-            if mechanism != "make_functional":
-                new_weights = list(new_weights.values())
+            new_weights = []
+            with torch.no_grad():
+                for grad_weight, weight in zip(grad_weights, weights):
+                    new_weights.append(weight - grad_weight * lr)
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3443,10 +3469,10 @@ class TestExamplesCorrectness(TestCase):
         def init_fn(num_models):
             og_model = MLPClassifier().to(device)
             models = tuple(copy.deepcopy(og_model) for _ in range(num_models))  # have same initialization
-            if mechanism == "make_functional":
-                return combine_state_for_ensemble(models)[1]
-            else:
-                return combine_weights_for_ensemble(models)[0]
+            weights = tuple(make_functional(model)[1] for model in models)
+            weights = tuple(zip(*weights))
+            weights = tuple(torch.stack(shards).detach() for shards in weights)
+            return weights
 
         batched_weights = init_fn(num_models=2)
         parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
