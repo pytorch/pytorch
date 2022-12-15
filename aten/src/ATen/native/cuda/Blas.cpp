@@ -304,25 +304,34 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           result_ptr, result_ld
       );
       });
-    }
-    else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-        scalar_t alpha_val = alpha.to<scalar_t>();
-        scalar_t beta_val = beta.to<scalar_t>();
-        scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-        scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-        scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-        at::cuda::blas::gemm<scalar_t>(
-          transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
-          transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
-          m, n, k,
-          alpha_val,
-          mat1_ptr, mat1_ld,
-          mat2_ptr, mat2_ld,
-          beta_val,
-          result_ptr, result_ld
-        );
-      });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+          at::ScalarType::Half,
+          at::ScalarType::BFloat16,
+          scalar_type,
+          "addmm_cuda",
+          [&] {
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t alpha_val = alpha.to<opmath_t>();
+            opmath_t beta_val = beta.to<opmath_t>();
+            scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
+            scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
+            scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+            at::cuda::blas::gemm<scalar_t>(
+                transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+                transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
+                m,
+                n,
+                k,
+                alpha_val,
+                mat1_ptr,
+                mat1_ld,
+                mat2_ptr,
+                mat2_ld,
+                beta_val,
+                result_ptr,
+                result_ld);
+          });
     }
 
     switch (activation) {
@@ -398,7 +407,6 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-<<<<<<< HEAD
   if (self.scalar_type() == ScalarType::Long || self.scalar_type() == ScalarType::Int) {
     TORCH_CHECK(batch1_->is_contiguous(), "Tensor batch1 must be contiguous for integer matmul.");
     TORCH_CHECK(batch2_->is_contiguous(), "Tensor batch2 must be contiguous for integer matmul.");
@@ -431,11 +439,11 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
           );
       }
     });
-  }
-  else {
+  } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-      scalar_t alpha_val = alpha.to<scalar_t>();
-      scalar_t beta_val = beta.to<scalar_t>();
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t alpha_val = alpha.to<opmath_t>();
+      opmath_t beta_val = beta.to<opmath_t>();
       scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
       scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
       scalar_t* result_ptr = result_->data_ptr<scalar_t>();
@@ -453,27 +461,6 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     });
   }
 
-=======
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    opmath_t alpha_val = alpha.to<opmath_t>();
-    opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      batch1_ptr, lda, batch1_->strides()[0],
-      batch2_ptr, ldb, batch2_->strides()[0],
-      beta_val,
-      result_ptr, ldc, result_->strides()[0],
-      num_batches
-    );
-  });
->>>>>>> 0ac0af02d548cf1ad4fcb63dd2dbef5dcb58d2ff
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
