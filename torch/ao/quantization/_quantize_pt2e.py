@@ -1,4 +1,3 @@
-import torch
 from torch.fx import GraphModule
 import torch._dynamo as torchdynamo
 
@@ -44,6 +43,7 @@ def prepare_pt2e(
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
 ):
+    # TODO[jerryzh168]: check if the model is using EXIR - aten dialect
     _infer_nn_stack_trace_and_append_on_meta(model, model, example_inputs)
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
