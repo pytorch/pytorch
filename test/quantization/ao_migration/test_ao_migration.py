@@ -511,11 +511,10 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
         self._test_function_import('conv_relu', function_list,
                                    base='nn.intrinsic.quantized.modules')
 
-    def test_modules_intrinsic_quantized_linear_activation(self):
+    def test_modules_intrinsic_quantized_linear_relu(self):
         function_list = [
             'LinearReLU',
-            'LinearLeakyReLU',
             'LinearTanh',
         ]
-        self._test_function_import('linear_activation', function_list,
+        self._test_function_import('linear_relu', function_list,
                                    base='nn.intrinsic.quantized.modules')
