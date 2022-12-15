@@ -546,9 +546,11 @@ class TestFuseFx(QuantizationTestCase):
                 bn, conv = bn_pattern
                 return conv
 
-            conv_bn_res_relu_config1 = BackendPatternConfig((nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
+            conv_bn_res_relu_config1 = BackendPatternConfig() \
+                ._set_pattern_complex_format((nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
                 .set_fuser_method(fuse_conv_bn_relu)
-            conv_bn_res_relu_config2 = BackendPatternConfig((nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
+            conv_bn_res_relu_config2 = BackendPatternConfig() \
+                ._set_pattern_complex_format((nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d)))) \
                 .set_fuser_method(fuse_conv_bn_relu)
             backend_config = BackendConfig() \
                 .set_backend_pattern_config(conv_bn_res_relu_config1) \
@@ -606,7 +608,8 @@ class TestFuseFx(QuantizationTestCase):
             bn, conv = bn_pattern
             return [extra_input]
 
-        conv_bn_res_relu_config = BackendPatternConfig((nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))) \
+        conv_bn_res_relu_config = BackendPatternConfig() \
+            ._set_pattern_complex_format((nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))) \
             .set_fuser_method(fuse_conv_bn_relu) \
             ._set_root_node_getter(conv_bn_res_relu_root_node_getter) \
             ._set_extra_inputs_getter(conv_bn_res_relu_extra_inputs_getter)
@@ -654,7 +657,7 @@ class TestFuseFx(QuantizationTestCase):
 
         m = M().eval()
 
-        def fuse_conv_relu(is_qat, relu, conv):
+        def fuse_conv_relu(is_qat, conv, relu):
             return conv
 
         def fuse_conv_res_relu(is_qat, relu, add_pattern):
@@ -669,9 +672,10 @@ class TestFuseFx(QuantizationTestCase):
             relu, (_, _, extra_input) = pattern
             return [extra_input]
 
-        conv_relu_config = BackendPatternConfig((nn.ReLU, nn.Conv2d)) \
+        conv_relu_config = BackendPatternConfig((nn.Conv2d, nn.ReLU)) \
             .set_fuser_method(fuse_conv_relu)
-        conv_res_relu_config = BackendPatternConfig((nn.ReLU, (torch.add, nn.Conv2d, MatchAllNode))) \
+        conv_res_relu_config = BackendPatternConfig() \
+            ._set_pattern_complex_format((nn.ReLU, (torch.add, nn.Conv2d, MatchAllNode))) \
             .set_fuser_method(fuse_conv_res_relu) \
             ._set_root_node_getter(conv_res_relu_root_node_getter) \
             ._set_extra_inputs_getter(conv_res_relu_extra_inputs_getter)
@@ -5545,10 +5549,12 @@ class TestQuantizeFx(QuantizationTestCase):
                 return transpose
 
             backend_pattern_configs.append(
-                BackendPatternConfig((torch.reshape, torch.transpose, MatchAllNode))
-                .set_observation_type(observation_type)  # noqa: E131
+                BackendPatternConfig()
+                ._set_pattern_complex_format((torch.reshape, torch.transpose, MatchAllNode))  # noqa: E131
+                .set_observation_type(observation_type)
                 .set_dtype_configs(dtype_configs)
-                ._set_root_node_getter(root_node_getter))
+                ._set_root_node_getter(root_node_getter)
+            )
             return backend_pattern_configs
 
         backend_config = BackendConfig().set_backend_pattern_configs(_get_pattern_configs())
