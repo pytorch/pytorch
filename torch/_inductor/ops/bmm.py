@@ -87,8 +87,8 @@ bmm_template = TritonTemplate(
 """,
 )
 
-aten_bmm = ExternKernelChoice(torch.bmm)
-aten_baddbmm = ExternKernelChoice(torch.baddbmm)
+aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
+aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
 
 
 @register_lowering(aten.bmm)
