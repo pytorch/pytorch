@@ -76,8 +76,8 @@ mm_template = TritonTemplate(
 """,
 )
 
-aten_mm = ExternKernelChoice(torch.mm)
-aten_addmm = ExternKernelChoice(torch.addmm)
+aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
+aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 
 
 @register_lowering(aten.mm)
