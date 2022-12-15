@@ -124,21 +124,21 @@ linear_configs = _get_linear_configs(linear_dtype_configs)
 # 1.1 linear module + leaky_relu fusion config
 # linear leaky_relu, linear module + leaky_relu module
 linear_configs.append(
-    BackendPatternConfig((nn.LeakyReLU, nn.Linear))
+    BackendPatternConfig((nn.Linear, nn.LeakyReLU))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + functional leaky_relu
 linear_configs.append(
-    BackendPatternConfig((F.leaky_relu, nn.Linear))
+    BackendPatternConfig((nn.Linear, F.leaky_relu))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + BN + leaky_relu
 linear_configs.append(
-    BackendPatternConfig((nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)))
+    BackendPatternConfig((nn.Linear, nn.BatchNorm1d, nn.LeakyReLU))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
-        .set_fuser_method(_reverse3(_fuse_linear_bn_leaky_relu))
+        .set_fuser_method(_fuse_linear_bn_leaky_relu)
         .set_fused_module(nni.LinearLeakyReLU))
 
 # 1.2 linear module + leaky_relu, fused module configs
@@ -152,12 +152,12 @@ linear_configs.append(
 # 1.3 functional linear + leaky_relu configs
 # linear leaky_relu, functional linear + leaky_relu module
 linear_configs.append(
-    BackendPatternConfig((nn.LeakyReLU, F.linear))
+    BackendPatternConfig((F.linear, nn.LeakyReLU))
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(linear_dtype_configs))
 # linear leaky_relu, functional linear + functional leaky_relu
 linear_configs.append(
-    BackendPatternConfig((F.leaky_relu, F.linear))
+    BackendPatternConfig((F.linear, F.leaky_relu))
         .set_observation_type(observation_type)  # noqa: E131
         .set_dtype_configs(linear_dtype_configs))
 
