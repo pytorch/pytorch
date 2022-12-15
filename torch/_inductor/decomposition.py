@@ -44,8 +44,10 @@ decompositions = get_decompositions(
         aten.hardsigmoid,
         aten.hardsigmoid_backward,
         aten.hardswish,
+        aten.hardswish_,
         aten.hardswish_backward,
         aten.hardtanh,
+        aten.hardtanh_,
         aten.hardtanh_backward,
         aten.im2col,
         aten.index_add,
@@ -53,6 +55,7 @@ decompositions = get_decompositions(
         aten.index_select,
         aten.l1_loss,
         aten.leaky_relu,
+        aten.leaky_relu_,
         aten.leaky_relu_backward,
         aten.linalg_vector_norm,
         aten.logit,
@@ -60,6 +63,7 @@ decompositions = get_decompositions(
         aten._log_softmax,
         aten._log_softmax_backward_data,
         aten.logsumexp.default,
+        aten.masked_fill_,
         aten.max_pool2d_with_indices_backward,
         aten.mse_loss,
         aten.mse_loss_backward,
@@ -87,6 +91,7 @@ decompositions = get_decompositions(
         aten.sgn,
         aten.sigmoid_backward,
         aten.silu,
+        aten.silu_,
         aten.silu_backward,
         aten.slice_backward,
         aten._softmax,
@@ -472,31 +477,6 @@ def copy(self, src, non_blocking=False):
         return aten.expand_copy.default(intermediate, self.size())
     else:
         return intermediate
-
-
-@register_decomposition(aten.hardswish_)
-def hardswish_(x):
-    return x.copy_(aten.hardswish(x))
-
-
-@register_decomposition(aten.hardtanh_)
-def hardtanh_(x, min_val=-1, max_val=1):
-    return x.copy_(aten.hardtanh(x, min_val, max_val))
-
-
-@register_decomposition(aten.leaky_relu_)
-def leaky_relu_(x, negative_slope=0.01):
-    return x.copy_(aten.leaky_relu(x, negative_slope))
-
-
-@register_decomposition(aten.silu_)
-def silu_(x):
-    return x.copy_(aten.silu(x))
-
-
-@register_decomposition(aten.masked_fill_)
-def masked_fill_(x, mask, value):
-    return x.copy_(aten.masked_fill(x, mask, value))
 
 
 @register_decomposition([aten.baddbmm])
