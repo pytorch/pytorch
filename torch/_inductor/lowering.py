@@ -18,7 +18,7 @@ from torch._prims_common import (
     Number,
 )
 
-from . import config, ir, overrides
+from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -3684,7 +3684,7 @@ def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
 
 
-@register_lowering(aten._test_inductor_realize)
+@register_lowering(torch.ops._inductor_test.realize)
 def _realize(x):
     x.realize()
     return clone(x)
