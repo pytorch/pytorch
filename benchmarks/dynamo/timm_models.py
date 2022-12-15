@@ -218,7 +218,7 @@ class TimmRunnner(BenchmarkRunner):
         self.num_classes = model.num_classes
 
         data_config = resolve_data_config(
-            vars(self._args) if timmversion > "0.7.0" else self._args,
+            vars(self._args) if timmversion >= "0.8.0" else self._args,
             model=model,
             use_test_size=not is_training,
         )
