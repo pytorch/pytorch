@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.nn.functional as F
 import torch.nn.quantized._reference as nnqr
 from ._common_operator_config_utils import (
@@ -23,7 +23,7 @@ from .backend_config import (
     ObservationType,
 )
 from ..fuser_method_mappings import (
-    _reverse_sequential_wrapper2,
+    _sequential_wrapper2,
     _reverse3,
 )
 
@@ -156,7 +156,7 @@ def _add_eltwise_fusion_configs(configs, root_module, root_op, post_module, post
 # Configs for linear + leaky_relu fusion
 _add_eltwise_fusion_configs(linear_configs, nn.Linear, F.linear,
                             nn.LeakyReLU, F.leaky_relu, linear_dtype_configs,
-                            _reverse_sequential_wrapper2(nni.LinearLeakyReLU),
+                            _sequential_wrapper2(nni.LinearLeakyReLU),
                             nni.LinearLeakyReLU, observation_type, nnqr.Linear)
 
 # Configs for linear module + batchnorm + leaky_relu
@@ -169,7 +169,7 @@ linear_configs.append(
 # Configs for linear + tanh fusion
 _add_eltwise_fusion_configs(linear_configs, nn.Linear, F.linear,
                             nn.Tanh, torch.tanh, linear_dtype_configs,
-                            _reverse_sequential_wrapper2(nni.LinearTanh),
+                            _sequential_wrapper2(nni.LinearTanh),
                             nni.LinearTanh, observation_type, nnqr.Linear)
 
 # ===========================
