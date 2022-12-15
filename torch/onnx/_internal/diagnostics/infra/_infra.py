@@ -276,7 +276,7 @@ class Diagnostic:
         Args:
             verbose: If True, prints all information. E.g. stack frames, graphs, etc.
                 Otherwise, only prints compact information. E.g., rule name and display message.
-            level: The minimum level of diagnostics to print.
+            log_level: The minimum level of diagnostics to print.
         """
         if self.level.value < log_level.value:
             return
@@ -421,7 +421,7 @@ class DiagnosticContext:
 
         Args:
             verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
-            level: The minimum level of diagnostics to print.
+            log_level: The minimum level of diagnostics to print.
         """
         formatter.pretty_print_title(
             f"Diagnostic Run {self.name} version {self.version}"
