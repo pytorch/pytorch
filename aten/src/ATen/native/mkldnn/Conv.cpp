@@ -44,6 +44,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
+bool mkldnn_delete_param(int64_t param, int64_t param_type) {
+  TORCH_CHECK(false, "mkldnn_delete_param: ATen not compiled with MKLDNN support");
+}
+
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 }}
@@ -175,7 +179,34 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-long mkldnn_conv_param_generation(
+#define ONEDNN_PARAM_TYPE_CONV 0
+#define ONEDNN_PARAM_TYPE_LINEAR 1
+bool mkldnn_delete_param(int64_t param, int64_t param_type) {
+  if(param != 0) {
+    switch (param_type) {
+      case ONEDNN_PARAM_TYPE_CONV:
+        {
+          auto conv_params_ptr = (ideep::convolution_forward_params *) param;
+          delete conv_params_ptr;
+          conv_params_ptr = nullptr;
+        }
+        break;
+      case ONEDNN_PARAM_TYPE_LINEAR:
+        {
+          auto linear_params_ptr = (ideep::inner_product_forward_params *) param;
+          delete linear_params_ptr;
+          linear_params_ptr = nullptr;
+        }
+        break;
+      default:
+        return false;
+    }
+  }
+
+  return true;
+}
+
+int64_t mkldnn_conv_param_generation(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -257,10 +288,10 @@ long mkldnn_conv_param_generation(
         op_attr);
   }
 
-  return (long) conv_params_ptr;
+  return (int64_t) conv_params_ptr;
 }
 
-long mkldnn_conv_param_generation_binary(
+int64_t mkldnn_conv_param_generation_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -389,7 +420,7 @@ long mkldnn_conv_param_generation_binary(
     conv_params_ptr = nullptr;
   }
 
-  return (long) conv_params_ptr;
+  return (int64_t) conv_params_ptr;
 }
 
 void _mkldnn_convolution_out (

@@ -30,6 +30,9 @@ inplace_buffers = True
 # codegen benchmark harness
 benchmark_harness = True
 
+# cache mkldnn param for mkldnn related ops
+mkldnn_param_caching = False
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold

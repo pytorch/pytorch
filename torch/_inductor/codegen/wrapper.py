@@ -265,7 +265,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
-        self.onednn_param_utils_gen = False
+        self.mkldnn_param_utils_gen = False
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -354,28 +354,55 @@ class WrapperCodeGen(CodeGen):
                 )
             V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
 
-    def write_onednn_param_gen_utils(self):
+    def write_mkldnn_param_gen_utils(self):
         self.header.splice(
             """
-            onednn_param_cache = dict()
-            def get_onednn_conv_param(op_id, src, weight, bias, padding, stride, dilation, groups, attr, scalars, algo):
-                if op_id in onednn_param_cache:
-                    conv_param = onednn_param_cache[op_id]
+            class mkldnn_param_cache:
+                def __init__(self):
+                    self.p_cache = dict()
+
+                def add_param(self, param_id, param, param_type):
+                    self.p_cache[param_id] = (param, param_type)
+
+                def get_param(self, param_id):
+                    if param_id in self.p_cache:
+                        return self.p_cache[param_id][0]
+                    else:
+                        return 0
+
+                def check_param(self, param_id):
+                    if param_id in self.p_cache:
+                        return True
+                    else:
+                        return False
+
+                def clear(self):
+                    for param in self.p_cache.values():
+                        torch.mkldnn_delete_param(param[0], param[1])
+                    self.p_cache.clear()
+
+                def __del__(self):
+                    self.clear()
+
+            param_cache = mkldnn_param_cache()
+            def get_mkldnn_conv_param(op_id, src, weight, bias, padding, stride, dilation, groups, attr, scalars, algo):
+                if param_cache.check_param(op_id):
+                    conv_param = param_cache.get_param(op_id)
                 else:
                     conv_param = torch.ops.mkldnn._conv_param_generation(src, weight, bias, padding, stride, dilation,
                                                                          groups, attr, scalars, algo)
-                    onednn_param_cache[op_id] = conv_param
+                    param_cache.add_param(op_id, conv_param, 0)
                 return conv_param
-            def get_onednn_conv_param_binary(op_id, src, other, weight, bias, padding, stride, dilation, groups,
+            def get_mkldnn_conv_param_binary(op_id, src, other, weight, bias, padding, stride, dilation, groups,
                                              binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm):
-                if op_id in onednn_param_cache:
-                    conv_param = onednn_param_cache[op_id]
+                if param_cache.check_param(op_id):
+                    conv_param = param_cache.get_param(op_id)
                 else:
                     conv_param = torch.ops.mkldnn._conv_param_generation_binary(src, other, weight, bias, padding,
                                                                                 stride, dilation, groups, binary_attr,
                                                                                 alpha, unary_attr, unary_scalars,
                                                                                 unary_algorithm)
-                    onednn_param_cache[op_id] = conv_param
+                    param_cache.add_param(op_id, conv_param, 0)
                 return conv_param
             """
         )

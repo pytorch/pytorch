@@ -254,7 +254,7 @@ class TestMkldnnFusion(JitTestCase):
                         )
                     self.assertEqual(ref, fused)
 
-    def test_conv_unary_fusion_ops_with_param_cache(self):
+    def test_conv_unary_fusion_ops_with_param(self):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
                 super(M, self).__init__()
@@ -291,6 +291,7 @@ class TestMkldnnFusion(JitTestCase):
                             x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, scalars, algorithm, conv_param
                         )
+                        torch.mkldnn_delete_param(conv_param, 0)
                     self.assertEqual(ref, fused)
 
     def test_conv_binary_fusion_ops(self):
@@ -340,7 +341,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         self.assertEqual(ref, fused)
 
-    def test_conv_binary_fusion_ops_with_param_cache(self):
+    def test_conv_binary_fusion_ops_with_param(self):
         class M(nn.Module):
             def __init__(self, binary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
                 super(M, self).__init__()
@@ -380,6 +381,7 @@ class TestMkldnnFusion(JitTestCase):
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, None, unary_attr, [], None, conv_param
                         )
+                        torch.mkldnn_delete_param(conv_param, 0)
                         # for binary add, we support inplace version.
                         if attr == "add":
                             fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
