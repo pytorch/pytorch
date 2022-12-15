@@ -716,6 +716,10 @@ class ShapeEnv(object):
         for t, source in zip(placeholders, sources):
             if t is None:
                 continue
+            if isinstance(t, SymInt):
+                track_symint(source, t)
+                continue
+            assert isinstance(t, torch.Tensor)
             # TODO: size(i)/stride(i) more efficient
             for i, s in enumerate(t.size()):
                 track_symint(f"{source}.size()[{i}]", s)
