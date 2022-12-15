@@ -198,7 +198,7 @@ bool isBlackhole(Val* v, BinaryOpType type) {
   }
   switch (type) {
     case BinaryOpType::Mul:
-      return v->getInt() == 0 || v->getDouble() == 0.0;
+      return v->getInt() == 0;
     case BinaryOpType::And:
       return v->getBool() == false || v->getInt() == 0;
     case BinaryOpType::Or:
@@ -606,18 +606,78 @@ Val* unflatten(Val* value, const std::list<ValInfo>& variables) {
 
 } // namespace assoc_comm
 
+namespace {
+
+using FOp = assoc_comm::FlattenedAssocCommOp;
+
+FOp* toFlattenedAdd(Expr* expr) {
+  if (auto fop = dynamic_cast<FOp*>(expr)) {
+    if (fop->getOpType() == BinaryOpType::Add) {
+      return fop;
+    }
+  }
+  return nullptr;
+}
+
+bool isFlattenedAdd(Val* x) {
+  return toFlattenedAdd(x->definition()) != nullptr;
+}
+
+FOp* toFlattenedMul(Expr* expr) {
+  if (auto fop = dynamic_cast<FOp*>(expr)) {
+    if (fop->getOpType() == BinaryOpType::Mul) {
+      return fop;
+    }
+  }
+  return nullptr;
+}
+
+bool isFlattenedMul(Val* x) {
+  return toFlattenedMul(x->definition()) != nullptr;
+}
+
+} // namespace
+
 namespace prove {
 
-bool isNonZero(Val*) {
-  // TODO: implement this
+// Prove properties of values. Note that functions in this namespace return
+// boolean values. If true is returned, then this means the property is
+// successfully proved. If false is returned, then this means that we are unable
+// to prove the property. Be warned that a false being returned does not
+// necessarily means the opposite of the property holds. For example, if you get
+// isNonZero(x) == false, you shouldn't think that isZero(x) == true, because
+// isNonZero(x) == false could mean:
+// - x is actually non-zero, but we are not smart enough to prove it
+// - x can be either zero or non-zero, it is just a symbolic number that depends
+// - x is zero
+
+bool isNonZero(Val* value) {
+  value = foldConstants(value);
+  if (value->getInt().has_value() && *value->getInt() != 0) {
+    return true;
+  }
+  if (value->getDouble().has_value() && *value->getDouble() != 0.0) {
+    return true;
+  }
+  if (auto ns = dynamic_cast<NamedScalar*>(value)) {
+    if (ns->getParallelDim().has_value()) {
+      return true;
+    }
+  }
+  if (auto fop = toFlattenedMul(value->definition())) {
+    for (auto inp : fop->inputsAndConstTerm()) {
+      if (!isNonZero(inp)) {
+        return false;
+      }
+    }
+    return true;
+  }
   return false;
 }
 
 } // namespace prove
 
 namespace rules {
-
-using FOp = assoc_comm::FlattenedAssocCommOp;
 
 // Do simplifications like:
 // 1 * a -> a
@@ -666,8 +726,7 @@ Val* eliminateTrivialComputation(Val* value) {
       auto lhs = foldConstants(bop->lhs());
       auto rhs = foldConstants(bop->rhs());
       bool divisor_is_1 = (rhs->getInt() == 1 || rhs->getDouble() == 1.0);
-      bool dividend_is_0 = (lhs->getInt() == 0 || lhs->getDouble() == 0.0);
-      if (divisor_is_1 || (prove::isNonZero(rhs) && dividend_is_0)) {
+      if (divisor_is_1 || (prove::isNonZero(rhs) && lhs->getInt() == 0)) {
         return lhs;
       }
     }

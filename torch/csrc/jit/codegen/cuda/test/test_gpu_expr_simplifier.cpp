@@ -79,10 +79,8 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   TORCH_CHECK(simplifyExpr(mul(d, d1))->sameAs(d));
   // 0 * a -> 0
   TORCH_CHECK(simplifyExpr(mul(i0, i))->sameAs(i0));
-  TORCH_CHECK(simplifyExpr(mul(d0, d))->sameAs(d0));
   // a * 0 -> 0
   TORCH_CHECK(simplifyExpr(mul(i, i0))->sameAs(i0));
-  TORCH_CHECK(simplifyExpr(mul(d, d0))->sameAs(d0));
 
   // 0 + a -> a
   TORCH_CHECK(simplifyExpr(add(i0, i))->sameAs(i));
@@ -113,9 +111,8 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   TORCH_CHECK(simplifyExpr(cpp_div(i, i1))->sameAs(i));
   TORCH_CHECK(simplifyExpr(cpp_div(d, d1))->sameAs(d));
   // 0 / a -> 0
-  // TODO: reenable this when we can reliably detect divide-by-zero error.
-  // TORCH_CHECK(simplifyExpr(cpp_div(i0, i))->sameAs(i0));
-  // TORCH_CHECK(simplifyExpr(cpp_div(d0, d))->sameAs(d0));
+  auto tdimx = NamedScalar::getParallelDim(ParallelType::TIDx);
+  TORCH_CHECK(simplifyExpr(cpp_div(i0, tdimx))->sameAs(i0));
   // a % 1 -> 0
   TORCH_CHECK(simplifyExpr(mod(i, i1))->sameAs(i0));
 }
