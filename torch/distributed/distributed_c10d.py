@@ -1018,7 +1018,7 @@ def _new_process_group_helper(
             extended_api = backend_plugin.extended_api
 
             if not extended_api:
-                backend = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
+                backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
             else:
                 dist_backend_opts = _DistributedBackendOptions()
                 dist_backend_opts.store = backend_prefix_store
@@ -1028,7 +1028,7 @@ def _new_process_group_helper(
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
 
-                backend = creator_fn(dist_backend_opts, pg_options)
+                backend_class = creator_fn(dist_backend_opts, pg_options)
 
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
@@ -1036,8 +1036,8 @@ def _new_process_group_helper(
         # If the type is a sublcass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
-        if issubclass(type(backend), ProcessGroup):
-            pg = backend
+        if issubclass(type(backend_class), ProcessGroup):
+            pg = backend_class
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
