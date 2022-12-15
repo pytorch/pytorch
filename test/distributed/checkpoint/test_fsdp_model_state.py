@@ -78,7 +78,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     def test_fsdp_model_state_no_resharding(self):
         self._test_fsdp_model_state(process_group=None)
 
-    def create_new_process_group(self):
+    def _create_new_dist_group(self):
         # create new fsdp group for resharding
         fsdp_0 = dist.new_group(ranks=[0, 2])
         fsdp_1 = dist.new_group(ranks=[1, 3])
@@ -94,7 +94,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
     @with_temp_dir
     def test_fsdp_model_state_with_resharding(self):
         self._test_fsdp_model_state(
-            process_group=self.create_new_process_group()
+            process_group=self.create_new_dist_group()
         )
 
 
