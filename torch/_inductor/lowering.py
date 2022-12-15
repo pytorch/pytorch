@@ -948,6 +948,36 @@ def register_onednn_fusion_ops():
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
             return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
 
+        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        def convolution_transpose_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            output_padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionTransposeUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
         if torch._C.has_mkl:
 
             @register_lowering(torch.ops.mkl._mkl_linear)
@@ -3676,15 +3706,18 @@ def _realize(x):
     return clone(x)
 
 
-def _import_ops():
+def _import_kernels():
+    """
+    Need to make sure all these get registered in the lowers dict
+    """
     import importlib
     import os
 
-    from . import ops
+    from . import kernel
 
-    for filename in sorted(os.listdir(os.path.dirname(ops.__file__))):
+    for filename in sorted(os.listdir(os.path.dirname(kernel.__file__))):
         if filename.endswith(".py") and filename[0] != "_":
-            importlib.import_module(f"{ops.__name__}.{filename[:-3]}")
+            importlib.import_module(f"{kernel.__name__}.{filename[:-3]}")
 
 
-_import_ops()
+_import_kernels()
