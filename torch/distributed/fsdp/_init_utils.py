@@ -45,7 +45,6 @@ from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
     FlatParameter,
     FlatParamHandle,
-    HandleConfig,
     HandleShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import _FSDPPolicy
@@ -282,6 +281,8 @@ def _init_core_state(
     state._is_root = None
     _streams: Dict[str, torch.cuda.Stream] = {}
     state._streams = _streams
+    _stream_to_name: Dict[torch.cuda.Stream, str] = {}
+    state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = _ExecOrderData(
@@ -469,19 +470,16 @@ def _init_param_handle_from_params(
 ):
     if len(params) == 0:
         return
-    handle_config = HandleConfig(
-        SHARDING_STRATEGY_MAP[state.sharding_strategy],
-        state.cpu_offload.offload_params,
-        state.mixed_precision.param_dtype,
-        state.mixed_precision.reduce_dtype,
-        state.mixed_precision.keep_low_precision_grads,
-    )
     handle = FlatParamHandle(
         params,
         root_module,
         comm_module,
         state.compute_device,
-        handle_config,
+        SHARDING_STRATEGY_MAP[state.sharding_strategy],
+        state.cpu_offload.offload_params,
+        state.mixed_precision.param_dtype,
+        state.mixed_precision.reduce_dtype,
+        state.mixed_precision.keep_low_precision_grads,
         state.process_group,
         state._use_orig_params,
     )
