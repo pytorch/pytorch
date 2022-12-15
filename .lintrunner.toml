@@ -626,6 +626,7 @@ exclude_patterns = [
     'tools/**',
     'test/**',
     'benchmarks/**',
+    'torch/distributed/run.py',
     'functorch/benchmarks/**',
     # Grandfathered in
     'caffe2/**',
