@@ -293,3 +293,8 @@ class InductorConfigContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._prev._apply()
+
+
+from .._dynamo.config_utils import get_config_serialization_fns
+
+save_config, load_config = get_config_serialization_fns(sys.modules[__name__])

@@ -458,6 +458,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
+  m.def("are_transforms_active", &at::functorch::areTransformsActive);
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
@@ -503,6 +504,12 @@ void initFuncTorchBindings(PyObject* module) {
       .def("level", &GradInterpreterPtr::level)
       .def("lift", &GradInterpreterPtr::lift)
       .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+  py::class_<JvpInterpreterPtr>(m, "CJvpInterpreterPtr")
+      .def(py::init<const Interpreter*>())
+      .def("key", &JvpInterpreterPtr::key)
+      .def("level", &JvpInterpreterPtr::level)
+      .def("lift", &JvpInterpreterPtr::lift)
+      .def("prevFwdGradMode", &JvpInterpreterPtr::prevFwdGradMode);
   py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
       .def(py::init<const Interpreter*>())
       .def("key", &VmapInterpreterPtr::key)

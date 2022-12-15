@@ -9,6 +9,7 @@ import functools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
+from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
            "InplaceFunction", "NestedIOFunction"]
@@ -418,9 +419,6 @@ class Function(_SingleLevelFunction):
         if not torch._C._is_autograd_function_extension_enabled():
             return super().apply(*args, **kwargs)
 
-        # TODO: fix circular import
-        # https://github.com/pytorch/pytorch/issues/90224
-        from torch._functorch.autograd_function import custom_function_call
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)

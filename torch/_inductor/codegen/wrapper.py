@@ -440,6 +440,15 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
+    def generate_extern_kernel_out(
+        self, output_view, codegen_reference, args, kernel, cpp_kernel
+    ):
+        if output_view:
+            args.append(f"out={output_view.codegen_reference()}")
+        else:
+            args.append(f"out={codegen_reference}")
+        self.writeline(f"{kernel}({', '.join(args)})")
+
     @dynamo_utils.dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -654,7 +663,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         ext = "so"
         extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
         # \n is required to match with the CodeCache behavior
-        source_code = "\n" + code.getvalue()
+        #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
+        # at the end of lines for readability purpose:
+        #       #pragma omp declare reduction(xxx :\
+        #                       omp_out.value = xxx,\
+        # While the code string loaded during the execution will escape the backslash '\':
+        #       #pragma omp declare reduction(xxx :                omp_out.value = xxx,
+        # Use code.getrawvalue() here to escape the backslash to
+        # make sure the same code string is used during compilation and execution,
+        # so that the hash value is the same.
+        source_code = "\n" + code.getrawvalue()
         _, _, kernel_path = get_code_path(source_code, ext, extra)
         return kernel_path
 
@@ -717,3 +735,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             call = _wrap_func(module.call_{self._call_func_id})
             """
         )
+
+    def generate_extern_kernel_out(
+        self, output_view, codegen_reference, args, kernel, cpp_kernel
+    ):
+        if output_view:
+            output_as_strided = f"{output_view.codegen_reference()}"
+            output_name = f"{output_view.get_name()}_as_strided"
+            self.writeline(f"auto {output_name} = {output_as_strided};")
+
+            args.insert(0, output_name)
+        else:
+            args.insert(0, f"{codegen_reference}")
+        self.writeline(f"{cpp_kernel}({', '.join(args)});")
