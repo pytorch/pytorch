@@ -180,7 +180,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {
     // TODO: need to see if there is extra error checking needed
-    src.expand_as(self);
+    src.expand_symint(self.sym_sizes());
     return self;
   }
 
