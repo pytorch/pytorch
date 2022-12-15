@@ -207,6 +207,7 @@ namespace c10 {
   _(aten, dict)                      \
   _(aten, wait)                      \
   _(aten, awaitable_wait)            \
+  _(aten, awaitable_nowait)          \
   _(aten, save)                      \
   _(aten, keys)                      \
   _(aten, ord)                       \

@@ -633,6 +633,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case aten::wait:
       return analyzeWait(node);
     case prim::awaitable:
+    case aten::awaitable_nowait:
       return analyzeAwaitable(node);
     case aten::awaitable_wait:
       return analyzeAwaitableWait(node);

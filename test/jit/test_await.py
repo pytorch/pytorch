@@ -35,9 +35,26 @@ class TestAwait(JitTestCase):
         # print(f"XXX tm.graph:{tm.graph}")
         inp = torch.zeros(2)
 
-        print("XXX:test_script_GRAPH")
         sm = torch.jit.script(fn)
         print(f"XXX test_await sm.graph:{sm.graph}")
+        out = fn(inp)
+        print(f"XXX test_await eager out:{out}")
+        script_out = sm(inp)
+        print(f"XXX test_await script_out:{script_out}")
+
+    def test_nowait(self):
+        print("XXX:test_nowait_START")
+        @torch.jit.script
+        def fn(x: Tensor):
+            aw = torch.jit.awaitable_nowait(13)
+            a = torch.eye(2)
+            b = torch.jit.awaitable_wait(aw)
+            return a + b + x
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(fn)
+        print(f"XXX test_await TEST_NOWAIT sm.graph:{sm.graph}")
         out = fn(inp)
         print(f"XXX test_await eager out:{out}")
         script_out = sm(inp)

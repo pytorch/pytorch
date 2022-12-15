@@ -322,6 +322,14 @@ RegisterOperators reg(
            TORCH_CHECK(false, "Not implemented yet");
          },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "aten::awaitable_nowait(t self) -> Await(t)",
+         [](Stack& stack) {
+           auto aw = c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
+           aw->markCompleted(pop(stack));
+           push(stack, std::move(aw));
+         },
+         aliasAnalysisSpecialCase()),
     });
 
 RegisterOperators logging_operators(

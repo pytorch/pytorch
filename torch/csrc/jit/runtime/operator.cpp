@@ -328,6 +328,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallMethod,
       aten::wait,
       aten::awaitable_wait,
+      aten::awaitable_nowait,
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
