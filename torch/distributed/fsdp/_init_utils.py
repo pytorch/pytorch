@@ -309,8 +309,7 @@ def _init_core_state(
         forward_prefetch_limit,
     )
     # Mapping from fully sharded module to the handles it is responsible to
-    # unshard and reshard (see `FlatParamHandle` docs for the fully sharded
-    # module definition)
+    # unshard and reshard (see [Note: Fully Sharded Module])
     _fully_sharded_module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)

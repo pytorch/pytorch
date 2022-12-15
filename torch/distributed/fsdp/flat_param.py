@@ -51,8 +51,9 @@ __all__ = [
 [Note: Fully Sharded Module]
 We define the "fully sharded module" to be the original ``nn.Module`` that owns
 a ``FlatParamHandle``. It is the *single* module logically responsible for the
-*single* unshard/reshard pair for the handle's ``FlatParameter``. The fully
-sharded module should be passed to the ``FlatParamHandle`` constructor.
+*single* unshard/reshard pair for the handle's ``FlatParameter`` for a given
+forward or backward pass. The fully sharded module should be passed to the
+``FlatParamHandle`` constructor.
 
 For the wrapper code path:
 - The ``FullyShardedDataParallel`` module wrapping the fully sharded module
