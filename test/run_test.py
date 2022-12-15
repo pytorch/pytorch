@@ -747,9 +747,6 @@ def run_test_ops(test_module, test_directory, options):
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", "--flake-runs=50"]
-    elif keep_going():
-        # If in keep going mode, run the test only once, and keep going
-        rerun_options = []
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
@@ -975,7 +972,7 @@ def parse_args():
         "--continue-through-error",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
-        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")) or keep_going(),
+        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",
@@ -1064,12 +1061,6 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_matc
                     print_to_stderr("Excluding {} {}".format(test, exclude_message))
                 selected_tests.remove(test)
     return selected_tests
-
-
-def keep_going() -> bool:
-    return (
-        "ciflow/keep_going" in os.getenv("PR_LABELS", "")
-    )
 
 
 def must_serial(file: str) -> bool:
