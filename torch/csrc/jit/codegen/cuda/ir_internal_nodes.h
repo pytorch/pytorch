@@ -202,6 +202,9 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return "UnaryOp";
   }
 
+  virtual std::vector<EvaluatorValue> evaluate(
+      const std::vector<EvaluatorValue>& inputs) const override;
+
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;
 
@@ -235,6 +238,9 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   virtual const char* getOpString() const override {
     return "BinaryOp";
   }
+
+  virtual std::vector<EvaluatorValue> evaluate(
+      const std::vector<EvaluatorValue>& inputs) const override;
 
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;
@@ -278,6 +284,9 @@ class TORCH_CUDA_CU_API TernaryOp : public Expr {
   virtual const char* getOpString() const override {
     return "TernaryOp";
   }
+
+  virtual std::vector<EvaluatorValue> evaluate(
+      const std::vector<EvaluatorValue>& inputs) const override;
 
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;

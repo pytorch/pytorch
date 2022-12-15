@@ -237,6 +237,73 @@ class FlattenedAssocCommOp : public Expr {
     return sorted_inputs;
   }
 
+  std::vector<EvaluatorValue> evaluate(
+      const std::vector<EvaluatorValue>& inputs) const override {
+    using namespace EvaluatorValue_functions;
+    std::vector<EvaluatorValue> inputs_ = inputs;
+    EvaluatorValue result;
+    if (hasConstantTerm()) {
+      if (isIntegralType(dtype())) {
+        result = EvaluatorValue(*getConstantTerm()->getInt());
+      } else if (isBooleanType(dtype())) {
+        result = EvaluatorValue(*getConstantTerm()->getBool());
+      } else if (isFloatingPointType(dtype())) {
+        result = EvaluatorValue(*getConstantTerm()->getDouble());
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            "Unexpected dtype encountered"
+            "in EvaluatorValue::evaluate: ",
+            dtype());
+      }
+    } else {
+      result = inputs_.back();
+      inputs_.pop_back();
+    }
+    switch (getOpType()) {
+      case BinaryOpType::Add:
+        for (auto i : inputs_) {
+          result += i;
+        }
+        break;
+      case BinaryOpType::Mul:
+        for (auto i : inputs_) {
+          result *= i;
+        }
+        break;
+      case BinaryOpType::And:
+        for (auto i : inputs_) {
+          result = result && i;
+        }
+        break;
+      case BinaryOpType::Or:
+        for (auto i : inputs_) {
+          result = result || i;
+        }
+        break;
+      case BinaryOpType::Xor:
+        for (auto i : inputs_) {
+          result = result ^ i;
+        }
+        break;
+      case BinaryOpType::Min:
+        for (auto i : inputs_) {
+          result = min(result, i);
+        }
+        break;
+      case BinaryOpType::Max:
+        for (auto i : inputs_) {
+          result = max(result, i);
+        }
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(
+            "Unexpected operator type encountered"
+            "in EvaluatorValue::evaluate: ",
+            getOpType());
+    }
+    return {result};
+  }
+
  protected:
   // Add a new value as an input of this expression. If `value` is a constant
   // scalar, then evalate this constant and merge it with the constant term.

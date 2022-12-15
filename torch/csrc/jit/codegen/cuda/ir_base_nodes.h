@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder_passkey.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -497,6 +498,9 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   Expr* shallowCopy() const;
 
   bool sameAs(const Statement* other) const override;
+
+  virtual std::vector<EvaluatorValue> evaluate(
+      const std::vector<EvaluatorValue>& inputs) const;
 
   // Input/output accessors
   const auto& inputs() const {

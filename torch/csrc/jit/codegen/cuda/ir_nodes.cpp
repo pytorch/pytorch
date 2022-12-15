@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <c10/util/irange.h>
 
@@ -249,6 +250,43 @@ UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
       IrBuilder::create<Attribute<UnaryOpType>>(passkey.ir_container_, type));
 }
 
+std::vector<EvaluatorValue> UnaryOp::evaluate(
+    const std::vector<EvaluatorValue>& inputs) const {
+  using namespace EvaluatorValue_functions;
+  const auto& in = inputs.at(0);
+  switch (getUnaryOpType()) {
+    case UnaryOpType::Neg:
+      return {-in};
+    case UnaryOpType::Set:
+      return {in};
+      break;
+    case UnaryOpType::Cast:
+      if (isIntegralType(*out()->getDataType())) {
+        return {EvaluatorValue(in.cast<int64_t>())};
+      } else if (isFloatingPointType(*out()->getDataType())) {
+        return {EvaluatorValue(in.cast<double>())};
+      } else if (out()->getDataType() == DataType::Bool) {
+        return {EvaluatorValue(in.cast<bool>())};
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "dtype not supported in evaluator: ", *out()->getDataType());
+      }
+    case UnaryOpType::Abs:
+      return {abs(in)};
+      break;
+    case UnaryOpType::Not:
+      return {notExpr(in)};
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Unexpected operator type ",
+          getUnaryOpType(),
+          " in ",
+          toString());
+  }
+}
+
 void UnaryOp::printHelper(std::stringstream& ss, std::string input) const {
   auto op_type = getUnaryOpType();
 
@@ -312,6 +350,77 @@ BinaryOp::BinaryOp(
   addInput(rhs);
   addAttribute(
       IrBuilder::create<Attribute<BinaryOpType>>(passkey.ir_container_, type));
+}
+
+std::vector<EvaluatorValue> BinaryOp::evaluate(
+    const std::vector<EvaluatorValue>& inputs) const {
+  using namespace EvaluatorValue_functions;
+  const auto& lhs = inputs.at(0);
+  const auto& rhs = inputs.at(1);
+
+  switch (getBinaryOpType()) {
+    case BinaryOpType::Add:
+      return {lhs + rhs};
+      break;
+    case BinaryOpType::Sub:
+      return {lhs - rhs};
+      break;
+    case BinaryOpType::Mul:
+      return {lhs * rhs};
+      break;
+    case BinaryOpType::Div:
+      TORCH_CHECK(rhs != 0);
+      return {lhs / rhs};
+      break;
+    case BinaryOpType::Mod:
+      TORCH_CHECK(rhs != 0);
+      return {lhs % rhs};
+      break;
+    case BinaryOpType::CeilDiv:
+      TORCH_CHECK(rhs != 0);
+      return {ceildiv(lhs, rhs)};
+      break;
+    case BinaryOpType::And:
+      return {lhs && rhs};
+      break;
+    case BinaryOpType::Or:
+      return {lhs || rhs};
+      break;
+    case BinaryOpType::Xor:
+      return {lhs ^ rhs};
+      break;
+    case BinaryOpType::Eq:
+      return {lhs == rhs};
+      break;
+    case BinaryOpType::NE:
+      return {lhs != rhs};
+      break;
+    case BinaryOpType::GT:
+      return {lhs > rhs};
+      break;
+    case BinaryOpType::GE:
+      return {lhs >= rhs};
+      break;
+    case BinaryOpType::LT:
+      return {lhs < rhs};
+      break;
+    case BinaryOpType::LE:
+      return {lhs <= rhs};
+      break;
+    case BinaryOpType::Max:
+      return {max(lhs, rhs)};
+      break;
+    case BinaryOpType::Min:
+      return {min(lhs, rhs)};
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Unexpected operator type: ",
+          getBinaryOpType(),
+          " in ",
+          toString());
+  }
 }
 
 void BinaryOp::printHelper(
@@ -391,6 +500,26 @@ TernaryOp::TernaryOp(
   addInput(in3);
   addAttribute(
       IrBuilder::create<Attribute<TernaryOpType>>(passkey.ir_container_, type));
+}
+
+std::vector<EvaluatorValue> TernaryOp::evaluate(
+    const std::vector<EvaluatorValue>& inputs) const {
+  using namespace EvaluatorValue_functions;
+  const auto& in1 = inputs.at(0);
+  const auto& in2 = inputs.at(1);
+  const auto& in3 = inputs.at(2);
+  switch (getTernaryOpType()) {
+    case TernaryOpType::Where:
+      return {in1.as<bool>() ? in2 : in3};
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Unexpected operator type: ",
+          getTernaryOpType(),
+          " in ",
+          toString());
+  }
 }
 
 void TernaryOp::printHelper(

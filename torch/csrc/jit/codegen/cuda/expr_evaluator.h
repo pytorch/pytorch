@@ -19,7 +19,7 @@ namespace cuda {
 class PrecomputedValues;
 
 //! Calculate Fusion IR expressions
-class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
+class TORCH_CUDA_CU_API ExpressionEvaluator {
   void bind_(const Val* value, const EvaluatorValue& concrete_value);
   void bind_(const std::string& name, const EvaluatorValue& concrete_value);
 
@@ -55,12 +55,6 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
 
  private:
   c10::optional<EvaluatorValue> getValue(const Val* value);
-
-  using OptInConstDispatch::handle;
-
-  void handle(const UnaryOp* unary_op) final;
-  void handle(const BinaryOp* binary_op) final;
-  void handle(const TernaryOp* binary_op) final;
 
  private:
   PrecomputedValues* precomputed_values_ = nullptr;

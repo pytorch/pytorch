@@ -105,9 +105,21 @@ c10::optional<EvaluatorValue> ExpressionEvaluator::evaluate(const Val* value) {
 
   auto maybe_concrete_value = getValue(value);
   if (!maybe_concrete_value.has_value()) {
-    if (value->definition() != nullptr) {
+    if (auto def = value->definition()) {
       FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
-      OptInConstDispatch::handle(value->definition());
+      std::vector<EvaluatorValue> inputs;
+      inputs.reserve(def->inputs().size());
+      for (auto i : def->inputs()) {
+        auto eval_i = evaluate(i);
+        if (!eval_i.has_value()) {
+          return c10::nullopt;
+        }
+        inputs.emplace_back(*eval_i);
+      }
+      auto outputs = def->evaluate(inputs);
+      for (auto i : c10::irange(def->outputs().size())) {
+        known_values_[def->output(i)] = outputs[i];
+      }
       maybe_concrete_value = getValue(value);
     }
   }
@@ -165,140 +177,6 @@ void ExpressionEvaluator::print() const {
     precomputed_values_->print();
   }
   std::cout << "--------------------\n\n";
-}
-
-void ExpressionEvaluator::handle(const UnaryOp* uop) {
-  using namespace EvaluatorValue_functions;
-  const auto in = evaluate(uop->in());
-  if (in.has_value()) {
-    switch (uop->getUnaryOpType()) {
-      case UnaryOpType::Neg:
-        known_values_[uop->out()] = -*in;
-        break;
-      case UnaryOpType::Set:
-        known_values_[uop->out()] = *in;
-        break;
-      case UnaryOpType::Cast:
-        if (isIntegralType(*uop->out()->getDataType())) {
-          known_values_[uop->out()] = EvaluatorValue(in->cast<int64_t>());
-        } else if (isFloatingPointType(*uop->out()->getDataType())) {
-          known_values_[uop->out()] = EvaluatorValue(in->cast<double>());
-        } else if (uop->out()->getDataType() == DataType::Bool) {
-          known_values_[uop->out()] = EvaluatorValue(in->cast<bool>());
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "dtype not supported in evaluator: ",
-              *uop->out()->getDataType());
-        }
-        break;
-      case UnaryOpType::Abs:
-        known_values_[uop->out()] = abs(*in);
-        break;
-      case UnaryOpType::Not:
-        known_values_[uop->out()] = notExpr(*in);
-        break;
-      default:
-        TORCH_CHECK(
-            false,
-            "Unexpected operator type ",
-            uop->getUnaryOpType(),
-            " in ",
-            uop->toString());
-    }
-  }
-}
-
-void ExpressionEvaluator::handle(const BinaryOp* bop) {
-  using namespace EvaluatorValue_functions;
-  const auto lhs = evaluate(bop->lhs());
-  const auto rhs = evaluate(bop->rhs());
-  if (lhs.has_value() && rhs.has_value()) {
-    switch (bop->getBinaryOpType()) {
-      case BinaryOpType::Add:
-        known_values_[bop->out()] = *lhs + *rhs;
-        break;
-      case BinaryOpType::Sub:
-        known_values_[bop->out()] = *lhs - *rhs;
-        break;
-      case BinaryOpType::Mul:
-        known_values_[bop->out()] = *lhs * *rhs;
-        break;
-      case BinaryOpType::Div:
-        TORCH_CHECK(*rhs != 0);
-        known_values_[bop->out()] = *lhs / *rhs;
-        break;
-      case BinaryOpType::Mod:
-        TORCH_CHECK(*rhs != 0);
-        known_values_[bop->out()] = *lhs % *rhs;
-        break;
-      case BinaryOpType::CeilDiv:
-        TORCH_CHECK(*rhs != 0);
-        known_values_[bop->out()] = ceildiv(*lhs, *rhs);
-        break;
-      case BinaryOpType::And:
-        known_values_[bop->out()] = *lhs && *rhs;
-        break;
-      case BinaryOpType::Or:
-        known_values_[bop->out()] = *lhs || *rhs;
-        break;
-      case BinaryOpType::Xor:
-        known_values_[bop->out()] = *lhs ^ *rhs;
-        break;
-      case BinaryOpType::Eq:
-        known_values_[bop->out()] = *lhs == *rhs;
-        break;
-      case BinaryOpType::NE:
-        known_values_[bop->out()] = *lhs != *rhs;
-        break;
-      case BinaryOpType::GT:
-        known_values_[bop->out()] = *lhs > *rhs;
-        break;
-      case BinaryOpType::GE:
-        known_values_[bop->out()] = *lhs >= *rhs;
-        break;
-      case BinaryOpType::LT:
-        known_values_[bop->out()] = *lhs < *rhs;
-        break;
-      case BinaryOpType::LE:
-        known_values_[bop->out()] = *lhs <= *rhs;
-        break;
-      case BinaryOpType::Max:
-        known_values_[bop->out()] = max(*lhs, *rhs);
-        break;
-      case BinaryOpType::Min:
-        known_values_[bop->out()] = min(*lhs, *rhs);
-        break;
-      default:
-        TORCH_CHECK(
-            false,
-            "Unexpected operator type: ",
-            bop->getBinaryOpType(),
-            " in ",
-            bop->toString());
-    }
-  }
-}
-
-void ExpressionEvaluator::handle(const TernaryOp* top) {
-  using namespace EvaluatorValue_functions;
-  const auto in1 = evaluate(top->in1());
-  const auto in2 = evaluate(top->in2());
-  const auto in3 = evaluate(top->in3());
-  if (in1.has_value() && in2.has_value() && in3.has_value()) {
-    switch (top->getTernaryOpType()) {
-      case TernaryOpType::Where:
-        known_values_[top->out()] = in1->as<bool>() ? *in2 : *in3;
-        break;
-      default:
-        TORCH_CHECK(
-            false,
-            "Unexpected operator type: ",
-            top->getTernaryOpType(),
-            " in ",
-            top->toString());
-    }
-  }
 }
 
 } // namespace cuda
