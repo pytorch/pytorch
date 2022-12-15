@@ -2210,6 +2210,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
