@@ -368,10 +368,10 @@ class TestMkldnnFusion(JitTestCase):
                             mod.conv_transpose.weight,
                             mod.conv_transpose.bias,
                             mod.conv_transpose.padding,
+                            mod.conv_transpose.output_padding,
                             mod.conv_transpose.stride,
                             mod.conv_transpose.dilation,
                             mod.conv_transpose.groups,
-                            mod.conv_transpose.output_padding,
                             attr,
                             scalars,
                             algorithm)
