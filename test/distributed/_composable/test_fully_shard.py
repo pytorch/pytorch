@@ -474,8 +474,10 @@ class TestFSDPModelCheckpointing(FSDPTest):
         )
         _zero_model(load_composable)
         sd = {k: v.clone() for k, v in composable_sd.items()}
+        print(f"sd keys: {list(sd.keys())}")
         load_composable.load_state_dict(sd)
         self._check_model_parity(load_composable, save_composable)
+        dist.barrier()
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_save_load_submodule_fully_shard(self):
