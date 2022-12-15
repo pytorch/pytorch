@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+from typing import Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1456,6 +1457,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for node in gm.graph.nodes:
             if node.op == "placeholder":
                 self.assertIn("val", node.meta)
+
+    def test_input_container_type(self):
+        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+            return {"a": x.sum() + sum(y).sum()}
+
+        inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])
+
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        self.assertEqual(gm(*inp), f(*inp))
 
 
 if __name__ == "__main__":
