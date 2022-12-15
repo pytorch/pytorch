@@ -12,8 +12,6 @@ from .fused import ConvReLU2d
 from .fused import ConvReLU3d
 from .fused import LinearBn1d
 from .fused import LinearReLU
-from .fused import LinearLeakyReLU
-from .fused import LinearTanh
 
 
 __all__ = [
@@ -30,6 +28,4 @@ __all__ = [
     'ConvReLU3d',
     'LinearBn1d',
     'LinearReLU',
-    'LinearLeakyReLU',
-    'LinearTanh',
 ]
