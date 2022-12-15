@@ -443,7 +443,9 @@ class VariableBuilder:
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
-                value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                source=self.source,
             )
         elif value in tensor_dunder_fns:
             return TorchVariable(
@@ -453,6 +455,7 @@ class VariableBuilder:
         elif istype(value, types.FunctionType):
             return UserFunctionVariable(
                 value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
@@ -505,6 +508,7 @@ class VariableBuilder:
         else:
             result = UserDefinedObjectVariable(
                 value,
+                source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):

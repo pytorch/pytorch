@@ -157,6 +157,7 @@ class DefaultsSource(Source):
 
     def __init__(self, base, idx_key, is_kw=False):
         super().__init__()
+        assert base, "Must provide a valid base source"
         self.base = base
         self.idx_key = idx_key
         self.is_kw = is_kw

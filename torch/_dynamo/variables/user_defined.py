@@ -27,6 +27,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        assert self.source, "no source on UserdefinedClassVariable!"
 
     def as_python_constant(self):
         return self.value
@@ -37,11 +38,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
-
+        source = AttrSource(self.source, name)
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(obj.__get__(self.value), **options)
+            return variables.UserFunctionVariable(
+                obj.__get__(self.value), source=source, **options
+            )
         elif isinstance(obj, classmethod):
-            return variables.UserMethodVariable(obj.__func__, self, **options)
+            return variables.UserMethodVariable(
+                obj.__func__, self, source=source, **options
+            )
 
         return super(UserDefinedClassVariable, self).var_getattr(tx, name)
 
@@ -125,6 +130,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        assert self.source, "no source!"
 
     def __str__(self):
         inner = self.value_type.__name__
@@ -167,7 +173,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
-
+            source = AttrSource(AttrSource(self.source, "__class__"), name)
             if method is object.__init__:
                 return ConstantVariable(None, **options)
 
@@ -205,9 +211,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 # TODO(jansel): add a guard to check for monkey patching?
-                return UserMethodVariable(method, self, **options).call_function(
-                    tx, args, kwargs
-                )
+                return UserMethodVariable(
+                    method, self, source=source, **options
+                ).call_function(tx, args, kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
