@@ -36,7 +36,7 @@ else
     tmp_dir=$(mktemp -d)
     (
         pushd "${tmp_dir}"
-        curl --retry 3 -o "${cudnn_installer_name}" "$cudnn_installer_link"
+        curl --retry 3 --retry-all-errors -o "${cudnn_installer_name}" "$cudnn_installer_link"
         7z x "${cudnn_installer_name}" -ocudnn
         # Use '${var:?}/*' to avoid potentially expanding to '/*'
         # Remove all of the directories before attempting to copy files

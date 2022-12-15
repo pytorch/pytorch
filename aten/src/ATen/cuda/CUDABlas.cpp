@@ -741,7 +741,7 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  TORCH_CUDABLAS_CHECK(cublasLtMatmul(
+  cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
       &alpha_val,
@@ -757,7 +757,33 @@ void gemm_and_bias(
       &heuristicResult.algo,
       workspace.data_ptr(),
       workspaceSize,
-      at::cuda::getCurrentCUDAStream()));
+      at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " result_ld ",
+      result_ld,
+      " abcType ",
+      abcType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType);
 }
 
 template void gemm_and_bias(

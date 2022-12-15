@@ -14,11 +14,16 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      runs-on:
+        required: false
+        type: string
+        default: "macos-m1-12"
+        description: Hardware to run tests on
 
 jobs:
   run_mps_test:
     name: "Run MPS tests"
-    runs-on: macos-m1-12
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
@@ -66,6 +71,7 @@ jobs:
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
 
       - name: Run MPS tests
+        id: test
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
         shell: arch -arch arm64 bash {0}
@@ -74,5 +80,18 @@ jobs:
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
 
-          ${CONDA_RUN} --cwd test python3 test_mps.py -v
-          ${CONDA_RUN} --cwd test python3 test_metal.py -v
+          ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}

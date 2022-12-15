@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functorch import grad_and_value, vmap, combine_weights_for_ensemble
+from functorch import make_functional, grad_and_value, vmap, combine_state_for_ensemble
 
 # Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
 # tutorial on Model Ensembling with JAX by Will Whitney.
@@ -68,11 +68,16 @@ class MLPClassifier(nn.Module):
 
 
 loss_fn = nn.NLLLoss()
-model = MLPClassifier().to(DEVICE)
+
+# Step 3: Make the model functional(!!) and define a training function.
+# NB: this mechanism doesn't exist in PyTorch today, but we want it to:
+# https://github.com/pytorch/pytorch/issues/49171
+func_model, weights = make_functional(MLPClassifier().to(DEVICE))
+
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
-        output = torch.nn.utils.stateless.functional_call(model, weights, batch)
+        output = func_model(weights, batch)
         loss = loss_fn(output, targets)
         return loss
 
@@ -80,10 +85,10 @@ def train_step_fn(weights, batch, targets, lr=0.2):
 
     # NB: PyTorch is missing a "functional optimizer API" (possibly coming soon)
     # so we are going to re-implement SGD here.
-    new_weights = {}
+    new_weights = []
     with torch.no_grad():
-        for key in grad_weights:
-            new_weights[key] = weights[key] - grad_weights[key] * lr
+        for grad_weight, weight in zip(grad_weights, weights):
+            new_weights.append(weight - grad_weight * lr)
 
     return loss, new_weights
 
@@ -93,7 +98,7 @@ def train_step_fn(weights, batch, targets, lr=0.2):
 def step4():
     global weights
     for i in range(2000):
-        loss, weights = train_step_fn({k: v for k, v in model.named_parameters()}, points, labels)
+        loss, weights = train_step_fn(weights, points, labels)
         if i % 100 == 0:
             print(loss)
 
@@ -106,7 +111,7 @@ step4()
 
 def init_fn(num_models):
     models = [MLPClassifier().to(DEVICE) for _ in range(num_models)]
-    params, _ = combine_weights_for_ensemble(models)
+    _, params, _ = combine_state_for_ensemble(models)
     return params
 
 # Step 6: Now, can we try multiple models at the same time?

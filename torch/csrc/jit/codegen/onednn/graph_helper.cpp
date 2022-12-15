@@ -505,7 +505,6 @@ Node* LlgaGraphHelper::createSingletonSubgraph(Node* n, AliasDb& aliasDb) {
   auto group = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
       n, prim::oneDNNFusionGroup, aliasDb);
   opToOwningPartition_.add(group, partitionId);
-  LlgaNodeWrapper(group).initOutputLayouts();
   return group;
 }
 
@@ -585,25 +584,29 @@ LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)
 }
 
 void LlgaNodeWrapper::setOpaqueLayout(size_t offset) {
-  TORCH_CHECK(offset < n->outputs().size(), "Invalid output offset ", offset);
+  const auto num_output = n->is(attr::output_layouts).size();
+  TORCH_CHECK(
+      offset < num_output,
+      "Out of range. (Invalid index ",
+      offset,
+      " for attr::output_layouts with size ",
+      num_output,
+      ")");
   auto& layouts =
       const_cast<std::vector<int64_t>&>(n->is(attr::output_layouts)); // NOLINT
-  layouts.at(offset) = 1;
+  layouts.at(offset) = OPAQUE_LAYOUT;
 }
 
 bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
-  TORCH_CHECK(offset < n->outputs().size(), "Invalid output offset ", offset);
-  return n->is(attr::output_layouts)[offset] == 1;
-}
-
-void LlgaNodeWrapper::initOutputLayouts() {
-  if (n->hasAttribute(attr::output_layouts)) {
-    return;
-  }
-
-  // Init all output layouts as undef
-  std::vector<int64_t> layouts(n->outputs().size(), 0);
-  n->is_(attr::output_layouts, layouts);
+  const auto num_output = n->is(attr::output_layouts).size();
+  TORCH_CHECK(
+      offset < num_output,
+      "Out of range. (Invalid index ",
+      offset,
+      " for attr::output_layouts with size ",
+      num_output,
+      ")");
+  return n->is(attr::output_layouts)[offset] == OPAQUE_LAYOUT;
 }
 
 } // namespace onednn

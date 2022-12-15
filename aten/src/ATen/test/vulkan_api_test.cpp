@@ -252,6 +252,7 @@ class VulkanAPITest : public ::testing::Test {
 };
 
 TEST_F(VulkanAPITest, copy_to_texture) {
+  using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
     // 4D
     at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
@@ -273,6 +274,8 @@ TEST_F(VulkanAPITest, copy_to_texture) {
       std::cout << "Copy failed on size " << in_cpu.sizes()
                 << "with dtype" << in_cpu.dtype() << std::endl;
     }
+
+    ASSERT_TRUE(check_copy);
   }
 }
 
@@ -1058,6 +1061,136 @@ TEST_F(VulkanAPITest, conv2d_prepack_bc) {
     {1, 1},       // padding
     {1, 1},       // dilation
     1);           // groups
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_3x3) {
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, groups, 137, 199};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 3, 3};
+
+  const auto input_cpu =
+      at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv2d_dw_5x5) {
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{1, groups, 137, 199};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 5, 5};
+
+  const auto input_cpu =
+      at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    showRtol(output_cpu, output_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
 }
 
 TEST_F(VulkanAPITest, conv2d_dw) {

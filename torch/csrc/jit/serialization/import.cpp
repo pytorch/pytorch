@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
@@ -294,18 +295,50 @@ Module import_ir_module(
   return import_ir_module(std::move(cu), in, device, extra_files);
 }
 
-Module (*_load_jit_module_from_flatbuffer_bytes)(
-    std::shared_ptr<char>,
-    size_t,
-    ExtraFilesMap&,
-    c10::optional<at::Device>) = nullptr;
-
 static Module _load_jit_module_from_bytes(
     std::shared_ptr<char> data,
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
+
+Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
+  populate_upgraders_graph_map();
+  ExtraFilesMap jit_files;
+  std::vector<IValue> jit_constants;
+  mobile::Module mobilem = parse_and_initialize_mobile_module_for_jit(
+      data.get(), size, jit_files, jit_constants, device, &extra_files);
+
+  Module m = jitModuleFromSourceAndConstants(
+      mobilem._ivalue(),
+      jit_files,
+      jit_constants,
+      static_cast<int32_t>(mobilem.bytecode_version()));
+  m.set_delete_memory(data);
+  return m;
+}
+
+Module load_jit_module_from_file(
+    const std::string& filename,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
+  auto data = get_file_content(filename.c_str());
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
+}
+
+Module load_jit_module_from_stream(
+    std::istream& in,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
+  auto data = get_stream_content(in);
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
+}
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
@@ -444,18 +477,11 @@ Module _load_jit_module_from_bytes(
     std::shared_ptr<CompilationUnit> cu,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
-  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecorgnized data format");
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
   auto format = getFileFormat(data.get());
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-      if (_load_jit_module_from_flatbuffer_bytes != nullptr) {
-        return _load_jit_module_from_flatbuffer_bytes(
-            data, size, extra_files, device);
-      } else {
-        TORCH_CHECK(
-            false,
-            "Flatbuffer input file but the build hasn't enable flatbuffer")
-      }
+      return parse_and_initialize_jit_module(data, size, extra_files, device);
     }
     case FileFormat::ZipFileFormat: {
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);

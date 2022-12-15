@@ -1,7 +1,6 @@
 import functools
 import inspect
 import itertools
-import re
 import types
 from contextlib import contextmanager
 from typing import Dict, List
@@ -165,7 +164,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = str(type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -197,14 +196,14 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
 
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     **options,
                 )
@@ -282,18 +281,15 @@ class NNModuleVariable(VariableTracker):
             bound_args = bound_args.arguments
             return {k: bound_args[k] for k in names}
 
-        def wrap_values(items, getsource=AttrSource):
+        def wrap_values(items):
             result = []
             for name, submod in items:
-                # layer.0.foo => layer[0].foo
-                name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
-                src = NNModuleSource(getsource(self.source, name))
                 result.append(
                     tx.output.register_attr_or_module(
                         submod,
                         key,
                         name,
-                        source=src,
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     )
                 )
@@ -307,11 +303,20 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        source=NNModuleSource(GetItemSource(self.source, name)),
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     ),
                 ]
             )
+
+        def gen_source(source, name):
+            name_split = name.split(".")
+            if name_split[0] == "":
+                return source
+            while len(name_split) > 0:
+                x = name_split.pop(0)
+                source = AttrSource(source, x)
+            return source
 
         if name == "children":
             assert not (args or kwargs)
@@ -337,11 +342,19 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "modules":
+            return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "keys":
+            assert not (args or kwargs)
+            result = []
+            for name in module.keys():
+                result.append(ConstantVariable(name, **options))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
-            return wrap_values(module.items(), GetItemSource)
+            return wrap_values(module.items())
         elif name == "items":
             assert not (args or kwargs)
             result = []
@@ -452,14 +465,15 @@ class NNModuleVariable(VariableTracker):
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
                     name,
                     args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -496,8 +510,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
+        except AttributeError as e:
+            raise NotImplementedError from e
 
         if fn in (
             torch.nn.ModuleList.__iter__,
@@ -562,7 +576,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
-
+            elif isinstance(method, staticmethod):
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(method.__func__, **options),
+                    args,
+                    kwargs,
+                )
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 

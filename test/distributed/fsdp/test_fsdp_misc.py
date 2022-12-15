@@ -2,6 +2,7 @@
 
 import functools
 import sys
+import warnings
 from collections import namedtuple
 from contextlib import suppress
 from copy import deepcopy
@@ -15,7 +16,11 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    ModuleWrapPolicy,
+    transformer_auto_wrap_policy,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -211,10 +216,20 @@ class TestFSDPMisc(FSDPTest):
     def test_device_id_auto_wrap(self):
         """Tests that ``auto_wrap_policy`` propagates ``device_id`` to all
         nested FSDP instances."""
-        auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+        self.run_subtests(
+            {"use_callable": [False, True]},
+            self._test_device_id_auto_wrap,
         )
+
+    def _test_device_id_auto_wrap(self, use_callable: bool):
+        module_classes = {TransformerEncoderLayer, TransformerDecoderLayer}
+        if use_callable:
+            auto_wrap_policy = functools.partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls=module_classes,
+            )
+        else:
+            auto_wrap_policy = ModuleWrapPolicy(module_classes)
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
             "device_id": torch.cuda.current_device(),
@@ -486,6 +501,49 @@ class TestFSDPMisc(FSDPTest):
         with fsdp.summon_full_params(fsdp):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
+            )
+
+
+class TestFSDPMiscWorldSize1(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_world_size_1_sharding_strategy_warning(self):
+        """
+        Tests that FSDP issues a warning when it switches to using ``NO_SHARD``
+        when the world size is 1.
+        """
+        warning_prefix = "FSDP is switching to use `NO_SHARD` instead of"
+        # If the user already passes `NO_SHARD`, then there should not be a
+        # warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")  # trigger all warnings
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.NO_SHARD)
+            for warning in w:
+                self.assertTrue(
+                    warning.category != UserWarning
+                    or not str(warning.message).startswith(warning_prefix)
+                )
+
+        # Check that a warning is issued
+        warning_suffix = " since the world size is 1."
+        # - Pass `FULL_SHARD` or `None`
+        expected_regex_full_shard = (
+            warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.FULL_SHARD)
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda())
+        # - Pass `SHARD_GRAD_OP`
+        expected_regex_shard_grad_op = (
+            warning_prefix + " " + str(ShardingStrategy.SHARD_GRAD_OP) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
+            FSDP(
+                nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
             )
 
 

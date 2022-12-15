@@ -59,7 +59,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
-        self.assertTrue(not is_safe[0])
+        self.assertTrue(is_safe[0])
 
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -88,7 +88,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
-        self.assertTrue(not is_safe[0])
+        self.assertTrue(is_safe[0])
 
     def test_negative_testing_mutation(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -202,7 +202,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torch._dynamo.optimize(compiler_fn)(graph)
         aot_fn(x, y)
-        self.assertTrue(not is_safe[0])
+        self.assertTrue(is_safe[0])
 
     def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
         class ModuleSpecialFwd(torch.nn.Module):
