@@ -1319,6 +1319,50 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, y_grad * grad_output)
         self.assertEqual(z.grad, z_grad * grad_output)
 
+    def test_to_sparse_backward(self):
+        to_attr_names = (
+            'to_dense',
+            'to_sparse',
+            'to_sparse_csr',
+            'to_sparse_csc',
+            'to_sparse_bsr',
+            'to_sparse_bsc',
+        )
+        to_params = ((), (), (), (), (2,), (2,))
+        to_attr_names_params = dict(zip(to_attr_names, to_params))
+
+        def check_inversion_possible(t, layout1, layout1_params, layout2, layout2_params):
+            l = (layout1, layout2)
+            p = (layout1_params, layout2_params)
+            for l1, l2, p1, p2 in ((*l, *p), (*l[::-1], *p[::-1])):
+                try:
+                    to_l1 = getattr(t, l1)(*p1)
+                    to_l2 = getattr(to_l1, l2)(*p2)
+                except RuntimeError:
+                    return False
+
+            return True
+
+        self_strided = torch.rand(4, 4, dtype=torch.double) + 1
+        grad_strided = torch.rand(4, 4, dtype=torch.double) + 1
+
+        for from_to_attr in to_attr_names:
+            from_params = to_attr_names_params[from_to_attr]
+            self_from = getattr(self_strided, from_to_attr)(*from_params).requires_grad_(True)
+
+            for to_to_attr in to_attr_names[1:]:
+                to_params = to_attr_names_params[to_to_attr]
+
+                if check_inversion_possible(self_strided, from_to_attr, from_params, to_to_attr, to_params):
+                    self_to = getattr(self_from, to_to_attr)(*to_params)
+                    grad_to = getattr(grad_strided, to_to_attr)(*to_params)
+
+                    # No gradcheck support for BSR/BSC, so the grads are checked explicitly
+                    grad_res = torch.autograd.grad(self_to, self_from, grad_to)[0]
+
+                    self.assertEqual(grad_res.layout, self_from.layout)
+                    self.assertEqual(grad_res.to_dense(), grad_strided)
+
     def test_sparse_mm_backward(self):
         size = (3, 3)
 
