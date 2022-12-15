@@ -8,7 +8,7 @@ import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from typing import List
+from typing import Dict, List, Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -2209,6 +2209,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    def test_input_container_type(self):
+        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+            return {"a": x.sum() + sum(y).sum()}
+
+        inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])
+
+        gm, _ = torch._dynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        self.assertEqual(gm(*inp), f(*inp))
 
 
 if __name__ == "__main__":
