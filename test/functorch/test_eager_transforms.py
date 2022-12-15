@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils.stateless import functional_call
 import os
 import subprocess
 import sys
@@ -31,10 +30,11 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
-    combine_state_for_ensemble, make_fx
+    combine_state_for_ensemble, make_fx, functional_call,
+    params_and_buffers_no_grad_tracking, combine_weights_for_ensemble
 )
 from torch._functorch.make_functional import (
-    functional_init, functional_init_with_buffers, combine_weights_for_ensemble
+    functional_init, functional_init_with_buffers
 )
 from torch._functorch.eager_transforms import _slice_argnums
 from functorch.experimental import functionalize
@@ -2863,6 +2863,25 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
+    def test_params_and_buffers_no_grad_tracking(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.register_buffer('buffer', torch.randn(3))
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + self.buffer
+                return x
+
+        mod = Foo()
+        params, buffers = params_and_buffers_no_grad_tracking(mod)
+        self.assertEqual(len(params), 2)
+        self.assertEqual(len(buffers), 1)
+        for param in params.values():
+            self.assertEqual(param.requires_grad, False)
+
     def test_parameter_tying_grad(self):
         class Foo(nn.Module):
             def __init__(self):
@@ -2988,7 +3007,8 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
-    def test_state_correctly_returned_after_forward(self):
+    @parametrize("mechanism", ["make_functional", "functional_call"])
+    def test_make_functional_state_correctly_returned_after_forward(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2998,21 +3018,32 @@ class TestMakeFunctional(TestCase):
                 x = self.linear(x)
                 return x
 
+        def get_module_info(mod):
+            if mechanism == "make_functional":
+                return make_functional(mod)
+            else:
+                return mod, dict(mod.named_parameters())
+
         mod = Net()
-        func, params = make_functional(mod)
+        func_mod, params = get_module_info(mod)
 
         # state in func.names_map
-        old_state_linear_weight = func.stateless_model.linear.weight
-        old_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        old_state_linear_weight = mod.linear.weight
+        old_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(old_state_linear_weight)
         self.assertIsNotNone(old_state_linear_bias)
 
         x = torch.randn(4, 3)
-        func(params, x)
+        if mechanism == "make_functional":
+            func_mod(params, x)
+        else:
+            functional_call(func_mod, params, x)
 
-        new_state_linear_weight = func.stateless_model.linear.weight
-        new_state_linear_bias = func.stateless_model.linear.bias
+        mod = func_mod.stateless_model if mechanism == "make_functional" else func_mod
+        new_state_linear_weight = mod.linear.weight
+        new_state_linear_bias = mod.linear.bias
 
         self.assertIsNotNone(new_state_linear_weight)
         self.assertIsNotNone(new_state_linear_bias)
@@ -3352,7 +3383,8 @@ class TestExamplesCorrectness(TestCase):
                 loss = compute_loss(weights, batch, targets)
                 list_weights = weights if mechanism == "make_functional" else list(weights.values())
                 grad_weights = torch.autograd.grad(loss, list_weights)
-                grad_weights = grad_weights if mechanism == "make_functional" else dict(zip(weights.keys(), grad_weights))
+                grad_weights = grad_weights if mechanism == "make_functional" else dict(
+                    zip(weights.keys(), grad_weights))
 
             new_weights = self._update_params(weights, grad_weights, lr, mechanism)
             if mechanism != "make_functional":
