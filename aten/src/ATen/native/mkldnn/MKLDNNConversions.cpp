@@ -212,10 +212,10 @@ ideep::tensor::desc get_conv_transpose_expected_weights_desc(
 Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,
     IntArrayRef padding,
+    IntArrayRef output_padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    IntArrayRef output_padding,
     c10::OptionalArrayRef<int64_t> input_size) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   if (self.scalar_type() == ScalarType::BFloat16) {
