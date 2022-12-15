@@ -56,6 +56,13 @@ class Source:
             GuardSource.LOCAL_NN_MODULE,
             GuardSource.GLOBAL_NN_MODULE,
         )
+    
+    def is_func_defaults(self):
+        print(f"is_fn_d {self.name()}")
+        return  (
+            "__defaults__" in self.name()
+           or "__kwdefaults__" in self.name()
+        )
 
 
 @dataclasses.dataclass

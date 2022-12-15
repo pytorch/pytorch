@@ -41,6 +41,11 @@ class GuardSource(enum.Enum):
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
 
+class DefaultsGuardSource(GuardSource):
+    """
+    This GuardSource represents defaults (or kwdefaults) for a function or method. 
+    """
+    pass
 
 """
 Base class for a "GuardBuilder" role.
@@ -149,6 +154,9 @@ class Guard:
 
     def is_nn_module(self):
         return self.source.is_nn_module()
+
+    def is_func_defaults(self):
+        return self.source.is_func_defaults()
 
     def is_local(self):
         return self.source.is_local()
