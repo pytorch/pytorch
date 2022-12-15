@@ -401,10 +401,6 @@ extern "C" void __avx_chk_kernel() {
             return False
 
 
-is_omp_enabled = is_omp_valid()
-is_arch_native_enabled = is_arch_native_valid()
-
-
 @functools.lru_cache(None)
 def optimization_flags():
     opt_flags = " -O3 -ffast-math -fno-finite-math-only"
@@ -485,6 +481,10 @@ def cpp_compile_command(
             -o{output}
         """,
     ).strip()
+
+
+is_omp_enabled = is_omp_valid()
+is_arch_native_enabled = is_arch_native_valid()
 
 
 class CppCodeCache:
