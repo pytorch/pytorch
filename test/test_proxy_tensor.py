@@ -721,7 +721,7 @@ class TestFakeProxyTensor(TestCase):
 
         def f():
             return torch.ops.aten.t.default(x)
-        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
 
         class A(torch.Tensor):
             pass

@@ -621,7 +621,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real"):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -635,10 +635,15 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            fake_tensor_mode = FakeTensorMode(
+                allow_fallback_kernels=True,
+                allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
             shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
+            fake_tensor_mode = FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=_allow_non_fake_inputs,
+                shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
