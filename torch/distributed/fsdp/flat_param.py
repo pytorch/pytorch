@@ -23,6 +23,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
@@ -112,8 +113,8 @@ class HandleShardingStrategy(Enum):
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
     offload_params: bool
-    low_prec_param_dtype: Optional[torch.dtype]
-    low_prec_reduce_dtype: Optional[torch.dtype]
+    fwd_bwd_param_dtype: torch.dtype
+    reduce_dtype: torch.dtype
     keep_low_precision_grads: bool
 
 
@@ -166,6 +167,9 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
+        _comm_module_prefix (str): Module name prefix starting from ``module``
+            to ``comm_module`` as passed to :class:`FlatParamHandle`, including
+            a trailing '.' if this is not the empty string.
         _modules (Set[nn.Module]): Modules that contain some original parameter
             that is flattened into the ``FlatParameter``.
 
@@ -235,6 +239,7 @@ class FlatParameter(nn.Parameter):
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
         param_extensions: List[Any],
+        comm_module_prefix: str,
         params: Optional[List[nn.Parameter]],
         shared_params: Optional[List[nn.Parameter]],
     ) -> None:
@@ -264,6 +269,7 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
+        self._comm_module_prefix = comm_module_prefix
         self._modules = set(pi.module for pi in self._param_infos).union(
             set(spi.module for spi in self._shared_param_infos)
         )
@@ -316,8 +322,15 @@ class FlatParamHandle:
             module-wrapper code path, this is always the same as ``module``.
         device (torch.device): The compute and communication device, which
             should be a non-CPU device. We refer to it as the compute device.
-        config (HandleConfig): A config customizing the handle based on FSDP's
-            available features.
+        sharding_strategy (ShardingStrategy): Sharding strategy to apply to
+            this handle's ``FlatParameter``.
+        offload_params (bool): Whether to offload the handle's
+            ``FlatParameter`` to CPU.
+        mp_param_dtype (Optional[torch.dtype]): Parameter mixed precision
+            setting passed to the FSDP constructor.
+        mp_reduce_dtype (Optional[torch.dtype]): Gradient reduction mixed
+            precision setting passed to the FSDP constructor.
+        keep_low_precision_grads (bool): Whether to keep gradients in low precision.
         use_orig_params (bool): If ``True``, then FSDP preserves the original
             parameter variables and returns them from ``named_parameters()``
             (e.g. to support different optimizer hyperparameters within one
@@ -339,13 +352,16 @@ class FlatParamHandle:
         module: nn.Module,
         comm_module: nn.Module,
         device: torch.device,
-        config: HandleConfig,
+        sharding_strategy: HandleShardingStrategy,
+        offload_params: bool,
+        mp_param_dtype: Optional[torch.dtype],
+        mp_reduce_dtype: Optional[torch.dtype],
+        keep_low_precision_grads: bool,
         process_group: dist.ProcessGroup,
         use_orig_params: bool,
     ):
         super().__init__()
         self.device = device
-        self._config = config
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -353,13 +369,22 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._comm_module = comm_module
-        self._init_flat_param(params, module, use_orig_params)
+        self._init_flat_param(params, module, comm_module, use_orig_params)
+        self._orig_param_dtype = self.flat_param.dtype
         self._use_unsharded_views(as_params=False)
+        self._config = self._init_config(
+            sharding_strategy,
+            offload_params,
+            mp_param_dtype,
+            mp_reduce_dtype,
+            keep_low_precision_grads,
+        )
 
     def _init_flat_param(
         self,
         params: Sequence[Optional[nn.Parameter]],
         module: nn.Module,
+        comm_module: nn.Module,
         use_orig_params: bool,
     ) -> None:
         """
@@ -467,6 +492,7 @@ class FlatParamHandle:
             prefixed_param_names,
             shared_param_infos,
             param_extensions,
+            self._get_comm_module_prefix(module, comm_module),
             convert_to_params(params_to_flatten) if use_orig_params else None,
             convert_to_params(shared_params) if use_orig_params else None,
         )
@@ -493,6 +519,66 @@ class FlatParamHandle:
             flat_param_data = torch.cat(flat_params, dim=0)
         flat_param = FlatParameter(flat_param_data, requires_grad=requires_grad)
         return flat_param
+
+    def _init_config(
+        self,
+        sharding_strategy: HandleShardingStrategy,
+        offload_params: bool,
+        mp_param_dtype: Optional[torch.dtype],
+        mp_reduce_dtype: Optional[torch.dtype],
+        keep_low_precision_grads: bool,
+    ) -> HandleConfig:
+        """
+        Precondition: ``self.flat_param`` is set via :meth:`_init_flat_param`.
+
+        Returns:
+            HandleConfig: The same config as ``handle_config`` except with the
+            low precision dtypes that are ``None`` set to the original
+            parameter dtype. One special case is if the parameter low precision
+            is specified while the gradient reduction low precision is not, in
+            which case the gradient reduction low precision is set to the
+            parameter one.
+        """
+        low_prec_param_dtype_specified = mp_param_dtype is not None
+        low_prec_reduce_dtype_specified = mp_reduce_dtype is not None
+        if low_prec_param_dtype_specified and not low_prec_reduce_dtype_specified:
+            # Special case: infer gradient reduction mixed precision
+            fwd_bwd_param_dtype = mp_param_dtype
+            reduce_dtype = fwd_bwd_param_dtype
+        else:
+            fwd_bwd_param_dtype = mp_param_dtype or self._orig_param_dtype
+            reduce_dtype = mp_reduce_dtype or self._orig_param_dtype
+        assert fwd_bwd_param_dtype is not None
+        assert reduce_dtype is not None
+        # TODO (awgu): Get rid of `HandleConfig` and store the attributes
+        # directly on the `FlatParamHandle` now that we are processing it
+        # instead of just taking what is passed in.
+        return HandleConfig(
+            sharding_strategy,
+            offload_params,
+            fwd_bwd_param_dtype,
+            reduce_dtype,
+            keep_low_precision_grads,
+        )
+
+    def _get_comm_module_prefix(
+        self,
+        local_root_module: nn.Module,
+        comm_module: nn.Module,
+    ) -> str:
+        """
+        Returns the prefix from ``local_root_module`` to ``comm_module``. For
+        example, if we have ``local_root.submodule.comm_module``, then the
+        returned prefix is ``local_root.submodule.`` (with the trailing '.').
+        """
+        if local_root_module is comm_module:
+            return ""
+        for submodule_name, submodule in local_root_module.named_modules():
+            if submodule is comm_module:
+                return submodule_name + "."
+        raise AssertionError(
+            "Expects `comm_module` to be in `local_root_module`'s subtree"
+        )
 
     ###################################
     # SHARD INITIALIZATION & METADATA #
@@ -747,7 +833,7 @@ class FlatParamHandle:
             flat_param._cpu_grad = torch.zeros_like(
                 flat_param._local_shard, device=cpu_device
             ).pin_memory()
-        if self._config.low_prec_param_dtype is not None:
+        if self._uses_param_mixed_precision:
             # For parameter mixed precision, we maintain a low precision
             # sharded tensor on the compute device to be all-gathered (for
             # sharded strategies) or directly used (for `NO_SHARD`) for
@@ -755,14 +841,16 @@ class FlatParamHandle:
             flat_param._mp_shard = torch.zeros_like(
                 flat_param._local_shard,
                 device=self.device,
-                dtype=self._config.low_prec_param_dtype,
+                dtype=self._config.fwd_bwd_param_dtype,
             )
             _free_storage(flat_param._mp_shard)
         if self.uses_sharded_strategy:
             # We maintain a padded unsharded tensor that serves as the
             # all-gather destination and owns the original parameter storages.
             unsharded_param_dtype = (
-                self._config.low_prec_param_dtype or flat_param.dtype
+                self._config.fwd_bwd_param_dtype
+                if self._uses_param_mixed_precision
+                else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             padded_unsharded_numel = flat_param.numel() * self.world_size
             flat_param._full_param_padded = torch.zeros(
@@ -773,7 +861,7 @@ class FlatParamHandle:
             flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
             _free_storage(flat_param._full_param_padded)
 
-            if self._config.low_prec_param_dtype is not None:
+            if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
                 flat_param._full_prec_full_param_padded = torch.zeros(
@@ -895,8 +983,8 @@ class FlatParamHandle:
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
             p_assert(
-                unsharded_flat_param.dtype != self._config.low_prec_param_dtype,
-                f"Expects full precision but got {self._config.low_prec_param_dtype}",
+                unsharded_flat_param.dtype != self._config.fwd_bwd_param_dtype,
+                f"Expects full precision but got {self._config.fwd_bwd_param_dtype}",
             )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
@@ -1106,9 +1194,9 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
-                if flat_param.grad.dtype != self._config.low_prec_param_dtype:
+                if flat_param.grad.dtype != self._config.fwd_bwd_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(
-                        self._config.low_prec_param_dtype
+                        self._config.fwd_bwd_param_dtype
                     )
                     if self._use_orig_params:
                         self._use_sharded_grad_views()
@@ -1247,10 +1335,21 @@ class FlatParamHandle:
         if self._use_orig_params:
             self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
-            # views, but for the post-backward reshard, we delay the call to
-            # after the reduce-scatter
+            # views (or unsharded gradient views if a gradient was accumulated
+            # in `no_sync()`), but for the post-backward reshard, we delay the
+            # call to after the reduce-scatter.
             if self._training_state == HandleTrainingState.FORWARD:
-                self._use_sharded_grad_views()
+                # TODO: Change `_unpadded_unsharded_size` if we change the
+                # gradient to be computed directly with padding.
+                accumulated_grad_in_no_sync = (
+                    flat_param.grad is not None
+                    and self.uses_sharded_strategy
+                    and flat_param.grad.shape == flat_param._unpadded_unsharded_size
+                )
+                if accumulated_grad_in_no_sync:
+                    self._use_unsharded_grad_views()
+                else:
+                    self._use_sharded_grad_views()
 
     #########
     # VIEWS #
@@ -1306,6 +1405,12 @@ class FlatParamHandle:
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if self._use_orig_params and as_params:
+                if type(view) is DTensor:
+                    # A `DTensor` `view` is not compatible with assigning
+                    # `param.data = view`, so we cannot preserve the parameter
+                    # variable.
+                    setattr(module, param_name, nn.Parameter(view))
+                    continue
                 param = self.flat_param._params[i]  # type: ignore[index]
                 setattr(module, param_name, param)
                 param.data = view
@@ -1398,7 +1503,16 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            param.grad = view
+            if param.shape != view.shape:
+                # NOTE: This is a hack using `.data` to side step the
+                # check that parameter/gradient sizes match. Here,
+                # `param` has the sharded size; `grad` has the unsharded size.
+                # This happens when running in `no_sync()`.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = view
+            else:
+                param.grad = view
         for i, (
             param_name,
             module,
@@ -1413,7 +1527,14 @@ class FlatParamHandle:
             )  # did not save prefixed name
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
-            param.grad = prim_param.grad
+            if param.shape != prim_param.grad.shape:
+                # NOTE: This is the same hack to use `.data` to side step the
+                # size check.
+                if param.grad is None:
+                    param.grad = torch.empty_like(param)
+                param.grad.data = prim_param.grad
+            else:
+                param.grad = prim_param.grad
 
     @contextlib.contextmanager
     def unflatten_as_params(self) -> Generator:
@@ -1593,6 +1714,7 @@ class FlatParamHandle:
                 continue
             param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
             numel_in_shard = param_end - param_start + 1
+
             # Check for parameter writeback
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
@@ -1609,6 +1731,7 @@ class FlatParamHandle:
                     param, flat_param, i, expected_shape, offset, True
                 )
                 wroteback = True
+
             # Check for gradient writeback
             # NOTE: Since this method is called in the pre-unshard, which is
             # only called during computation in the pre-forward or
@@ -1763,7 +1886,13 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
+    # NOTE: These two methods to get parameter and module names are used for
+    # `state_dict()`, which constructs a prefix starting from the module on
+    # which `state_dict()` is called. Since the comm. module is the module that
+    # saves its managed parameters, we must strip the comm. module prefix to
+    # align with the state-dict prefix.
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        comm_module_prefix = self.flat_param._comm_module_prefix
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1778,9 +1907,17 @@ class FlatParamHandle:
         for param_name, _, module_name in chain(
             self.flat_param._param_infos, shared_param_infos
         ):
-            yield (param_name, module_name)
+            assert module_name.startswith(comm_module_prefix), (
+                f"module_name: {module_name} comm_module_prefix: "
+                f"{comm_module_prefix}"
+            )
+            module_name_prefixed_from_comm_module = module_name[
+                len(comm_module_prefix) :
+            ]
+            yield (param_name, module_name_prefixed_from_comm_module)
 
     def shared_parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        comm_module_prefix = self.flat_param._comm_module_prefix
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (
@@ -1792,7 +1929,14 @@ class FlatParamHandle:
                 _,
             ) in self.flat_param._shared_param_infos
         ]:
-            yield (param_name, module_name)
+            assert module_name.startswith(comm_module_prefix), (
+                f"module_name: {module_name} comm_module_prefix: "
+                f"{comm_module_prefix}"
+            )
+            module_name_prefixed_from_comm_module = module_name[
+                len(comm_module_prefix) :
+            ]
+            yield (param_name, module_name_prefixed_from_comm_module)
 
     @property
     def _fqns_in_shard(self) -> List[str]:
@@ -1924,11 +2068,11 @@ class FlatParamHandle:
 
     @property
     def _uses_param_mixed_precision(self) -> bool:
-        return self._config.low_prec_param_dtype is not None
+        return self._config.fwd_bwd_param_dtype != self._orig_param_dtype
 
     @property
     def _uses_reduce_mixed_precision(self) -> bool:
-        return self._config.low_prec_reduce_dtype is not None
+        return self._config.reduce_dtype != self._orig_param_dtype
 
     @property
     def _keep_low_precision_grads(self) -> bool:
