@@ -37,6 +37,11 @@ void init_num_threads() {
     // size of the OpenMP thread pool, resulting in worse performance (and memory
     // leaks in GCC 5.4)
     omp_set_num_threads(mkl_get_max_threads());
+    // Dynamic adjustment of the number of threads by MKL is enabled by default.
+    // So, MKL may use fewer threads in parallel regions than the number returned by mkl_get_max_threads.
+    // With libgomp (GCC's OpenMP), this may result in the creation & destruction of threads across every
+    // MKL & non-MKL boundary of OpenMP usage, resulting in degraded performance.
+    mkl_set_dynamic(false);
 #elif defined(_OPENMP)
     omp_set_num_threads(intraop_default_num_threads());
 #endif
