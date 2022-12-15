@@ -91,6 +91,7 @@ class MemoryPlanningState:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
+
 @dataclasses.dataclass
 class EnterCudaDeviceContextManagerLine:
     device_idx: int
@@ -98,10 +99,11 @@ class EnterCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer):
         code.writeline(f"with torch.cuda.device({self.device_idx}):")
 
-class ExitCudaDeviceContextManagerLine:
 
+class ExitCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer):
         pass
+
 
 class MemoryPlanningLine:
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
@@ -532,7 +534,7 @@ class WrapperCodeGen(CodeGen):
                 f"{name} = rand_strided("
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(shape)}, "
                 f"{V.graph.sizevars.codegen_benchmark_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"device='{device}', dtype={dtype})"
             )
 
         output.writelines(["", "", 'if __name__ == "__main__":'])

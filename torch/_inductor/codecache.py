@@ -614,9 +614,9 @@ class AsyncCompile:
 
     def triton(self, source_code):
         _compile_start()
-        if self._context_keepalive is None:
-            # Workaround `CUDA: Error- context is destroyed`
-            self._context_keepalive = torch.tensor([1], device="cuda")
+        # if self._context_keepalive is None:
+        #     # Workaround `CUDA: Error- context is destroyed`
+        #     self._context_keepalive = torch.tensor([1], device="cuda")
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
