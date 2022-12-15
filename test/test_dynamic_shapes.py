@@ -499,7 +499,7 @@ class TestSymNumberMagicMethods(TestCase):
                 return context()
 
             if key in expected_failure_sym_magic_methods:
-                return self.assertRaises((TypeError, AssertionError))
+                return self.assertRaises((TypeError, AssertionError, NotImplementedError))
             else:
                 return contextlib.nullcontext()
 
