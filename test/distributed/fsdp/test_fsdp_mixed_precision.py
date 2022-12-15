@@ -757,10 +757,17 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         # Use an input with dtype not equal to the mixed precision
         # `param_dtype` so that it gets cast
-        x_float = torch.randn(32, 1024, device="cuda", dtype=torch.float32)
-        x_float.requires_grad_()
+        x_float = torch.randn(
+            (32, 1024),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
         fsdp_model(x_float).sum().backward()
         self.assertTrue(x_float.grad is not None)
+        # Check that `x_float` preserves its dtype, meaning that the gradient
+        # propagated via `ToCopyBackward0`
+        self.assertEqual(x_float.grad.dtype, torch.float32)
 
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
