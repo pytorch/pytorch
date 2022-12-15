@@ -112,8 +112,6 @@ aten::cumprod
 aten::cumprod.out
 aten::embedding_renorm_
 aten::exponential_
-aten::fill.Scalar
-aten::fill.Tensor
 aten::fractional_max_pool2d
 aten::fractional_max_pool2d.output
 aten::fractional_max_pool2d_backward
@@ -341,6 +339,3 @@ aten::upsample_trilinear3d_backward.grad_input
 aten::vdot
 aten::view_as_complex
 aten::view_as_real
-aten::zero
-aten::zero_
-aten::zeros_like
