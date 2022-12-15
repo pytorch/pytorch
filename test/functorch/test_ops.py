@@ -34,6 +34,7 @@ from common_utils import (
     check_vmap_fallback,
     is_batch_norm_training,
     is_valid_inplace_sample_input,
+    loop,
     loop2,
 )
 from torch.testing._internal.autograd_function_db import (
@@ -223,13 +224,22 @@ def get_vjp_fn_and_args_with_cotangents(f, sample, cotangents):
 # sample (*args, *cotangents)
 def get_vjpfull_variant(f, sample):
     fn, primals = normalize_op_input_output(f, sample)
+    return _get_vjpfull_variant(fn, primals)
+
+
+def get_vjpfull_variant2(f, args, kwargs):
+    fn, primals = normalize_op_input_output2(f, args, kwargs)
+    return _get_vjpfull_variant(fn, primals)
+
+
+def _get_vjpfull_variant(fn, primals):
     result = fn(*primals)
     cotangents = _as_tuple(
         tree_map(lambda x: torch.randn_like(x, requires_grad=True), result))
     num_primals = len(primals)
     args = (*primals, *cotangents)
 
-    @functools.wraps(f)
+    @functools.wraps(fn)
     def wrapped(*args):
         primals = args[:num_primals]
         cotangents = args[num_primals:]
@@ -240,6 +250,7 @@ def get_vjpfull_variant(f, sample):
         return vjp_fn(cotangents)
 
     return wrapped, args
+
 
 
 def get_jvp_variant(f, sample):
@@ -1882,6 +1893,126 @@ class TestOperators(TestCase):
                 assert grad_op == "vjp"
                 with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
                     vjp(f, torch.randn_like(without_grad))
+
+    @_set_autograd_function_extension_enabled()
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
+    # NOTE: [three-transform testing]
+    # We only test the autograd_function_db tests here.
+    #
+    # Usually testing the composition of two transforms is sufficient to convince
+    # ourselves that an operator is correctly implemented. For the following cases,
+    # we want to be extra sure, so we send those through some three-transform tests:
+    # - autograd.Function. The mechanism is via PyDispatcher/PyOperator, not the
+    #   regular PyTorch dispatcher, so it's good to exercise more caution.
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vmapvjpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vmapvjpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                inner_vmapped_fn, primals = normalize_op_input_output2(
+                    inner_vmapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                inner_mapped_fn, _ = normalize_op_input_output2(
+                    inner_mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                result = inner_mapped_fn(*primals)
+                cotangents = tree_map(lambda x: torch.rand_like(x), result)
+
+                def apply_vjp(fn):
+                    def inner(primals, cotangents):
+                        _, vjp_fn = vjp(fn, *primals)
+                        return vjp_fn(cotangents)
+                    return inner
+
+                vjpvmap_fn = apply_vjp(inner_vmapped_fn)
+                vjpmap_fn = apply_vjp(inner_mapped_fn)
+                batched_args = (primals, cotangents)
+                generator = generate_vmap_inputs(batched_args, {})
+
+                for batched_args, in_dims, _ in generator:
+                    # strategy: compare vmap(vjp(vmap(op)) vs map(vjp(map(op))
+                    vmapvjpvmap_fn = vmap(vjpvmap_fn, in_dims)
+                    mapvjpmap_fn = functools.partial(loop, vjpmap_fn, in_dims, 0, B)
+
+                    result = vmapvjpvmap_fn(*batched_args)
+                    expected = mapvjpmap_fn(*batched_args)
+                    self.assertEqual(result, expected)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vjpvmapvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vjpvmapvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+                generator = generate_vmap_inputs(batched_args, kwargs)
+                for batched_args, in_dims, kwargs in generator:
+                    # strategy: compare vjp(vmap(vmap(op)) vs vjp(map(map(op))
+                    vmapped_op = vmap(inner_vmapped_op, in_dims)
+                    mapped_op = functools.partial(loop, inner_mapped_op, in_dims, 0, B)
+
+                    vmapped_fn, primals = normalize_op_input_output2(
+                        vmapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+                    mapped_fn, _ = normalize_op_input_output2(
+                        mapped_op, batched_args, kwargs, sample.output_process_fn_grad)
+
+                    result = mapped_fn(*primals)
+                    cotangents = tree_map(lambda x: torch.rand_like(x), result)
+
+                    _, vjp_fn = vjp(mapped_fn, *primals)
+                    expected_vjps = vjp_fn(cotangents)
+
+                    _, vjp_fn = vjp(vmapped_fn, *primals)
+                    result_vjps = vjp_fn(cotangents)
+
+                    self.assertEqual(result_vjps, expected_vjps)
+
+    # See NOTE: [three-transform testing]
+    @_set_autograd_function_extension_enabled()
+    @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
+    @skipOps('TestOperators', 'test_vjpvjpvmap', {
+        xfail('NumpyCubeNotComposableAutogradFunction'),  # Not composable
+        xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
+    })
+    def test_vjpvjpvmap(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        B = 2
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            generator = generate_vmap_inputs(args, kwargs, batch_size=B)
+            for batched_args, in_dims, kwargs in generator:
+                inner_vmapped_op = vmap(op, in_dims)
+                inner_mapped_op = functools.partial(loop, op, in_dims, 0, B)
+
+                vjpmap_fn, args = get_vjpfull_variant2(inner_mapped_op, batched_args, kwargs)
+                vjpvmap_fn, _ = get_vjpfull_variant2(inner_vmapped_op, batched_args, kwargs)
+
+                vjpvjpvmap_fn, new_args = get_vjpfull_variant2(vjpvmap_fn, args, {})
+                vjpvjpmap_fn, _ = get_vjpfull_variant2(vjpmap_fn, args, {})
+
+                expected = vjpvjpmap_fn(*new_args)
+                result = vjpvjpvmap_fn(*new_args)
+                self.assertEqual(result, expected)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
