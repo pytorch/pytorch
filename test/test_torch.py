@@ -1154,6 +1154,7 @@ else:
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1166,6 +1167,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1178,6 +1180,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1190,6 +1193,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1202,6 +1206,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1214,6 +1219,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1226,6 +1232,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1280,6 +1287,7 @@ else:
             'max_unpooling3d_forward_out')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1294,6 +1302,7 @@ else:
             'upsample_linear1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1309,6 +1318,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1324,6 +1334,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1339,6 +1350,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1350,6 +1362,7 @@ else:
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReflectionPad2d(self, device):
         module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
@@ -1362,6 +1375,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1374,6 +1388,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1385,6 +1400,7 @@ else:
             'replication_pad1d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
@@ -1397,6 +1413,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1419,6 +1436,7 @@ else:
             'nll_loss2d_forward_out_cuda_template',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1433,6 +1451,7 @@ else:
             'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -1447,6 +1466,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @dtypes(*all_types_and_complex_and(torch.bool))
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
         should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
@@ -1523,6 +1543,7 @@ else:
                 torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1535,6 +1556,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
+    @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -1710,6 +1732,7 @@ else:
         self.assertEqual(result, original, atol=0, rtol=0)
 
     @onlyCUDA
+    @skipIfTorchInductor("FIXME")
     def test_sync_warning(self, device):
 
         def _sync_raises_helper(f, level):
@@ -3046,6 +3069,7 @@ else:
 
     # FIXME: move to test indexing
     @onlyCPU
+    @skipIfTorchInductor("FIXME")
     def test_errors_index_copy(self, device):
         # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
         idx_dim = 8
@@ -3428,6 +3452,7 @@ else:
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipIfTorchInductor("FIXME")
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
@@ -4002,6 +4027,7 @@ else:
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
     @dtypes(torch.double)
+    @skipIfTorchInductor("FIXME")
     def test_ternary_op_mem_overlap(self, device, dtype):
         ops = [
             ("addcmul", True, True, 'cpu'),
@@ -4209,6 +4235,7 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
+    @skipIfTorchInductor("FIXME")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(0, device=devices[0])
         y = torch.empty(0, device=devices[1])
@@ -4359,6 +4386,7 @@ else:
         y = ndhwc.permute(0, 1, 4, 3, 2).permute(0, 1, 4, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_propagation_rules(self, device):
 
         contiguous = torch.rand(10, 3, 5, 5, device=device)
@@ -4402,6 +4430,7 @@ else:
             self.assertEqual(ambiguous.stride(), result.stride())
 
     @skipIfMps
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
             xc = x.contiguous(memory_format=memory_format)
@@ -4444,6 +4473,7 @@ else:
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     # FIXME: make this a elementwise unary and elementwise binary OpInfo test
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_operators(self, device):
         def _chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
@@ -4878,6 +4908,7 @@ else:
             x = x.permute(permutation)
             self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_to(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -4895,6 +4926,7 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_type(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -4912,6 +4944,7 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_clone(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -4929,6 +4962,7 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_factory_like_functions_preserve(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -4954,6 +4988,7 @@ else:
                 self._test_memory_format_transformations(
                     device, get_generator(mf, shape), transformation_fn, mf, compare_data=False, default_is_preserve=True)
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_type_shortcuts(self, device):
         def get_generator(memory_format, shape, dtype):
             def input_generator_fn(device):
@@ -4987,6 +5022,7 @@ else:
                 device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
     @onlyCUDA
+    @skipIfTorchInductor("To be supported")
     def test_memory_format_cpu_and_cuda_ops(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -5136,6 +5172,7 @@ else:
                         check_equal(torch.tensor(True), y, x)
 
 
+    @skipIfTorchInductor("FIXME")
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
         def _test_helper(remove_hook):
@@ -5186,6 +5223,7 @@ else:
     # FIXME: get PyTorch/XLA to run test_testing
     # This test should ideally be in test_testing.py,
     # but since pytorch/xla runs tests from test_torch.py, we have it here.
+    @skipIfTorchInductor("random_.from needs to be renamed")
     def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
         # Verify that self.assertRaisesRegex only checks the Error and ignores
         # message for non-native devices.
@@ -5326,6 +5364,7 @@ class TestDevicePrecision(TestCase):
 
     # FIXME: moved to indexing test suite
     @deviceCountAtLeast(1)
+    @skipIfTorchInductor("FIXME")
     def test_advancedindex_mixed_cpu_devices(self, devices) -> None:
         def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
             # test getitem
@@ -5359,6 +5398,7 @@ class TestDevicePrecision(TestCase):
             test(x, ia, ib)
 
     @deviceCountAtLeast(1)
+    @skipIfTorchInductor("FIXME")
     def test_advancedindex_mixed_devices_error(self, devices) -> None:
         def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
             # test getitem
@@ -5681,6 +5721,27 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
+
+    # Test that warnings generated from C++ are translated to the correct type
+    def test_warn_types(self):
+        test_cases = [
+            # function, warning type, message
+            (torch._C._warn, UserWarning, r"Test message for TORCH_WARN"),
+            (torch._C._warn_deprecation, DeprecationWarning, r"Test message for TORCH_WARN_DEPRECATION"),
+        ]
+
+        for fn, warning_type, message in test_cases:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                warnings.filterwarnings('always', category=warning_type)
+                fn()
+
+                self.assertEqual(len(w), 1, msg=f'{warning_type} not raised')
+                warning = w[0].message
+                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
+                self.assertTrue(re.search(
+                    message,
+                    str(warning)))
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
@@ -6508,6 +6569,7 @@ class TestTorch(TestCase):
 
     # Test that public functions related to TypedStorage produce a deprecation
     # warning
+    @skipIfTorchInductor("FIXME")
     def test_typed_storage_deprecation_warning(self):
         s0 = torch.FloatStorage(10)
         funcs = [
@@ -7122,6 +7184,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_close(expected_norm, actual_norm)
 
+    @skipIfTorchInductor("To be supported")
     def test_memory_format(self):
         def test_helper(x, memory_format):
             y = x.contiguous(memory_format=memory_format)
@@ -7645,6 +7708,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y[:, 40], range(4000, 4100))
 
     # FIXME: Port to a more appropriate test suite
+    @skipIfTorchInductor("FIXME")
     def test_copy_broadcast(self):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
@@ -7655,6 +7719,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
+    @skipIfTorchInductor("FIXME")
     def test_copy_float16(self):
         # Check that fbgemm code no longer reads memory out of bounds, see
         # copy_impl and fbgemm::Float16ToFloat_ref.
@@ -7764,6 +7829,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
+    @skipIfTorchInductor("FIXME")
     def test_to(self):
         self._test_to_with_layout(torch.strided)
         is_cuda10_2_or_higher = (
@@ -7837,6 +7903,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             s0 = t0.as_subclass(BadSubTensor)
 
     # FIXME: Port to a test suite that better fits slicing
+    @skipIfTorchInductor("FIXME")
     def test_slice(self):
         empty = torch.empty(0, 4)
         x = torch.arange(0., 16).view(4, 4)
@@ -8262,7 +8329,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_weakref_dealloc(self):
 
         x = torch.empty(2)
@@ -8378,7 +8445,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
@@ -8407,6 +8474,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x._fix_weakref()
         del y
         x.sigmoid()
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_fix_weakref_no_leak(self):
+        import weakref
+
+        called = False
+
+        a = torch.randn(1)
+
+        def callback(w):
+            nonlocal called
+            called = True
+        wa = weakref.ref(a, callback)
+        a._fix_weakref()
+        del a
+
+        self.assertTrue(called)
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
