@@ -84,6 +84,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs = None
         self.device_types = set()
         self.buffers = []
+        self.works = []
         self.constants = {}
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
@@ -94,6 +95,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+        self.name_to_work = {}
         self.creation_time = time.time()
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
@@ -164,6 +166,12 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        return name
+
+    def register_work(self, work):
+        name = f"work{len(self.works)}"
+        self.works.append(work)
+        self.name_to_work[name] = work
         return name
 
     def realize_users_of(self, name: str):

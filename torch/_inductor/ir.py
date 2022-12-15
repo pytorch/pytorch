@@ -1791,15 +1791,6 @@ class AliasedLayout(Layout):
 
         return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
 
-class AsyncCollectiveLayout(Layout):
-    def __init__(self, target: IRNode):
-        super().__init__(
-            target.get_device(),
-            target.get_dtype(),
-            target.get_size(),
-            None,  # type: ignore[arg-type]
-        )
-        self.target = target
 
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
@@ -3358,12 +3349,31 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-class AllReduce(ExternKernelAlloc):
-    # allreduce_ can't be called from python, without fixing bindings
-    #  --> try implementing traceable_allreduce and adding POD types to api for rank/size?
-    # constant_args show up in codegen, use those if needed
-    # think about what to do for cpu
-    # also how to handle comm stream
+# class InplaceBernoulliFallback(ExternKernel):
+
+#         (x,) = [t.codegen_reference() for t in self.inputs]
+#         wrapper.writeline(
+#             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+#         )
+
+#     def should_allocate(self):
+#         return False
+
+#     def get_mutation_names(self):
+#         assert isinstance(self.layout, MutationLayout)
+#         return (self.layout.target.get_name(),)
+
+#     def __init__(self, x, *constant_args):
+#         super().__init__(
+#             None,
+#             MutationLayout(x),
+#             self.unwrap_storage([x]),
+#             constant_args,
+#         )
+#         self.name = V.graph.register_buffer(self)
+
+
+class Wait(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -3372,6 +3382,28 @@ class AllReduce(ExternKernelAlloc):
     ):
         super().__init__(layout, inputs, constant_args)
 
+    def codegen(self, wrapper):
+        (work,) = self.constant_args
+        (x,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{self.get_name()} = {x}")
+
+    def apply_constraint(self):
+        pass
+
+
+class AllReduce(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        # TODO should i call `self.unwrap_storage([inputs])` like Bernoulli?
+        super().__init__(layout, inputs, constant_args)
+        self.work = V.graph.register_work(self)
+        self.name = V.graph.register_buffer(self)
+
     @classmethod
     def create(
         cls,
@@ -3379,45 +3411,34 @@ class AllReduce(ExternKernelAlloc):
     ):
         breakpoint()
         x = cls.realize_input(x)
-        return AllReduce(
-            layout=AsyncCollectiveLayout(x),
+        all_reduce = AllReduce(
+            layout=MutationLayout(x),
             inputs=[x],
+        )
+        realized_allreduce = cls.realize_input(all_reduce)
+        return Wait(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=x.data.layout.size,
+            ),
+            inputs=[realized_allreduce],
+            constant_args=(all_reduce.work,),
         )
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, AsyncCollectiveLayout)
+        assert isinstance(self.layout, MutationLayout)
         return (self.layout.target.get_name(),)
 
-    # def codegen(self, wrapper):
-    #     wrapper.header.writeline(
-    #         f"import torch.cuda.nccl as nccl"
-    #     )
-    #     # comm_stream = wrapper.write_get_cuda_stream(10)
-    #     wrapper.writeline(
-    #         # streams=[...]
-    #         f"nccl.all_reduce([{', '.join(self.codegen_args())}], op=nccl.SUM)"
-    #     )
-    #     wrapper.writeline(
-    #         f"{self.get_name()} = {self.codegen_args()[0]}"
-    #     )
-
     def codegen(self, wrapper):
-        wrapper.header.writeline(
-            f"import torch.distributed as dist"
-        )
-        wrapper.writeline(
-            f"{self.get_name()}_work = dist.all_reduce({self.codegen_args()[0]}, async_op=True)"
-        )
-        # now, how do we move this wait to before the first place we use our buf?
-        wrapper.writeline(
-            f"{self.get_name()}_work.wait()"
-        )
+        wrapper.header.writeline("import torch.distributed as dist")
+        (x,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(f"{self.work} = dist.all_reduce({x}, async_op=True)")
+        wrapper.writeline(f"{self.get_name()} = {x}")
 
-        # TODO- check InplaceBernoulliFallback as a better pattern for inplace;
-        # shouldn't have to do this.
-        wrapper.writeline(
-            f"{self.get_name()} = {self.codegen_args()[0]}"
-        )
+    def apply_constraint(self):
+        pass
+
 
 def _prepare_convolution_fusion_create(
     cls,
