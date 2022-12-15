@@ -440,25 +440,25 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
       }
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-      using opmath_t = at::opmath_type<scalar_t>;
-      opmath_t alpha_val = alpha.to<opmath_t>();
-      opmath_t beta_val = beta.to<opmath_t>();
-      scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-      scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-      scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-      at::cuda::blas::bgemm<scalar_t>(
-        transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-        transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-        m, n, k,
-        alpha_val,
-        batch1_ptr, lda, batch1_->strides()[0],
-        batch2_ptr, ldb, batch2_->strides()[0],
-        beta_val,
-        result_ptr, ldc, result_->strides()[0],
-        num_batches
-      );
-    });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    opmath_t alpha_val = alpha.to<opmath_t>();
+    opmath_t beta_val = beta.to<opmath_t>();
+    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
+    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+    at::cuda::blas::bgemm<scalar_t>(
+      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
+      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
+      m, n, k,
+      alpha_val,
+      batch1_ptr, lda, batch1_->strides()[0],
+      batch2_ptr, ldb, batch2_->strides()[0],
+      beta_val,
+      result_ptr, ldc, result_->strides()[0],
+      num_batches
+    );
+  });
   }
 
   if (!result.is_same(*result_)) {
