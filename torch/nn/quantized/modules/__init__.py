@@ -56,6 +56,7 @@ __all__ = [
     'LeakyReLU',
     'Linear',
     'LSTM',
+    'MaxPool2d',
     'MultiheadAttention',
     'Quantize',
     'ReLU6',
