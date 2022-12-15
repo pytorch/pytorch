@@ -1856,6 +1856,7 @@ class CommonTemplate:
                 with torch.no_grad():
                     self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv_transpose2d unary test")
     def test_conv_transpose2d_unary(self):
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
