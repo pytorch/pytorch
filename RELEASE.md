@@ -1,6 +1,6 @@
 # Releasing PyTorch
 
-<!-- toc -->
+<!-- toc test -->
 
   - [General Overview](#general-overview)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
