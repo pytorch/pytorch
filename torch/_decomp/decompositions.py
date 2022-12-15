@@ -1536,7 +1536,7 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
     if memory_format is not None:  # no ref/prim for memory format
         out = torch.empty_like(x, memory_format=memory_format)
-        out.copy_(x)
+        out = torch.ops.aten.copy.default(out, x)
         return out  # type: ignore[call-overload]
     return x
 
