@@ -83,8 +83,8 @@ TORCH_API c10::intrusive_ptr<Work> alltoall_base(
 
 TORCH_API c10::intrusive_ptr<Work> alltoall(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<at::Tensor>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    const at::TensorList& output_tensors,
+    const at::TensorList& input_tensors,
     const AllToAllOptions& opts = {});
 
 TORCH_API c10::intrusive_ptr<Work> barrier(

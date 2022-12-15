@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <c10/macros/Macros.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
@@ -73,10 +73,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 5,
   };
 
-  // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
+  // Not used, set for backwards compatibility and only used for TypeDef in
+  // Ops.cpp
   explicit ProcessGroup(int rank, int size);
 
-  explicit ProcessGroup(const c10::intrusive_ptr<::c10d::Store>& store, int rank, int size, c10::intrusive_ptr<Options> options);
+  explicit ProcessGroup(
+      const c10::intrusive_ptr<::c10d::Store>& store,
+      int rank,
+      int size,
+      c10::intrusive_ptr<Options> options);
   virtual ~ProcessGroup();
 
   int getRank() const {
@@ -96,7 +101,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   };
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
-    // only nccl has implemented startCoalescing so only execute for nccl backends
+    // only nccl has implemented startCoalescing so only execute for nccl
+    // backends
     if (getBackendType() == BackendType::NCCL) {
       getBackend(deviceType)->startCoalescing();
     }
@@ -105,61 +111,117 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void endCoalescing(
       c10::DeviceType deviceType,
       std::vector<c10::intrusive_ptr<Work>>& reqs) {
-    // only nccl has implemented startCoalescing so only execute for nccl backends
+    // only nccl has implemented startCoalescing so only execute for nccl
+    // backends
     if (getBackendType() == BackendType::NCCL) {
       getBackend(deviceType)->endCoalescing(reqs);
     }
   }
 
-  // Consider using ops in Ops.hpp instead of the below, which route things
-  // to the dispatcher.
-  // TODO: Find a way to force the above rule programmatically.
   virtual c10::intrusive_ptr<Work> broadcast(
-      std::vector<at::Tensor>& /* tensors */,
-      const BroadcastOptions& /* opts */ = BroadcastOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support broadcast"));
+      std::vector<at::Tensor>& tensors,
+      const BroadcastOptions& opts = BroadcastOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::broadcast_", "")
+            .typed<
+                std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                    at::TensorList,
+                    const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                    int64_t,
+                    int64_t,
+                    int64_t)>();
+    // It's awakward to unbox the opts here and box them again in the custom C++
+    // op. But it's also complicated to make opts as a CustomClassHolder. Leave
+    // it as it is now.
+    return std::get<1>(op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.rootRank,
+        opts.rootTensor,
+        opts.timeout.count()));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support allreduce"));
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::allreduce_", "")
+            .typed<
+                std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                    at::TensorList,
+                    const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                    const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                    int64_t)>();
+
+    return std::get<1>(op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        c10::make_intrusive<ReduceOp>(opts.reduceOp),
+        opts.timeout.count()));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ =
-          AllreduceCoalescedOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support allreduce_coalesced"));
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::allreduce_coalesced_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                             int64_t)>();
+
+    return op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+
+        c10::make_intrusive<ReduceOp>(opts.reduceOp),
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> reduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const ReduceOptions& /* opts */ = ReduceOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::reduce_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                             int64_t,
+                             int64_t,
+                             int64_t)>();
+    return op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+
+        c10::make_intrusive<ReduceOp>(opts.reduceOp),
+        opts.rootRank,
+        opts.rootTensor,
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> allgather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support allgather"));
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::allgather_", "")
+                         .typed<std::tuple<
+                             std::vector<std::vector<at::Tensor>>,
+                             c10::intrusive_ptr<Work>>(
+                             const std::vector<std::vector<at::Tensor>>&,
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t)>();
+
+    return std::get<1>(op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.timeout.count()));
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
@@ -167,15 +229,21 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
   virtual c10::intrusive_ptr<Work> _allgather_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support _allgather_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::_allgather_base_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                at::Tensor&,
+                at::Tensor&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+    return op.call(
+        outputBuffer,
+        inputBuffer,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -183,95 +251,168 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support allgather_coalesced"));
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::allgather_coalesced_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                const std::vector<std::vector<at::Tensor>>&,
+                const at::TensorList&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+    return op.call(
+        outputTensorLists,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
   }
 
   virtual c10::intrusive_ptr<Work> gather(
-      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
-      const GatherOptions& /* opts */ = GatherOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support gather"));
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::gather_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             const std::vector<std::vector<at::Tensor>>&,
+                             const at::TensorList&,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t,
+                             int64_t)>();
+    return op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.rootRank,
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
-      const ScatterOptions& /* opts */ = ScatterOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support scatter"));
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::scatter_", "")
+            .typed<
+                std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                    const at::TensorList&,
+                    const std::vector<std::vector<at::Tensor>>&,
+                    const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                    int64_t,
+                    int64_t)>();
+    return std::get<1>(op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.rootRank,
+        opts.timeout.count()));
   }
 
   virtual c10::intrusive_ptr<Work> reduce_scatter(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
-      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support reduce_scatter"));
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::reduce_scatter_", "")
+            .typed<
+                std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                    const at::TensorList&,
+                    const std::vector<std::vector<at::Tensor>>&,
+                    const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                    const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                    int64_t)>();
+    return std::get<1>(op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.timeout.count()));
   }
 
   virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support _reduce_scatter_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::_reduce_scatter_base_", "")
+                         .typed<c10::intrusive_ptr<Work>(
+                             at::Tensor&,
+                             at::Tensor&,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                             int64_t)>();
+    return op.call(
+        outputBuffer,
+        inputBuffer,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      std::vector<int64_t>& /* outputSplitSizes */,
-      std::vector<int64_t>& /* inputSplitSizes */,
-      const AllToAllOptions& /* opts */ = AllToAllOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support alltoall_base"));
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::alltoall_base_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::Tensor&,
+                             at::Tensor&,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             std::vector<int64_t>,
+                             std::vector<int64_t>,
+                             int64_t)>();
+    return op.call(
+        outputBuffer,
+        inputBuffer,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        outputSplitSizes,
+        inputSplitSizes,
+        opts.timeout.count());
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
-      std::vector<at::Tensor>& /* outputTensors */,
-      std::vector<at::Tensor>& /* inputTensors */,
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support alltoall"));
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::alltoall_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t)>();
+    return op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.timeout.count());
   }
 
   virtual void monitoredBarrier(
-      const BarrierOptions& /* unused */,
-      bool /* unused */ = false) {
-    auto backendName = getBackendName();
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            backendName,
-            " does not support monitoredBarrier, only GLOO supports monitored barrier."));
+      const BarrierOptions& opts,
+      bool wait_all_ranks = false) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::monitored_barrier_", "")
+                         .typed<void(
+                             at::Tensor,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             const std::vector<int64_t>&,
+                             int64_t,
+                             bool)>();
+    // Default to using cpu implementation, monitored barrier is only for GLOO
+    at::Tensor tensor = at::empty({0}, at::TensorOptions().device(at::kCPU));
+    op.call(
+        tensor,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.device_ids,
+        opts.timeout.count(),
+        wait_all_ranks);
   }
 
   // Agrees on an initial sequence number for the whole group by having rank 0
@@ -280,7 +421,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void setSequenceNumberForGroup() {
     auto backendType = getBackendType();
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO || backendType == ProcessGroup::BackendType::NCCL || backendType == ProcessGroup::BackendType::UCC) {
+    if (backendType == ProcessGroup::BackendType::GLOO ||
+        backendType == ProcessGroup::BackendType::NCCL ||
+        backendType == ProcessGroup::BackendType::UCC) {
       getDefaultBackend()->setSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -299,7 +442,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto backendType = getBackendType();
 
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO || backendType == ProcessGroup::BackendType::NCCL || backendType == ProcessGroup::BackendType::UCC) {
+    if (backendType == ProcessGroup::BackendType::GLOO ||
+        backendType == ProcessGroup::BackendType::NCCL ||
+        backendType == ProcessGroup::BackendType::UCC) {
       return getDefaultBackend()->getSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -312,40 +457,85 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual c10::intrusive_ptr<Work> send(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* dstRank */,
-      int /* tag */) {
-    TORCH_CHECK(
-        false,
-        c10::str("ProcessGroup ", getBackendName(), " does not support send"));
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::send", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t,
+                             int64_t)>();
+    return op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        dstRank,
+        tag);
   }
 
   virtual c10::intrusive_ptr<Work> recv(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* srcRank */,
-      int /* tag */) {
-    TORCH_CHECK(
-        false,
-        c10::str("ProcessGroup ", getBackendName(), " does not support recv"));
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::recv_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t,
+                             int64_t)>();
+    return op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        srcRank,
+        tag);
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* tag */) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ",
-            getBackendName(),
-            " does not support recvAnysource"));
+      std::vector<at::Tensor>& tensors,
+      int tag) {
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::recv_any_source_", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::TensorList,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             int64_t)>();
+    return op.call(
+        tensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        tag);
   }
 
   virtual c10::intrusive_ptr<Work> barrier(
-      const BarrierOptions& /* opts */ = BarrierOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "ProcessGroup ", getBackendName(), " does not support barrier"));
+      const BarrierOptions& opts = BarrierOptions()) {
+    static at::Tensor tensor;
+    // TODO: if nccl was specified then use it
+    if (backendType_ == c10d::ProcessGroup::BackendType::NCCL) {
+      // set cuda tensor
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte));
+    } else {
+      // Default to using cpu implementation
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(at::DeviceType::CPU).dtype(at::kByte));
+    }
+
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::barrier", "")
+                         .typed<c10::intrusive_ptr<::c10d::Work>(
+                             at::Tensor,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             const std::vector<int64_t>&,
+                             int64_t)>();
+
+    return op.call(
+        tensor,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.device_ids,
+        opts.timeout.count());
   }
 
   c10::intrusive_ptr<Options> getOptions() {
@@ -356,14 +546,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return !deviceTypeToBackendType_.empty();
   }
 
-  void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
+  void setBackend(
+      c10::DeviceType deviceType,
+      BackendType backendType,
+      const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
     deviceTypeToBackendType_[deviceType] = backendType;
     // if the backendType is already set then reuse it for this device
-    if (backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end()) {
+    if (backendTypeToBackend_.find(backendType) !=
+        backendTypeToBackend_.end()) {
       auto existingBackend = backendTypeToBackend_.at(backendType);
       deviceTypeToBackend_[deviceType] = existingBackend;
-    }
-    else {
+    } else {
       // check if backend has value
       if (backend.has_value()) {
         deviceTypeToBackend_[deviceType] = backend.value();
@@ -382,7 +575,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         ".");
     return backendTypeToBackend_.at(backendType_);
   }
-
 
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);
 
@@ -414,8 +606,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
-  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> deviceTypeToBackend_;
-  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>> backendTypeToBackend_;
+  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
+      deviceTypeToBackend_;
+  std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
+      backendTypeToBackend_;
 };
 
 } // namespace c10d

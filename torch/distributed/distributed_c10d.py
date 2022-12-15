@@ -916,7 +916,7 @@ def _new_process_group_helper(
     group_size,
     group_rank,
     global_ranks_in_group,
-    backend_enum,
+    backend,
     store,
     pg_options=None,
     group_name=None,
@@ -959,10 +959,10 @@ def _new_process_group_helper(
             return GroupMember.NON_GROUP_MEMBER
 
     prefix_store = PrefixStore(f"{group_name}/", store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend_enum))
+    base_pg_options = ProcessGroup.Options(backend=str(backend))
     base_pg_options._timeout = timeout
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
-    backend_config = BackendConfig(backend_enum)
+    backend_config = BackendConfig(backend)
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
@@ -975,16 +975,16 @@ def _new_process_group_helper(
                     " MPI is only included if you build PyTorch from"
                     " source on a host that has MPI installed."
                 )
-            backend = ProcessGroupMPI.create(global_ranks_in_group)
+            backend_class = ProcessGroupMPI.create(global_ranks_in_group)
             backend_type = ProcessGroup.BackendType.MPI
-            if not backend:
+            if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
 
         if backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
-            backend = ProcessGroupGloo(backend_prefix_store, group_rank, group_size, timeout=timeout)
+            backend_class = ProcessGroupGloo(backend_prefix_store, group_rank, group_size, timeout=timeout)
             backend_type = ProcessGroup.BackendType.GLOO
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
@@ -999,14 +999,14 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            backend = ProcessGroupNCCL(backend_prefix_store, group_rank, group_size, pg_options)
+            backend_class = ProcessGroupNCCL(backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
             # is_ucc_available() from above elif-condition and raise
             # RuntimeError if is_ucc_available() returns false.
 
-            backend = ProcessGroupUCC(backend_prefix_store, group_rank, group_size, timeout=timeout)
+            backend_class = ProcessGroupUCC(backend_prefix_store, group_rank, group_size, timeout=timeout)
             backend_type = ProcessGroup.BackendType.UCC
         else:
             assert backend_str.upper() in Backend._plugins, (
@@ -1032,7 +1032,7 @@ def _new_process_group_helper(
 
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
-            backend._set_sequence_number_for_group()
+            backend_class._set_sequence_number_for_group()
         # If the type is a sublcass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
@@ -1062,16 +1062,18 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
 
-        # only create single backend pg when backend is set to gloo, nccl, mpi, etc.
-        if backend_enum.lower() in Backend.backend_list:
+        # only create single backend pg when backend is set to gloo, nccl, mpi, and ucc
+        if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC, Backend.MPI]:
             for device in backend_config.get_device_backend_map().keys():
-                pg._register_backend(torch.device(device), backend_type, backend)
+                pg._register_backend(torch.device(device), backend_type, backend_class)
 
             # break out of outer loop to not create any more backends
             break
+        else:
+            pg._register_backend(torch.device(device), backend_type, backend_class)
 
     # update global state
-    _world.pg_map[pg] = (backend_enum, prefix_store)
+    _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     _pg_backend_map[pg] = str(backend_config)
     return pg
