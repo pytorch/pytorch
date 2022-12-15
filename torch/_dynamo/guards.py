@@ -510,19 +510,16 @@ class CheckFunctionManager:
         # shape variables to sources from GraphArgs.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
-        # TODO: What about grapharg pruning?  This could be problematic if we
-        # guarded on a tensor that isn't actually used as an input in the end.
-        if (
-            self.output_graph
-            and self.output_graph.tracing_context.fake_mode
-            and self.output_graph.tracing_context.fake_mode.shape_env
-        ):
-            graphargs = self.output_graph.graphargs
-            expr_as_str = (
-                self.output_graph.tracing_context.fake_mode.shape_env.codegen_guards(
-                    [a.fake_tensor for a in graphargs if a.is_tensor],
-                    [a.source.name() for a in graphargs if a.is_tensor],
-                )
+        if self.output_graph and self.output_graph.shape_env:
+            # NB: use orig_graphargs, as we can have created guards for
+            # inputs that are ultimately unused in the graph, but we
+            # are still on the hook for guarding on them (because, e.g.,
+            # Dynamo may have gone down a different conditional branch
+            # because of it.)
+            graphargs = self.output_graph.orig_graphargs
+            expr_as_str = self.output_graph.shape_env.codegen_guards(
+                [a.fake_tensor for a in graphargs if a.is_tensor],
+                [a.source.name() for a in graphargs if a.is_tensor],
             )
             if expr_as_str != "True":
                 code_parts.append(expr_as_str)

@@ -250,6 +250,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         return self.root_tx.fake_mode
 
     @property
+    def shape_env(self):
+        return self.tracing_context.fake_mode.shape_env
+
+    @property
     def guards(self) -> Set[Guard]:
         return self.tracing_context.guards_context.dynamo_guards
 

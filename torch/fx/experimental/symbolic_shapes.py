@@ -737,14 +737,14 @@ class ShapeEnv(object):
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
-        for expr, stack in self.guards:
-            if self._maybe_evaluate_static(expr) is not None:
+        for g, tb in self.guards:
+            if self._maybe_evaluate_static(g) is not None:
                 continue
-            expr = self.simplify(expr)
+            g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(expr))
+                exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                logging.warning(f"failing guard allocated at {stack}")
+                logging.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
