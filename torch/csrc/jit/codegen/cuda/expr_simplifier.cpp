@@ -3,8 +3,11 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 
+#include <memory>
+#include <sstream>
 #include <unordered_set>
 #include <vector>
 
@@ -123,7 +126,8 @@ namespace assoc_comm_reordering {
 bool isAssociativeAndCommutative(BinaryOpType type) {
   return type == BinaryOpType::Add || type == BinaryOpType::Mul ||
       type == BinaryOpType::And || type == BinaryOpType::Or ||
-      type == BinaryOpType::Xor;
+      type == BinaryOpType::Xor || type == BinaryOpType::Max ||
+      type == BinaryOpType::Min;
 }
 
 // The expression type that represents the flattened ops. For example, if I have
@@ -161,7 +165,54 @@ class FlattenedAssocCommOp : public Expr {
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
-    return "FlattenedAssocCommOp";
+    switch (getOpType()) {
+      case BinaryOpType::Add:
+        return "FlattenedAdd";
+      case BinaryOpType::Mul:
+        return "FlattenedMul";
+      case BinaryOpType::And:
+        return "FlattenedAnd";
+      case BinaryOpType::Or:
+        return "FlattenedOr";
+      case BinaryOpType::Xor:
+        return "FlattenedXor";
+      case BinaryOpType::Max:
+        return "FlattenedMax";
+      case BinaryOpType::Min:
+        return "FlattenedMin";
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unknown operator type ", getOpType());
+    }
+  }
+
+  std::string toString(int indent_size = 0) const override {
+    std::stringstream ss;
+    indent(ss, indent_size) << getOpString() << "(";
+    bool needs_comma = false;
+    for (auto v : inputsAndConstTerm()) {
+      if (needs_comma) {
+        ss << ", ";
+      }
+      ss << v->toString();
+      needs_comma = true;
+    }
+    ss << ")\n";
+    return ss.str();
+  }
+
+  std::string toInlineString(int = 0) const override {
+    std::stringstream ss;
+    ss << getOpString() << "(";
+    bool needs_comma = false;
+    for (auto v : inputsAndConstTerm()) {
+      if (needs_comma) {
+        ss << ", ";
+      }
+      ss << v->toInlineString();
+      needs_comma = true;
+    }
+    ss << ")";
+    return ss.str();
   }
 
   DataType dtype() const {
@@ -304,6 +355,15 @@ class FlattenedAssocCommOp : public Expr {
     return {result};
   }
 
+  std::vector<Val*> inputsAndConstTerm() const {
+    if (!hasConstantTerm()) {
+      return inputs();
+    }
+    std::vector<Val*> result = inputs();
+    result.emplace_back(getConstantTerm());
+    return result;
+  }
+
  protected:
   // Add a new value as an input of this expression. If `value` is a constant
   // scalar, then evalate this constant and merge it with the constant term.
@@ -324,8 +384,8 @@ class FlattenedAssocCommOp : public Expr {
   }
 
   // Update the constant term. For example, if getOpType() == "+", and the
-  // current constant term is 8, then updateConstantTermWith(7) will change the
-  // constant term to 15.
+  // current constant term is 8, then updateConstantTermWith(7) will change
+  // the constant term to 15.
   void updateConstantTermWith(Val* value) {
     if (!hasConstantTerm()) {
       addAttribute(value);
@@ -484,10 +544,76 @@ Val* unflatten(Val* value, const std::list<ValInfo>& variables) {
 
 } // namespace assoc_comm_reordering
 
+namespace debug_print {
+
+struct Record {
+  const char* name;
+  Val* result;
+};
+
+class NoOpLogger {
+ public:
+  NoOpLogger(Val*) {}
+  virtual ~NoOpLogger() {}
+  virtual void record(const char*, Val*) {}
+};
+
+class Logger : public NoOpLogger {
+ public:
+  Logger(Val* value)
+      : NoOpLogger(value), init_val_(value), current_val_(value) {}
+
+  virtual ~Logger() override {
+    if (current_val_->sameAs(init_val_)) {
+      return;
+    }
+    auto str = [](Val* v) {
+      return v->toString() + " = " + v->toInlineString();
+    };
+    std::string header = "Simplifying expression: " + str(init_val_);
+    std::cout << header << std::endl;
+    for (auto r : record_) {
+      std::cout << r.name << ": " << str(r.result) << std::endl;
+    }
+    std::cout << std::string(std::min<size_t>(header.size(), 80), '=')
+              << std::endl;
+  }
+
+  virtual void record(const char* name, Val* value) override {
+    if (value->sameAs(current_val_)) {
+      return;
+    } else {
+      record_.emplace_back(Record{name, value});
+      current_val_ = value;
+    }
+  }
+
+ private:
+  std::vector<Record> record_;
+  Val* init_val_;
+  Val* current_val_;
+};
+
+std::unique_ptr<debug_print::NoOpLogger> createLogger(Val* value) {
+  if (isDebugDumpEnabled(DebugDumpOption::ExprSimplification)) {
+    return std::make_unique<Logger>(value);
+  } else {
+    return std::make_unique<NoOpLogger>(value);
+  }
+}
+
+} // namespace debug_print
+
 Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
   FusionGuard fg(value->fusion());
+  auto logger = debug_print::createLogger(value);
+
   auto flattened = assoc_comm_reordering::flatten(value);
-  return assoc_comm_reordering::unflatten(flattened, variables);
+  logger->record("assoc_comm::flatten", flattened);
+
+  auto unflattened = assoc_comm_reordering::unflatten(flattened, variables);
+  logger->record("assoc_comm::unflatten", unflattened);
+  return unflattened;
 }
 
 } // namespace cuda

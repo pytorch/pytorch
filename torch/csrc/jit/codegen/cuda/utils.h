@@ -67,6 +67,7 @@ enum class DebugDumpOption {
   BankConflictInfo, //! Dump bank confliction info
   SyncMap, //! RAW dependency info
   LowerVerbose, //! Print all passes' transform in GpuLower::lower
+  ExprSimplification, //! Print all passes' transform in simplifyExpr
   EndOfOption //! Placeholder for counting the number of elements
 };
 
