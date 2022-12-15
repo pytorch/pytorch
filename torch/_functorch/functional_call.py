@@ -26,3 +26,7 @@ def functional_call(
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
     return nn.utils.stateless.functional_call(module, parameters_and_buffers, args, kwargs)
+
+
+def params_and_buffers_no_grad_tracking(module: 'torch.nn.Module'):
+    return {k: v.detach() for k, v in module.named_parameters()}, {k: v.detach() for k, v in module.named_buffers()}
