@@ -2311,7 +2311,7 @@ class ConcatKernel(NopKernel):
                     )
             offsets_end.append(new_size[dim])
 
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
             output = torch.ops.aten.cat(x_fake, dim)
 
