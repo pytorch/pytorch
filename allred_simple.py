@@ -16,7 +16,6 @@ def compile(func, example_inputs):
     return inductor_compile_fx(graph, example_inputs)
 
 def eager_all_reduce(x):
-    # return nccl.all_reduce([x])
     return dist.all_reduce(x, async_op=False)
 
 if __name__ == '__main__':
@@ -24,12 +23,10 @@ if __name__ == '__main__':
     os.environ["WORLD_SIZE"] = os.getenv("WORLD_SIZE", "1")
     os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
     os.environ["MASTER_PORT"] = os.getenv("MASTER_PORT", "12345")
-    # our_uuid = uuid.UUID('a8098c1a-f86e-11da-bd1a-00112444be1e')
     rank = int(os.getenv("RANK"))
     world_size = int(os.getenv("WORLD_SIZE"))
     torch.cuda.set_device(rank)
     dist.init_process_group(backend='nccl')
-    # nccl.init_rank(world_size, our_uuid.bytes*8, rank)
     inputs = (torch.ones(4, 4, device="cuda") + rank,) * 6
     correct_out = matmul_cat_col(*inputs, all_reduce=eager_all_reduce)
 
