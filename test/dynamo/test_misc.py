@@ -3015,6 +3015,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_model(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_cond_user_defined_object(self):
+        class MyClass(object):
+            pass
+
+        def fn(x, obj):
+            if not obj:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        obj0 = MyClass()
+        obj1 = None
+        ref0 = fn(x, obj0)
+        ref1 = fn(x, obj1)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res0 = opt_fn(x, obj0)
+        res1 = opt_fn(x, obj1)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
     def test_torch_cuda_is_available(self):
         def fn(x):
             if torch.cuda.is_available():

@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import dataclasses
 import functools
 import importlib
 import inspect
@@ -152,6 +151,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
+    def as_python_constant(self):
+        return self.value
+
     def python_type(self):
         return self.value_type
 
@@ -282,7 +284,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return getattr_fn
 
     def _getattr_static(self, name):
-        if isinstance(self.value, (dataclasses.Field, torch.nn.Module)):
+        if (
+            isinstance(self.value, torch.nn.Module)
+            or "__slots__" in self.value.__class__.__dict__
+        ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
         else:
