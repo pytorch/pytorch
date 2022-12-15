@@ -144,18 +144,31 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
               compressed_indices.layout() == kStrided && compressed_indices.is_contiguous(),
               "expected ", compressed_indices_name ," to be a strided and contiguous tensor");
 
-  // 2.3, partially 3.7
-  // TODO: allow values be contiguous along both block dimensions when the format is BSR or BSC
-  TORCH_CHECK(
-      values.layout() == kStrided && values.is_contiguous(),
-      "expected values to be a strided and contiguous tensor");
-
   const int base_ndim = 2;  // corresponds to compressed and plain indices
   const int batch_ndim = compressed_indices.dim() - 1;
   const int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
                            layout, "validate_sparse_compressed_tensor_args",
                            [&] { return 0; }, [&] { return 2; });
   const int dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
+
+  // 2.3, partially 3.7 with an extension of allowing BSR/BSC values
+  // to be column-major contiguous
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+        layout,
+        "validate_sparse_compressed_tensor_args",
+        [&]() {
+          TORCH_CHECK(
+                      values.layout() == kStrided && values.is_contiguous(),
+                      "expected values to be a strided and contiguous tensor");
+        },
+        [&]() {
+          TORCH_CHECK(
+                      values.layout() == kStrided
+                      && (values.is_contiguous()
+                          || values.transpose(-2 - dense_ndim, -1 - dense_ndim).is_contiguous()),
+                      "expected values to be a strided and contiguous tensor");
+        });
+
   // Shape and Strides invariants
 
   // 3.2
