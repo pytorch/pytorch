@@ -1,15 +1,6 @@
 import functools
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -314,6 +305,7 @@ def _pre_forward(
             state.compute_device, input_dtype, *args, **kwargs
         )
     return args, kwargs
+
 
 @no_type_check
 def _pre_forward_unshard(
@@ -982,9 +974,7 @@ def _register_pre_forward_hooks(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
             state._pre_forward_handles.append(
-                module.register_forward_pre_hook(
-                    hook, prepend=True, with_kwargs=True
-                )
+                module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
             )
 
 

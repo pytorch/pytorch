@@ -67,14 +67,10 @@ class ReplicateTest(MultiProcessTestCase):
             step_model(
                 replicate_mod,
                 input[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
             )
 
