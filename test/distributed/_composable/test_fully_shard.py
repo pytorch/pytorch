@@ -65,9 +65,9 @@ class TestFSDPInitialization(FSDPTest):
             auto_wrap_policy=policy,
             use_orig_params=True,
         )
-        composable_module = copy.deepcopy(local_model)
+        save_composable = copy.deepcopy(local_model)
         fully_shard(
-            composable_module,
+            save_composable,
             policy=policy,
         )
 
@@ -79,7 +79,7 @@ class TestFSDPInitialization(FSDPTest):
             (_, fsdp_wrapped_param),
         ) in zip(
             local_model.named_parameters(),
-            composable_module.named_parameters(),
+            save_composable.named_parameters(),
             fsdp_wrapped_model.named_parameters(),
         ):
             self.assertEqual(local_name, composable_name)
@@ -87,7 +87,7 @@ class TestFSDPInitialization(FSDPTest):
 
         # Check that the composable module has the same  `FlatParameter`
         # construction as the FSDP-wrapped model
-        composable_handles = fully_shard.state(composable_module)._handles
+        composable_handles = fully_shard.state(save_composable)._handles
         fsdp_wrapped_handles = FSDP._fsdp_handles(fsdp_wrapped_model)
         self.assertEqual(len(composable_handles), len(fsdp_wrapped_handles))
         for (composable_handle, fsdp_wrapped_handle) in zip(
@@ -99,39 +99,39 @@ class TestFSDPInitialization(FSDPTest):
 
         # Check that the composable module does not add any wrapper class
         local_module_classes = set()
-        composable_module_classes = set()
+        save_composable_classes = set()
         for submodule in local_model.modules():
             local_module_classes.add(type(submodule))
-        for submodule in composable_module.modules():
-            composable_module_classes.add(type(submodule))
-        self.assertEqual(local_module_classes, composable_module_classes)
+        for submodule in save_composable.modules():
+            save_composable_classes.add(type(submodule))
+        self.assertEqual(local_module_classes, save_composable_classes)
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):
         """Tests passing a ``device_id``."""
         cpu_device = torch.device("cpu")
-        composable_module = CompositeParamModel(device=cpu_device)
-        for param in composable_module.parameters():
+        save_composable = CompositeParamModel(device=cpu_device)
+        for param in save_composable.parameters():
             assert (
                 param.device == cpu_device
             ), "Expects module to be initialized on CPU for this unit test"
         fully_shard(
-            composable_module,
+            save_composable,
             policy=ModuleWrapPolicy({UnitModule}),
             device_id=self.rank,
         )
-        for param in composable_module.parameters():
+        for param in save_composable.parameters():
             self.assertEqual(param.device, torch.device("cuda", self.rank))
 
     @skip_if_lt_x_gpu(2)
     def test_sync_module_states(self):
         """Tests passing ``sync_module_states=True``."""
         local_model = CompositeParamModel(device=torch.device("cuda"))
-        composable_module = copy.deepcopy(local_model)
+        save_composable = copy.deepcopy(local_model)
         # Check that the parameters are broadcast from rank 0 by comparing
         # against an equivalent FSDP-wrapped module
         if self.rank != 0:
-            for param in composable_module.parameters():
+            for param in save_composable.parameters():
                 with torch.no_grad():
                     param.zero_()
         policy = ModuleWrapPolicy({UnitModule})
@@ -141,12 +141,12 @@ class TestFSDPInitialization(FSDPTest):
             use_orig_params=True,
         )
         fully_shard(
-            composable_module,
+            save_composable,
             policy=policy,
             sync_module_states=True,
         )
         for (composable_param, fsdp_wrapped_param) in zip(
-            composable_module.parameters(),
+            save_composable.parameters(),
             fsdp_wrapped_model.parameters(),
         ):
             self.assertEqual(composable_param, fsdp_wrapped_param)
@@ -182,7 +182,7 @@ class TestFSDPInitialization(FSDPTest):
                         nn.init.uniform_(materialized_param)
                         setattr(submodule, param_name, materialized_param)
 
-        composable_module = CompositeParamModel(device=torch.device("meta"))
+        save_composable = CompositeParamModel(device=torch.device("meta"))
         meta_model = CompositeParamModel(device=torch.device("meta"))
         fsdp_wrapped_model = FSDP(
             meta_model,
@@ -191,7 +191,7 @@ class TestFSDPInitialization(FSDPTest):
             use_orig_params=True,
         )
         fully_shard(
-            composable_module,
+            save_composable,
             policy=ModuleWrapPolicy({UnitModule}),
             param_init_fn=_param_init_fn,
         )
@@ -199,7 +199,7 @@ class TestFSDPInitialization(FSDPTest):
             (composable_param_name, composable_param),
             (fsdp_wrapped_param_name, fsdp_wrapped_param),
         ) in zip(
-            composable_module.named_parameters(),
+            save_composable.named_parameters(),
             fsdp_wrapped_model.named_parameters(),
         ):
             self.assertEqual(composable_param_name, fsdp_wrapped_param_name)
@@ -226,16 +226,16 @@ class TestFSDPRuntime(FSDPTest):
             auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
             use_orig_params=True,
         )
-        composable_module = copy.deepcopy(local_model)
+        save_composable = copy.deepcopy(local_model)
         fully_shard(
-            composable_module,
+            save_composable,
             policy=ModuleWrapPolicy({UnitModule}),
         )
         LR = 1e-2
         fsdp_wrapped_optim = torch.optim.Adam(fsdp_wrapped_model.parameters(), lr=LR)
-        composable_optim = torch.optim.Adam(composable_module.parameters(), lr=LR)
+        composable_optim = torch.optim.Adam(save_composable.parameters(), lr=LR)
         return (
-            composable_module,
+            save_composable,
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
@@ -246,7 +246,7 @@ class TestFSDPRuntime(FSDPTest):
         """Tests training (forward, backward, optimizer)."""
         device = torch.device("cuda")
         (
-            composable_module,
+            save_composable,
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
@@ -256,7 +256,7 @@ class TestFSDPRuntime(FSDPTest):
             losses: List[torch.Tensor] = []
             for model, optim in (
                 (fsdp_wrapped_model, fsdp_wrapped_optim),
-                (composable_module, composable_optim),
+                (save_composable, composable_optim),
             ):
                 optim.zero_grad(set_to_none=True)
                 out = model(inp)
@@ -277,14 +277,14 @@ class TestFSDPRuntime(FSDPTest):
         """
         device = torch.device("cuda")
         (
-            composable_module,
+            save_composable,
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
         ) = self._init_models_and_optims(device)
         # Before checking the unshard/reshard order, sanity check that the
         # assumption about wrapper FQN being a suffix of composable FQN holds
-        all_composable_handles = _all_handles(fully_shard.state(composable_module))
+        all_composable_handles = _all_handles(fully_shard.state(save_composable))
         all_wrapped_handles = _all_handles(fsdp_wrapped_model)
         self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
         num_handles = len(all_composable_handles)
@@ -340,7 +340,7 @@ class TestFSDPRuntime(FSDPTest):
         losses: List[torch.Tensor] = []
 
         for order, model, optim in (
-            (composable_order, composable_module, composable_optim),
+            (composable_order, save_composable, composable_optim),
             (wrapped_order, fsdp_wrapped_model, fsdp_wrapped_optim),
         ):
             with patch_unshard(
@@ -456,13 +456,15 @@ class TestFSDPModelCheckpointing(FSDPTest):
     def test_state_dict_save_load_root_fully_shard(self):
         """
         Tests that the full state dict saved from a module with ``fully_shard``
-        applied to the global root matches that of an equivalent local module.
+        applied to the global root matches that of an equivalent local module. Also
+        ensure that this state_dict can be reloaded into a composable module and
+        is equivalent to the original composable module.
         """
         local_model = CompositeParamModel(device=torch.device("cuda"))
-        composable_module = copy.deepcopy(local_model)
-        fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        save_composable = copy.deepcopy(local_model)
+        fully_shard(save_composable, policy=ModuleWrapPolicy({UnitModule}))
         local_sd = local_model.state_dict()
-        composable_sd = composable_module.state_dict()
+        composable_sd = save_composable.state_dict()
         self._check_state_dict_parity(local_sd, composable_sd)
 
         # Validate load
@@ -473,21 +475,36 @@ class TestFSDPModelCheckpointing(FSDPTest):
         _zero_model(load_composable)
         sd = {k: v.clone() for k, v in composable_sd.items()}
         load_composable.load_state_dict(sd)
-        self._check_model_parity(load_composable, composable_module)
+        self._check_model_parity(load_composable, save_composable)
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_submodule_fully_shard(self):
+    def test_state_dict_save_load_submodule_fully_shard(self):
         """
         Tests that the full state dict saved from a module with ``fully_shard``
-        applied on submodules matches that of an equivalent local module.
+        applied on submodules matches that of an equivalent local module. Also
+        ensures that this state_dict can be reloaded into a composable module and
+        is equivalent to
         """
         local_model = CompositeParamModel(device=torch.device("cuda"))
-        composable_module = copy.deepcopy(local_model)
-        fully_shard(composable_module.u1)
-        fully_shard(composable_module.u2)
+
+        def _create_fully_shard_on_submodules(mod: nn.Module):
+            fully_shard(mod.u1)
+            fully_shard(mod.u2)
+            return mod
+
+        save_composable = copy.deepcopy(local_model)
+        save_composable = _create_fully_shard_on_submodules(save_composable)
         local_sd = local_model.state_dict()
-        composable_sd = composable_module.state_dict()
+        composable_sd = save_composable.state_dict()
         self._check_state_dict_parity(local_sd, composable_sd)
+
+        # Validate load
+        load_composable = copy.deepcopy(local_model)
+        load_composable = _create_fully_shard_on_submodules(load_composable)
+        _zero_model(load_composable)
+        sd = {k: v.clone() for k, v in composable_sd.items()}
+        load_composable.load_state_dict(sd)
+        self._check_model_parity(load_composable, save_composable)
 
     def _check_state_dict_parity(self, local_sd: Dict, composable_sd: Dict):
         """Checks that ``local_sd`` and ``composable_sd`` are the same."""
@@ -510,7 +527,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
             m1.named_parameters(), m2.named_parameters()
         ):
             self.assertEqual(n1, n2)
-            self.assertEqul(p1, p2)
+            self.assertEqual(p1, p2)
 
 
 if __name__ == "__main__":
