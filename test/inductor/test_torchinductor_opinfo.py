@@ -363,8 +363,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "scatter_reduce.amax": {f16, f32, f64},
-    "scatter_reduce.amin": {f16, f32, f64},
     "tanh": {f16},
 }
 
