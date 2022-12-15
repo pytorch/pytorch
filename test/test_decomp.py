@@ -1,7 +1,6 @@
 # Owner(s): ["module: primTorch", "module: decompositions"]
 
 from collections import defaultdict
-from typing import Optional
 from torch import Tensor
 import torch.autograd
 from torch._decomp import decomposition_table
@@ -638,35 +637,38 @@ instantiate_device_type_tests(DecompAmpTests, globals())
 
 class HasDecompTest(TestCase):
     def test_has_decomposition(self):
-        def safe_has_key(op, key) -> Optional[bool]:
-            try:
-                return has_key(op, key)
-            except RuntimeError as e:
-                # has_key fails for some jit-registered ops
-                if 'does not exist' in str(e):
-                    return None
-                raise
 
         def can_appear_in_trace(op) -> bool:
-            return (
-                True == safe_has_key(op, DispatchKey.Meta) and
-                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                False == safe_has_key(op, DispatchKey.CompositeImplicitAutograd)
-            )
+            try:
+                return (
+                    has_key(op, DispatchKey.Meta) and
+                    # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+                    not has_key(op, DispatchKey.CompositeImplicitAutograd)
+                )
+            except RuntimeError as e:
+                # has_key fails for some jit-registered ops, which shouldn't be
+                # relevant here anyway
+                if 'does not exist' in str(e):
+                    return False
+                raise
 
-        overloads_wanting_decomp = set()
-        for op_name in torch.ops.aten:
-            op = getattr(torch.ops.aten, op_name)
-            if not isinstance(op, torch._ops.OpOverloadPacket):
-                continue
+        def all_aten_overloads():
+            for name in torch._C._dispatch_get_all_op_names():
+                if not name.startswith("aten::"):
+                    continue
 
-            overloads = [getattr(op, overload) for overload in op.overloads()]
+                name = name[6:]
+                if "." in name:
+                    packet_name, overload_name = name.split(".")
+                else:
+                    packet_name, overload_name = name, "default"
 
+                packet = getattr(torch.ops.aten, packet_name)
+                assert isinstance(packet, torch._ops.OpOverloadPacket)
+                op = getattr(packet, overload_name)
+                yield op
 
-            overloads_wanting_decomp.update(set(
-                op for op in overloads if can_appear_in_trace(op)
-            ))
-
+        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
 
