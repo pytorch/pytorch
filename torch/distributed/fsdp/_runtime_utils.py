@@ -73,7 +73,7 @@ def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
         if (
             optional_state is not None
             and optional_state not in visited_fsdp_states
-            and _is_fsdp_root(optional_state, module)
+            and _is_fsdp_root(optional_state, submodule)
         ):
             visited_fsdp_states.add(optional_state)
             fsdp_root_states.append(optional_state)
