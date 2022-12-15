@@ -82,7 +82,7 @@ using at::Tensor;
 // base if needed. Case 5 is handled in fw_grad by reading the forward grad from
 // the base if needed.
 
-namespace {
+namespace utils {
 
 // Enforcing that the metadata between the primal and tangent are same has two
 // goals:
@@ -139,7 +139,8 @@ bool has_same_meta(const Variable& base, const Variable& other) {
   }
   return true;
 }
-} // anonymous namespace
+
+} // namespace utils
 
 // This function is will ensure that the fw_grad_ is properly a view of the base
 // for inplace ops on Tensors that do not have forward grad originally.
@@ -219,7 +220,8 @@ void AutogradMeta::set_fw_grad(
           // Enforce same meta here to make sure that the view op below is
           // always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base) && has_same_meta(new_grad, self)) {
+          if (utils::has_same_meta(new_grad, base) &&
+              utils::has_same_meta(new_grad, self)) {
             // TODO extend this special case to when the underlying storage of
             // new_grad can be re-used.
             new_base_fw_grad = new_grad;
@@ -248,7 +250,7 @@ void AutogradMeta::set_fw_grad(
     }
 
     // Enforce the basic layout constraint
-    if (!has_same_meta(new_grad, self)) {
+    if (!utils::has_same_meta(new_grad, self)) {
       if (is_view_) {
         auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
         TORCH_INTERNAL_ASSERT(
