@@ -8558,23 +8558,12 @@ op_db: List[OpInfo] = [
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
-<<<<<<< HEAD
-           dtypes=floating_types(),
-           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64,
-                                                       torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64,
-                                                                torch.float16, *[torch.bfloat16] if SM53OrLater else []),
-           dtypesIfROCM=floating_types_and(torch.half),
-           backward_dtypesIfROCM=floating_types_and(torch.half),
-=======
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64, torch.float16,
                                                        *[torch.bfloat16]
                                                        if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
->>>>>>> 0ac0af02d548cf1ad4fcb63dd2dbef5dcb58d2ff
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
@@ -8607,14 +8596,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addbmm),
     OpInfo('baddbmm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-<<<<<<< HEAD
-                                           *[torch.bfloat16] if CUDA11OrLater else [],
-                                           torch.int32, torch.int64),
-=======
+           dtypesIfCUDA=floating_types_and(torch.int32, torch.int64, torch.float16, torch.complex64, torch.complex128,
                                            *[torch.bfloat16] if CUDA11OrLater or TEST_WITH_ROCM else []),
->>>>>>> 0ac0af02d548cf1ad4fcb63dd2dbef5dcb58d2ff
-           backward_dtypesIfCUDA=floating_types_and(torch.float16,
+           backward_dtypesIfCUDA=floating_types_and(torch.int32, torch.int64, torch.float16,
                                                     *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
                                                     torch.complex64, torch.complex128),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
