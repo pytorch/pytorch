@@ -22,7 +22,8 @@ def _infer_nn_stack_trace_and_append_on_meta(m, gm, args_as_list):
     reset_metadata = {}
     for node in trace_func.graph.nodes:
         nn_module_stack = {}
-        if (stack_trace := node.meta.get("stack_trace")) is not None:
+        stack_trace = node.meta.get("stack_trace", None)
+        if stack_trace is not None:
             for line in stack_trace.split("\n"):
                 if line.startswith("Module stack:"):
                     mod_trace = eval(line.replace("Module stack:", ""))  # pyre-ignore
@@ -30,7 +31,8 @@ def _infer_nn_stack_trace_and_append_on_meta(m, gm, args_as_list):
         reset_metadata[node.name] = nn_module_stack
 
     for n in gm.graph.nodes:
-        if (meta := reset_metadata.get(n.name)):
+        meta = reset_metadata.get(n.name, None)
+        if meta is not None:
             n.meta.update(meta)
 
 # TODO[qihan]: longer term, this should happen in the dynamo stack as well
