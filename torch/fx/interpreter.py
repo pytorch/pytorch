@@ -127,6 +127,7 @@ class Interpreter:
                 continue
 
             try:
+
                 self.env[node] = self.run_node(node)
             except Exception as e:
                 msg = f"While executing {node.format_node()}"

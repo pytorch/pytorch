@@ -889,6 +889,7 @@ class CppVecKernel(CppKernel):
         self.cse.store_cache[name] = tmpvar
 
 
+# V.kernel.current_node._body.root_block
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads):
         super(CppVecKernelChecker, self).__init__(args, num_threads)
@@ -922,13 +923,63 @@ class CppVecKernelChecker(CppVecKernel):
         return self.is_legal_data_access(most_inner_var, index)
 
     def load(self, name: str, index: sympy.Expr):
-        if not V.graph.get_dtype(name) in [
-            torch.float,
-            torch.float32,
-            torch.bool,
-            torch.uint8,
-            torch.float64,
-        ]:
+        buffer_dtype = V.graph.get_dtype(name)
+
+        def find_load_node():
+            nodes = V.kernel.current_node._body.root_block.graph.nodes
+            for node in nodes:
+                if name in node.args:
+                    return node
+
+        def is_used_by_to_float():
+            load_node = find_load_node()
+            for user in load_node.users:
+                if not (
+                    isinstance(user, torch.fx.node.Node)
+                    and user.target == "to_dtype"
+                    and user.args[2] == torch.float
+                ):
+                    return False
+            return True
+
+        def is_used_by_mask_fill():
+            load_node = find_load_node()
+            if buffer_dtype not in [torch.bool, torch.uint8]:
+                return False
+            if buffer_dtype == torch.bool:
+                # load(bool)->where
+                for user in load_node.users:
+                    if not (
+                        isinstance(user, torch.fx.node.Node) and user.target == "where"
+                    ):
+                        return False
+            elif buffer_dtype == torch.uint8:
+                # load(uint8)->to_dtype(bool)->where
+                if len(load_node.users) > 1:  # load only user ones.
+                    return False
+                for user in load_node.users:
+                    # TODO: to_dtype is used by multi-nodes.
+                    if len(user.users) > 1:
+                        return False
+                    if not (
+                        isinstance(user, torch.fx.node.Node)
+                        and user.target == "to_dtype"
+                        and user.args[2] == torch.bool
+                    ):
+                        return False
+                    for to_dtype_user in user.users:
+                        if not (
+                            isinstance(to_dtype_user, torch.fx.node.Node)
+                            and to_dtype_user.target == "where"
+                        ):
+                            return False
+            return True
+
+        if not (
+            buffer_dtype == torch.float
+            or is_used_by_mask_fill()
+            or is_used_by_to_float()
+        ):
             self.simd_vec = False
             return self.simd_vec
 
@@ -1028,8 +1079,35 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype):
-                if dtype not in [torch.bool, torch.float]:
-                    self.simd_vec = False
+                # only support those case:
+                # 1. load(uint8)->to_dtype(bool)->where
+                # 2. load->to_dtype(float)
+                nodes = V.kernel.current_node._body.root_block.graph.nodes
+                for node in nodes:
+                    if node.target == "to_dtype":
+                        if node.args[2] not in [torch.bool, torch.float]:
+                            self.simd_vec = False
+                        else:
+                            if not isinstance(node.args[1], torch.fx.node.Node):
+                                self.simd_vec = False
+                            else:
+                                if not node.args[1].target == "load":
+                                    self.simd_vec = False
+                                # load(uint8)->to_dtype(bool)->where
+                                if node.args[2] == torch.bool:
+                                    if (
+                                        len(node.args[1].users) != 1
+                                        or len(node.users) != 1
+                                    ):
+                                        self.simd_vec = False
+                                    for to_dtype_user in node.users:
+                                        if not (
+                                            isinstance(
+                                                to_dtype_user, torch.fx.node.Node
+                                            )
+                                            and to_dtype_user.target != "where"
+                                        ):
+                                            self.simd_vec = False
                 return x
 
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
