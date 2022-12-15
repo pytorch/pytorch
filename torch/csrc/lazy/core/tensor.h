@@ -42,7 +42,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     Data(BackendDevice device)
         : device(std::move(device)), unique_id(GetNextTensorId()) {}
 
-    ~Data();
+    virtual ~Data();
 
     BackendDataPtr handle;
     Value ir_value;
@@ -69,13 +69,17 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // easier. Restore it back to delete.
   LazyTensor() = default;
 
+  virtual ~LazyTensor() = default;
+
   size_t generation() const {
     return data()->generation;
   }
 
-  int64_t size(int64_t dim) const;
+  // Override it to use your own Shape.
+  virtual int64_t size(int64_t dim) const;
 
-  at::Tensor ToTensor(bool detached);
+  // Override it to use your own graph executor.
+  virtual at::Tensor ToTensor(bool detached);
 
   void ShallowCopyTo(LazyTensorPtr dest) const;
 
@@ -88,7 +92,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
   const std::shared_ptr<Data>& data() const;
 
-  at::ScalarType dtype() const;
+  // Override it to use your own type conversion.
+  virtual at::ScalarType dtype() const;
 
   MaybeRef<Shape> shape() const;
 
@@ -125,21 +130,16 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   LazyTensorPtr CopyTensorToDevice(const BackendDevice& device);
 
   // Applies the queue of operations in preparation for using the data.
-  void ApplyPendingGraph();
+  // Override it to use your own graph executor.
+  virtual void ApplyPendingGraph();
 
-  void AssignIrValue(Value ir_value) const;
+  // Override it to set extra information.
+  virtual void AssignIrValue(Value ir_value) const;
 
  protected:
   explicit LazyTensor(std::shared_ptr<Data> data);
 
   void SetTensorData(at::Tensor tensor_data);
-
- private:
-  LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
-  LazyTensor(Value ir_value, const BackendDevice& device);
-  explicit LazyTensor(BackendDataPtr handle);
-
-  Value CreateTensorNode(BackendDataPtr data, bool read_only) const;
 
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
@@ -148,9 +148,17 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   //     a = a + b
   void TryLimitGraphSize();
 
-  Value GetIrValueForTensor(
+  // Override it to instantiate your own data.
+  virtual Value GetIrValueForTensor(
       const at::Tensor& tensor,
       const BackendDevice& device) const;
+
+  Value CreateTensorNode(BackendDataPtr data, bool read_only) const;
+
+ private:
+  LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
+  LazyTensor(Value ir_value, const BackendDevice& device);
+  explicit LazyTensor(BackendDataPtr handle);
 
   static int64_t GetNextTensorId();
 
