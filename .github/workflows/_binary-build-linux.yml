@@ -126,16 +126,16 @@ jobs:
       - name: List the env
         shell: bash
         run: env
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.github-token }}
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.github-token }}
       - name: Clean workspace
         shell: bash
         run: |

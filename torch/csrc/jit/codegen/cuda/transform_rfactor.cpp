@@ -262,7 +262,7 @@ std::pair<TensorDomain*, TensorDomain*> TransformRFactor::runReplay(
   std::transform(axes.begin(), axes.end(), axes.begin(), [ndims](int i) {
     TORCH_CHECK(
         i >= -ndims && i < ndims,
-        "Rfactor replay recieved an axis outside the number of dims in the tensor, acceptable inclusive range is ",
+        "Rfactor replay received an axis outside the number of dims in the tensor, acceptable inclusive range is ",
         -ndims,
         " to ",
         ndims - 1);

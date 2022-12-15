@@ -13,7 +13,7 @@ programs, and can aid you in debugging.
 How autograd encodes the history
 --------------------------------
 
-Autograd is reverse automatic differentiation system.  Conceptually,
+Autograd is a reverse automatic differentiation system.  Conceptually,
 autograd records a graph recording all of the operations that created
 the data as you execute operations, giving you a directed acyclic graph
 whose leaves are the input tensors and roots are the output tensors.
@@ -23,11 +23,11 @@ compute the gradients using the chain rule.
 Internally, autograd represents this graph as a graph of
 :class:`Function` objects (really expressions), which can be
 :meth:`~torch.autograd.Function.apply` ed to compute the result of
-evaluating the graph.  When computing the forwards pass, autograd
+evaluating the graph.  When computing the forward pass, autograd
 simultaneously performs the requested computations and builds up a graph
 representing the function that computes the gradient (the ``.grad_fn``
 attribute of each :class:`torch.Tensor` is an entry point into this graph).
-When the forwards pass is completed, we evaluate this graph in the
+When the forward pass is completed, we evaluate this graph in the
 backwards pass to compute the gradients.
 
 An important thing to note is that the graph is recreated from scratch at every
@@ -119,7 +119,7 @@ For more fine-grained exclusion of subgraphs from gradient computation,
 there is setting the ``requires_grad`` field of a tensor.
 
 Below, in addition to discussing the mechanisms above, we also describe
-evaluation mode (:meth:`nn.Module.eval()`), a method that is not actually used
+evaluation mode (:meth:`nn.Module.eval()`), a method that is not used
 to disable gradient computation but, because of its name, is often mixed up with the three.
 
 Setting ``requires_grad``
@@ -164,8 +164,8 @@ of the module's parameters (which have ``requires_grad=True`` by default).
 Grad Modes
 ^^^^^^^^^^
 
-Apart from setting ``requires_grad`` there are also three possible modes
-enableable from Python that can affect how computations in PyTorch are
+Apart from setting ``requires_grad`` there are also three grad modes that can
+be selected from Python that can affect how computations in PyTorch are
 processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be togglable via context managers and
 decorators.
@@ -173,7 +173,7 @@ decorators.
 Default Mode (Grad Mode)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-The "default mode" is actually the mode we are implicitly in when no other modes like
+The "default mode" is the mode we are implicitly in when no other modes like
 no-grad and inference mode are enabled. To be contrasted with
 "no-grad mode" the default mode is also sometimes called "grad mode".
 
@@ -237,7 +237,7 @@ For implementation details of inference mode see
 Evaluation Mode (``nn.Module.eval()``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Evaluation mode is not actually a mechanism to locally disable gradient computation.
+Evaluation mode is not a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
 
 Functionally, ``module.eval()`` (or equivalently ``module.train(False)``) are completely
@@ -263,7 +263,7 @@ In-place operations with autograd
 Supporting in-place operations in autograd is a hard matter, and we discourage
 their use in most cases. Autograd's aggressive buffer freeing and reuse makes
 it very efficient and there are very few occasions when in-place operations
-actually lower memory usage by any significant amount. Unless you're operating
+lower memory usage by any significant amount. Unless you're operating
 under heavy memory pressure, you might never need to use them.
 
 There are two main reasons that limit the applicability of in-place operations:
@@ -271,13 +271,13 @@ There are two main reasons that limit the applicability of in-place operations:
 1. In-place operations can potentially overwrite values required to compute
    gradients.
 
-2. Every in-place operation actually requires the implementation to rewrite the
+2. Every in-place operation requires the implementation to rewrite the
    computational graph. Out-of-place versions simply allocate new objects and
    keep references to the old graph, while in-place operations, require
    changing the creator of all inputs to the :class:`Function` representing
    this operation. This can be tricky, especially if there are many Tensors
    that reference the same storage (e.g. created by indexing or transposing),
-   and in-place functions will actually raise an error if the storage of
+   and in-place functions will raise an error if the storage of
    modified inputs is referenced by any other :class:`Tensor`.
 
 In-place correctness checks
@@ -338,18 +338,18 @@ serializing all the backward calls in a specific order during execution
 Non-determinism
 ^^^^^^^^^^^^^^^
 
-If you are calling ``backward()`` on multiple thread concurrently but with
-shared inputs (i.e. Hogwild CPU training). Since parameters are automatically
-shared across threads, gradient accumulation might become non-deterministic on
-backward calls across threads, because two backward calls might access and try
-to accumulate the same ``.grad`` attribute. This is technically not safe, and
-it might result in racing condition and the result might be invalid to use.
+If you are calling ``backward()`` from multiple threads concurrently and have
+shared inputs (i.e. Hogwild CPU training), then non-determinsim should be expected.
+This can occur because parameters are automatically shared across threads,
+as such, multiple threads may access and try to accumulate the same ``.grad``
+attribute during gradient accumulation. This is technically not safe, and
+it might result in race condition and the result might be invalid to use.
 
-But this is expected pattern if you are using the multithreading approach to
-drive the whole training process but using shared parameters, user who use
-multithreading should have the threading model in mind and should expect this
-to happen. User could use the functional API :func:`torch.autograd.grad` to
-calculate the gradients instead of ``backward()`` to avoid non-determinism.
+Users developing multithreaded models featuring shared parameters should have the
+threading model in mind and should understand the issues described above.
+
+The functional API :func:`torch.autograd.grad` may be used to calculate the
+gradients instead of ``backward()`` to avoid non-determinism.
 
 Graph retaining
 ^^^^^^^^^^^^^^^
@@ -368,9 +368,9 @@ Thread Safety on Autograd Node
 
 Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
-parallel backwards that share part/whole of the GraphTask.
+parallel ``backward()`` calls that share part/whole of the GraphTask.
 
-Custom Python ``autograd.Function`` is automatically thread safe because of GIL.
+Custom Python ``autograd.Function``\s are automatically thread safe because of GIL.
 For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
 ``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
@@ -440,8 +440,8 @@ It also turns out that no interesting real-valued objective fulfill the
 Cauchy-Riemann equations. So the theory with homomorphic function cannot be
 used for optimization and most people therefore use the Wirtinger calculus.
 
-Wirtinger Calculus comes in picture ...
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Wirtinger Calculus comes into the picture ...
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 So, we have this great theory of complex differentiability and
 holomorphic functions, and we can’t use any of it at all, because many

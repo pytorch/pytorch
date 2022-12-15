@@ -45,7 +45,7 @@
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
-    "If on, static runtime may use use optimizations that cause accurary loss "
+    "If on, static runtime may use use optimizations that cause accuracy loss "
     "vs the jit interpreter");
 
 namespace at {
@@ -1675,36 +1675,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-namespace {
-
-std::vector<std::int64_t> permute_output_sizes(
-    c10::IntArrayRef self_sizes,
-    c10::IntArrayRef dims) {
-  const auto nDim = dims.size();
-  TORCH_CHECK(
-      self_sizes.size() == nDim,
-      "permute input and output tensors must have the same rank, got input rank=",
-      self_sizes.size(),
-      "; output rank=",
-      nDim);
-  std::vector<bool> dims_seen(nDim, false);
-  std::vector<std::int64_t> output_sizes;
-  output_sizes.reserve(nDim);
-  for (size_t i = 0; i < nDim; ++i) {
-    auto dim = c10::maybe_wrap_dim(dims[i], nDim);
-    TORCH_CHECK(
-        !dims_seen[dim],
-        "permute dims must be unique, found duplicate dim=",
-        dim);
-
-    output_sizes.push_back(self_sizes[dim]);
-    dims_seen[dim] = true;
-  }
-  return output_sizes;
-}
-
-} // namespace
-
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
 REGISTER_OPERATOR_FUNCTOR(
@@ -1726,29 +1696,6 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out = p_node->Output(0).toTensor();
         at::native::reshape_copy_out(out, self, proposed_shape, true);
-      };
-    });
-
-REGISTER_OPERATOR_FUNCTOR(
-    static_runtime::permute_copy,
-    sr_permute_copy,
-    [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema(
-              "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
-      }
-      return [](ProcessedNode* p_node) {
-        const auto& self = p_node->Input(0).toTensor();
-        const auto dims = p_node->Input(1).toDimVector();
-
-        if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = create_empty_from(self);
-        }
-        auto& output = p_node->Output(0).toTensor();
-        at::native::resize_(
-            output, permute_output_sizes(self.sizes(), dims), c10::nullopt);
-        at::native::permute_copy_out(self, dims, output);
       };
     });
 
