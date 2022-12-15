@@ -6,8 +6,8 @@
 #include <iostream>
 #include <thread>
 
-#include <c10d/HashStore.hpp>
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 
@@ -62,11 +62,11 @@ void stressTestStore(std::string prefix = "") {
   auto hashStore = c10::make_intrusive<c10d::HashStore>();
   c10d::PrefixStore store(prefix, hashStore);
 
-  for (const auto i : c10::irange(numThreads)) {
-    threads.push_back(std::thread([&] {
+  for (C10_UNUSED const auto i : c10::irange(numThreads)) {
+    threads.emplace_back(std::thread([&] {
       sem1.post();
       sem2.wait();
-      for (const auto j : c10::irange(numIterations)) {
+      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
     }));

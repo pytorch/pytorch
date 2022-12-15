@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
@@ -8,15 +10,12 @@ import tempfile
 import subprocess
 import glob
 
-import textwrap
-from multiprocessing import Process
-
 import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
+from torch.testing._internal.common_utils import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -38,7 +37,7 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root)
 
-
+# There's only one test that runs gracheck, run slow mode manually
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -420,8 +419,6 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
-
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
             if (input[0] < input[1] || input[0] >= input[1]) {
@@ -867,81 +864,8 @@ class TestCppExtensionJIT(common.TestCase):
         a = torch.randn(5, 5, requires_grad=True)
         b = torch.randn(5, 5, requires_grad=True)
 
-        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
-
-    @staticmethod
-    def _crash_handler_test_process(stderr_file, destination):
-        # Code to enable dumps and trigger a segfault
-        if sys.platform == "win32":
-            destination = destination.replace("\\", "\\\\")
-            csrc = textwrap.dedent(f"""
-            #include <torch/torch.h>
-            #include <locale>
-            #include <iostream>
-            #include <codecvt>
-            #include <string>
-
-            int fail() {{
-                std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-                std::string narrow("{destination}");
-                std::wstring wide = converter.from_bytes(narrow);
-                torch::crash_handler::enable_minidumps(wide.c_str());
-
-                volatile int* bad = nullptr;
-                return *bad;
-            }}
-            """)
-        else:
-            csrc = textwrap.dedent(f"""
-            #include <torch/torch.h>
-
-            int fail() {{
-                torch::crash_handler::enable_minidumps("{destination}");
-
-                volatile int* bad = nullptr;
-                return *bad;
-            }}
-            """)
-
-        # Some special stuff to overwrite stderr for a C++ extension
-        # Copied from: https://stackoverflow.com/questions/8804893/redirect-stdout-from-python-for-c-calls
-        sys.stdout.flush()
-        newstdout = os.dup(2)
-        devnull = os.open(stderr_file, os.O_WRONLY)
-        os.dup2(devnull, 2)
-        os.close(devnull)
-        sys.stdout = os.fdopen(newstdout, 'w')
-
-        module = torch.utils.cpp_extension.load_inline(
-            name="segfault",
-            cpp_sources=csrc,
-            functions=["fail"],
-        )
-        module.fail()
-
-    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
-    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
-    @unittest.skipIf(os.environ.get("TEST_CONFIG") == "force_on_cpu", "fails on force_on_cpu config, tracked w/ #65253")
-    def test_crash_handler(self):
-        with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
-            # Use multiprocessing to spin up a separate process to make catching
-            # the segfault easier
-            p = Process(target=self._crash_handler_test_process, args=(stderr.name, temp_dir))
-            p.start()
-            p.join()
-
-            with open(stderr.name) as f:
-                result = f.read().strip()
-
-            # Check that the signal handler was called
-            self.assertTrue(result.startswith(f"Wrote minidump to {temp_dir}"))
-
-            with open(result.replace("Wrote minidump to ", ""), "rb") as dump_file:
-                dump_bytes = dump_file.read()
-
-                # Check that the file has the correct magic number
-                self.assertEqual(b"MDMP", dump_bytes[0:4])
-
+        for fast_mode in (True, False):
+            gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
 
 if __name__ == "__main__":

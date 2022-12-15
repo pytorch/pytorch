@@ -15,11 +15,14 @@ namespace int8 {
 class Int8LeakyReluOp final : public Operator<CPUContext> {
  public:
   explicit Int8LeakyReluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), ws_(ws) {
+      : Operator<CPUContext>(operator_def, ws) {
     const float alpha = this->template GetSingleArgument<float>("alpha", 0.01);
     CAFFE_ENFORCE_GT(alpha, 0.0);
     CAFFE_ENFORCE_LT(alpha, 1.0);
     this->alpha_ = alpha;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+    this->ws_ = ws;
+#endif
   }
 
   ~Int8LeakyReluOp() {
@@ -35,8 +38,8 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
-    CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
+    TORCH_CHECK_GE(Y_zero_point, std::numeric_limits<uint8_t>::min());
+    TORCH_CHECK_LE(Y_zero_point, std::numeric_limits<uint8_t>::max());
 
     /*
      * Record quantization parameters for the input, because if the op is
@@ -99,7 +102,9 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
 
  private:
   float alpha_;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK Leaky ReLU operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

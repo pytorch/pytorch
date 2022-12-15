@@ -132,6 +132,8 @@ def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
+    if torch.overrides.has_torch_function_variadic(tensor):
+        return torch.overrides.handle_torch_function(uniform_, (tensor,), tensor=tensor, a=a, b=b)
     return _no_grad_uniform_(tensor, a, b)
 
 
@@ -148,6 +150,8 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
+    if torch.overrides.has_torch_function_variadic(tensor):
+        return torch.overrides.handle_torch_function(normal_, (tensor,), tensor=tensor, mean=mean, std=std)
     return _no_grad_normal_(tensor, mean, std)
 
 def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
@@ -183,6 +187,8 @@ def constant_(tensor: Tensor, val: float) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.constant_(w, 0.3)
     """
+    if torch.overrides.has_torch_function_variadic(tensor):
+        return torch.overrides.handle_torch_function(constant_, (tensor,), tensor=tensor, val=val)
     return _no_grad_fill_(tensor, val)
 
 
@@ -240,7 +246,7 @@ def dirac_(tensor, groups=1):
 
     Args:
         tensor: a {3, 4, 5}-dimensional `torch.Tensor`
-        groups (optional): number of groups in the conv layer (default: 1)
+        groups (int, optional): number of groups in the conv layer (default: 1)
     Examples:
         >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)
@@ -357,7 +363,9 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_uniform_(
+    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -384,6 +392,15 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> w = torch.empty(3, 5)
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
+    if torch.overrides.has_torch_function_variadic(tensor):
+        return torch.overrides.handle_torch_function(
+            kaiming_uniform_,
+            (tensor,),
+            tensor=tensor,
+            a=a,
+            mode=mode,
+            nonlinearity=nonlinearity)
+
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op")
         return tensor
@@ -395,7 +412,9 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+def kaiming_normal_(
+    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
@@ -444,12 +463,16 @@ def orthogonal_(tensor, gain=1):
         gain: optional scaling factor
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> w = torch.empty(3, 5)
         >>> nn.init.orthogonal_(w)
     """
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
+    if tensor.numel() == 0:
+        # no-op
+        return tensor
     rows = tensor.size(0)
     cols = tensor.numel() // rows
     flattened = tensor.new(rows, cols).normal_(0, 1)

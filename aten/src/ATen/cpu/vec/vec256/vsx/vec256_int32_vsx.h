@@ -5,8 +5,8 @@
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 template <>
 class Vectorized<int32_t> {
@@ -199,7 +199,7 @@ class Vectorized<int32_t> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};

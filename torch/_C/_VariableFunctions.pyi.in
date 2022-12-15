@@ -5,12 +5,10 @@ from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, 
 from typing_extensions import Literal
 from torch._six import inf
 
-from torch.types import _int, _float, _bool, Number, _dtype, _device, _qscheme, _size, _layout
+from torch.types import _int, _float, _bool, Number, _dtype, _device, _qscheme, _size, _layout, SymInt, Device
+import torch
 
 import builtins
-
-# REDUNDANT!
-${namedtuple_defs}
 
 ${function_hints}
 

@@ -1,6 +1,12 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_softmax_native.h>         // for mkldnn_softmax
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -17,7 +23,7 @@ Tensor mkldnn_softmax(
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -42,4 +48,4 @@ Tensor mkldnn_softmax(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

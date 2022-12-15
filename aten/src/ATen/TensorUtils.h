@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/DimVector.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
@@ -18,11 +19,15 @@ struct TORCH_API TensorArg {
   const char* name;
   int pos; // 1-indexed
   TensorArg(const Tensor& tensor, const char* name, int pos)
-    : tensor(tensor), name(name), pos(pos) {}
+      : tensor(tensor), name(name), pos(pos) {}
   // Try to mitigate any possibility of dangling reference to temporaries.
   TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
-  const Tensor* operator->() const { return &tensor; }
-  const Tensor& operator*() const { return tensor; }
+  const Tensor* operator->() const {
+    return &tensor;
+  }
+  const Tensor& operator*() const {
+    return tensor;
+  }
 };
 
 struct TORCH_API TensorGeometryArg {
@@ -30,11 +35,15 @@ struct TORCH_API TensorGeometryArg {
   const char* name;
   int pos; // 1-indexed
   /* implicit */ TensorGeometryArg(TensorArg arg)
-    : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
+      : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
   TensorGeometryArg(TensorGeometry tensor, const char* name, int pos)
-    : tensor(tensor), name(name), pos(pos) {}
-  const TensorGeometry* operator->() const { return &tensor; }
-  const TensorGeometry& operator*() const { return tensor; }
+      : tensor(tensor), name(name), pos(pos) {}
+  const TensorGeometry* operator->() const {
+    return &tensor;
+  }
+  const TensorGeometry& operator*() const {
+    return tensor;
+  }
 };
 
 // A string describing which function did checks on its input
@@ -59,10 +68,7 @@ TORCH_API void checkDim(
     const char* name,
     int pos, // 1-indexed
     int64_t dim);
-TORCH_API void checkDim(
-    CheckedFrom c,
-    const TensorGeometryArg& t,
-    int64_t dim);
+TORCH_API void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
 // NB: this is an inclusive-exclusive range
 TORCH_API void checkDimRange(
     CheckedFrom c,
@@ -79,11 +85,20 @@ TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     IntArrayRef sizes);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    c10::SymIntArrayRef sizes);
 TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
     int64_t size);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim,
+    c10::SymInt size);
 TORCH_API void checkNumel(
     CheckedFrom c,
     const TensorGeometryArg& t,
@@ -93,10 +108,7 @@ TORCH_API void checkSameNumel(
     const TensorGeometryArg& t1,
     const TensorGeometryArg& t2);
 TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
-TORCH_API void checkScalarType(
-    CheckedFrom c,
-    const TensorArg& t,
-    ScalarType s);
+TORCH_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
 TORCH_API void checkScalarTypes(
     CheckedFrom c,
     const TensorArg& t,
@@ -131,18 +143,14 @@ TORCH_API void checkDeviceType(
 
 TORCH_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
 
-TORCH_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
+TORCH_API void checkLayout(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::Layout layout);
 
 // Methods for getting data_ptr if tensor is defined
 TORCH_API void* maybe_data_ptr(const Tensor& tensor);
 TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
-
-// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
-// Although we cache is_contiguous in tensor now, this is till useful because it
-// allows checking if a particular geometry is contiguous without explicitly
-// constructing a tensor, e.g., when you want to choose a kernel strategy based
-// on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
 TORCH_API void check_dim_size(
     const Tensor& tensor,
@@ -152,13 +160,16 @@ TORCH_API void check_dim_size(
 
 namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
-TORCH_API size_t
-computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
 
 TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
+
+TORCH_API c10::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape);
 
 TORCH_API c10::optional<DimVector> computeStride(
     IntArrayRef oldshape,

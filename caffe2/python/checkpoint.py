@@ -133,7 +133,7 @@ def db_name(epoch, node_name, db_prefix, path_prefix=None):
         node_name: A string. The name of the node.
         db_prefix: A string. The prefix used to construct full db name.
         path_prefix: A string. Optional param used to construct db name or path
-            where checkpoint files are are stored.
+            where checkpoint files are stored.
     Returns:
         db_name: A string. The absolute path of full_db_name where checkpoint
             files are saved

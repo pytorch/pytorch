@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import inspect
@@ -16,6 +18,7 @@ from torch.testing import FileCheck
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -125,6 +128,59 @@ class TestList(JitTestCase):
             return
         with self.assertRaisesRegexWithHighlight(RuntimeError, "previously had type", "x"):
             self.checkScript(reassign_nested, (), optimize=False)
+
+    def test_list_variance(self):
+        """
+        `List[T1]` is not a subtype of `List[T2]`, even if `T1` is a
+        subtype of `T2`. However, if we have a temporary list object
+        (that is, a list comprehension or a list literal) on the rhs of
+        an assignment statement, we want to ignore the inferred type of
+        the rhs if we can prove that: 1) both the lhs and the rhs are
+        lists, and 2) the inner type of the lhs list is a subtype of the
+        inner type of the rhs list.
+
+        # This should pass
+        x: List[Optional[int]] = [None, None, None]
+
+        # This should fail
+        y: List[None] = [None, None, None]
+        x: List[Optional[int]] = y
+        """
+        def test_listliteral_is_typed_from_annotation():
+            x: List[Optional[int]] = [None, None, None]
+            return x
+
+        self.checkScript(test_listliteral_is_typed_from_annotation, ())
+
+        def test_listcomprehension_is_typed_from_annotation():
+            x: List[Optional[int]] = [None for _ in range(3)]
+            return x
+
+        self.checkScript(test_listcomprehension_is_typed_from_annotation, ())
+
+        def test_lists_with_different_internal_types_are_invariant(self):
+            x: List[int] = [1, 2, 3]
+            y: List[Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[Optional\[int\]\] but is "
+                                    "being assigned to a value of type "
+                                    r"List\[int\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant)
+
+        def test_lists_with_different_internal_types_are_invariant_recursive(self):
+            x: List[List[int]] = [[1, 2], [3]]
+            y: List[List[Optional[int]]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"List\[List\[Optional\[int\]\]\] "
+                                    "but is being assigned to a value "
+                                    r"of type List\[List\[int\]\]"):
+            torch.jit.script(test_lists_with_different_internal_types_are_invariant_recursive)
 
     def test_del(self):
         def inputs():
@@ -244,8 +300,8 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        err_msg = r"is annotated with type Dict\[int, str\] but is " \
-                  r"being assigned to a value of type Dict\[str, int\]"
+        err_msg = r"Dict type annotation `Dict\[int, str\]` did not " \
+                  "match the type of an actual key type `str`"
         with self.assertRaisesRegex(RuntimeError, err_msg):
             @torch.jit.script
             def fn():
@@ -1342,6 +1398,7 @@ class TestDict(JitTestCase):
     def dict_bool(self):
         return {True: 1}
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_dict_bool_conversion(self):
         def if_predicate(d: Dict[int, int]):
             if d:
@@ -1370,6 +1427,7 @@ class TestDict(JitTestCase):
         self.checkScript(ternary_predicate, ({1: 2, 3: 5},))
         self.checkScript(ternary_predicate, ({},))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_del(self):
         def inputs():
             return {'hi': 2, 'bye': 3}
@@ -1388,6 +1446,62 @@ class TestDict(JitTestCase):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['hi']"):
             self.checkScript(fn, [{}])
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
+    def test_dict_variance(self):
+        """
+        `Dict[T1, _]` is not a subtype of `Dict[T2, _]`, even if `T1` is
+        a subtype of `T2`; similarly `Dict[_, T1]` would not be a
+        subtype of `Dict[_, T2]`.
+
+        However, if we have a temporary dict object (that is, a dict
+        comprehension or a dict literal) on the rhs of an assignment
+        statement, we want to ignore the inferred type of the rhs if we
+        can prove that: 1) both the lhs and the rhs are dicts with the
+        same key types (TorchScript has a restricted set of allowed key
+        types, so we don't need to worry about subtyping relationships
+        here), and 2) the value type of the dict is a subtype of the
+        value type of the rhs dict.
+        """
+        def test_dictliteral_is_typed_from_annotation():
+            x: Dict[str, Optional[int]] = {"foo": None, "bar": None, "baz": None}
+            return x
+
+        self.checkScript(test_dictliteral_is_typed_from_annotation, ())
+
+        def test_dictcomprehension_is_typed_from_annotation():
+            metasyntactics = ["foo", "bar", "baz"]
+            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}
+            return x
+
+        self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())
+
+        def test_dicts_with_different_value_types_are_invariant(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Optional[int]] = x
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'y' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Optional\[int\]\] but "
+                                    "is being assigned to a value of "
+                                    r"type Dict\[str, int\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant)
+
+        def test_dicts_with_different_value_types_are_invariant_recursive(self):
+            x: Dict[str, int] = {"foo": 1, "bar": 2, "baz": 3}
+            y: Dict[str, Dict[str, int]] = {"foo": x, "bar": x, "baz": x}
+            z: Dict[str, Dict[str, Optional[int]]] = y
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "Variable 'z' is "
+                                    "annotated with type "
+                                    r"Dict\[str, Dict\[str, Optional"
+                                    r"\[int\]\]\] but is being assigned"
+                                    r" to a value of type Dict\[str, "
+                                    r"Dict\[str, int\]\]"):
+            torch.jit.script(test_dicts_with_different_value_types_are_invariant_recursive)
+
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_keys(self):
         @torch.jit.script
         def keys(x: Dict[str, Tensor]) -> List[str]:
@@ -1403,6 +1517,7 @@ class TestDict(JitTestCase):
 
         self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_values(self):
         @torch.jit.script
         def values(x: Dict[str, Tensor]) -> List[Tensor]:
@@ -1411,18 +1526,21 @@ class TestDict(JitTestCase):
         the_dict = self.dict()
         self.assertEqual(set(values(the_dict)), set(the_dict.values()))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_len(self):
         def length(x: Dict[str, Tensor]) -> int:
             return len(x)
 
         self.checkScript(length, (self.dict(),))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_copy(self):
         def func(x: Dict[str, Tensor]) -> Dict[str, Tensor]:
             return x.copy()
 
         self.checkScript(func, (self.dict(),))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_items(self):
         def func(x: Dict[str, Tensor]) -> List[Tuple[str, Tensor]]:
             return x.items()
@@ -1438,6 +1556,7 @@ class TestDict(JitTestCase):
         for item in eager_out:
             self.assertTrue(item in script_out)
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_pop(self):
         def pop(x: Dict[str, Tensor], key: str) -> Tuple[Tensor, Dict[str, Tensor]]:
             return x.pop(key), x
@@ -1461,6 +1580,7 @@ class TestDict(JitTestCase):
         tester(default_pop, 'a', torch.randn(2, 2))
         tester(default_pop, 'x', torch.randn(2, 2))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_setdefault(self):
         def setdefault(x: Dict[str, Tensor], key: str, default: Tensor) -> Dict[str, Tensor]:
             x.setdefault(key, default)
@@ -1469,6 +1589,7 @@ class TestDict(JitTestCase):
         self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
         self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_update(self):
         def update(a: Dict[str, Tensor], b: Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
             a.update(b)
@@ -1477,6 +1598,7 @@ class TestDict(JitTestCase):
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_update_existing_key(self):
         def foo() -> Dict[str, int]:
             a: Dict[str, int] = {}
@@ -1486,6 +1608,7 @@ class TestDict(JitTestCase):
 
         self.checkScript(foo, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a: Dict[str, Tensor]) -> Dict[str, Tensor]:
             a['a'] += 1
@@ -1506,6 +1629,7 @@ class TestDict(JitTestCase):
         self.checkScript(aug_assign_dict_tensor, (self.dict(),))
         self.checkScript(aug_assign_dict_prim, ({'a': 3.0, 'b': 2.0, 'c': 4.0},))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_popitem(self):
         @torch.jit.script
         def popitem(x: Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]:
@@ -1525,6 +1649,7 @@ class TestDict(JitTestCase):
         self.assertTrue(isinstance(script_out[0][0], str))
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_clear(self):
         def clear(x: Dict[str, Tensor]) -> Dict[str, Tensor]:
             x.clear()
@@ -1532,6 +1657,7 @@ class TestDict(JitTestCase):
 
         self.checkScript(clear, (self.dict(),))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_get(self):
         def get(x: Dict[str, Tensor], key: str) -> Optional[Tensor]:
             return x.get(key)
@@ -1545,6 +1671,7 @@ class TestDict(JitTestCase):
         self.checkScript(get, (self.dict(), 'a'))
         self.checkScript(get, (self.dict(), "doesn't exist"))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_get_boolkey(self):
         def get(x: Dict[bool, int], key: bool) -> Optional[int]:
             return x.get(key)
@@ -1558,6 +1685,7 @@ class TestDict(JitTestCase):
         self.checkScript(get_default, (self.dict_bool(), True))
         self.checkScript(get_default, (self.dict_bool(), False))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_basic(self):
         def simple(x: Dict[str, int]) -> Dict[str, int]:
             return x
@@ -1578,7 +1706,7 @@ class TestDict(JitTestCase):
         def missing_index(x: Dict[str, int]) -> int:
             return x['dne']
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['d"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['dne'"):
             missing_index({'item': 20, 'other_item': 120})
 
         code = dedent('''
@@ -1602,6 +1730,7 @@ class TestDict(JitTestCase):
 
         self.checkScript(list_of_dicts, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_mutability(self):
         @torch.jit.script
         def fn() -> Dict[str, int]:
@@ -1611,12 +1740,14 @@ class TestDict(JitTestCase):
 
         self.assertEqual(fn(), {'ok': 10})
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_key_type(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "but instead found type", "a[None]"):
             @torch.jit.script
             def fn(a: Dict[str, int]) -> int:
                 return a[None]
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_loop(self):
         @torch.jit.script
         def fn(x: int) -> Dict[str, int]:
@@ -1627,6 +1758,7 @@ class TestDict(JitTestCase):
 
         self.assertEqual(fn(10), {'ok': 9})
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_view(self):
         def fn(x, y):
             l = {"a": x}
@@ -1637,6 +1769,7 @@ class TestDict(JitTestCase):
             return a == b
         self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_membership(self):
         def fn(x: Dict[int, int], y: int) -> int:
             return x.get(y, 3)
@@ -1657,6 +1790,7 @@ class TestDict(JitTestCase):
             def bad_types(x: Dict[int, int], y: int) -> int:
                 return x.get(y)  # noqa: T484
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_dict_to_python(self):
         @torch.jit.ignore
         def python_lookup(my_dict: Dict[str, int], keys: List[str]) -> List[int]:
@@ -1668,6 +1802,7 @@ class TestDict(JitTestCase):
         a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
         self.checkScript(fn, (a_dict, ('a', 'c')))
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_ordered_dict(self):
         def test_func(fn, inputs):
             self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
@@ -1708,6 +1843,7 @@ class TestDict(JitTestCase):
         with self.assertRaisesRegexWithHighlight(Exception, "Arguments for call are not", "a[1] = 2"):
             torch.jit.script(test_dict_error)
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_type_annotation_missing_contained_type(self):
         """
         Test that the use of a Dict type annotation without contained
@@ -1735,6 +1871,7 @@ class TestDict(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
             m = torch.jit.script(annotated_fn)
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_dict_preserves_order(self):
         def dict_ordering():
             a : Dict[int, int] = {}
@@ -1749,6 +1886,7 @@ class TestDict(JitTestCase):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
 
+    @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
             def use(self, buffer: Dict[str, Optional[torch.Tensor]]):

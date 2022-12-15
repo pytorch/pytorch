@@ -59,30 +59,20 @@ echo "Android NDK version: $ANDROID_NDK_VERSION"
 
 CMAKE_ARGS=()
 
-if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
-  # Build PyTorch mobile
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
-  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
-  # custom build with selected ops
-  if [ -n "${SELECTED_OP_LIST}" ]; then
-    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
-    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
-    if [ ! -r ${SELECTED_OP_LIST} ]; then
-      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
-      exit 1
-    fi
-    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+# Build PyTorch mobile
+CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
+CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+
+# custom build with selected ops
+if [ -n "${SELECTED_OP_LIST}" ]; then
+  SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+  echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+  if [ ! -r ${SELECTED_OP_LIST} ]; then
+    echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+    exit 1
   fi
-else
-  # Build Caffe2 mobile
-  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
-  # Build protobuf from third_party so we have a host protoc binary.
-  echo "Building protoc"
-  $CAFFE2_ROOT/scripts/build_host_protoc.sh
-  # Use locally built protoc because we'll build libprotobuf for the
-  # target architecture and need an exact version match.
-  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+  CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
 fi
 
 # If Ninja is installed, prefer it to Make
@@ -112,6 +102,18 @@ if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
 else
   CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
 fi
+if [ "${TRACING_BASED}" == 1 ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
 CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
 CMAKE_ARGS+=("-DBUILD_MOBILE_TEST=$BUILD_MOBILE_TEST")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
@@ -123,6 +125,7 @@ else
 fi
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
+CMAKE_ARGS+=("-DUSE_ITT=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
 CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
 CMAKE_ARGS+=("-DUSE_LMDB=OFF")
@@ -148,10 +151,24 @@ fi
 
 if [ -n "${USE_VULKAN}" ]; then
   CMAKE_ARGS+=("-DUSE_VULKAN=ON")
+  if [ -n "${USE_VULKAN_FP16_INFERENCE}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_FP16_INFERENCE=ON")
+  fi
+  if [ -n "${USE_VULKAN_RELAXED_PRECISION}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_RELAXED_PRECISION=ON")
+  fi
+  if [ -n "${USE_VULKAN_SHADERC_RUNTIME}" ]; then
+    CMAKE_ARGS+=("-DUSE_VULKAN_SHADERC_RUNTIME=ON")
+  fi
 fi
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
+
+# Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
+if [ -f third_party/pocketfft/pocketfft_hdronly.h ]; then
+  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" third_party/pocketfft/pocketfft_hdronly.h
+fi
 
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}

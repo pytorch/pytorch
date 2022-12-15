@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
 #include <c10/util/Logging.h>
@@ -17,6 +17,8 @@ Dtype Dtype::scalar_dtype() const {
 #define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DTYPE_DEFINE)
+DTYPE_DEFINE(c10::quint8, QUInt8);
+DTYPE_DEFINE(c10::qint8, QInt8);
 
 #undef DTYPE_DEFINE
 
@@ -29,6 +31,8 @@ Dtype ToDtype(ScalarType type) {
   case ScalarType::n:    \
     return k##n;
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
+    TYPE_CASE(c10::quint8, QUInt8);
+    TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
 
     case ScalarType::Undefined:
@@ -57,6 +61,8 @@ int Dtype::byte_size() const {
     break;
 
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    TYPE_CASE(c10::quint8, QUInt8);
+    TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
     default:
       throw std::runtime_error(
@@ -78,7 +84,11 @@ std::string Dtype::ToCppString() const {
     case ScalarType::Half:
       return "half";
     case ScalarType::BFloat16:
-      return "__nv_bfloat16";
+      return "bfloat16";
+    case ScalarType::QInt8:
+      return "qint8";
+    case ScalarType::QUInt8:
+      return "quint8";
     default:
       throw unsupported_dtype();
   }

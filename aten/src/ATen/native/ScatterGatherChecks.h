@@ -1,8 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -45,7 +46,7 @@ static C10_UNUSED void gather_shape_check(const Tensor& self, int64_t dim,
     "Index tensor must have the same number of dimensions as input tensor"
   );
 
-  for (int64_t i = 0; i < self_dims; ++i) {
+  for (const auto i : c10::irange(self_dims)) {
     if (i != dim) {
       TORCH_CHECK(
         ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
@@ -77,7 +78,7 @@ static C10_UNUSED void scatter_shape_check(
   int64_t self_dims = ensure_nonempty_dim(self.dim());
 
   //  Check: index.size(d) <= self.size(d) for all d != dim
-  for (int64_t d = 0; d < self_dims; ++d) {
+  for (const auto d : c10::irange(self_dims)) {
     int64_t index_d_size = ensure_nonempty_size(index, d);
     if (d == dim) continue;
     if (index_d_size > ensure_nonempty_size(self, d)) {
@@ -89,7 +90,7 @@ static C10_UNUSED void scatter_shape_check(
   //  Check: index.size(d) <= src.size(d) for all d if src is Tensor
   if (!is_wrong_shape && src_opt.has_value()) {
     auto src = src_opt.value();
-    for (int64_t d = 0; d < self_dims; ++d) {
+    for (const auto d : c10::irange(self_dims)) {
       int64_t index_d_size = ensure_nonempty_size(index, d);
       if (index_d_size > ensure_nonempty_size(src, d)) {
         is_wrong_shape = true;

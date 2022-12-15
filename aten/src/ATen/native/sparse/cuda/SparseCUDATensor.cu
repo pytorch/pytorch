@@ -1,14 +1,27 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -130,10 +143,12 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+    dim3 block(warp_size, SZ);
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data_ptr<int64_t>(),
@@ -174,9 +189,6 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       Tensor indicesSlice = newIndices.narrow(0, d, 1);
-      // Note for the porting guide: THCTensor_(copy) does NOT do normal
-      // broadcasting logic; instead, it will blast the elements from one
-      // to the other so long as the numel is the same
       indicesSlice.copy_(indices1D);
       indices1D.divide_(self.size(d), "trunc");
       indicesSlice.add_(indices1D, -self.size(d));

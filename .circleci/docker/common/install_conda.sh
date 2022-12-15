@@ -21,7 +21,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       ;;
   esac
 
-  mkdir /opt/conda
+  mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
   # Work around bug where devtoolset replaces sudo and breaks it.
@@ -55,8 +55,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Ensure we run conda in a directory that jenkins has write access to
   pushd /opt/conda
 
-  # Track latest conda update
-  as_jenkins conda update -y -n base conda
+  # Prevent conda from updating to 4.14.0, which causes docker build failures
+  # See https://hud.pytorch.org/pytorch/pytorch/commit/754d7f05b6841e555cea5a4b2c505dd9e0baec1d
+  # Uncomment the below when resolved to track the latest conda update
+  # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
   as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
@@ -68,66 +70,49 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
   }
 
+  pip_install() {
+    as_jenkins pip install --progress-bar off $*
+  }
+
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.10, but
-  # we want to pin to version 3.10.
-  SCIPY_VERSION=1.1.0
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
-    SCIPY_VERSION=1.6.0
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
-    # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
+    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   else
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
+    # Install `typing_extensions` for 3.7
+    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing_extensions
   fi
 
-  if [[ "$CUDA_VERSION" == 10.2* ]]; then
-    conda_install magma-cuda102 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
-    conda_install magma-cuda110 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
-    conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
-    conda_install magma-cuda113 -c pytorch
+  # Use conda cmake in some cases. Conda cmake will be newer than our supported
+  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
+  # following builds that we know should use conda. Specifically, Ubuntu bionic
+  # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
+  if [ -n "${CONDA_CMAKE}" ]; then
+    conda_install cmake
   fi
 
-  # TODO: This isn't working atm
-  conda_install nnpack -c killeent
+  # Magma package names are concatenation of CUDA major and minor ignoring revision
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
+  fi
 
   # Install some other packages, including those needed for Python test reporting
-  # TODO: Why is scipy pinned
-  # Pin MyPy version because new errors are likely to appear with each release
-  # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  as_jenkins pip install --progress-bar off pytest \
-    scipy==$SCIPY_VERSION \
-    scikit-image \
-    psutil \
-    unittest-xml-reporting \
-    boto3==1.16.34 \
-    hypothesis==4.53.2 \
-    expecttest==0.1.3 \
-    mypy==0.812 \
-    tb-nightly
-
-  # Install numba only on python-3.8 or below
-  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
-  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
-  else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
-  fi
+  pip_install -r /opt/conda/requirements-ci.txt
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off -U scikit-learn
+    pip_install -U scikit-learn
   else
     # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
-    as_jenkins pip install --progress-bar off scikit-learn==0.20.3
+    pip_install scikit-learn==0.20.3
   fi
 
   popd

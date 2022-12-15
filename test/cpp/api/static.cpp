@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <torch/detail/static.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/utils/variadic.h>
+#include <torch/detail/static.h>
 #include <torch/torch.h>
 
 #include <string>
@@ -46,6 +47,8 @@ TEST(TestStatic, EnableIfModule) {
   ASSERT_FALSE(torch::detail::check_not_lvalue_references<std::string&>());
 }
 
+namespace {
+
 struct A : torch::nn::Module {
   int forward() {
     return 5;
@@ -72,6 +75,8 @@ struct D : torch::nn::Module {
 
 struct E : torch::nn::Module {};
 
+} // anonymous namespace
+
 // Put in a function because macros don't handle the comma between arguments to
 // is_same well ...
 template <typename Module, typename ExpectedType, typename... Args>
@@ -95,7 +100,7 @@ TEST(TestStatic, Apply) {
   std::vector<int> v;
   torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);
   ASSERT_EQ(v.size(), 5);
-  for (size_t i = 0; i < v.size(); ++i) {
+  for (const auto i : c10::irange(v.size())) {
     ASSERT_EQ(v.at(i), i + 1);
   }
 }

@@ -8,6 +8,8 @@ from .shape_prop import TensorMetadata
 from .tools_common import get_node_target, CALLABLE_NODE_OPS
 
 
+__all__ = ['OperatorSupportBase', 'OperatorSupport', 'create_op_support', 'chain', 'OpSupports']
+
 # fx.Node.target typename, as returned by `get_node_target()`
 TargetTypeName = str
 
@@ -65,8 +67,8 @@ class OperatorSupport(OperatorSupportBase):
     ) -> bool:
         """
         Args:
-            `sumodules`: mapping from module name to the module. This can be
-                         retrieved by calling model.named_modules().
+            `submodules`: mapping from module name to the module. This can be
+                          retrieved by calling model.named_modules().
 
             `node`: a Fx node that we want to determine whether it's supported.
 
@@ -171,12 +173,30 @@ class OpSupports:
             submodules: t.Mapping[str, torch.nn.Module],
             node: torch.fx.Node,
         ) -> bool:
-            for arg in node._input_nodes:
+            for arg in node.all_input_nodes:
+                # escape dtype check for get_attr node
+                if arg.op == "get_attr":
+                    continue
                 arg_dtype = _get_arg_dtype(arg)
                 if arg_dtype == dtype:
                     return False
             return True
         return create_op_support(_decline_if_input_dtype)
+
+    @classmethod
+    def decline_if_node_in_names(cls, disallow_set: t.Set[str]) -> OperatorSupportBase:
+        """
+        If a node has a name that is in the disallow set, reported it as non-supported.
+        """
+        def _decline_if_node_in_names(
+            submodules: t.Mapping[str, torch.nn.Module],
+            node: torch.fx.Node,
+        ) -> bool:
+            if node.name in disallow_set:
+                return False
+            else:
+                return True
+        return create_op_support(_decline_if_node_in_names)
 
 
 def _get_arg_dtype(arg: torch.fx.Node) -> t.Any:

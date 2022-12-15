@@ -1,7 +1,11 @@
 #pragma once
 
+#include <ATen/core/boxing/OperatorKernel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/TypeList.h>
+#include <ATen/core/IListRef.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -61,27 +65,6 @@ class OperatorHandle;
  * and are expected to be called by explicitly specifying the template parameters in a way that matches
  * the expected operator signature at each call site.
  */
-
-/**
- * Inherit from OperatorKernel to implement a c10 kernel.
- *
- * Example:
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- *
- * The kernel class is allowed to have members but these are equivalent
- * to global variables. The kernel implementation is responsible for
- * preventing race conditions on them.
- *
- * See below for how to register this kernel with PyTorch.
- */
-struct TORCH_API OperatorKernel {
-  virtual ~OperatorKernel() = default;
-};
 
 namespace impl {
   // supported_primitive_arg_types defines which primitive types we allow in
@@ -179,6 +162,13 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value,
+      "You tried to register a kernel with an unsupported input type: OptionalArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
@@ -230,6 +220,10 @@ namespace impl {
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
@@ -349,6 +343,13 @@ namespace impl {
     }
   };
 
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::ITensorListRef, AllowDeprecatedTypes> final {
+    static List<at::Tensor> call(IValue& v) {
+      return v.toTensorList();
+    }
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
@@ -357,11 +358,48 @@ namespace impl {
       return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
     }
   };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
+    static std::vector<c10::SymInt> call(IValue& v) {
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return r;
+      } else {
+        return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+      }
+    }
+  };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::OptionalArray<c10::SymInt>, AllowDeprecatedTypes> final {
+    static OptionalArray<c10::SymInt> call(IValue& v) {
+      if (v.isIntList()) {
+        std::vector<c10::SymInt> r;
+        auto src = v.toIntList();
+        std::transform(src.begin(), src.end(), std::back_inserter(r), [](int64_t i) { return c10::SymInt(i); });
+        return OptionalArray<c10::SymInt>(r);
+      } else {
+        return std::move(v).to<OptionalArray<c10::SymInt>>();
+      }
+    }
+  };
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
+    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
     // to optional<ArrayRef<T>>.
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
+    }
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is OptionalArrayRef<T>, convert the IValue to an
+    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
@@ -539,14 +577,16 @@ namespace impl {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
 #ifdef __cpp_if_constexpr
-        using ReturnType_ = std::decay_t<ReturnType>;
+        // [Note: VC++ and 'std': ambiguous symbol]
+        using ReturnType_ = ::std::decay_t<ReturnType>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
 #else
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
 #endif
         torch::jit::drop(*stack, num_inputs);
-        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+        // See note [ VC++ and 'std': ambiguous symbol]
+        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(::std::move(output), stack);
 #ifdef __cpp_if_constexpr
       } else {
 #else

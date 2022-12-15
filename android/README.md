@@ -14,9 +14,16 @@ repositories {
     jcenter()
 }
 
+# lite interpreter build
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.6.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
+    implementation 'org.pytorch:pytorch_android_lite:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.10.0'
+}
+
+# full jit build
+dependencies {
+    implementation 'org.pytorch:pytorch_android:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0'
 }
 ```
 
@@ -32,10 +39,19 @@ repositories {
     }
 }
 
+# lite interpreter build
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.11.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.11.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_lite:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.12.0-SNAPSHOT'
+    ...
+}
+
+# full jit build
+dependencies {
+    ...
+    implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
     ...
 }
 ```
@@ -68,7 +84,7 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
@@ -95,12 +111,12 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     ...
-    implementation 'com.facebook.soloader:nativeloader:0.8.0'
-    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    implementation 'com.facebook.soloader:nativeloader:0.10.4'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.8.0'` and `'com.facebook.fbjni:fbjni-java-only:0.0.3'`, we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.4'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
 You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
@@ -133,7 +149,7 @@ android {
 }
 
 dependencies {
-    extractForNativeBuild('org.pytorch:pytorch_android:1.6.0')
+    extractForNativeBuild('org.pytorch:pytorch_android:1.10.0')
 }
 
 task extractAARForNativeBuild {

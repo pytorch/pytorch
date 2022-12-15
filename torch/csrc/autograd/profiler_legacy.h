@@ -1,100 +1,26 @@
 #pragma once
 
-#include <iostream>
-#include <mutex>
-#include <memory>
-#include <vector>
 #include <cstdint>
-#include <string>
-#include <sstream>
 #include <forward_list>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
 #include <tuple>
-#include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/autograd/profiler_utils.h>
-#ifndef _WIN32
-#include <ctime>
-#endif
-#if defined(C10_IOS) && defined(C10_MOBILE)
-#include <sys/time.h> // for gettimeofday()
-#endif
+#include <vector>
 
-#include <ATen/record_function.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/stubs/base.h>
+#include <torch/csrc/profiler/util.h>
 
-#include <torch/csrc/jit/frontend/source_range.h>
-
-struct CUevent_st;
-typedef std::shared_ptr<CUevent_st> CUDAEventStub;
-
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct Node;
 
 namespace profiler {
-
-struct TORCH_API CUDAStubs {
-  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const {
-    fail();
-  }
-  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const {
-    fail();
-    return 0.f;
-  }
-  virtual void nvtxMarkA(const char* name) const {
-    fail();
-  }
-  virtual void nvtxRangePushA(const char* name) const {
-    fail();
-  }
-  virtual void nvtxRangePop() const {
-    fail();
-  }
-  virtual bool enabled() const {
-    return false;
-  }
-  virtual void onEachDevice(std::function<void(int)> op) const {
-    fail();
-  }
-  virtual void synchronize() const {
-    fail();
-  }
-  virtual ~CUDAStubs();
-
-private:
-  void fail() const {
-    AT_ERROR("CUDA used in profiler but not enabled.");
-  }
-};
-
-TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
-TORCH_API const CUDAStubs* cudaStubs();
-
-constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
-  return ((a + b - 1) / b) * b;
-}
-
-inline int64_t getTime(bool allow_monotonic = false) {
-#if defined(C10_IOS) && defined(C10_MOBILE)
-// clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
-// CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
-  struct timeval now;
-  gettimeofday(&now, NULL);
-  return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
-#elif defined(_WIN32) || defined(__MACH__)
-  using namespace std::chrono;
-  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
-  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#else
-  // clock_gettime is *much* faster than std::chrono implementation on Linux
-  struct timespec t{};
-  auto mode = CLOCK_REALTIME;
-  if (allow_monotonic) {
-    mode = CLOCK_MONOTONIC;
-  }
-  clock_gettime(mode, &t);
-  return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
-#endif
-}
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -172,10 +98,14 @@ struct TORCH_API LegacyEvent {
 
   std::string kindStr() const {
     switch (kind_) {
-      case EventKind::Mark: return "mark";
-      case EventKind::PushRange: return "push";
-      case EventKind::PopRange: return "pop";
-      case EventKind::MemoryAlloc: return "memory_alloc";
+      case EventKind::Mark:
+        return "mark";
+      case EventKind::PushRange:
+        return "push";
+      case EventKind::PopRange:
+        return "pop";
+      case EventKind::MemoryAlloc:
+        return "memory_alloc";
     }
     throw std::runtime_error("unknown event kind");
   }
@@ -198,15 +128,15 @@ struct TORCH_API LegacyEvent {
 
   double cpuElapsedUs(const LegacyEvent& e) const {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
-    return (e.cpu_ns_ - cpu_ns_)/(1000.0);
+    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / (1000.0);
   }
 
   void setCpuUs(int64_t cpu_us) {
-    cpu_ns_ = cpu_us * 1000.0;
+    cpu_ns_ = static_cast<double>(cpu_us) * 1000.0;
   }
 
   double cpuUs() const {
-    return cpu_ns_ / (1000.0);
+    return static_cast<double>(cpu_ns_) / (1000.0);
   }
 
   double cudaElapsedUs(const LegacyEvent& e) const;
@@ -220,11 +150,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.is_cuda() ||
-        device.type() == c10::DeviceType::HIP) {
+    if (device.is_cuda() || device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
-    } else if (device.is_cpu() ||
-        device.type() == c10::DeviceType::MKLDNN ||
+    } else if (
+        device.is_cpu() || device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
     } else {
@@ -245,7 +174,7 @@ struct TORCH_API LegacyEvent {
   }
 
   // Node ID corresponding to this event.
-  int nodeId( ) const {
+  int nodeId() const {
     return node_id_;
   }
 
@@ -333,12 +262,12 @@ struct TORCH_API LegacyEvent {
   EventKind kind_;
   uint64_t thread_id_;
   uint64_t fwd_thread_id_;
-  at::RecordFunctionHandle handle_ {0};
+  at::RecordFunctionHandle handle_{0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  CUDAEventStub cuda_event = nullptr;
+  torch::profiler::impl::ProfilerEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
@@ -357,11 +286,12 @@ struct TORCH_API LegacyEvent {
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
   RangeEventList() {
     events_.reserve(kReservedCapacity);
   }
 
-  template<typename... Args>
+  template <typename... Args>
   void record(Args&&... args) {
     std::lock_guard<std::mutex> guard(mutex_);
     events_.emplace_back(std::forward<Args>(args)...);
@@ -369,6 +299,7 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
@@ -392,51 +323,6 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
-std::string getNvtxStr(
-    const at::StringView& name,
-    int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes);
-
-enum class C10_API_ENUM ProfilerState {
-  Disabled = 0,
-  CPU, // CPU-only profiling
-  CUDA, // CPU + CUDA events
-  NVTX,  // only emit NVTX markers
-  KINETO, // use libkineto
-  KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
-  NUM_PROFILER_STATES, // must be the last one
-};
-
-struct TORCH_API ProfilerConfig {
-  explicit ProfilerConfig(
-      ProfilerState state,
-      bool report_input_shapes = false,
-      bool profile_memory = false,
-      bool with_stack = false,
-      bool with_flops = false,
-      bool with_modules = false)
-      : state(state),
-        report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory),
-        with_stack(with_stack),
-        with_flops(with_flops),
-        with_modules(with_modules) {}
-  ~ProfilerConfig() = default;
-  ProfilerState state;
-  bool report_input_shapes;
-  bool profile_memory;
-  bool with_stack;
-  bool with_flops;
-  bool with_modules;
-
-  // Returns IValues corresponding to ProfilerConfig struct, to be used for
-  // serialization.
-  at::IValue toIValue() const;
-
-  // Reconstructs a ProfilerConfig from IValues given by toIValue.
-  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
-};
-
 // A struct to control settings of disableProfiler options.
 struct TORCH_API ProfilerDisableOptions {
   ProfilerDisableOptions() = default;
@@ -454,19 +340,20 @@ struct TORCH_API ProfilerDisableOptions {
 
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
-TORCH_API void enableProfilerLegacy(const ProfilerConfig&);
+TORCH_API void enableProfilerLegacy(
+    const torch::profiler::impl::ProfilerConfig&);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
-TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
+TORCH_API thread_event_lists disableProfilerLegacy(
+    c10::optional<ProfilerDisableOptions> profilerDisableOptions =
+        c10::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
-// Returns if the profiler is currently enabled in the current thread.
-TORCH_API bool profilerEnabled();
-// Retrieve the thread_local ProfilerConfig.
-TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
-TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
+TORCH_API void writeProfilerEventsToStream(
+    std::ostream& out,
+    const std::vector<LegacyEvent*>& events);
 
 // Usage:
 //   {
@@ -479,16 +366,16 @@ struct TORCH_API RecordProfile {
   RecordProfile(const std::string& filename);
 
   ~RecordProfile();
-private:
+
+ private:
   void init();
   std::unique_ptr<std::ofstream> file_;
   std::ostream& out_;
   void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
-// A guard that enables the legacy profiler, taking in an optional callback to process
-// the results
-// Usage:
+// A guard that enables the legacy profiler, taking in an optional callback to
+// process the results Usage:
 // {
 //   TLSLegacyProfilerGuard g([](thread_event_lists profilerResults) {
 //     // process profilerResults
@@ -497,7 +384,7 @@ private:
 // }
 struct TORCH_API TLSLegacyProfilerGuard {
   explicit TLSLegacyProfilerGuard(
-      const ProfilerConfig& cfg,
+      const torch::profiler::impl::ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
           resultCallback = c10::nullopt,
       c10::optional<ProfilerDisableOptions> profilerDisableOptions =
@@ -509,7 +396,8 @@ struct TORCH_API TLSLegacyProfilerGuard {
   }
   ~TLSLegacyProfilerGuard() {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
+    thread_event_lists event_lists =
+        disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
         (*cb_)(event_lists);
@@ -524,75 +412,6 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct TORCH_API FileLineFunc {
-  std::string filename;
-  size_t line;
-  std::string funcname;
-};
-TORCH_API std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
-TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
-TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
-
-struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit ProfilerThreadLocalState(const ProfilerConfig& config)
-      : config_(config), remoteProfiledEvents_{c10::nullopt} {}
-  ~ProfilerThreadLocalState() override = default;
-
-  const ProfilerConfig& config() const;
-
-  thread_event_lists consolidate();
-
-  void mark(std::string name, bool include_cuda = true);
-
-  void setOrAddRemoteProfiledEvents(
-      std::vector<LegacyEvent>&& remoteProfiledEvents);
-
-  void pushRange(
-      const at::RecordFunction& fn,
-      const bool record_cuda,
-      std::vector<std::vector<int64_t>>&& shapes = {});
-
-  void popRange(const at::RecordFunction& fn, const bool record_cuda);
-
-  void setCallbackHandle(at::CallbackHandle handle) {
-    handle_ = handle;
-  }
-
-  at::CallbackHandle callbackHandle() const {
-    return handle_;
-  }
-
-  bool hasCallbackHandle() {
-    return handle_ > 0;
-  }
-
-  void reportMemoryUsage(
-      void* /* unused */,
-      int64_t alloc_size,
-      int64_t /* total_allocated, unused for legacy */,
-      int64_t /* total_reserved, unused for legacy */,
-      c10::Device device) override;
-
-  bool memoryProfilingEnabled() const override;
-
- protected:
-  RangeEventList& getEventList(int64_t thread_id = -1);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::mutex state_mutex_;
-  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
-      // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-      event_lists_map_;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  at::CallbackHandle handle_ = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
-};
-
-
 } // namespace profiler
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

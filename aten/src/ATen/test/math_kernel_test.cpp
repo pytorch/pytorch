@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -111,16 +112,6 @@ TEST(MathKernelTest, MishBackward) {
   auto out = at::native::mish_backward(grad_output, input);
   auto math_out = at::native::math_mish_backward(grad_output, input);
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
-}
-
-TEST(MathKernelTest, NarrowCopy)  {
-  auto x = rand({5, 8, 7});
-  for (int64_t dim = 0; dim < 3; ++dim) {
-    const int64_t start = 1, length = 4;
-    auto y_ref = x.narrow(dim, start, length);
-    auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
-    ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
-  }
 }
 
 TEST(MathKernelTest, Bmm)  {

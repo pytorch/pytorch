@@ -2,14 +2,57 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace at {
 namespace native {
+
+Tensor quantize_per_tensor_dynamic(
+    const Tensor& self,
+    ScalarType dtype,
+    bool reduce_range) {
+  TORCH_CHECK( (dtype == ScalarType::QInt8 || dtype == ScalarType::QUInt8 || dtype == ScalarType::Half), "dtype ", dtype, "not supported");
+  auto input_contig = self.contiguous();
+  if (dtype == ScalarType::Half) {
+    return input_contig.to(ScalarType::Half);
+  }
+  float x_min = input_contig.min().item<float>();
+  float x_max = input_contig.max().item<float>();
+
+  if (reduce_range && at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    reduce_range = false;
+  }
+
+  int qmin;
+  int qmax;
+
+  if (dtype == ScalarType::QInt8) {
+    qmin = -128;
+    qmax = 127;
+  } else {
+    // for now, this branch executes for dtype == ScalarType::QUInt8
+    // additional cases will be added when quantization support for other dtypes becomes available
+    qmin = 0;
+    qmax = 255;
+  }
+
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/qmin,
+      /*qmax=*/qmax,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
+  return at::native::quantize_per_tensor(self, q_params.scale, q_params.zero_point, dtype);
+}
 
 Tensor quantize_per_tensor(
     const Tensor& self,
@@ -54,8 +97,8 @@ Tensor quantize_per_channel(
   auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
-Tensor dequantize_cpu(const Tensor& self) {
-  TORCH_CHECK(!self.is_quantized());
+
+Tensor dequantize_cpu_or_cuda(const Tensor& self) {
   return self.to(at::kFloat);
 }
 
@@ -132,7 +175,7 @@ Tensor& set_storage_quantized_(
     IntArrayRef sizes,
     IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(storage);
+  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -289,6 +332,12 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const double ratio,
     int64_t bit_width) {
 
+  if (numel < 0 || numel > input_tensor.numel()) {
+    TORCH_CHECK(false, "numel is out of the bound of input tensor");
+  }
+
+  TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
+      " greater than input_tensor.numel() ", input_tensor.numel());
   const float* input_row = input_tensor.data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);

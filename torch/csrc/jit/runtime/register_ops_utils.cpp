@@ -20,7 +20,7 @@ void listIndex<at::Tensor>(Stack& stack) {
   auto pos =
       std::find_if(list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
+        return at::native::is_nonzero(cmp_result);
       });
 
   if (pos != list.end()) {
@@ -38,7 +38,7 @@ void listCount<at::Tensor>(Stack& stack) {
   const int64_t count =
       std::count_if(list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
+        return at::native::is_nonzero(cmp_result);
       });
   push(stack, count);
 }
@@ -69,7 +69,7 @@ void listSort<at::Tensor>(Stack& stack) {
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
         }
-        return (a.lt(b).is_nonzero()) ^ reverse;
+        return (at::native::is_nonzero(a.lt(b))) ^ reverse;
       });
 }
 
@@ -81,7 +81,7 @@ void listCopyAndSort<at::Tensor>(Stack& stack) {
       list_copied.begin(),
       list_copied.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
-        return a.lt(b).is_nonzero();
+        return at::native::is_nonzero(a.lt(b));
       });
   push(stack, list_copied);
 }
@@ -93,7 +93,7 @@ void listRemove<at::Tensor>(Stack& stack) {
 
   auto pos = std::find_if(list.begin(), list.end(), [&](const at::Tensor& b) {
     const auto cmp_result = elem.eq(b);
-    return cmp_result.is_nonzero();
+    return at::native::is_nonzero(cmp_result);
   });
 
   if (pos != list.end()) {
@@ -118,91 +118,6 @@ void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
        << " as an integral argument";
     throw std::runtime_error(ss.str());
   }
-}
-
-IValue tensorToListRecursive(
-    char* data,
-    int64_t cur_dim,
-    int64_t num_tensor_dims,
-    TypePtr ty,
-    at::ScalarType scalar_ty,
-    at::IntArrayRef sizes,
-    at::IntArrayRef strides,
-    size_t element_size) {
-  // If ty is a ListType, get the element type.
-  if (auto list_type = ty->cast<ListType>()) {
-    ty = list_type->getElementType();
-  } else {
-    // If the output type is a scalar, read and push one scalar of
-    // the right type onto the stack.
-    if (ty == IntType::get()) {
-      int64_t scalar = *(int64_t*)data;
-      return IValue(scalar);
-    } else if (ty == FloatType::get()) {
-      TORCH_INTERNAL_ASSERT(
-          scalar_ty == at::ScalarType::Float ||
-              scalar_ty == at::ScalarType::Double,
-          "Unexpected scalar type for Tensor");
-      double scalar =
-          scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
-      return IValue(scalar);
-    } else if (ty == ComplexType::get()) {
-      TORCH_INTERNAL_ASSERT(
-          scalar_ty == at::ScalarType::ComplexFloat ||
-              scalar_ty == at::ScalarType::ComplexDouble,
-          "Unexpected scalar type for Tensor");
-      c10::complex<double> scalar = scalar_ty == at::ScalarType::ComplexFloat
-          ? *(c10::complex<float>*)data
-          : *(c10::complex<double>*)data;
-      return IValue(scalar);
-    } else if (ty == BoolType::get()) {
-      bool scalar = *(bool*)data;
-      return IValue(scalar);
-    } else {
-      TORCH_CHECK(
-          false,
-          ty->repr_str(),
-          " is not one of the supported types for tolist: int, float, bool");
-    }
-  }
-
-  // Make the result list consisting of elements of type ty. Since this
-  // invocation is processing dimension cur_dim, there will be sizes[cur_dim]
-  // output elements.
-  auto result = c10::impl::GenericList(ty);
-  result.reserve(sizes[cur_dim]);
-
-  // Since ty was a list type, tensorToListRecursive needs to be called
-  // recursively on each slice of the tensor in the current dimension.
-  for (int64_t i = 0, e = sizes[cur_dim]; i < e; ++i) {
-    auto inner_result = tensorToListRecursive(
-        data,
-        cur_dim + 1,
-        num_tensor_dims,
-        ty,
-        scalar_ty,
-        sizes,
-        strides,
-        element_size);
-
-    if (inner_result.isList()) {
-      result.emplace_back(inner_result.toList());
-    } else if (inner_result.isComplexDouble()) {
-      result.emplace_back(inner_result.toComplexDouble());
-    } else if (inner_result.isDouble()) {
-      result.emplace_back(inner_result.toDouble());
-    } else if (inner_result.isInt()) {
-      result.emplace_back(inner_result.toInt());
-    } else if (inner_result.isBool()) {
-      result.emplace_back(inner_result.toBool());
-    } else {
-      TORCH_INTERNAL_ASSERT("Unknown return type for tensorToListRecursive");
-    }
-
-    data += strides[cur_dim] * element_size;
-  }
-
-  return result;
 }
 
 void checkDoubleInRange(double a) {
@@ -258,14 +173,6 @@ double degrees(double x) {
 }
 double radians(double x) {
   return x * degToRad;
-}
-
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
 }
 
 void listAppend(Stack& stack) {
@@ -384,8 +291,8 @@ void listAdd(Stack& stack) {
 }
 
 void listInplaceAdd(Stack& stack) {
-  c10::List<IValue> b = pop(stack).to<List<IValue>>();
-  c10::List<IValue> a = pop(stack).to<List<IValue>>();
+  c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   a.append(std::move(b));
   push(stack, std::move(a));
 }

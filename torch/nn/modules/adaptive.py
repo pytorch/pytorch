@@ -11,6 +11,7 @@ from . import Sequential, ModuleList, Linear
 from .module import Module
 from ..functional import log_softmax
 
+__all__ = ['AdaptiveLogSoftmaxWithLoss']
 
 _ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 
@@ -93,9 +94,9 @@ class AdaptiveLogSoftmaxWithLoss(Module):
               log likelihood loss
 
     Shape:
-        - input: :math:`(N, \texttt{in\_features})`
-        - target: :math:`(N)` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
-        - output1: :math:`(N)`
+        - input: :math:`(N, \texttt{in\_features})` or :math:`(\texttt{in\_features})`
+        - target: :math:`(N)` or :math:`()` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
+        - output1: :math:`(N)` or :math:`()`
         - output2: ``Scalar``
 
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
@@ -166,10 +167,27 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             i2h.reset_parameters()
             h2o.reset_parameters()
 
-    def forward(self, input: Tensor, target: Tensor) -> _ASMoutput:
-        if input.size(0) != target.size(0):
-            raise RuntimeError('Input and target should have the same size '
-                               'in the batch dimension.')
+    def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
+        targ_dim = target_.dim()
+
+        if targ_dim == 1:
+            if input_.size(0) != target_.size(0):
+                raise RuntimeError('Input and target should have the same size '
+                                   'in the batch dimension.')
+            if input_.dim() != 2:
+                raise RuntimeError('1D target tensor expects 2D input tensors, '
+                                   'but found inputs with size', input_.size())
+        elif targ_dim == 0:
+            if input_.dim() != 1:
+                raise RuntimeError('0D target tensor expects 1D input tensors, '
+                                   'but found inputs with size', input_.size())
+        else:
+            raise RuntimeError('0D or 1D target tensor expected, '
+                               'multi-target not supported')
+
+        is_batched = targ_dim > 0
+        input = input_ if is_batched else input_.unsqueeze(0)
+        target = target_ if is_batched else target_.unsqueeze(0)
 
         used_rows = 0
         batch_size = target.size(0)
@@ -200,7 +218,6 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 cluster_index = self.shortlist_size + i - 1
 
                 gather_inds.index_fill_(0, row_indices, cluster_index)
-
                 cluster_logprob = log_softmax(cluster_output, dim=1)
                 local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
                 output.index_copy_(0, row_indices, local_logprob.squeeze(1))
@@ -218,6 +235,9 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         head_logprob = log_softmax(head_output, dim=1)
         output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
         loss = (-output).mean()
+
+        if not is_batched:
+            output = output.squeeze(0)
 
         return _ASMoutput(output, loss)
 
@@ -260,7 +280,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return self._get_full_log_prob(input, head_output)
 
     def predict(self, input: Tensor) -> Tensor:
-        r""" This is equivalent to `self.log_pob(input).argmax(dim=1)`,
+        r""" This is equivalent to `self.log_prob(input).argmax(dim=1)`,
         but is more efficient in some cases.
 
         Args:

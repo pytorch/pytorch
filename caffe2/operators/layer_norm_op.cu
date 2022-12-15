@@ -77,12 +77,11 @@ __global__ void LayerNormForwardCUDAKernel(
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
-    const int M,
     const int N,
-    const T* dYxX,
-    const T* dY,
-    T* ds,
-    T* db) {
+    const T *const dYxX,
+    const T *const dY,
+    T *const ds,
+    T *const db) {
   __shared__ typename BlockReduce<T>::TempStorage ds_storage;
   __shared__ typename BlockReduce<T>::TempStorage db_storage;
   const int i = blockIdx.x;
@@ -108,13 +107,12 @@ __global__ void ComputeInternalGradientsCUDAKernel(
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
-    const int M,
     const int N,
-    const T* dYxX,
-    const T* dY,
-    const T* gamma,
-    T* ds,
-    T* db) {
+    const T *const dYxX,
+    const T *const dY,
+    const T *const gamma,
+    T *const ds,
+    T *const db) {
   __shared__ typename BlockReduce<T>::TempStorage ds_storage;
   __shared__ typename BlockReduce<T>::TempStorage db_storage;
   const int i = blockIdx.x;
@@ -269,12 +267,12 @@ void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
   if (gamma != nullptr) {
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-            M, N, dYxX, dY, gamma, ds, db);
+            N, dYxX, dY, gamma, ds, db);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-            M, N, dYxX, dY, ds, db);
+            N, dYxX, dY, ds, db);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }

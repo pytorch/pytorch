@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
@@ -9,7 +10,10 @@ namespace {
 
 using namespace api::utils;
 
-Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+Tensor pad2d(
+    const Tensor& self_arg,
+    IntArrayRef padding,
+    const api::ShaderSource& shader_descriptor) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
@@ -35,7 +39,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   const vTensor& v_self = convert(self);
 
   c10::SmallVector<int64_t, 4> output_size(input_dim);
-  for (size_t d = 0; d < input_dim; ++d) {
+  for (const auto d : c10::irange(input_dim)) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     } else if (d == input_dim - 2) {
@@ -51,58 +55,62 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
       v_self.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        uvec4 padding;
-      } block{
-          v_output.extents(),
-          0u,
-          {
-            safe_downcast<uint32_t>(pad_left),
-            safe_downcast<uint32_t>(pad_right),
-            safe_downcast<uint32_t>(pad_top),
-            safe_downcast<uint32_t>(pad_bottom)
-          },
-      };
+  const struct Block final {
+    uvec3 extents;
+    uint32_t _;
+    uvec4 padding;
+  } block{
+      v_output.extents(),
+      0u,
+      {safe_downcast<uint32_t>(pad_left),
+       safe_downcast<uint32_t>(pad_right),
+       safe_downcast<uint32_t>(pad_top),
+       safe_downcast<uint32_t>(pad_bottom)},
+  };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(reflection_pad2d),
-          v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(command_buffer, vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_self.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
+}
+
+Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+  return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d));
+}
+
+Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
+  return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d));
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::reflection_pad2d"),
+      TORCH_FN(reflection_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::replication_pad2d"),
+      TORCH_FN(replication_pad2d));
 }
 
 #endif /* USE_VULKAN_API */

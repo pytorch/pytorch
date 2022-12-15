@@ -128,14 +128,28 @@ struct q8gemm_prepackA_sparse_dq_context {
   size_t a_packed_stride;
   size_t log2_mr;
   size_t log2_row_block_size;
-  const uint32_t* kernel_col_indices;
-  const uint32_t* kernel_row_values;
+  union {
+    const uint32_t* kernel_col_indices_w32;
+    const uint16_t* kernel_col_indices_w16;
+    const uint8_t* kernel_col_indices_w8;
+  };
+  union {
+    const uint32_t* kernel_row_values_w32;
+    const uint16_t* kernel_row_values_w16;
+    const uint8_t* kernel_row_values_w8;
+  };
+  enum pytorch_qnnp_sparse_matrix_indices_dtype kernel_indices_dtype;
   const uint8_t* kernel_values;
   const float* bias;
   float* c;  // can be float or uint8)t
   size_t c_stride;
   struct pytorch_qnnp_conv_dynamic_quantization_params quantization_params;
-  const pytorch_q8gemm_dq_sparse_packedA_ukernel_function ukernel;
+  union {
+    // Not const because assigned after context is initialized
+    pytorch_q8gemm_dq_sparse_packedA_w32_ukernel_function ukernel_w32;
+    pytorch_q8gemm_dq_sparse_packedA_w16_ukernel_function ukernel_w16;
+    pytorch_q8gemm_dq_sparse_packedA_w8_ukernel_function ukernel_w8;
+  };
   const pytorch_q8gemm_sparse_packA_ukernel_function prepack_ukernel;
 };
 
@@ -172,26 +186,66 @@ static void compute_q8gemm_prepacked_sparse_dq(
     size_t pixel_range,
     size_t mr_block_size,
     size_t nr_block_size) {
-  const uint8_t* restrict a_packed = context->a_packed;
   const size_t mr_packed_block_start =
     ((mr_block_start >> context->log2_mr) * context->a_packed_stride);
-  float* restrict c = (float*)context->c;
+  const uint8_t* restrict a_packed = context->a_packed + mr_packed_block_start;
   const size_t c_stride = context->c_stride;
+  float* restrict c =
+      ((float*)context->c) + mr_block_start * c_stride + nr_block_start;
+  const size_t kernel_row_values_shift =
+      nr_block_start >> context->log2_row_block_size;
+  const float* bias = context->bias + nr_block_start;
+  const size_t output_channel_index = nr_block_start;
 
-  size_t output_channel_index = nr_block_start;
-  context->ukernel(
-      mr_block_size,
-      nr_block_size,
-      a_packed + mr_packed_block_start,
-      context->kernel_values,
-      context->kernel_row_values +
-        (nr_block_start >> context->log2_row_block_size),
-      context->kernel_col_indices,
-      context->bias + nr_block_start,
-      c + mr_block_start * c_stride + nr_block_start,
-      c_stride,
-      output_channel_index,
-      &context->quantization_params);
+  switch (context->kernel_indices_dtype) {
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t:
+      context->ukernel_w32(
+          mr_block_size,
+          nr_block_size,
+          a_packed,
+          context->kernel_values,
+          context->kernel_row_values_w32 + kernel_row_values_shift,
+          context->kernel_col_indices_w32,
+          bias,
+          c,
+          c_stride,
+          output_channel_index,
+          &context->quantization_params);
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t:
+      context->ukernel_w16(
+          mr_block_size,
+          nr_block_size,
+          a_packed,
+          context->kernel_values,
+          context->kernel_row_values_w16 + kernel_row_values_shift,
+          context->kernel_col_indices_w16,
+          bias,
+          c,
+          c_stride,
+          output_channel_index,
+          &context->quantization_params);
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t:
+      context->ukernel_w8(
+          mr_block_size,
+          nr_block_size,
+          a_packed,
+          context->kernel_values,
+          context->kernel_row_values_w8 + kernel_row_values_shift,
+          context->kernel_col_indices_w8,
+          bias,
+          c,
+          c_stride,
+          output_channel_index,
+          &context->quantization_params);
+      break;
+    case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
+      pytorch_qnnp_log_error(
+          "Invalid indices dtype specified for "
+          "operator-run compute_q8gemm_prepacked_sparse_dq");
+      assert(false);
+  }
 }
 
 struct q8sum_rows_context {
@@ -345,7 +399,7 @@ static void compute_q8conv(
       &context->quantization_params);
 }
 
-struct q8dwconv_context {
+struct q8dwconv2d_context {
   size_t groups;
   size_t group_stride;
   const uint8_t** indirection_buffer;
@@ -359,13 +413,30 @@ struct q8dwconv_context {
   size_t output_col_increment;
   union pytorch_qnnp_conv_quantization_params quantization_params;
   union {
-    const pytorch_q8dwconv_up_ukernel_function unipass_ukernel;
-    const pytorch_q8dwconv_mp_ukernel_function multipass_ukernel;
+    const pytorch_q8dwconv2d_up_ukernel_function unipass_ukernel;
+    const pytorch_q8dwconv2d_mp_ukernel_function multipass_ukernel;
   };
 };
 
-static void compute_dwconv_unipass(
-    const struct q8dwconv_context context[RESTRICT_STATIC 1],
+struct q8dwconv3d_context {
+  size_t groups;
+  size_t group_stride;
+  const uint8_t** indirection_buffer;
+  size_t indirection_buffer_slice_stride;
+  size_t indirection_buffer_row_stride;
+  size_t indirection_buffer_col_stride;
+  const void* packed_weights;
+  uint8_t* output;
+  size_t output_depth;
+  size_t output_height;
+  size_t output_width;
+  size_t output_slice_stride;
+  union pytorch_qnnp_conv_quantization_params quantization_params;
+  const pytorch_q8dwconv3d_mp_ukernel_function multipass_ukernel;
+};
+
+static void compute_dwconv2d_unipass(
+    const struct q8dwconv2d_context context[RESTRICT_STATIC 1],
     size_t image,
     size_t output_y) {
   const size_t output_height = context->output_height;
@@ -384,8 +455,8 @@ static void compute_dwconv_unipass(
       &context->quantization_params);
 }
 
-static void compute_dwconv_multiipass(
-    const struct q8dwconv_context context[RESTRICT_STATIC 1],
+static void compute_dwconv2d_multiipass(
+    const struct q8dwconv2d_context context[RESTRICT_STATIC 1],
     size_t image,
     size_t output_y) {
   const size_t output_height = context->output_height;
@@ -408,6 +479,40 @@ static void compute_dwconv_multiipass(
           (image * output_height + output_y) * context->output_row_stride,
       context->indirection_buffer_col_stride,
       context->output_col_increment,
+      &context->quantization_params);
+
+#ifdef _MSC_VER
+  _freea(multipass_acc);
+#endif
+}
+
+static void compute_dwconv3d_multiipass(
+    const struct q8dwconv3d_context context[1],
+    size_t image,
+    size_t output_z) {
+  const size_t output_depth = context->output_depth;
+  PYTORCH_QNNP_ALIGN(16)
+#ifdef _MSC_VER
+  int32_t* multipass_acc =
+      (int32_t*)_malloca(sizeof(int32_t) * context->group_stride);
+#else
+  int32_t multipass_acc[context->group_stride];
+#endif
+
+  context->multipass_ukernel(
+      context->groups,
+      context->output_height,
+      context->output_width,
+      context->indirection_buffer +
+          (image * output_depth + output_z) *
+              context->indirection_buffer_slice_stride,
+      context->packed_weights,
+      multipass_acc,
+      context->output +
+          (image * output_depth + output_z) * context->output_slice_stride,
+      context->indirection_buffer_row_stride,
+      context->indirection_buffer_col_stride,
+      0,
       &context->quantization_params);
 
 #ifdef _MSC_VER
@@ -790,23 +895,25 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
     case pytorch_qnnp_ukernel_type_dwconv: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
+      const size_t kernel_depth = op->kernel_depth;
       const size_t kernel_height = op->kernel_height;
       const size_t kernel_width = op->kernel_width;
-      const size_t kernel_size = kernel_height * kernel_width;
-      const size_t width_step =
-          op->dilation_width == 1 ? op->stride_width : op->kernel_width;
+      const size_t kernel_size = kernel_depth * kernel_height * kernel_width;
+      const size_t output_depth = op->output_depth;
       const size_t output_height = op->output_height;
       const size_t output_width = op->output_width;
 
+      const size_t step_height = op->step_height;
+      const size_t step_width = op->step_width;
+
       switch (kernel_size) {
         case 9: {
-          struct q8dwconv_context context = {
+          struct q8dwconv2d_context context = {
               .groups = groups,
               .indirection_buffer = (const uint8_t**)op->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size + (output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = op->packed_weights,
               .output = op->output,
               .output_height = output_height,
@@ -815,28 +922,26 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .unipass_ukernel =
-                  op->per_channel ?
-                      pytorch_qnnp_params.q8dw9.updw_per_channel :
-                      pytorch_qnnp_params.q8dw9.updw,
+              .unipass_ukernel = op->per_channel
+                  ? pytorch_qnnp_params.q8dw9.updw_per_channel
+                  : pytorch_qnnp_params.q8dw9.updw,
           };
           pthreadpool_compute_2d(
               threadpool,
-              (pthreadpool_function_2d_t)compute_dwconv_unipass,
+              (pthreadpool_function_2d_t)compute_dwconv2d_unipass,
               &context,
               batch_size,
               output_height);
           break;
         }
         case 25: {
-          struct q8dwconv_context context = {
+          struct q8dwconv2d_context context = {
               .groups = groups,
               .group_stride = op->group_stride,
               .indirection_buffer = (const uint8_t**)op->indirection_buffer,
-              .indirection_buffer_row_stride =
-                  kernel_size + (output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = op->packed_weights,
               .output = op->output,
               .output_height = output_height,
@@ -845,17 +950,43 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .multipass_ukernel =
-                  op->per_channel ?
-                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
-                      pytorch_qnnp_params.q8dw25.mpdw,
+              .multipass_ukernel = op->per_channel
+                  ? pytorch_qnnp_params.q8dw25.mpdw_per_channel
+                  : pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
-              (pthreadpool_function_2d_t)compute_dwconv_multiipass,
+              (pthreadpool_function_2d_t)compute_dwconv2d_multiipass,
               &context,
               batch_size,
               output_height);
+          break;
+        }
+        case 27: {
+          struct q8dwconv3d_context context = {
+              .groups = groups,
+              .group_stride = op->group_stride,
+              .indirection_buffer = (const uint8_t**)op->indirection_buffer,
+              .indirection_buffer_slice_stride = step_height * output_height,
+              .indirection_buffer_row_stride = step_height * sizeof(void*),
+              .indirection_buffer_col_stride =
+                  kernel_height * kernel_depth * step_width * sizeof(void*),
+              .packed_weights = op->packed_weights,
+              .output = op->output,
+              .output_depth = output_depth,
+              .output_height = output_height,
+              .output_width = output_width,
+              .output_slice_stride =
+                  output_height * output_width * op->output_pixel_stride,
+              .quantization_params = op->conv_quantization_params,
+              .multipass_ukernel = pytorch_qnnp_params.q8dw27.mpdw,
+          };
+          pthreadpool_compute_2d(
+              threadpool,
+              (pthreadpool_function_2d_t)compute_dwconv3d_multiipass,
+              &context,
+              batch_size,
+              output_depth);
           break;
         }
         default:
@@ -941,8 +1072,10 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
       const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
+      const size_t output_depth = op->output_depth;
+      const size_t output_size = (output_depth != 0 ? output_depth : 1) *
+          op->output_height * op->output_width;
 
-      const size_t output_size = op->output_height * op->output_width;
       struct q8gemm_context q8gemm_context = {
           .k = group_input_channels,
           .k_stride = k_stride,
@@ -1015,7 +1148,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t group_output_channels = op->group_output_channels;
       uint32_t mr, log2_mr, nr, kr, log2_row_block_size;
       pytorch_q8gemm_sparse_packA_ukernel_function prepack_kernel;
-      pytorch_q8gemm_dq_sparse_packedA_ukernel_function compute_kernel;
+      struct pytorch_q8gemm_sparse_parameters* pytorch_q8gemm_sparse_params =
+          NULL; // used to assign ukernel
       if (op->sparse_matrix.row_block_size == 1 &&
           op->sparse_matrix.col_block_size == 4) {
         mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.mr;
@@ -1023,9 +1157,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
         log2_row_block_size = 0;
         nr = pytorch_qnnp_params.q8gemm_sparse_c1x4.nr;
         kr = pytorch_qnnp_params.q8gemm_sparse_c1x4.kr;
-        compute_kernel =
-          pytorch_qnnp_params.q8gemm_sparse_c1x4.packedA_gemm_dq;
         prepack_kernel = pytorch_qnnp_params.q8gemm_sparse_c1x4.packA;
+        pytorch_q8gemm_sparse_params = &pytorch_qnnp_params.q8gemm_sparse_c1x4;
       } else if (op->sparse_matrix.row_block_size == 8 &&
           op->sparse_matrix.col_block_size == 1) {
         mr = pytorch_qnnp_params.q8gemm_sparse_c8x1.mr;
@@ -1033,9 +1166,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
         log2_row_block_size = 3;
         nr = pytorch_qnnp_params.q8gemm_sparse_c8x1.nr;
         kr = pytorch_qnnp_params.q8gemm_sparse_c8x1.kr;
-        compute_kernel =
-          pytorch_qnnp_params.q8gemm_sparse_c8x1.packedA_gemm_dq;
         prepack_kernel = pytorch_qnnp_params.q8gemm_sparse_c8x1.packA;
+        pytorch_q8gemm_sparse_params = &pytorch_qnnp_params.q8gemm_sparse_c8x1;
       } else {
         return pytorch_qnnp_status_invalid_parameter;
       }
@@ -1053,24 +1185,56 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       }
 
       struct q8gemm_prepackA_sparse_dq_context
-        q8gemm_prepack_sparse_dq_context = {
-          .k = group_input_channels,
-          .a = op->input,
-          .a_stride = op->input_pixel_stride,
-          .a_packed = op->prepacked_a,
-          .a_packed_stride = k_stride * mr,
-          .log2_mr = log2_mr,
-          .log2_row_block_size = log2_row_block_size,
-          .kernel_col_indices = op->sparse_matrix.col_indices,
-          .kernel_row_values = op->sparse_matrix.row_values,
-          .kernel_values = op->sparse_matrix.values,
-          .bias = (const float*)op->bias,
-          .c = (float*)op->output,
-          .c_stride = op->output_pixel_stride,
-          .quantization_params = op->dynamic_conv_quantization_params,
-          .ukernel = compute_kernel,
-          .prepack_ukernel = prepack_kernel,
-      };
+          q8gemm_prepack_sparse_dq_context = {
+              .k = group_input_channels,
+              .a = op->input,
+              .a_stride = op->input_pixel_stride,
+              .a_packed = op->prepacked_a,
+              .a_packed_stride = k_stride * mr,
+              .log2_mr = log2_mr,
+              .log2_row_block_size = log2_row_block_size,
+              .kernel_indices_dtype = op->sparse_matrix.indices_dtype,
+              .kernel_values = op->sparse_matrix.values,
+              .bias = (const float*)op->bias,
+              .c = (float*)op->output,
+              .c_stride = op->output_pixel_stride,
+              .quantization_params = op->dynamic_conv_quantization_params,
+              .prepack_ukernel = prepack_kernel,
+              // kernel_col_indices, kernel_row_values, and ukernel assigned
+              // below
+          };
+
+      switch (q8gemm_prepack_sparse_dq_context.kernel_indices_dtype) {
+        case pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t:
+          q8gemm_prepack_sparse_dq_context.kernel_col_indices_w32 =
+              op->sparse_matrix.col_indices_w32;
+          q8gemm_prepack_sparse_dq_context.kernel_row_values_w32 =
+              op->sparse_matrix.row_values_w32;
+          q8gemm_prepack_sparse_dq_context.ukernel_w32 =
+              pytorch_q8gemm_sparse_params->packedA_w32_gemm_dq;
+          break;
+        case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t:
+          q8gemm_prepack_sparse_dq_context.kernel_col_indices_w16 =
+              op->sparse_matrix.col_indices_w16;
+          q8gemm_prepack_sparse_dq_context.kernel_row_values_w16 =
+              op->sparse_matrix.row_values_w16;
+          q8gemm_prepack_sparse_dq_context.ukernel_w16 =
+              pytorch_q8gemm_sparse_params->packedA_w16_gemm_dq;
+          break;
+        case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t:
+          q8gemm_prepack_sparse_dq_context.kernel_col_indices_w8 =
+              op->sparse_matrix.col_indices_w8;
+          q8gemm_prepack_sparse_dq_context.kernel_row_values_w8 =
+              op->sparse_matrix.row_values_w8;
+          q8gemm_prepack_sparse_dq_context.ukernel_w8 =
+              pytorch_q8gemm_sparse_params->packedA_w8_gemm_dq;
+          break;
+        case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
+          pytorch_qnnp_log_error(
+              "Invalid indices dtype specified for "
+              "operator-run pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq");
+          return pytorch_qnnp_status_invalid_parameter;
+      }
 
       // This batch size is not the actual batch size of the op
       // The batch size is modified in fully-connected-sparse.c
@@ -1117,10 +1281,14 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
       const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
-
-      const size_t output_size = op->output_height * op->output_width;
-      const size_t kernel_size = op->kernel_height * op->kernel_width;
+      const size_t output_depth = op->output_depth;
+      const size_t output_size = (output_depth != 0 ? output_depth : 1) *
+          op->output_height * op->output_width;
+      const size_t kernel_depth = op->kernel_depth;
+      const size_t kernel_size = (kernel_depth != 0 ? kernel_depth : 1) *
+          op->kernel_height * op->kernel_width;
       const size_t m_stride = round_up(output_size, mr);
+
       struct q8conv_context q8conv_context = {
           .bs = batch_size,
           .ks = kernel_size,
@@ -1163,10 +1331,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t pooling_width = op->kernel_width;
       const size_t pooling_size = pooling_height * pooling_width;
 
-      const size_t width_step = min(op->stride_width, pooling_width);
       const size_t indirect_input_height_stride =
-          (pooling_size + (output_width * width_step - 1) * pooling_height) *
-          sizeof(void*);
+          op->step_height * sizeof(void*);
       const size_t output_height_stride =
           output_width * op->output_pixel_stride;
 
@@ -1188,7 +1354,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .packed_channels = (channels + (kr - 1)) & -kr,
           .zero = op->zero_pointer,
           .input_increment =
-              (pooling_height * width_step - multipass_adjustment) *
+              (pooling_height * op->step_width - multipass_adjustment) *
               sizeof(void*),
           .output_increment =
               (op->output_pixel_stride - channels) * sizeof(uint8_t),
@@ -1231,12 +1397,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t pooling_width = op->kernel_width;
       const size_t pooling_size = pooling_height * pooling_width;
 
-      const size_t width_step = op->dilation_width > 1
-          ? pooling_width
-          : min(op->stride_width, pooling_width);
       const size_t indirect_input_height_stride =
-          (pooling_size + (output_width * width_step - 1) * pooling_height) *
-          sizeof(void*);
+          op->step_height * sizeof(void*);
       const size_t output_height_stride =
           output_width * op->output_pixel_stride;
 
@@ -1256,7 +1418,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .pooling_size = pooling_size,
           .channels = channels,
           .input_increment =
-              (pooling_height * width_step - multipass_adjustment) *
+              (pooling_height * op->step_width - multipass_adjustment) *
               sizeof(void*),
           .output_increment =
               (op->output_pixel_stride - channels) * sizeof(uint8_t),

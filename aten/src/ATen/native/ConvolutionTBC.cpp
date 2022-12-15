@@ -1,6 +1,17 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <c10/util/irange.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/conv_tbc_backward_native.h>
+#include <ATen/ops/conv_tbc_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -39,7 +50,7 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
     weight_size[2],
   }, self.options());
   output.copy_(bias.expand(output.sizes()));
-  for (int k = 0; k < kw; k++) {
+  for (const auto k : c10::irange(kw)) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));
     int oShift = std::max(0, static_cast<int>(real_pad - k));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)

@@ -16,10 +16,7 @@ enum class TrainingMode {
   TRAINING, // Training mode
 };
 
-// We pin IR version instead of using onnx::IR_VERSION so that the
-// test_operators.py will be more stable. Only bump it when
-// necessary.
-constexpr size_t IR_VERSION = 7;
-constexpr const char* PRODUCER_VERSION = "1.11";
+constexpr char kOnnxNodeNameAttribute[] = "onnx_name";
+
 } // namespace onnx
 } // namespace torch

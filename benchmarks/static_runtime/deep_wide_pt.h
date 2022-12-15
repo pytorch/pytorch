@@ -60,7 +60,7 @@ struct DeepAndWideFast : torch::nn::Module {
       auto dp_unflatten = at::cpu::bmm(ad_emb_packed, user_emb_t);
       // auto dp = at::native::flatten(dp_unflatten, 1);
       auto dp = dp_unflatten.view({dp_unflatten.size(0), 1});
-      auto input = at::native::_cat_cpu({dp, wide_preproc}, 1);
+      auto input = at::cpu::cat({dp, wide_preproc}, 1);
 
       // fc1 = torch::nn::functional::linear(input, fc_w_, fc_b_);
       fc_w_t_ = torch::t(fc_w_);
@@ -103,8 +103,7 @@ struct DeepAndWideFast : torch::nn::Module {
       }
 
       // Potential optimization: call MKLDNN directly.
-      at::cpu::bmm_out(
-          ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
+      at::cpu::bmm_out(ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
 
       if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
         // in unlikely case that the input tensor changed we need to
@@ -115,7 +114,7 @@ struct DeepAndWideFast : torch::nn::Module {
 
       // Potential optimization: we can replace cat with carefully constructed
       // tensor views on the output that are passed to the _out ops above.
-      at::native::_cat_out_cpu(
+      at::cpu::cat_outf(
           {prealloc_tensors[5], prealloc_tensors[2]}, 1, prealloc_tensors[6]);
       at::cpu::addmm_out(
           prealloc_tensors[7], fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1);

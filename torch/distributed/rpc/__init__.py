@@ -1,12 +1,13 @@
 from datetime import timedelta
 import logging
+import os
 import threading
 import warnings
 from typing import Generator, Tuple
+from urllib.parse import urlparse
 
 import torch
 import torch.distributed as dist
-
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 _init_counter = 0
 _init_counter_lock = threading.Lock()
 
+__all__ = ["is_available"]
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -75,6 +77,9 @@ if is_available():
 
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
+    __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
+    __all__ = __all__ + api.__all__ + backend_registry.__all__
+
     def init_rpc(
         name,
         backend=None,
@@ -110,7 +115,7 @@ if is_available():
                 :ref:`rpc-backends` for more information and find which options
                 are available.
         """
-
+        torch._C._log_api_usage_once("torch.distributed.init_rpc")
         if backend is not None and not isinstance(
             backend, backend_registry.BackendType
         ):
@@ -152,31 +157,26 @@ if is_available():
         if backend is None:
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
-        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            raise RuntimeError(
-                "RPC was initialized with the PROCESS_GROUP backend which has "
-                "been removed and is superseded by the TENSORPIPE backend. "
-                "Please migrate to the TENSORPIPE backend. "
-                "PyTorch v1.9 was the last release that carries PROCESS_GROUP "
-                "RPC backend."
-            )
-
         if rpc_backend_options is None:
             # default construct a set of RPC backend options.
             rpc_backend_options = backend_registry.construct_rpc_backend_options(
                 backend
             )
 
-        # Rendezvous.
-        # This rendezvous state sometimes is destroyed before all processes
-        # finishing handshaking. To avoid that issue, we make it global to
-        # keep it alive.
-        global rendezvous_iterator
-        rendezvous_iterator = torch.distributed.rendezvous(
-            rpc_backend_options.init_method, rank=rank, world_size=world_size
-        )
-        store, _, _ = next(rendezvous_iterator)
-
+        # Create store, performs rendezvous for static RPC group.
+        if not world_size:
+            # If world_size is not set in construction and also not set in environment variables
+            # The store will be created for the dynamic group setting
+            store = dist._create_store_from_options(rpc_backend_options, rank)
+        else:
+            # This rendezvous state sometimes is destroyed before all processes
+            # finishing handshaking. To avoid that issue, we make it global to
+            # keep it alive.
+            global rendezvous_iterator
+            rendezvous_iterator = dist.rendezvous(
+                rpc_backend_options.init_method, rank=rank, world_size=world_size
+            )
+            store, _, _ = next(rendezvous_iterator)
         # Use same timeout as RPC.
         store.set_timeout(timedelta(seconds=rpc_backend_options.rpc_timeout))
 
@@ -204,11 +204,12 @@ if is_available():
             store: dist.Store,
             name: str,
             rank: numbers.Integral,
-            world_size: numbers.Integral,
+            # world_size can be None for a dynamic group
+            world_size: (numbers.Integral, type(None)),
             rpc_backend_options: RpcBackendOptions,
         }
         for arg, arg_type in type_mapping.items():
-            if not isinstance(arg, arg_type):
+            if not isinstance(arg, arg_type):  # type: ignore[arg-type]
                 raise RuntimeError(
                     "Argument {} must be of type {} but got type {}".format(
                         arg, arg_type, type(arg)
@@ -220,7 +221,7 @@ if is_available():
         store=None,
         name=None,
         rank=-1,
-        world_size=-1,
+        world_size=None,
         rpc_backend_options=None,
     ):
 

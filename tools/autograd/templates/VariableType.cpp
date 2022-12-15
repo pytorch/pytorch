@@ -3,7 +3,11 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/RedispatchFunctions.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <ATen/core/TorchDispatchUtils.h>
 #include <torch/library.h>
+
+#include <ATen/SparseCsrTensorUtils.h>
 
 
 // ${generated_comment}
@@ -32,6 +36,7 @@ using namespace at;
 using namespace torch::autograd::generated;
 using namespace torch::autograd::generated::details;
 
+
 namespace torch { namespace autograd {
 
 namespace VariableType {
@@ -45,15 +50,15 @@ namespace{
 }
 
 namespace {
+
+
 ${type_derived_method_definitions}
 }
 }
 
 namespace {
 
-TORCH_LIBRARY_IMPL(aten, Autograd, m) {
-  ${wrapper_registrations}
-}
+${wrapper_registrations}
 
 }
 

@@ -1,6 +1,13 @@
 #pragma once
 
-#include <ATen/Operators.h>
+#ifdef TORCH_ASSERT_NO_OPERATORS
+#error This change adds a dependency on native_functions.yaml,            \
+  meaning the file will need to be re-compiled every time an operator     \
+  is changed or added. Consider if your change would be better placed in  \
+  another file, or if a more specific header might achieve the same goal. \
+  See NOTE: [Tensor vs. TensorBase]
+#endif
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -10,7 +17,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
-#include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
@@ -18,16 +24,24 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/macros/Export.h>
+#include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <c10/core/SymInt.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+
+
+#include <ATen/MethodOperators.h>
 
 namespace c10{
 template<class T> class List;
+template<class T> class IListRef;
 }
 namespace at {
 struct Generator;
@@ -52,6 +66,7 @@ namespace at {
 class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+using ITensorList = c10::IListRef<Tensor>;
 
 using Stream = c10::Stream;
 
@@ -119,6 +134,7 @@ class TORCH_API Tensor: public TensorBase {
 
   // Aliased by Dimname overloads, so need explicit using
   using TensorBase::size;
+  using TensorBase::sym_size;
   using TensorBase::stride;
 
   /// Should be used if *this can reasonably be expected to be contiguous and
@@ -186,9 +202,15 @@ class TORCH_API Tensor: public TensorBase {
     return operator=(static_cast<TensorBase&&>(x));
   }
 
-  Tensor& operator=(Scalar v) &&;
-  Tensor& operator=(const Tensor&) &&;
-  Tensor& operator=(Tensor&&) &&;
+  Tensor& operator=(Scalar v) && {
+    return fill_(v);
+  }
+  Tensor& operator=(const Tensor &rhs) && {
+    return copy_(rhs);
+  }
+  Tensor& operator=(Tensor&& rhs) && {
+    return copy_(rhs);
+  }
 
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
@@ -220,9 +242,6 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   T item() const;
 
-  // Purposely not defined here to avoid inlining
-  void print() const;
-
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
@@ -232,22 +251,67 @@ class TORCH_API Tensor: public TensorBase {
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
-  Tensor operator~() const;
-  Tensor operator-() const;
-  Tensor& operator+=(const Tensor & other);
-  Tensor& operator+=(Scalar other);
-  Tensor& operator-=(const Tensor & other);
-  Tensor& operator-=(Scalar other);
-  Tensor& operator*=(const Tensor & other);
-  Tensor& operator*=(Scalar other);
-  Tensor& operator/=(const Tensor & other);
-  Tensor& operator/=(Scalar other);
-  Tensor& operator&=(const Tensor & other);
-  Tensor& operator|=(const Tensor & other);
-  Tensor& operator^=(const Tensor & other);
-  Tensor operator[](Scalar index) const;
-  Tensor operator[](Tensor index) const;
-  Tensor operator[](int64_t index) const;
+  Tensor operator~() const {
+    return bitwise_not();
+  }
+  Tensor operator-() const {
+    return neg();
+  }
+  Tensor& operator+=(const Tensor & other) {
+    return add_(other);
+  }
+  Tensor& operator+=(Scalar other) {
+    return add_(other);
+  }
+  Tensor& operator-=(const Tensor & other) {
+    return sub_(other);
+  }
+  Tensor& operator-=(Scalar other) {
+    return sub_(other);
+  }
+  Tensor& operator*=(const Tensor & other) {
+    return mul_(other);
+  }
+  Tensor& operator*=(Scalar other) {
+    return mul_(other);
+  }
+  Tensor& operator/=(const Tensor & other) {
+    return div_(other);
+  }
+  Tensor& operator/=(Scalar other) {
+    return div_(other);
+  }
+  Tensor& operator&=(const Tensor & other) {
+    return bitwise_and_(other);
+  }
+  Tensor& operator|=(const Tensor & other) {
+    return bitwise_or_(other);
+  }
+  Tensor& operator^=(const Tensor & other) {
+    return bitwise_xor_(other);
+  }
+  Tensor operator[](Scalar index) const {
+    if (!index.isIntegral(false)) {
+      TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
+    }
+    return this->operator[](index.toLong());
+  }
+  Tensor operator[](Tensor index) const {
+    // These properties are checked in the Scalar constructor, but we already
+    // check them here to provide more useful diagnostics for the user.
+    if (!index.defined()) {
+      TORCH_CHECK_INDEX(false, "Can only index with tensors that are defined");
+    }
+    if (index.dim() != 0) {
+      TORCH_CHECK_INDEX(false,
+                        "Can only index with tensors that are scalars (zero-dim)");
+    }
+    // The Scalar(Tensor) constructor is explicit, so we need to call it.
+    return this->operator[](index.item());
+  }
+  Tensor operator[](int64_t index) const {
+    return select(0, index);
+  }
 
   Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
@@ -280,6 +344,10 @@ class TORCH_API Tensor: public TensorBase {
 
   Tensor metal() const {
     return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+  }
+
+  Tensor meta() const {
+    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -503,9 +571,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -570,8 +638,7 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-// See Note [Avoiding Include Cycles In Static Dispatch]
-${static_dispatch_extra_headers}
+
 namespace at {
 ${tensor_method_definitions}
 } // namespace at
@@ -616,7 +683,7 @@ struct MaybeOwnedTraits<at::Tensor> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

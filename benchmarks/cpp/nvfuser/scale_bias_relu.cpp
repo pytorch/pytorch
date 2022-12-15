@@ -8,7 +8,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -135,10 +135,8 @@ static void NvFuserScheduler_SBR(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
-  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
-  auto params = toString(compile_log.pointwise_params.value());
-  auto lparams = toString(compile_log.launch_constraints.value());
+  auto params = toString(compile_log.params);
+  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(params + lparams);
   benchmark_state.SetLabel(lparams);
@@ -146,17 +144,16 @@ static void NvFuserScheduler_SBR(
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
+    clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
     benchmark_state.SetIterationTime(
         executor_instance->kernelTimeMs() / 1000.0);
-    clearL2Cache();
   }
-
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
@@ -184,7 +181,8 @@ static void Baseline_SBR(benchmark::State& benchmark_state, DataType dtype) {
   at::Tensor at_scale = at::ones(bcast_shape, options);
   at::Tensor at_bias = at::zeros(bcast_shape, options);
 
-  cudaDeviceSynchronize();
+  clearL2Cache();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -193,9 +191,9 @@ static void Baseline_SBR(benchmark::State& benchmark_state, DataType dtype) {
     auto output = at::relu(bias);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   const size_t size =
@@ -239,27 +237,25 @@ static void NvFuserScheduler_SBR_Norm(
 
   auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
   auto executor_instance = compile_log.fusion_executor;
-  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
-  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
-  auto params = toString(compile_log.pointwise_params.value());
-  auto lparams = toString(compile_log.launch_constraints.value());
+  auto params = toString(compile_log.params);
+  auto lparams = toString(compile_log.fusion_executor->lastLaunchParams());
 
   benchmark_state.SetLabel(params + lparams);
 
   fusion_executor_cache->profile(false);
   executor_instance->setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
+    clearL2Cache();
     auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
     benchmark_state.SetIterationTime(
         executor_instance->kernelTimeMs() / 1000.0);
-    clearL2Cache();
   }
 
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
@@ -290,7 +286,7 @@ static void Baseline_SBR_Norm(
   at::Tensor at_mean = at::zeros(bcast_shape, options);
   at::Tensor at_var = at::ones(bcast_shape, options);
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -302,7 +298,7 @@ static void Baseline_SBR_Norm(
     auto output = at::relu(bias);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   const size_t size =
@@ -322,8 +318,8 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Float);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -334,8 +330,8 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Half);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -348,8 +344,8 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Float);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -360,8 +356,8 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Half);
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -372,8 +368,8 @@ static void Baseline_SBR_fp32(benchmark::State& benchmark_state) {
 }
 
 BENCHMARK(Baseline_SBR_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -382,8 +378,8 @@ static void Baseline_SBR_fp16(benchmark::State& benchmark_state) {
 }
 
 BENCHMARK(Baseline_SBR_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -394,8 +390,8 @@ static void Baseline_SBR_Norm_fp32(benchmark::State& benchmark_state) {
 }
 
 BENCHMARK(Baseline_SBR_Norm_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -404,7 +400,7 @@ static void Baseline_SBR_Norm_fp16(benchmark::State& benchmark_state) {
 }
 
 BENCHMARK(Baseline_SBR_Norm_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

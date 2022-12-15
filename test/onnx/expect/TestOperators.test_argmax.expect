@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::ArgMax_0"
     output: "1"
     name: "ArgMax_0"
     op_type: "ArgMax"
@@ -17,10 +17,15 @@ graph {
       i: 0
       type: INT
     }
+    attribute {
+      name: "select_last_index"
+      i: 0
+      type: INT
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::ArgMax_0"
     type {
       tensor_type {
         elem_type: 1
@@ -50,5 +55,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

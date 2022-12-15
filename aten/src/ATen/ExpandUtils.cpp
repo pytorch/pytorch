@@ -1,13 +1,20 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
+#include <ATen/ExpandBase.h>
 
 #include <c10/util/irange.h>
 
 namespace at {
+namespace internal {
+TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
+  return OptionalTensorRef(self)->expand(size);
+}
+}
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
-template <typename Container>
-Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
+template <typename Container, typename ArrayType>
+Container infer_size_impl(ArrayType a, ArrayType b) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
@@ -18,8 +25,8 @@ Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
     ptrdiff_t dimB = dimsB - 1 - offset;
-    int64_t sizeA = (dimA >= 0) ? a[dimA] : 1;
-    int64_t sizeB = (dimB >= 0) ? b[dimB] : 1;
+    auto sizeA = (dimA >= 0) ? a[dimA] : 1;
+    auto sizeB = (dimB >= 0) ? b[dimB] : 1;
 
     TORCH_CHECK(
         sizeA == sizeB || sizeA == 1 || sizeB == 1,
@@ -28,7 +35,7 @@ Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
         ") at non-singleton dimension ", i);
 
       // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
+      expandedSizes[i] = sizeA == 1 ? std::move(sizeB) : std::move(sizeA);
   }
 
   return expandedSizes;
@@ -40,7 +47,11 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
 }
 
 DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
-  return infer_size_impl<DimVector>(a, b);
+  return infer_size_impl<DimVector, IntArrayRef>(a, b);
+}
+
+SymDimVector infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b) {
+  return infer_size_impl<SymDimVector, SymIntArrayRef>(a, b);
 }
 
 template<typename Container>
@@ -197,7 +208,7 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   // compute output strides which preserves the input tensor's memory layout
   std::vector<int64_t> out_strides(ndim);
   int64_t curr_stride = 1;
-  for (size_t i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     int64_t idx = perm[i];
     out_strides[idx] = curr_stride;
     // Note: for size 0, we simply treated it as 1, it really doesn't matter here

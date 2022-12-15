@@ -74,7 +74,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATen)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
-
   BufHandle input("input", {N_, C_, H_, W_}, kFloat);
   BufHandle weight("weight", {C_}, kFloat);
   BufHandle bias("bias", {C_}, kFloat);
@@ -83,10 +82,8 @@ BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;
-  Tensor output = Compute(
-      "output",
-      {{N_, "N"}, {C_, "C"}, {H_, "H"}, {W_, "W"}},
-      [&](axis n, axis c, axis h, axis w) {
+  Tensor output =
+      Compute("output", {N_, C_, H_, W_}, [&](axis n, axis c, axis h, axis w) {
         // Compute affine terms.
         auto inv_var = FloatImm::make(1.0f) / sqrt(var.load(c) + eps);
         auto weight_v = weight.load(c);
@@ -136,7 +133,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATenRelu)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
-
   BufHandle input("input", {N_, C_, H_, W_}, kFloat);
   BufHandle weight("weight", {C_}, kFloat);
   BufHandle bias("bias", {C_}, kFloat);
@@ -145,10 +141,8 @@ BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
   VarHandle eps("eps", kFloat);
 
   using axis = const VarHandle&;
-  Tensor output = Compute(
-      "output",
-      {{N_, "N"}, {C_, "C"}, {H_, "H"}, {W_, "W"}},
-      [&](axis n, axis c, axis h, axis w) {
+  Tensor output =
+      Compute("output", {N_, C_, H_, W_}, [&](axis n, axis c, axis h, axis w) {
         // Compute affine terms.
         auto inv_var = FloatImm::make(1.0f) / sqrt(var.load(c) + eps);
         auto weight_v = weight.load(c);

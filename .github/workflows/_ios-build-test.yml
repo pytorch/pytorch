@@ -1,0 +1,161 @@
+name: ios-build-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      ios-platform:
+        required: true
+        type: string
+        description: Which iOS platform to build for.
+      ios-arch:
+        required: true
+        type: string
+        description: Which iOS arch to build for.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+  IOS_PLATFORM: ${{ inputs.ios-platform }}
+  IOS_ARCH: ${{ inputs.ios-arch }}
+
+jobs:
+  build:
+    runs-on: macos-12
+    timeout-minutes: 240
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Populate CI build options
+        run: |
+          # Most builds use the lite interpreter, if certain builds shouldn't
+          # build the lite interpreter this env variable should get over-written
+          # in the following case statement
+          echo "BUILD_LITE_INTERPRETER=1" >> "${GITHUB_ENV}"
+
+          case ${BUILD_ENVIRONMENT} in
+            *metal*)
+              echo "USE_PYTORCH_METAL=1" >> "${GITHUB_ENV}"
+              ;;
+            *full_jit*)
+              echo "BUILD_LITE_INTERPRETER=0" >> "${GITHUB_ENV}"
+              ;;
+            *custom*)
+              echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/mobilenetv2.yaml" >> "${GITHUB_ENV}"
+              ;;
+            *coreml*)
+              echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
+              ;;
+          esac
+
+      - name: Install brew dependencies
+        run: |
+          # Install dependencies
+          brew install libtool
+
+      - name: Install conda and dependencies
+        run: |
+          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
+          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+          chmod +x "${RUNNER_TEMP}/conda.sh"
+          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
+          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          conda install -y \
+            blas=1.0 \
+            cffi=1.15.1 \
+            cmake=3.22.1 \
+            mkl=2022.1.0 \
+            mkl-include=2022.1.0 \
+            ninja=1.10.2 \
+            numpy=1.23.3 \
+            pyyaml=6.0 \
+            requests=2.28.1 \
+            setuptools=63.4.1 \
+            typing_extensions=4.3.0
+
+      - name: Setup Fastlane
+        run: |
+          set -x
+          cd ios/TestApp
+          # install fastlane
+          sudo gem install bundler && bundle install
+          bundle update fastlane
+
+      - name: Build PyTorch Mobile Runtime
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          export TCLLIBPATH="/usr/local/lib"
+          python -VV
+          export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
+          scripts/build_ios.sh
+
+      - name: Build TestApp
+        if: inputs.ios-platform == 'SIMULATOR'
+        timeout-minutes: 15
+        run: |
+          # run the ruby build script
+          if ! [ -x "$(command -v xcodebuild)" ]; then
+            echo 'Error: xcodebuild is not installed.'
+            exit 1
+          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
+
+      - name: Run Simulator Tests
+        if: inputs.ios-platform == 'SIMULATOR'
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          # use the pytorch nightly build to generate models
+          pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+          # generate models for differnet backends
+          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          mkdir -p ../models
+          if [ "${USE_COREML_DELEGATE}" == 1 ]; then
+            pip install coremltools==5.0b5 protobuf==3.20.1
+            pip install six==1.16.0
+            python coreml_backend.py
+          else
+            cd "${GITHUB_WORKSPACE}"
+            python test/mobile/model_test/gen_test_model.py ios-test
+          fi
+          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+            echo "Setting up the TestApp for LiteInterpreter"
+            ruby setup.rb --lite 1
+          else
+            echo "Setting up the TestApp for Full JIT"
+            ruby setup.rb
+          fi
+          cd "${GITHUB_WORKSPACE}/ios/TestApp"
+          # instruments -s -devices
+          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+            if [ "${USE_COREML_DELEGATE}" == 1 ]; then
+              bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+            else
+              bundle exec fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
+            fi
+          else
+            bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+          fi
+
+      - name: Dump Simulator Tests On a Failure
+        if: |
+          failure() && inputs.ios-platform == 'SIMULATOR'
+        run: |
+          echo "Simulator Tests Logs:"
+          cat /Users/runner/Library/Logs/scan/*.log

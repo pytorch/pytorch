@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
-from tools.codegen.gen import parse_native_yaml, FileManager
-import tools.codegen.model as model
+from torchgen.gen import parse_native_yaml, FileManager
+import torchgen.model as model
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())
@@ -12,8 +12,8 @@ def deindent(code: str) -> str:
     return '\n'.join(lines)
 
 
-def gen_external(native_functions_path, external_path):
-    native_functions = parse_native_yaml(native_functions_path)
+def gen_external(native_functions_path, tags_path, external_path):
+    native_functions = parse_native_yaml(native_functions_path, tags_path)
     func_decls = []
     func_registrations = []
     for func in native_functions:
@@ -53,11 +53,12 @@ void nnc_aten_{name}(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {{
   std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   at::Tensor& r = tensors[0];
   {nl.join(tensor_decls)}
   try {{
@@ -82,11 +83,14 @@ def main() -> None:
     parser.add_argument('--native_functions',
                         help='path to native_functions.yaml',
                         default='../../../../aten/src/ATen/native/native_functions.yaml')
+    parser.add_argument('--tags',
+                        help='path to tags.yaml',
+                        default='../../../../aten/src/ATen/native/tags.yaml')
     parser.add_argument('--template_path',
                         help='path to external_functions_codegen_template.cpp',
                         default='../../../../tools/jit/templates/external_functions_codegen_template.cpp')
     args = parser.parse_args()
-    gen_external(args.native_functions, args.template_path)
+    gen_external(args.native_functions, args.tags, args.template_path)
 
 if __name__ == '__main__':
     main()

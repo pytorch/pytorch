@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include "TestUtils.hpp"
 
 #include <gtest/gtest.h>
@@ -33,6 +33,12 @@ inline void check(
   auto tmp = store.get(key);
   auto actual = std::string((const char*)tmp.data(), tmp.size());
   EXPECT_EQ(actual, expected);
+}
+
+inline void deleteKey(
+    Store& store,
+    const std::string& key) {
+  store.deleteKey(key);
 }
 
 } // namespace test

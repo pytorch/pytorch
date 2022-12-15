@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import os
 import sys
 from contextlib import closing

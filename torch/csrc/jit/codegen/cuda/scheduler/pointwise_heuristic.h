@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
 
 #include <sstream>
 
@@ -9,11 +9,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Parameters the Reduction Heuristic Generates to describe the optimial
-// schedule. Warning: equal operator is intended for use in caching the kernel
-// associated with these reduction parameters. It does not check if the launch
-// parameters are equivelent!
-class PointwiseParams {
+// Parameters of the pointwise heuristic to describe the optimial schedule.
+// Warning: equal operator is intended for use in caching the kernel associated
+// with these pointwise parameters. It does not check if the launch parameters
+// are equivelent!
+class PointwiseParams : public HeuristicParams {
  public:
   // vectorize if true, otherwise unroll
   bool vectorize = false;
@@ -30,23 +30,34 @@ class PointwiseParams {
   // Split grid y dimension, if otherwise it would be too large
   bool split_grid_y_dim = false;
 
+  // For many instances having BIDx on the inner most dimension is the most
+  // performant parallel binding. However, if we're broadcasting the outer
+  // dimension with a large inner dimension, it can be more performant to bind
+  // BIDy on the inner most dimension.
+  bool flip_grid_binding = false;
+
   // Unroll or vectorization factor
-  int64_t inner_factor = 1;
+  size_t unroll_factor = 1;
 
-  std::string tag = "";
-
-  LaunchParams lparams;
+  using HeuristicParams::HeuristicParams;
 
   // Warning: Does not check launch parameters!
-  bool operator==(const PointwiseParams& other) const {
+  bool sameAs(
+      const std::shared_ptr<HeuristicParams>& other_base) const override {
+    auto other_casted = std::dynamic_pointer_cast<PointwiseParams>(other_base);
+    if (other_casted == nullptr) {
+      return false;
+    }
+    const PointwiseParams& other = *other_casted;
     bool attr_equal = other.vectorize == vectorize &&
         other.break_point == break_point && other.split_block == split_block &&
         other.split_grid_y_dim == split_grid_y_dim &&
-        other.inner_factor == inner_factor;
+        other.unroll_factor == unroll_factor &&
+        other.flip_grid_binding == flip_grid_binding;
     return attr_equal;
   }
 
-  std::string toString() const {
+  std::string toString() const override {
     std::stringstream ss;
     ss << "\n===== Pointwise Parameters ========\n"
        << (tag == "" ? "" : "Tag: ") << tag << " Pointwise Characteristics:\n"
@@ -62,28 +73,33 @@ class PointwiseParams {
         ss << "  Split y grid dim\n";
       }
     }
-    if (inner_factor > 1) {
+    if (unroll_factor > 1) {
       if (vectorize) {
-        ss << "Vectorize, Factor: " << inner_factor << "\n";
+        ss << "Vectorize, Factor: " << unroll_factor << "\n";
       } else {
-        ss << "Unroll, Factor: " << inner_factor << "\n";
+        ss << "Unroll, Factor: " << unroll_factor << "\n";
       }
+    }
+    if (flip_grid_binding) {
+      ss << "Flip BIDx/BIDy bindings\n";
     }
     ss << "====================================\n";
     return ss.str();
   }
-};
 
-// Warning: Hash is not based on launch parameters!
-class PointwiseParamsHash {
- public:
-  size_t operator()(const PointwiseParams& pp) const {
-    size_t attr_hash = static_cast<size_t>(pp.vectorize) ^
-        static_cast<size_t>(pp.break_point) << 4 ^
-        static_cast<size_t>(pp.split_block) << 5 ^
-        static_cast<size_t>(pp.split_grid_y_dim) << 6 ^
-        static_cast<size_t>(pp.inner_factor) << 9;
+  // Warning: Hash is not based on launch parameters!
+  size_t hash() const override {
+    size_t attr_hash = static_cast<size_t>(vectorize) ^
+        static_cast<size_t>(break_point) << 4 ^
+        static_cast<size_t>(split_block) << 5 ^
+        static_cast<size_t>(split_grid_y_dim) << 6 ^
+        static_cast<size_t>(unroll_factor) << 9 ^
+        static_cast<size_t>(flip_grid_binding) << 10;
     return attr_hash;
+  }
+
+  std::shared_ptr<HeuristicParams> clone() const override {
+    return std::make_shared<PointwiseParams>(*this);
   }
 };
 

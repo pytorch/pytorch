@@ -50,7 +50,7 @@ class SumRangeReducerGradient {
       const T* /*data_out*/, // unused
       Context* context) {
     // do we have some op that does it smartly with minimum number of memcpy?
-    for (int64_t i = 0; i < blocks; ++i) {
+    for (const auto i : c10::irange(blocks)) {
       context->template CopySameDevice<T>(
           block_size, segment_grad, data_grad + block_size * i);
     }
@@ -83,13 +83,13 @@ class LogSumExpRangeReducer<T, CPUContext> {
       const T* in,
       T* out,
       CPUContext* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       T max_value = std::numeric_limits<T>::lowest();
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         max_value = std::max(max_value, in[i * block_size + j]);
       }
       T scaled_exp_sum = 0;
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         scaled_exp_sum += std::exp(in[i * block_size + j] - max_value);
       }
       *(out++) = std::log(scaled_exp_sum) + max_value;
@@ -109,10 +109,10 @@ class LogSumExpRangeReducerGradient {
       const T* data_in, // I
       const T* data_out, // O
       Context* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       const T out_grad = *(segment_grad++);
       const T offset = *(data_out++);
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         auto idx = i * block_size + j;
         data_grad[idx] = out_grad * std::exp(data_in[idx] - offset);
       }
@@ -145,13 +145,13 @@ class LogMeanExpRangeReducer<T, CPUContext> {
       const T* in,
       T* out,
       CPUContext* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       T max_value = std::numeric_limits<T>::lowest();
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         max_value = std::max(max_value, in[i * block_size + j]);
       }
       T scaled_exp_sum = 0;
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         scaled_exp_sum += std::exp(in[i * block_size + j] - max_value);
       }
       scaled_exp_sum /= blocks;
@@ -171,10 +171,10 @@ class LogMeanExpRangeReducerGradient {
       const T* data_in, // I
       const T* data_out, // O
       Context* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       const T out_grad = *(segment_grad++);
       const T offset = *(data_out++);
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         auto idx = i * block_size + j;
         data_grad[idx] = out_grad * std::exp(data_in[idx] - offset) / blocks;
       }
@@ -207,9 +207,9 @@ class MeanRangeReducer<T, CPUContext> {
       const T* in,
       T* out,
       CPUContext* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       T avg_value = 0;
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         avg_value += in[i * block_size + j] / blocks;
       }
       *(out++) = avg_value;
@@ -229,9 +229,9 @@ class MeanRangeReducerGradient {
       const T* /*data_out*/, // O
       Context* /*context*/) {
     const auto in_grad = 1.0 / blocks;
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       const T out_grad = *(segment_grad++);
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         auto idx = i * block_size + j;
         data_grad[idx] = out_grad * in_grad;
       }
@@ -266,9 +266,9 @@ class MaxRangeReducer<T, CPUContext> {
       const T* in,
       T* out,
       CPUContext* /*context*/) {
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       T max_value = std::numeric_limits<T>::lowest();
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         max_value = std::max(max_value, in[i * block_size + j]);
       }
       *(out++) = max_value;
@@ -289,10 +289,10 @@ class MaxRangeReducerGradient {
       Context* /*context*/) {
     std::memset(
         static_cast<void*>(data_grad), 0, blocks * block_size * sizeof(T));
-    for (int j = 0; j < block_size; ++j) {
+    for (const auto j : c10::irange(block_size)) {
       const T out_grad = *(segment_grad++);
       const T out = data_out[j];
-      for (int i = 0; i < blocks; ++i) {
+      for (const auto i : c10::irange(blocks)) {
         auto idx = i * block_size + j;
         if (out == data_in[idx]) {
           data_grad[idx] = out_grad;
@@ -343,7 +343,7 @@ class BaseReducer {
     }
 
     void observeInput(int input, const Tensor& value, int skip_dims) {
-      DCHECK_EQ(0, input);
+      TORCH_DCHECK_EQ(0, input);
       auto dims = value.sizes();
       computeMeta(dims, skip_dims);
     }
@@ -813,7 +813,7 @@ class MaxReducerGradient : public BaseReducerGradient {
       int64_t /*offset*/,
       Context* /*context*/,
       const int /*length*/) {
-    for (int64_t i = 0; i < meta.block_size; ++i) {
+    for (const auto i : c10::irange(meta.block_size)) {
       data_grad[i] = data[i] == forward_output[i] ? s_grad_[i] : 0;
     }
   }

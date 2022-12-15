@@ -1,6 +1,7 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Type.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -120,7 +121,7 @@ c10::optional<FrameInformation> parse_frame_information(
   // `<object-file>(<mangled-function-name>+<offset-into-function>)
   // [<return-address>]`
 
-  auto function_name_start = frame_string.find("(");
+  auto function_name_start = frame_string.find('(');
   if (function_name_start == std::string::npos) {
     return c10::nullopt;
   }
@@ -281,8 +282,7 @@ std::string get_backtrace(
   // Toggles to true after the first skipped python frame.
   bool has_skipped_python_frames = false;
 
-  for (size_t frame_number = 0; frame_number < callstack.size();
-       ++frame_number) {
+  for (const auto frame_number : c10::irange(callstack.size())) {
     const auto frame = parse_frame_information(symbols[frame_number]);
 
     if (skip_python_frames && frame && is_python_frame(*frame)) {

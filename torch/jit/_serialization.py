@@ -146,6 +146,7 @@ def load(f, map_location=None, _extra_files=None):
         import os
         os.remove("scriptmodule.pt")
     """
+
     if isinstance(f, string_classes):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
@@ -181,3 +182,110 @@ def validate_map_location(map_location=None):
         validate_cuda_device(map_location)
 
     return map_location
+
+
+def get_ff_module():
+    try:
+        import torch._C_flatbuffer as ff
+
+        return ff
+    except ImportError:
+        print("Please include //caffe2:_C_flatbuffer as dependency.")
+        raise
+
+
+def jit_module_from_flatbuffer(f):
+    ff = get_ff_module()
+    if isinstance(f, string_classes):
+        if not os.path.exists(f):  # type: ignore[type-var]
+            raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
+
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
+        f = str(f)
+        return wrap_cpp_module(ff._load_jit_module_from_file(f))
+    else:
+        return wrap_cpp_module(ff._load_jit_module_from_bytes(f.read()))
+
+
+def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
+    r"""
+    Save an offline version of this module for use in a separate process. The
+    saved module serializes all of the methods, submodules, parameters, and
+    attributes of this module. It can be loaded into the C++ API using
+    ``torch::jit::load_jit_module_from_file(filename)`` or into the Python API with
+    :func:`torch.jit.jit_module_from_flatbuffer<torch.jit.jit_module_from_flatbuffer>`.
+
+    To be able to save a module, it must not make any calls to native Python
+    functions.  This means that all submodules must be subclasses of
+    :class:`ScriptModule` as well.
+
+    .. DANGER::
+        All modules, no matter their device, are always loaded onto the CPU
+        during loading.  This is different from :func:`torch.load`'s semantics
+        and may change in the future.
+
+    Args:
+        m: A :class:`ScriptModule` to save.
+        f: A string for file path
+
+
+    Example:
+
+    .. testcode::
+
+        import torch
+        import io
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        m = torch.jit.script(MyModule())
+
+        # Save to file
+        torch.jit.save_jit_module_to_flatbuffer(m, 'scriptmodule.ff')
+    """
+
+    extra_files = _extra_files
+    if extra_files is None:
+        extra_files = {}
+
+    ff = get_ff_module()
+    if isinstance(f, str) or isinstance(f, pathlib.Path):
+        f = str(f)
+        ff._save_jit_module(m._c, f, extra_files)
+    else:
+        s = ff._save_jit_module_to_bytes(m._c, extra_files)
+        f.write(s)
+
+
+def get_flatbuffer_module_info(path_or_file):
+    r"""Get some information regarding a model file in flatbuffer format.
+
+
+    Args:
+        path_or_file: Either str, Path or file like object (BytesIO OK).
+            If it's str or Path, we will read the file referenced by that
+            path as Bytes.
+
+    Returns:
+        A dict with metadata on what that file contains, currently looks like
+        this:
+        {
+            'bytecode_version': 4,  # int
+            'operator_version': 4,  # int
+            'function_names': {
+                '__torch__.___torch_mangle_0.Foo.forward'}, # set
+            'type_names': set(),  # set
+            'opname_to_num_args': {'aten::linear': 3} # Dict[str, int]
+        }
+    """
+    ff = get_ff_module()
+    if isinstance(path_or_file, str) or isinstance(path_or_file, pathlib.Path):
+        with open(path_or_file, "rb") as f:
+            all_bytes = f.read()
+    else:
+        all_bytes = path_or_file.read()
+    return ff._get_module_info_from_flatbuffer(all_bytes)

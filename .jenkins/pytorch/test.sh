@@ -4,11 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
-# Get fully qualified path using realpath
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+set -ex
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
@@ -19,13 +15,57 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
-# GHA has test config defined for the test job, so we need to add them.
-if [[ -n "${TEST_CONFIG}" ]]; then
-    BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
+export VALGRIND=ON
+export TORCH_INDUCTOR_INSTALL_GXX=ON
+if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # such that valgrind complains along these lines:
+  #
+  # Conditional jump or move depends on uninitialised value(s)
+  #    at 0x40303A: ~optional_base (Optional.h:281)
+  #    by 0x40303A: call (Dispatcher.h:448)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x403700: main (basic.cpp:16)
+  #  Uninitialised value was created by a stack allocation
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #
+  # The problem does not appear with gcc or newer versions of clang (we tested
+  # clang14).  So we suppress valgrind testing for clang9 specifically.
+  # You may need to suppress it for other versions of clang if they still have
+  # the bug.
+  #
+  # A minimal repro for the valgrind error is below:
+  #
+  # #include <ATen/ATen.h>
+  # #include <ATen/core/dispatch/Dispatcher.h>
+  #
+  # using namespace at;
+  #
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  #   auto op = c10::Dispatcher::singleton()
+  #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
+  #       .typed<at::_ops::as_strided::schema>();
+  #   return op.call(self, size, stride, storage_offset);
+  # }
+  #
+  # int main(int argv) {
+  #   Tensor b = empty({3, 4});
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  # }
+  export VALGRIND=OFF
 fi
+
+# Get fully qualified path using realpath
+if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
+fi
+
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+echo "Environment variables"
+env
 
 echo "Testing pytorch"
 
@@ -33,48 +73,52 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
+if [[ "$TEST_CONFIG" == 'default' ]]; then
+  export CUDA_VISIBLE_DEVICES=0
+  export HIP_VISIBLE_DEVICES=0
+fi
+
+if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HIP_VISIBLE_DEVICES=0,1
+fi
+
+if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  # Used so that only cuda specific versions of tests are generated
+if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
+if [[ "$TEST_CONFIG" == *crossref* ]]; then
+  export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
-  export PYTORCH_TEST_SKIP_NOARCH=0
-else
-  export PYTORCH_TEST_SKIP_NOARCH=1
+if [[ "$TEST_CONFIG" == *dynamo* ]]; then
+  export PYTORCH_TEST_WITH_DYNAMO=1
 fi
 
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
-  # skip expensive checks when on PR and CI_MASTER flag is not set
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
-else
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
+if [[ "$TEST_CONFIG" == *inductor* ]]; then
+  export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
+  rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 fi
 
-# --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user ninja
+  pip_install --user "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -84,9 +128,8 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    # Suppress vptr violations arising from multiple copies of pybind11
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -122,51 +165,167 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it to be loaded globally.  This isn't really a good idea though, because
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
-    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so
+
+    # TODO: get rid of the hardcoded path
+    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export PYTORCH_TEST_WITH_TSAN=1
+fi
+
+if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
-  export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# if PR_NUMBER exist, use it to grab PR contents.
-DETERMINE_FROM=$(mktemp)
-if [ -n "$PR_NUMBER" ]; then
-  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-else
-  file_diff_from_base "$DETERMINE_FROM"
-fi
-
 test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
-test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
+test_python_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
 
-test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
+}
+
+
+test_dynamo_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  python tools/dynamo/verify_dynamo.py
+  # Temporarily disable test_fx for dynamo pending the investigation on TTS
+  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  time python test/run_test.py \
+    --exclude-jit-executor \
+    --exclude-distributed-tests \
+    --exclude \
+      test_autograd \
+      test_proxy_tensor \
+      test_quantization \
+      test_public_bindings \
+      test_dataloader \
+      test_reductions \
+      test_namedtensor \
+      test_namedtuple_return_api \
+      profiler/test_profiler \
+      profiler/test_profiler_tree \
+      test_overrides \
+      test_python_dispatch \
+      test_fx \
+      test_package \
+      test_legacy_vmap \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_distributed() {
+  # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
+  # with if required # gpus aren't available
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  assert_git_not_dirty
+}
+
+test_inductor() {
+  python tools/dynamo/verify_dynamo.py
+  python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
+}
+
+test_inductor_benchmark() {
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  PARTITION_FLAGS=""
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+  fi
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --accuracy \
+    --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  # Check training with --amp
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --accuracy \
+    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+}
+
+test_inductor_benchmark_perf() {
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  PARTITION_FLAGS=""
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+  fi
+  mkdir -p "$TEST_REPORTS_DIR"
+  # Check training with --amp
+  # Not checking accuracy for perf test for now
+  # shellcheck disable=SC2086
+  python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
+    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+}
+test_inductor_huggingface() {
+  test_inductor_benchmark huggingface
+}
+
+test_inductor_huggingface_perf() {
+  test_inductor_benchmark_perf huggingface
+}
+
+test_inductor_timm_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  test_inductor_benchmark timm_models "$1"
+}
+
+test_inductor_timm_perf_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  test_inductor_benchmark_perf timm_models "$1"
+}
+
+test_inductor_torchbench() {
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+}
+
+test_inductor_torchbench_perf() {
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf torchbench
 }
 
 test_python_gloo_with_tls() {
@@ -196,10 +355,6 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo
-    fi
-
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
@@ -222,6 +377,8 @@ test_aten() {
 test_without_numpy() {
   pushd "$(dirname "${BASH_SOURCE[0]}")"
   python -c "import sys;sys.path.insert(0, 'fake_numpy');from unittest import TestCase;import torch;x=torch.randn(3,3);TestCase().assertRaises(RuntimeError, lambda: x.numpy())"
+  # Regression test for https://github.com/pytorch/pytorch/issues/66353
+  python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   popd
 }
 
@@ -259,24 +416,37 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    # Run JIT cpp tests
-    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        # Run JIT cpp tests
+        python test/cpp/jit/tests_setup.py setup
+    fi
+
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
-    python test/cpp/jit/tests_setup.py shutdown
+
+    # Run Lazy Tensor cpp tests
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
+      LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
+    else
+      "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
+    fi
+
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        python test/cpp/jit/tests_setup.py shutdown
+    fi
+
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
-        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
-      fi
+
+    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+      # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+      "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
     assert_git_not_dirty
   fi
@@ -284,6 +454,14 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+
+  # Make test_reports directory
+  # NB: the ending test_libtorch must match the current function name for the current
+  # test reporting process (in print_test_stats.py) to function as expected.
+  TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
+  mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
   # shellcheck source=test/mobile/nnc/test_aot_compile.sh
   if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
@@ -293,21 +471,21 @@ test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
 test_distributed() {
   echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
@@ -347,7 +525,7 @@ test_rpc() {
 }
 
 test_custom_backend() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
     CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     pushd test/custom_backend
@@ -364,7 +542,7 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     pushd test/custom_operator
@@ -380,7 +558,7 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing jit hooks in cpp"
     HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     pushd test/jit_hooks
@@ -406,29 +584,93 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
-test_xla() {
+build_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
+  XLA_DIR=xla
+  USE_CACHE=1
+  clone_pytorch_xla
   # shellcheck disable=SC1091
-  source "./xla/.circleci/common.sh"
-  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  source "xla/.circleci/common.sh"
+
+  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
+  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
+  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
+
+  apply_patches
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR $USE_CACHE
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }
 
-# Do NOT run this test before any other tests, like test_python_shard1, etc.
-# Because this function uninstalls the torch built from branch, and install
-# nightly version.
-test_backward_compatibility() {
+test_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "./xla/.circleci/common.sh"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  assert_git_not_dirty
+}
+
+# Do NOT run this test before any other tests, like test_python_shard, etc.
+# Because this function uninstalls the torch built from branch and installs
+# the torch built on its base commit.
+test_forward_backward_compatibility() {
   set -x
-  pushd test/backward_compatibility
+  REPO_DIR=$(pwd)
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    echo "On trunk, we should compare schemas with torch built from the parent commit"
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+  else
+    echo "On pull, we should compare schemas with torch built from the merge base"
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+  fi
+  export SHA_TO_COMPARE
+
+  # create a dummy ts model at this version
+  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+
+  # build torch at the base commit to generate a base function schema for comparison
+  git reset --hard "${SHA_TO_COMPARE}"
+  echo "::group::Installing Torch From Base Commit"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -mpip install base_dist/*.whl
+  echo "::endgroup::"
+
+  pushd test/forward_backward_compatibility
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
+
+  git reset --hard "${SHA1}"
+  # FC: verify new model can be load with old code.
+  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
+      echo "FC check failed: new model cannot be load in old code"
+      return 1
+  fi
+  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
-  rm -r venv
+  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
-  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  # BC: verify old model can be load with new code
+  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
+      echo "BC check failed: old model cannot be load in new code"
+      return 1
+  fi
   popd
   set +x
   assert_git_not_dirty
@@ -437,13 +679,23 @@ test_backward_compatibility() {
 test_bazel() {
   set -e
 
+  # bazel test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   get_bazel
 
-  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+   # Test //c10/... without Google flags and logging libraries. The
+   # :all_tests target in the subsequent Bazel invocation tests
+   # //c10/... with the Google libraries.
+  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+              --no//c10:use_gflags --no//c10:use_glog //c10/...
+
+  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
@@ -463,7 +715,7 @@ test_benchmarks() {
 
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
-  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose
   assert_git_not_dirty
 }
 
@@ -483,63 +735,127 @@ test_vec256() {
   fi
 }
 
-test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
-  assert_git_not_dirty
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
-  test_backward_compatibility
+if [[ "${TEST_CONFIG}" == *backward* ]]; then
+  test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
-elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
+elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
+  build_xla
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
+elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
-    test_torch_deploy
+elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_filelock
+  install_triton
+  test_distributed
+  # Only run RPC C++ tests on the first shard
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_rpc
   fi
+elif [[ "$TEST_CONFIG" == deploy ]]; then
+  checkout_install_torchdeploy
+  test_torch_deploy
+elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  test_python_shard1
+  install_triton
+  test_dynamo_shard 1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_python_shard2
+  install_filelock
+  install_triton
+  test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+    test_inductor_huggingface_perf
+  else
+    test_inductor_huggingface
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_inductor_timm_perf_shard $id
+  else
+    test_inductor_timm_shard $id
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    test_inductor_torchbench_perf
+  else
+    test_inductor_torchbench
+  fi
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  test_inductor
+  test_inductor_distributed
+elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_without_numpy
+  install_torchvision
+  install_triton
+  test_python_shard 1
+  test_aten
+elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_triton
+  test_python_shard 2
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+  # Handle arbitrary number of shards
+  install_triton
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
-  test_distributed
-  test_rpc
+elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
+  test_libtorch
+elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
+  # TODO: TSAN check is currently failing with 415 data race warnings. This will
+  # be addressed later, the first PR can be merged first to setup the CI jobs
+  test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
+elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
+  test_functorch
 else
   install_torchvision
+  install_triton
   install_monkeytype
   test_python
   test_aten
@@ -550,7 +866,4 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_benchmarks
-  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
-    test_python_gloo_with_tls
-  fi
 fi

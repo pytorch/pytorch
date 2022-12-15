@@ -9,7 +9,7 @@ created on that device. The selected device can be changed with a
 :any:`torch.cuda.device` context manager.
 
 However, once a tensor is allocated, you can do operations on it irrespective
-of the selected device, and the results will be always placed in on the same
+of the selected device, and the results will be always placed on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the exception of
@@ -59,7 +59,8 @@ Below you can find a small example showcasing this::
 TensorFloat-32(TF32) on Ampere devices
 --------------------------------------
 
-Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
+Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
+defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
 available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
 and batched matrix multiplies) and convolutions.
@@ -72,7 +73,8 @@ matmuls and convolutions are controlled separately, and their corresponding flag
 
 .. code:: python
 
-  # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+  # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+  # in PyTorch 1.12 and later.
   torch.backends.cuda.matmul.allow_tf32 = True
 
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
@@ -95,6 +97,7 @@ To get an idea of the precision and speed, see the example code below:
   b = b_full.float()
 
   # Do matmul at TF32 mode.
+  torch.backends.cuda.matmul.allow_tf32 = True
   ab_tf32 = a @ b  # takes 0.016s on GA100
   error = (ab_tf32 - ab_full).abs().max()  # 0.1747
   relative_error = error / mean  # 0.0022
@@ -106,7 +109,7 @@ To get an idea of the precision and speed, see the example code below:
   relative_error = error / mean  # 0.000039
 
 From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
-compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
+compared to double precision is approximately 2 orders of magnitude larger.  If full FP32 precision
 is needed, users can disable TF32 by:
 
 .. code:: python
@@ -130,6 +133,47 @@ For more information about TF32, see:
 .. _TensorFloat-32: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
 .. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
+
+.. _fp16reducedprecision:
+
+Reduced Precision Reduction in FP16 GEMMs
+-----------------------------------------
+
+fp16 GEMMs are potentially done with some intermediate reduced precision reductions (e.g., in fp16 rather than fp32). These selective reductions in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
+
+Some example benchmark data on V100:
+
+.. code::
+
+  [--------------------------- bench_gemm_transformer --------------------------]
+        [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
+  1 threads: --------------------------------------------------------------------
+        [4096, 4048, 4096]    |           1634.6        |           1639.8
+        [4096, 4056, 4096]    |           1670.8        |           1661.9
+        [4096, 4080, 4096]    |           1664.2        |           1658.3
+        [4096, 4096, 4096]    |           1639.4        |           1651.0
+        [4096, 4104, 4096]    |           1677.4        |           1674.9
+        [4096, 4128, 4096]    |           1655.7        |           1646.0
+        [4096, 4144, 4096]    |           1796.8        |           2519.6
+        [4096, 5096, 4096]    |           2094.6        |           3190.0
+        [4096, 5104, 4096]    |           2144.0        |           2663.5
+        [4096, 5112, 4096]    |           2149.1        |           2766.9
+        [4096, 5120, 4096]    |           2142.8        |           2631.0
+        [4096, 9728, 4096]    |           3875.1        |           5779.8
+        [4096, 16384, 4096]   |           6182.9        |           9656.5
+  (times in microseconds).
+
+If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+To toggle the reduced precision reduction flags in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowFP16ReductionCuBLAS(false);
 
 Asynchronous execution
 ----------------------
@@ -305,24 +349,146 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
+.. _cuda-memory-envvars:
+
+Environment variables
+^^^^^^^^^^^^^^^^^^^^^
+
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
-The behavior of caching allocator can be controlled via environment variable
+The behavior of the caching allocator can be controlled via the environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
-* ``max_split_size_mb`` prevents the allocator from splitting blocks larger
-  than this size (in MB). This can help prevent fragmentation and may allow
-  some borderline workloads to complete without running out of memory.
-  Performance cost can range from 'zero' to 'substatial' depending on
-  allocation patterns.  Default value is unlimited, i.e. all blocks can be
-  split. The :meth:`~torch.cuda.memory_stats` and
+* ``backend`` allows selecting the underlying allocator implementation.
+  Currently, valid options are ``native``, which uses PyTorch's native
+  implementation, and ``cudaMallocAsync``, which uses
+  `CUDA's built-in asynchronous allocator`_.
+  ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
+  ``backend`` applies to all devices used by the process, and can't be
+  specified on a per-device basis.
+* ``max_split_size_mb`` prevents the native allocator
+  from splitting blocks larger than this size (in MB). This can reduce
+  fragmentation and may allow some borderline workloads to complete without
+  running out of memory. Performance cost can range from 'zero' to 'substantial'
+  depending on allocation patterns.  Default value is unlimited, i.e. all blocks
+  can be split. The
+  :meth:`~torch.cuda.memory_stats` and
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+  ``max_split_size_mb`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``max_split_size_mb`` is ignored.
+* ``roundup_power2_divisions`` helps with rounding the requested allocation
+  size to nearest power-2 division and making better use of the blocks. In
+  the native CUDACachingAllocator, the sizes are rounded up in multiple
+  of blocks size of 512, so this works fine for smaller sizes. However, this
+  can be inefficient for large near-by allocations as each will go to different
+  size of blocks and re-use of those blocks are minimized. This might create
+  lots of unused blocks and will waste GPU memory capacity. This option enables
+  the rounding of allocation size to nearest power-2 division. For example, if
+  we need to round-up size of 1200 and if number of divisions is 4,
+  the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
+  will be rounded to 1280 as the nearest ceiling of power-2 division.
+  Specify a single value to apply for all allocation sizes or specify an
+  array of key value pairs to set power-2 division individually for each
+  power of two interval. For example to set 1 division for all allocations
+  under 256MB, 2 division for allocations between 256MB and 512MB, 4 divisions
+  for allocations between 512MB and 1GB and 8 divisions for any larger allocations,
+  set the knob value to: [256:1,512:2,1024:4,>:8].
+  ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
+* ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
+  for allocation requests larger than the threshold value (in MB). This can help
+  reduce the memory footprint when making large allocations that are expected to
+  be persistent or have a large lifetime.
+  ``roundup_bypass_threshold_mb`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``roundup_bypass_threshold_mb`` is ignored.
+* ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
+  avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
+  which can be unfavorable to latency-critical GPU applications (e.g., servers).
+  Upon setting this threshold (e.g., 0.8), the allocator will start reclaiming
+  GPU memory blocks if the GPU memory capacity usage exceeds the threshold (i.e.,
+  80% of the total memory allocated to the GPU application). The algorithm prefers
+  to free old & unused blocks first to avoid freeing blocks that are actively being
+  reused. The threshold value should be between greater than 0.0 and less than 1.0.
+  ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
+
+.. note::
+
+    Some stats reported by the
+    :ref:`CUDA memory management API<cuda-memory-management-api>`
+    are specific to ``backend:native``, and are not meaningful with
+    ``backend:cudaMallocAsync``.
+    See each function's docstring for details.
+
+.. _CUDA's built-in asynchronous allocator:
+    https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
+
+.. _cuda-memory-custom-allocator:
+
+Using custom memory allocators for CUDA
+---------------------------------------
+
+It is possible to define allocators as simple functions in C/C++ and compile
+them as a shared library, the code below shows a basic allocator that just
+traces all the memory operations.
+
+.. code:: C++
+
+   #include <sys/types.h>
+   #include <cuda_runtime_api.h>
+   #include <iostream>
+   // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
+   extern "C" {
+   void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+      void *ptr;
+      cudaMalloc(&ptr, size);
+      std::cout<<"alloc "<<ptr<<size<<std::endl;
+      return ptr;
+   }
+
+   void my_free(void* ptr, ssize_t size, cudaStream_t stream) {
+      std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
+      cudaFree(ptr);
+   }
+   }
+
+
+This can be used in python through the :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+The user is responsible for supplying the path to the `.so` file and the name
+of the alloc/free functions that match the signatures specified above.
+
+.. code:: python
+
+   import torch
+
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # Swap the current allocator
+   torch.cuda.memory.change_current_allocator(new_alloc)
+   # This will allocate memory in the device using the new allocator
+   b = torch.zeros(10, device='cuda')
+
+
+.. code:: python
+
+   import torch
+
+   # Do an initial memory allocator
+   b = torch.zeros(10, device='cuda')
+   # Load the allocator
+   new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+       'alloc.so', 'my_malloc', 'my_free')
+   # This will error since the current allocator was already instantiated
+   torch.cuda.memory.change_current_allocator(new_alloc)
+
 
 .. _cufft-plan-cache:
 
@@ -351,6 +517,25 @@ To control and query plan caches of a non-default device, you can index the
 object or a device index, and access one of the above attributes. E.g., to set
 the capacity of the cache for device ``1``, one can write
 ``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
+
+.. _cuda-just-in-time-compilation:
+
+Just-in-Time Compilation
+------------------------
+
+PyTorch just-in-time compiles some operations, like torch.special.zeta, when
+performed on CUDA tensors. This compilation can be time consuming
+(up to a few seconds depending on your hardware and software)
+and may occur multiple times for a single operator since many PyTorch operators actually
+select from a variety of kernels, each of which must be compiled once, depending on their input.
+This compilation occurs once per process, or just once if a kernel cache is used.
+
+By default, PyTorch creates a kernel cache in $XDG_CACHE_HOME/torch/kernels if
+XDG_CACHE_HOME is defined and $HOME/.cache/torch/kernels if it's not (except on Windows,
+where the kernel cache is not yet supported). The caching behavior can be directly
+controlled with two environment variables. If USE_PYTORCH_KERNEL_CACHE is set to 0 then no
+cache will be used, and if PYTORCH_KERNEL_CACHE_PATH is set then that path will be used
+as a kernel cache instead of the default location.
 
 Best practices
 --------------
@@ -382,6 +567,26 @@ have a flag that can be used to disable CUDA, in combination with
         args.device = torch.device('cuda')
     else:
         args.device = torch.device('cpu')
+
+.. note::
+
+    When assessing the availability of CUDA in a given environment (:meth:`~torch.cuda.is_available`), PyTorch's default
+    behavior is to call the CUDA Runtime API method `cudaGetDeviceCount`_. Because this call in turn initializes the
+    CUDA Driver API (via `cuInit`_) if it is not already initialized, subsequent forks of a process that has run
+    :meth:`~torch.cuda.is_available` will fail with a CUDA initialization error.
+
+    One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
+    :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
+    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment (`nvmlDeviceGetCount_v2`_). If the
+    NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
+    :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
+
+    If NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard CUDA Runtime
+    API assessment and the aforementioned fork constraint will apply.
+
+    Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
+    Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
+    may succeed while later CUDA initialization fails.
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
 desired device.
@@ -463,6 +668,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
+
 .. _cuda-memory-pinning:
 
 Use pinned memory buffers
@@ -513,6 +719,15 @@ by GIL of Python interpreter.
 
 If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
+
+.. _cudaGetDeviceCount:
+    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g18808e54893cfcaafefeab31a73cc55f
+
+.. _cuInit:
+    https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__INITIALIZE.html#group__CUDA__INITIALIZE_1g0a2f1517e1bd8502c7194c3a8c134bc3
+
+.. _nvmlDeviceGetCount_v2:
+    https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d
 
 .. _cuda-graph-semantics:
 
@@ -639,7 +854,7 @@ Violating any of these will likely cause a runtime error:
   :meth:`CUDAGraph.capture_end<torch.cuda.CUDAGraph.capture_end>` calls.
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
-* Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
+* Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
@@ -750,8 +965,8 @@ lets us capture and run graph-safe sections as graphs regardless::
     module3 = torch.nn.Linear(H, D_out).cuda()
 
     loss_fn = torch.nn.MSELoss()
-    optimizer = torch.optim.SGD(chain(module1.parameters() +
-                                      module2.parameters() +
+    optimizer = torch.optim.SGD(chain(module1.parameters(),
+                                      module2.parameters(),
                                       module3.parameters()),
                                 lr=0.1)
 
@@ -778,7 +993,7 @@ lets us capture and run graph-safe sections as graphs regardless::
         else:
             tmp = module3(tmp)  # forward ops run as a graph
 
-        loss = loss_fn(tmp, y)
+        loss = loss_fn(tmp, target)
         # module2's or module3's (whichever was chosen) backward ops,
         # as well as module1's backward ops, run as graphs
         loss.backward()

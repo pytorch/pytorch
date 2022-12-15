@@ -15,7 +15,7 @@ test_aot_model_compiler() {
   python "$CURRENT_DIR"/aot_test_model.py
   mv "$MODEL" "$TMP_DIR"/
   pushd "$TMP_DIR"
-  "$TORCH_BIN_DIR"/aot_model_compiler_test --model "$MODEL" --model_name=aot_test_model --model_version=v1 --input_dims="2,2,2"
+  "$TORCH_BIN_DIR"/aot_model_compiler_test --model "$MODEL" --model_name=aot_test_model --output_llvm=$COMPILED_CODE --model_version=v1 --input_dims="2,2,2"
   if [ ! -f "$COMPILED_MODEL" ] || [ ! -f "$COMPILED_CODE" ]; then
     echo "AOT model compiler failed to generate $COMPILED_MODEL and $COMPILED_CODE"
     exit 1
@@ -23,4 +23,5 @@ test_aot_model_compiler() {
   popd
 }
 
-test_aot_model_compiler
+# Temporarily disable the test since NNC backend is no longer available.
+# test_aot_model_compiler

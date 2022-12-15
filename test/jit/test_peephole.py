@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
 from torch import nn
@@ -531,6 +533,65 @@ class TestPeephole(JitTestCase):
             FileCheck().check_not("aten::eq").check_not("aten::neq").run(func_s.graph)
             self.assertEqual(func(inp), func_s(inp))
 
+    def test_peephole_add_zero(self):
+        @torch.jit.script
+        def foo(x: int):
+            return x + 0, 0 + x
+
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("aten::add")
+        self.assertEqual(foo(3), (3, 3))
+
+    def test_noop_peephole(self):
+        # test unsuccessful
+        def foo1(x):
+            return x + 0
+
+        def foo2():
+            x = torch.zeros([2, 2])
+            x.sub_(3)
+            return x + 0
+
+        def foo3():
+            x = torch.zeros([2, 2])
+            return x, x + 0
+
+        def foo4():
+            x = torch.zeros([2, 2])
+            return x + 0.
+
+        funcs = foo1, foo2, foo3, foo4
+        inps = (torch.ones([2]),), (), (), ()
+        for func, inp in zip(funcs, inps):
+            foo_s = torch.jit.script(func)
+            self.run_pass("peephole", foo_s.graph)
+            FileCheck().check_count("aten::add", 1, exactly=True).run(foo_s.graph)
+            self.assertEqual(func(*inp), foo_s(*inp))
+
+        # successful
+        def func(x):
+            return (x + 0) * 1 - 5
+
+        func_s = torch.jit.script(func)
+        self.run_pass("peephole", func_s.graph)
+        # bail on modified value first
+        FileCheck().check_not("aten::add").check("aten::mul").run(func_s.graph)
+        # second run it should succeed
+        self.run_pass("peephole", func_s.graph)
+        FileCheck().check_not("aten::add").check_not("aten::mul").run(func_s.graph)
+        self.assertEqual(func(torch.ones([2, 2])), func_s(torch.ones([2, 2])))
+
+        def func(x):
+            return (x + 0.) - 5
+
+        func_s = torch.jit.script(func)
+        inp = next(func_s.graph.inputs())
+        inp.setType(torch._C.TensorType.create_from_tensor(torch.rand([2, 2])))
+        torch._C._jit_pass_peephole(func_s.graph, disable_shape_peepholes=True)
+        FileCheck().check("aten::add").run(func_s.graph)
+        torch._C._jit_pass_peephole(func_s.graph, disable_shape_peepholes=False)
+        FileCheck().check_not("aten::add").run(func_s.graph)
+
     def test_refine_integer_values(self):
         @torch.jit.script
         def foo(x: int):
@@ -571,6 +632,18 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::len").run(foo.graph)
         self.assertEqual(3, foo(torch.rand([3, 1])))
+
+    def test_peephole_optional_refine(self):
+        @torch.jit.script
+        def foo(z: int, z2: int, cond: bool):
+            if cond:
+                return z
+            else:
+                return z2
+        out = next(foo.graph.findNode("prim::If").outputs())
+        out.setType(torch._C.OptionalType(torch._C.IntType.get()))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("int?").run(foo.graph)
 
     def test_peephole_int(self):
         @torch.jit.script

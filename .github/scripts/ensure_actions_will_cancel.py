@@ -9,14 +9,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-
-
-def concurrency_key(filename: Path) -> str:
-    workflow_name = filename.with_suffix("").name.replace("_", "-")
-    if workflow_name.startswith("generated-"):
-        workflow_name = workflow_name[len("generated-"):]
-    return f"{workflow_name}-${{{{ github.event.pull_request.number || github.sha }}}}" \
-        "-${{ github.event_name == 'workflow_dispatch' }}"
+EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+    "-${{ github.event_name == 'workflow_dispatch' }}"
 
 
 def should_check(filename: Path) -> bool:
@@ -38,20 +32,36 @@ if __name__ == "__main__":
 
     errors_found = False
     files = [f for f in files if should_check(f)]
+    names = set()
     for filename in files:
         with open(filename, "r") as f:
             data = yaml.safe_load(f)
 
-        expected = {
-            "group": concurrency_key(filename),
-            "cancel-in-progress": True,
-        }
-        if data.get("concurrency", None) != expected:
+        name = data.get("name")
+        if name is not None and name in names:
+            print("ERROR: duplicate workflow name:", name, file=sys.stderr)
+            errors_found = True
+        names.add(name)
+        actual = data.get("concurrency", {})
+        if not actual.get("group", "").startswith(EXPECTED_GROUP):
             print(
                 f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
                 file=sys.stderr,
             )
+            print(
+                f"concurrency group should start with {EXPECTED_GROUP} but found {actual.get('group', None)}",
+                file=sys.stderr,
+            )
             errors_found = True
+        if not actual.get("cancel-in-progress", False):
+            print(
+                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"concurrency cancel-in-progress should be True but found {actual.get('cancel-in-progress', None)}",
+                file=sys.stderr,
+            )
 
     if errors_found:
         sys.exit(1)

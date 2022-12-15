@@ -1,6 +1,7 @@
 torch.utils.bottleneck
 ======================
 
+.. automodule:: torch.utils.bottleneck
 .. currentmodule:: torch.utils.bottleneck
 
 `torch.utils.bottleneck` is a tool that can be used as an initial step for
@@ -46,7 +47,9 @@ where [args] are any number of arguments to `script.py`, or run
     evaluating. If the profiler outputs don't help, you could try looking at
     the result of :func:`torch.autograd.profiler.emit_nvtx()` with ``nvprof``.
     However, please take into account that the NVTX overhead is very high and
-    often gives a heavily skewed timeline.
+    often gives a heavily skewed timeline. Similarly, ``Intel® VTune™ Profiler``
+    helps to analyze performance on Intel platforms further with
+    :func:`torch.autograd.profiler.emit_itt()`.
 
 .. warning::
     If you are profiling CUDA code, the first profiler that ``bottleneck`` runs

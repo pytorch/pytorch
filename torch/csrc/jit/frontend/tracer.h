@@ -1,12 +1,13 @@
 #pragma once
 
 #include <ATen/core/Dimname.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
-#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -39,6 +40,8 @@ using ::c10::ivalue::ConstantString;
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API std::atomic<bool>& getTracerStateWarnMode();
+
 struct TORCH_API TracingState
     : public std::enable_shared_from_this<TracingState> {
   TracingState();
@@ -47,7 +50,7 @@ struct TORCH_API TracingState
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool warn = true;
+  bool warn = getTracerStateWarnMode();
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -69,6 +72,9 @@ struct TORCH_API TracingState
   Value* getValue(const IValue& var);
   Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
+
+  Node* createNode(c10::Symbol op_name, size_t num_outputs);
+  void insertNode(Node* node);
 
  private:
   using WeakIValue = at::WeakIValue;
@@ -190,10 +196,12 @@ struct TORCH_API NoWarn {
 };
 
 struct WithNestedTracingFrame {
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   WithNestedTracingFrame() {
     getTracingState()->enterFrame();
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~WithNestedTracingFrame() {
     getTracingState()->leaveFrame();
   }
@@ -229,6 +237,7 @@ TORCH_API void abandon();
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -254,6 +263,11 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<c10::SymInt> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -261,7 +275,25 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const at::OptionalIntArrayRef& opt_value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalSymIntArrayRef& opt_value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,
@@ -271,7 +303,7 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
-    const ClassTypePtr& class_type);
+    const c10::ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(
     Node* n,
@@ -378,6 +410,8 @@ TORCH_API void addOutput(
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
+
+TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
 } // namespace jit

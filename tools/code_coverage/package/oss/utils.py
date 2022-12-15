@@ -2,7 +2,7 @@ import os
 import subprocess
 from typing import List, Optional
 
-from ..util.setting import TOOLS_FOLDER, CompilerType, TestType
+from ..util.setting import CompilerType, TestType, TOOLS_FOLDER
 from ..util.utils import print_error, remove_file
 
 

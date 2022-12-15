@@ -1,15 +1,20 @@
 import torch
 import inspect
 import numbers
+import types
 import typing
 import enum
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
 from ._compatibility import compatibility
+from torch._ops import OpOverloadPacket, OpOverload
 
 if TYPE_CHECKING:
     from .node import Argument
+
+__all__ = ["ArgsKwargsPair", "check_for_mutable_operation", "get_signature_for_torch_op", "create_type_hint",
+           "type_matches", "normalize_function", "normalize_module"]
 
 @compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
@@ -133,18 +138,22 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             return_schemas=True, returns a tuple containing the optional Python signatures
             and the optional TorchScript Function signature
     """
-    override = _manual_overrides.get(op)
-    if override:
-        return (override, None) if return_schemas else None
+    if isinstance(op, OpOverload):
+        schemas = [op._schema]
+    elif isinstance(op, OpOverloadPacket):
+        schemas = [getattr(op, overload)._schema for overload in op.overloads()]
+    else:
+        override = _manual_overrides.get(op)
+        if override:
+            return (override, None) if return_schemas else None
 
-    aten_fn = torch.jit._builtins._find_builtin(op)
+        aten_fn = torch.jit._builtins._find_builtin(op)
 
-    if aten_fn is None:
-        return (None, None) if return_schemas else None
+        if aten_fn is None:
+            return (None, None) if return_schemas else None
+        schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
 
-    schemas = torch._C._jit_get_schemas_for_operator(aten_fn)
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
-
     return (signatures, schemas) if return_schemas else signatures
 
 @compatibility(is_backward_compatible=False)
@@ -171,7 +180,7 @@ def create_type_hint(x):
             return ret_type(base_type)
     except Exception as e:
         # We tried to create a type hint for list but failed.
-        torch.warnings.warn(f"We were not able to successfully create type hint from the type {x}")
+        warnings.warn(f"We were not able to successfully create type hint from the type {x}")
         pass
     return x
 
@@ -253,7 +262,9 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
+    if not isinstance(target, types.BuiltinFunctionType) and not (
+        isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)
+    ):
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
@@ -344,9 +355,9 @@ def normalize_module(
     """
     try:
         submod = root.get_submodule(target)
-    except AttributeError:
+    except AttributeError as e:
         raise RuntimeError(f"Tried to normalize node with target {target} but root did not "
-                           f"have that target!")
+                           f"have that target!") from e
     if hasattr(submod.__class__, '__name__'):
         classname = submod.__class__.__name__
         if getattr(torch.nn, classname, None) == submod.__class__:
@@ -368,7 +379,7 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
 
     Args:
 
-        target (inspect.Signature): Signature object for the target
+        sig (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
         kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.

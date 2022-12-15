@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
@@ -23,7 +23,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 
-at::Tensor parseHookResult(const c10::IValue& result) override;
+  at::Tensor parseHookResult(const c10::IValue& result) override;
 
  private:
   // Only needed for stateful communication.

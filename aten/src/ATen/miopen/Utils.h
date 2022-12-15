@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <aten/src/THH/THH.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Handle.h>
 

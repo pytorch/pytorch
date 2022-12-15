@@ -20,7 +20,7 @@ struct ForEach {
 
   template <typename In, typename Out, typename Context>
   bool operator()(int n, const In* in, Out* out, Context* /*c*/) {
-    for (int i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       out[i] = functor(in[i]);
     }
     return true;

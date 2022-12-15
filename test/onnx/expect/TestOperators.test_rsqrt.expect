@@ -3,13 +3,13 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
+    input: "onnx::Sqrt_0"
+    output: "onnx::Div_1"
     name: "Sqrt_0"
     op_type: "Sqrt"
   }
   node {
-    output: "2"
+    output: "onnx::Div_2"
     name: "Constant_1"
     op_type: "Constant"
     attribute {
@@ -22,15 +22,15 @@ graph {
     }
   }
   node {
-    input: "2"
-    input: "1"
+    input: "onnx::Div_2"
+    input: "onnx::Div_1"
     output: "3"
     name: "Div_2"
     op_type: "Div"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Sqrt_0"
     type {
       tensor_type {
         elem_type: 1
@@ -63,5 +63,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

@@ -1,12 +1,12 @@
 #pragma once
-
 #include <cstdint>
 
 namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
+
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0xAL;
 
 // Versions (i.e. why was the version number bumped?)
 
@@ -47,7 +47,38 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 // 5. (Dynamic) Stops torch.full inferring a floating point dtype
 //      when given bool or integer fill values.
 // 6. Write version string to `./data/version` instead of `version`.
-constexpr uint64_t kProducedFileFormatVersion = 0x3L;
+
+// [12/15/2021]
+// kProducedFileFormatVersion is set to 7 from 3 due to a different
+// interpretation of what file format version is.
+// Whenever there is new upgrader introduced,
+// this number should be bumped.
+// The reasons that version is bumped in the past:
+//     1. aten::div is changed at version 4
+//     2. aten::full is changed at version 5
+//     3. torch.package uses version 6
+//     4. Introduce new upgrader design and set the version number to 7
+//        mark this change
+// --------------------------------------------------
+// We describe new operator version bump reasons here:
+// 1) [01/24/2022]
+//     We bump the version number to 8 to update aten::linspace
+//     and aten::linspace.out to error out when steps is not
+//     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
+// 2) [01/30/2022]
+//     Bump the version number to 9 to update aten::logspace and
+//     and aten::logspace.out to error out when steps is not
+//     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
+// 3) [02/11/2022]
+//     Bump the version number to 10 to update aten::gelu and
+//     and aten::gelu.out to support the new approximate kwarg.
+//     (see: https://github.com/pytorch/pytorch/pull/61439)
+constexpr uint64_t kProducedFileFormatVersion = 0xAL;
+
+// Absolute minimum version we will write packages. This
+// means that every package from now on will always be
+// greater than this number.
+constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 
 // The version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
@@ -66,27 +97,37 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 //  0x2L: (Comment missing)
 //  0x3L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
-//  0x5L: (update) Update bytecode is sharing constant tensor files from torchscript, and only serialize
-//  extra tensors that are not in the torchscript constant table. Also update tensor storage schema adapting
-//  to the unify format, the root key of tensor storage is updated from {index} to
-//  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
-//  Forward-compatibility change.
+//  0x5L: (update) Update bytecode is sharing constant tensor files from
+//  torchscript, and only serialize extra tensors that are not in the
+//  torchscript constant table. Also update tensor storage schema adapting to
+//  the unify format, the root key of tensor storage is updated from {index} to
+//  {the_pointer_value_the_tensor.storage}, for example:
+//  `140245072983168.storage` Forward-compatibility change.
 //  0x6L: Implicit opereator versioning using number of specified argument.
-//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
-//  for details.
-//  0x7L: Enable support for operators with default arguments plus out arguments.
-constexpr uint64_t kProducedBytecodeVersion = 0x7L;
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845 for
+//  details.
+//  0x7L: Enable support for operators with default arguments plus out
+//  arguments. Refer. See https://github.com/pytorch/pytorch/pull/63651 for
+//  details.
+//  0x8L: Emit promoted operators as instructions. See
+//  https://github.com/pytorch/pytorch/pull/71662 for details.
+//  0x9L: Change serialization format from pickle to format This version is to
+//  serve migration. v8 pickle and v9 flatbuffer are the same. Refer to the
+//  summary of https://github.com/pytorch/pytorch/pull/75201 for more details.
+constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 
-static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
-    "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
+// static_assert(
+//     kProducedBytecodeVersion >= kProducedFileFormatVersion,
+//     "kProducedBytecodeVersion must be higher or equal to
+//     kProducedFileFormatVersion.");
 
 // Introduce kMinSupportedBytecodeVersion and kMaxSupportedBytecodeVersion
 // for limited backward/forward compatibility support of bytecode. If
-// kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion (in loader),
-// we should support this model_version. For example, we provide a wrapper to
-// handle an updated operator.
-constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
-constexpr uint64_t kMaxSupportedBytecodeVersion = 0x7L;
+// kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion
+// (in loader), we should support this model_version. For example, we provide a
+// wrapper to handle an updated operator.
+constexpr uint64_t kMinSupportedBytecodeVersion = 0x4L;
+constexpr uint64_t kMaxSupportedBytecodeVersion = 0x9L;
 
 } // namespace serialize
 } // namespace caffe2

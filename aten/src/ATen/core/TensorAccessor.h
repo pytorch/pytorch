@@ -1,8 +1,10 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <stdint.h>
 #include <cstddef>
 
@@ -134,7 +136,7 @@ public:
       const source_index_t* sizes_,
       const source_index_t* strides_)
       : data_(data_) {
-    for (int i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       this->sizes_[i] = sizes_[i];
       this->strides_[i] = strides_[i];
     }
@@ -158,7 +160,7 @@ protected:
   index_t strides_[N];
   C10_HOST void bounds_check_(index_t i) const {
     TORCH_CHECK_INDEX(
-        0 <= i && i < N,
+        0 <= i && i < index_t{N},
         "Index ",
         i,
         " is not within bounds of a tensor of dimension ",

@@ -3,11 +3,16 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::MaxPool_0"
     output: "1"
-    output: "2"
+    output: "onnx::Sub_2"
     name: "MaxPool_0"
     op_type: "MaxPool"
+    attribute {
+      name: "ceil_mode"
+      i: 0
+      type: INT
+    }
     attribute {
       name: "kernel_shape"
       ints: 3
@@ -26,9 +31,9 @@ graph {
     }
   }
   node {
-    input: "0"
+    input: "onnx::MaxPool_0"
     output: "3"
-    output: "4"
+    output: "onnx::Slice_4"
     name: "MaxPool_1"
     op_type: "MaxPool"
     attribute {
@@ -43,36 +48,66 @@ graph {
     }
   }
   node {
-    input: "4"
-    output: "5"
-    name: "Slice_2"
-    op_type: "Slice"
+    output: "onnx::Slice_5"
+    name: "Constant_2"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 2
-      type: INTS
-    }
-    attribute {
-      name: "ends"
-      ints: 1
-      type: INTS
-    }
-    attribute {
-      name: "starts"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   node {
-    input: "2"
-    input: "5"
-    output: "6"
-    name: "Sub_3"
+    output: "onnx::Slice_6"
+    name: "Constant_3"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_7"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Slice_4"
+    input: "onnx::Slice_6"
+    input: "onnx::Slice_7"
+    input: "onnx::Slice_5"
+    output: "onnx::Sub_8"
+    name: "Slice_5"
+    op_type: "Slice"
+  }
+  node {
+    input: "onnx::Sub_2"
+    input: "onnx::Sub_8"
+    output: "9"
+    name: "Sub_6"
     op_type: "Sub"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::MaxPool_0"
     type {
       tensor_type {
         elem_type: 1
@@ -110,7 +145,7 @@ graph {
     }
   }
   output {
-    name: "6"
+    name: "9"
     type {
       tensor_type {
         elem_type: 7
@@ -130,5 +165,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

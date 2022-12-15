@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -8,8 +8,11 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -22,6 +25,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
   ReplaceWithCopy(graph);
+  ReplaceWithMaybeCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -47,7 +51,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
     torch::jit::drop(stack, num_inputs);
 
     if (module->num_outputs() > 1) {
-      for (auto& o : outputs.toTuple()->elements()) {
+      for (auto& o : outputs.toTupleRef().elements()) {
         push_one(stack, std::move(o));
       }
     } else {
@@ -317,6 +321,37 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
     }
   }
   inlineSmallFusionGroups(block, min_size);
+}
+
+void inlineFallbackGraphs(std::shared_ptr<Graph> graph) {
+  DepthFirstGraphNodeIterator it(graph);
+
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      SubgraphUtils::unmergeSubgraph(n);
+    }
+  }
+}
+
+void performTensorExprFusion(
+    std::shared_ptr<Graph> graph,
+    std::vector<IValue> sample_inputs) {
+  // Enable TensorExpr fusion with dynamic shapes
+  setTensorExprDynamicShapeFusionEnabled(true);
+  GRAPH_DEBUG("Graph before tracing: ", *graph);
+  auto traced_graph = TraceGraph(graph, sample_inputs);
+  GRAPH_DEBUG("Graph after tracing: ", *traced_graph);
+  FuseTensorExprs(
+      traced_graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
+  RemoveTensorTypeSpecializations(graph);
+  inlineFallbackGraphs(traced_graph);
+  graph->block()->clear();
+  graph->block()->cloneFrom(traced_graph->block(), nullptr);
+  GRAPH_DUMP("Graph after fusion: ", graph);
 }
 
 } // namespace jit

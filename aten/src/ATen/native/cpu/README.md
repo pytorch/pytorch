@@ -64,7 +64,7 @@ within 256bit & 512bits registers. vec defines various operators such as
 As an example `ReduceOpsKernel.cpp` implements a generic `kernel_` that reduces
 an entire array using a given associative binary operation such as +.
 
-More explicity, calling `kernel_` with template argument `std::plus` will cause
+More explicitly, calling `kernel_` with template argument `std::plus` will cause
 it to sum up the entire array into a single value.
 
 `ReduceOpsKernel.cpp` uses the `CPU_CAPABILITY_*` macros to "know" under which
@@ -73,6 +73,13 @@ generic code, which will be compiled under multipled compilation settings.
 
 `../ReduceOps.cpp` now includes the header `ReduceOpsKernel.h`, which contains
 a generic definition of `sumImplAll`. This function allows the user to reduce
-over a dimension or all dimensions. The appropiate capability is chosen at
+over a dimension or all dimensions. The appropriate capability is chosen at
 runtime using cpuinfo. If the current platform has AVX2, `sumImpl` will be set
 to `sumImplAll<CPUCapability::AVX2>`.
+
+At runtime, the following environment variables control which codepath is taken:
+
+x64 options:
+ATEN_CPU_CAPABILITY=avx2    # Force AVX2 codepaths to be used
+ATEN_CPU_CAPABILITY=avx     # Force AVX codepaths to be used
+ATEN_CPU_CAPABILITY=default # Use oldest supported vector instruction set

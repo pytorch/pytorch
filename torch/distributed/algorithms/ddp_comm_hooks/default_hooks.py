@@ -3,6 +3,7 @@ from typing import Any, Callable
 import torch
 import torch.distributed as dist
 
+__all__ = ["allreduce_hook", "fp16_compress_hook", "bf16_compress_hook", "fp16_compress_wrapper", "bf16_compress_wrapper"]
 
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
@@ -33,6 +34,7 @@ def allreduce_hook(
     unaffecting DDP behavior.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     return _allreduce_fut(process_group, bucket.buffer())
@@ -49,6 +51,7 @@ def fp16_compress_hook(
     tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -84,6 +87,7 @@ def bf16_compress_hook(
     tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, bf16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -105,62 +109,6 @@ def bf16_compress_hook(
     return fut.then(decompress)
 
 
-class _OptimizerHookState(object):
-    """
-    Holds state for running optimizer in-line after DDP communication hook.
-    Currently contains only optimizer class which must have a method `step_param`.
-    """
-
-    __slots__ = ["functional_optimizer"]
-
-    def __init__(
-        self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs
-    ):
-        self.functional_optimizer = functional_optim_cls(
-            [],
-            *functional_optim_args,
-            **functional_optim_kwargs,
-            _allow_empty_param_list=True,
-        )
-        if not hasattr(self.functional_optimizer, "step_param"):
-            raise ValueError(
-                f"Class {functional_optim_cls} must implement method step_param."
-            )
-
-
-# TODO: Add an example to use such a wrapper.
-def _hook_then_optimizer(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
-    optimizer_state: _OptimizerHookState,
-) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
-    r"""
-    Runs optimizer in a functional fashion after DDP communication hook.
-
-    .. warning ::
-        This API is experimental adn subject to change.
-    """
-
-
-    def hook_then_optimizer_wrapper(
-        hook_state, bucket: dist.GradBucket
-    ) -> torch.futures.Future[torch.Tensor]:
-        # Run original hook
-        fut = hook(hook_state, bucket)
-
-        def optimizer_step(fut):
-            gradient_tensors = bucket.gradients()
-            model_params = bucket.parameters()
-            for grad_tensor, model_param in zip(gradient_tensors, model_params):
-                optimizer_state.functional_optimizer.step_param(
-                    model_param,
-                    grad_tensor,
-                )
-            return bucket.buffer()
-        return fut.then(optimizer_step)
-
-    return hook_then_optimizer_wrapper
-
-
 def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
@@ -172,6 +120,7 @@ def fp16_compress_wrapper(
     Therefore, ``fp16_compress_hook`` is equivalent to ``fp16_compress_wrapper(allreduce_hook)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
     """
@@ -209,6 +158,7 @@ def bf16_compress_wrapper(
     Therefore, ``bf16_compress_hook`` is equivalent to ``bf16_compress_wrapper(allreduce_hook)``.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, bf16_compress_wrapper(powerSGD_hook))
     """

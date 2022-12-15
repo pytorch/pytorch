@@ -14,15 +14,13 @@ class IDEEPLRNOp final : public IDEEPOperator {
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
-        pre_pad_((size_ - 1) / 2) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
+    TORCH_DCHECK_GT(size_, 0);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_GT(alpha_, 0);
+    TORCH_DCHECK_GT(beta_, 0);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~IDEEPLRNOp() override {}
+  ~IDEEPLRNOp() override = default;
 
   bool RunOnDevice() override {
     auto& X = Input(INPUT);
@@ -38,8 +36,6 @@ class IDEEPLRNOp final : public IDEEPOperator {
   const float alpha_;
   const float beta_;
   const float bias_;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-private-field)
-  const int pre_pad_;
 
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);
@@ -55,15 +51,13 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
-        pre_pad_((size_ - 1) / 2) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)) {
+    TORCH_DCHECK_GT(size_, 0);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_GT(alpha_, 0);
+    TORCH_DCHECK_GT(beta_, 0);
   }
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  ~IDEEPLRNGradientOp() override {}
+  ~IDEEPLRNGradientOp() override = default;
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -81,8 +75,6 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
   const float alpha_;
   const float beta_;
   const float bias_;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-private-field)
-  const int pre_pad_;
 
   INPUT_TAGS(INPUT, FILTER, OUTPUT_GRAD);
   OUTPUT_TAGS(INPUT_GRAD);

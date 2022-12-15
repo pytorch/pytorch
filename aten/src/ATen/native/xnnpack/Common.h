@@ -1,11 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/util/ArrayRef.h>
+#include <limits>
+#include <memory>
 
 namespace at {
 namespace native {
@@ -67,6 +68,9 @@ struct ContextConv2D final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
+
+bool available();
+
 namespace internal {
 
 struct Layout final {
@@ -121,9 +125,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-bool available();
-
 } // namespace internal
 } // namespace xnnpack
 } // namespace native

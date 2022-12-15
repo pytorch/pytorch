@@ -6,7 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 
 #include <ATen/cpu/vec/vec_base.h>
-#if !defined(__VSX__)  || !defined(CPU_CAPABILITY_VSX)
+#if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_float_neon.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
@@ -15,8 +15,11 @@
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec/vec256/vec256_complex_double.h>
-#else
+#elif defined(__VSX__)  || defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
+#else
+#include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
+#include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
 
 #include <algorithm>
@@ -28,29 +31,28 @@
 namespace at {
 namespace vec {
 
-// Note [Acceptable use of anonymous namespace in header]
+// Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Yes you saw right, this is an anonymous namespace in a header.  This header,
-// and all of its subheaders, REQUIRE their code to be entirely inlined into
-// the compilation unit that uses them.  It's important that these functions have
-// internal linkage so that kernels for different architectures don't get
-// combined during linking. It's sufficient to label functions "static", but
-// class methods must be an unnamed namespace to have internal linkage (since
-// static means something different in the context of classes).
-namespace {
+// This header, and all of its subheaders, will be compiled with
+// different architecture flags for each supported set of vector
+// intrinsics. So we need to make sure they aren't inadvertently
+// linked together. We do this by declaring objects in an `inline
+// namespace` which changes the name mangling, but can still be
+// accessed as `at::vec`.
+inline namespace CPU_CAPABILITY {
 
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
-     stream << val.val_;
-     return stream;
- }
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
-     stream << static_cast<int>(val.val_);
-     return stream;
- }
- C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
-     stream << static_cast<unsigned int>(val.val_);
-     return stream;
- }
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
@@ -218,6 +220,59 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
   //          {b0, b1, b2, b3, b4, b5, b6, b7}
   return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, 0b0100000),  // 0, 2.   4 bits apart
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<>
+inline Vectorized<float> flip(const Vectorized<float> & v) {
+  const __m256i mask_float = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  return _mm256_permutevar8x32_ps(v, mask_float);
+}
+
+template<>
+inline Vectorized<double> flip(const Vectorized<double> & v) {
+  return _mm256_permute4x64_pd(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
+}
+
+template<>
+inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
+  return _mm256_permute4x64_epi64(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
+}
+
+template<>
+inline Vectorized<int32_t> flip(const Vectorized<int32_t> & v) {
+  const __m256i mask_int32 = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  return _mm256_permutevar8x32_epi32(v, mask_int32);
+}
+
+template<>
+inline Vectorized<int16_t> flip(const Vectorized<int16_t> & v) {
+  const __m256i mask = _mm256_set_epi8(
+    1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
+    1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14
+  );
+  auto reversed = _mm256_shuffle_epi8(v, mask);
+  return _mm256_permute2x128_si256(reversed, reversed, 1);
+}
+
+inline __m256i flip8(const __m256i & v) {
+  const __m256i mask_int8 = _mm256_set_epi8(
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  );
+  auto reversed = _mm256_shuffle_epi8(v, mask_int8);
+  return _mm256_permute2x128_si256(reversed, reversed, 1);
+}
+
+template<>
+inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+  return flip8(v);
+}
+
+template<>
+inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
+  return flip8(v);
 }
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)

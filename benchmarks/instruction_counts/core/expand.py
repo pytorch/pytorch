@@ -8,7 +8,7 @@ import itertools as it
 import os
 import re
 import textwrap
-from typing import cast, List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple, TYPE_CHECKING
 import uuid
 
 import torch
@@ -63,15 +63,12 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
 
     # Import magic to actually load our function.
     module_spec = importlib.util.spec_from_file_location(f"torchscript__{name}", module_path)
+    assert module_spec is not None
     module = importlib.util.module_from_spec(module_spec)
     loader = module_spec.loader
     assert loader is not None
 
-    # Module.loader has type Optional[_Loader]. Even when we assert loader is
-    # not None and MyPy narrows it to type _Loader, it will not pass type
-    # checks. So we have to use a cast to tell MyPy that _Loader implements
-    # importlib.abc.Loader.
-    cast(importlib.abc.Loader, loader).exec_module(module)
+    loader.exec_module(module)
 
     # And again, the type checker has no way of knowing that this line is valid.
     jit_model = module.jit_model  # type: ignore[attr-defined]

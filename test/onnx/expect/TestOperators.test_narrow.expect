@@ -3,29 +3,59 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
-    name: "Slice_0"
-    op_type: "Slice"
+    output: "onnx::Slice_13"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-    attribute {
-      name: "ends"
-      ints: 2
-      type: INTS
-    }
-    attribute {
-      name: "starts"
-      ints: 0
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  node {
+    output: "onnx::Slice_14"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_15"
+    name: "Constant_2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Slice_0"
+    input: "onnx::Slice_13"
+    input: "onnx::Slice_14"
+    input: "onnx::Slice_15"
+    output: "11"
+    name: "Slice_3"
+    op_type: "Slice"
+  }
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Slice_0"
     type {
       tensor_type {
         elem_type: 1
@@ -41,7 +71,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "11"
     type {
       tensor_type {
         elem_type: 1
@@ -58,5 +88,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 
 import torch
 from torch import nn
@@ -15,7 +17,7 @@ class TestParametrization(JitTestCase):
     # Define some parametrization
     class Symmetric(nn.Module):
         def forward(self, X):
-            return X.triu() + X.triu(1).transpose(-1, -2)
+            return X.triu() + X.triu(1).mT
 
     def test_traceable(self):
         r"""Test the jit scripting and tracing of a parametrized model."""
@@ -44,14 +46,14 @@ class TestParametrization(JitTestCase):
 
     def test_scriptable(self):
         # TODO: Need to fix the scripting in parametrizations
-        #       Currently, all the tests below will throw UnsupportedNodeError
+        #       Currently, all the tests below will throw torch.jit.Error
         model = nn.Linear(5, 5)
         parametrize.register_parametrization(model, "weight", self.Symmetric())
 
         x = torch.randn(3, 5)
         y = model(x)
 
-        with self.assertRaises(torch.jit.frontend.UnsupportedNodeError):
+        with self.assertRaises(torch.jit.Error):
             # Check scripting works
             scripted_model = torch.jit.script(model)
             y_hat = scripted_model(x)

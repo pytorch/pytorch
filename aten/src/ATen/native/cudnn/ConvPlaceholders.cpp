@@ -1,6 +1,16 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h> // for the definition of AT_CUDNN_ENABLED
-#include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_convolution_add_relu_native.h>
+#include <ATen/ops/cudnn_convolution_native.h>
+#include <ATen/ops/cudnn_convolution_relu_native.h>
+#include <ATen/ops/cudnn_convolution_transpose_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -118,62 +128,5 @@ Tensor cudnn_convolution_add_relu(
 }
 
 #endif  // AT_CUDNN_ENABLED
-
-// ---------------------------------------------------------------------
-//
-// Deprecated operators
-//
-// ---------------------------------------------------------------------
-
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_deprecated(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  auto output = at::cudnn_convolution(input, weight, padding, stride, dilation, groups, benchmark, deterministic);
-  if (bias.defined()) {
-    output = output + reshape_bias(input.dim(), bias);
-  }
-  return output;
-}
-
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_deprecated2(
-    const Tensor& input_t, const Tensor& weight_t,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
-{
-  return at::cudnn_convolution(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, at::globalContext().allowTF32CuDNN());
-}
-
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_transpose_deprecated(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
-{
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  auto output = at::cudnn_convolution_transpose(input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
-  if (bias.defined()) {
-    output = output + reshape_bias(input.dim(), bias);
-  }
-  return output;
-}
-
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_transpose_deprecated2(
-    const Tensor& input_t, const Tensor& weight_t,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
-{
-    return at::cudnn_convolution_transpose(input_t, weight_t, padding, output_padding, stride, dilation, groups, benchmark, deterministic, at::globalContext().allowTF32CuDNN());
-}
 
 }}

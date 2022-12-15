@@ -4,6 +4,13 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph
 from typing import Union, Dict, Any, Set
 
+__all__ = [
+    "FusedGraphModule",
+    "ObservedGraphModule",
+    "ObservedStandaloneGraphModule",
+    "QuantizedGraphModule",
+]
+
 class FusedGraphModule(GraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
         self.preserved_attr_names = preserved_attr_names
@@ -18,7 +25,7 @@ class FusedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return FusedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return FusedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
 class ObservedGraphModule(GraphModule):
 
@@ -27,10 +34,13 @@ class ObservedGraphModule(GraphModule):
             '_activation_post_process_map',
             '_activation_post_process_indexes',
             '_patterns',
-            '_qconfig_map',
-            '_prepare_custom_config_dict',
-            '_equalization_qconfig_map',
-            '_node_name_to_scope']).union(preserved_attr_names)
+            '_node_name_to_qconfig',
+            '_prepare_custom_config',
+            '_equalization_node_name_to_qconfig',
+            '_node_name_to_scope',
+            '_qconfig_mapping',
+            '_is_qat',
+            '_observed_node_names']).union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
         for attr in preserved_attrs:
@@ -42,9 +52,9 @@ class ObservedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return ObservedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
-def is_observed_module(module: Any) -> bool:
+def _is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
@@ -57,11 +67,10 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return ObservedStandaloneGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
-def is_observed_standalone_module(module: Any) -> bool:
+def _is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
-
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):
@@ -102,4 +111,4 @@ class QuantizedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return QuantizedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))

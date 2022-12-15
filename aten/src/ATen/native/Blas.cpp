@@ -1,11 +1,30 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CPUFunctions.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmv.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul_cpu_dispatch.h>
+#include <ATen/ops/mv_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -16,7 +35,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
      "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, mat.options(), names);
+  set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
 }
 
@@ -97,14 +116,14 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
   if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
-    Tensor self_addmv = at::empty({self.size(0)}, self.options());
+    Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }
   return at::addmv_out(result, result, self, vec, 0, 1);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  Tensor result = at::empty({self.size(0)}, self.options());
+  Tensor result = at::empty({self.size(0)}, vec.options());
   //inplace version is more efficient if we can use it
   return at::addmv_(result, self, vec, 0, 1);
 }
@@ -154,6 +173,10 @@ Tensor dot(const Tensor &self, const Tensor &other){
   at::NoNamesGuard guard;
   dot_check(self, other);
 
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
+
   if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
     // mkldnn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
@@ -161,7 +184,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
     return r;
   }
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;
@@ -187,6 +210,10 @@ Tensor vdot(const Tensor &self, const Tensor &other){
   at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());

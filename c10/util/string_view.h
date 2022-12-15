@@ -9,6 +9,35 @@
 #include <stdexcept>
 #include <string>
 
+#if __cpp_lib_string_view
+#include <string_view>
+#define C10_HAS_STD_STRING_VIEW() 1
+#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
+#elif defined(__has_include)
+#if __has_include(<experimental/string_view>)
+// libc++ 7.0 has experimental/string_view but it's just a #error
+#if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION < 7000)
+#include <experimental/string_view>
+#endif
+#if __cpp_lib_experimental_string_view
+#define C10_HAS_STD_STRING_VIEW() 0
+#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 1
+#endif
+#endif
+#endif
+
+#ifndef C10_HAS_STD_STRING_VIEW
+#define C10_HAS_STD_STRING_VIEW() 0
+#endif
+#ifndef C10_HAS_STD_EXPERIMENTAL_STRING_VIEW
+#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
+#endif
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated")
+#endif
+
 namespace c10 {
 
 /**
@@ -150,7 +179,7 @@ class basic_string_view final {
     return size() == 0;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void remove_prefix(size_type n) {
+  constexpr void remove_prefix(size_type n) {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_prefix: out of range. PrefixLength: " +
@@ -160,7 +189,7 @@ class basic_string_view final {
     size_ -= n;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void remove_suffix(size_type n) {
+  constexpr void remove_suffix(size_type n) {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_suffix: out of range. SuffixLength: " +
@@ -169,7 +198,7 @@ class basic_string_view final {
     size_ -= n;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void swap(basic_string_view& sv) noexcept {
+  constexpr void swap(basic_string_view& sv) noexcept {
     auto tmp = *this;
     *this = sv;
     sv = tmp;
@@ -650,14 +679,22 @@ template <class CharT>
 inline std::basic_ostream<CharT>& operator<<(
     std::basic_ostream<CharT>& stream,
     basic_string_view<CharT> sv) {
-  // The rules for operator<< are quite complex, but std::string has the same.
-  // Let's just rely on the std::string implementation. This might be a bit
-  // slower, but I don't think performance matters here.
-  return stream << ::std::basic_string<CharT>(sv);
+  // The rules for operator<< are quite complex, so lets defer to the
+  // STL implementation. The std::string fallback might be a bit
+  // slower, but is better than getting it wrong.
+
+#if C10_HAS_STD_STRING_VIEW()
+  using std_string_type = ::std::basic_string_view<CharT>;
+#elif C10_HAS_STD_EXPERIMENTAL_STRING_VIEW()
+  using std_string_type = ::std::experimental::basic_string_view<CharT>;
+#else
+  using std_string_type = ::std::basic_string<CharT>;
+#endif
+  return stream << std_string_type(sv.data(), sv.size());
 }
 
 template <class CharT>
-CONSTEXPR_EXCEPT_GCC5 inline void swap(
+constexpr inline void swap(
     basic_string_view<CharT>& lhs,
     basic_string_view<CharT>& rhs) {
   lhs.swap(rhs);
@@ -673,12 +710,20 @@ struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
     // The standard says that std""string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
-    // up to the implementer. So, to be conformant, we need to have the same
-    // behavior as the implementer-defined std::string hasher of the STL
-    // we're built against. Let's just call it. This is probably slow
-    // but the only way to be conformant.
-    return std::hash<::std::basic_string<CharT>>()(
-        ::std::basic_string<CharT>(x));
+    // up to the implementer. So, to be conformant, we need to re-use and
+    // existing STL type's hash function. The std::string fallback is probably
+    // slow but the only way to be conformant.
+
+#if C10_HAS_STD_STRING_VIEW()
+    using std_string_type = ::std::basic_string_view<CharT>;
+#elif C10_HAS_STD_EXPERIMENTAL_STRING_VIEW()
+    using std_string_type = ::std::experimental::basic_string_view<CharT>;
+#else
+    using std_string_type = ::std::basic_string<CharT>;
+#endif
+    return ::std::hash<std_string_type>{}(std_string_type(x.data(), x.size()));
   }
 };
 } // namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

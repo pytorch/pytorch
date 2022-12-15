@@ -421,6 +421,62 @@ kernel void hardswish(texture2d_array<half, access::read> in_arr[[texture(0), fu
     }
 }
 
+constant bool hardshrink_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool hardshrink_is_tex = !hardshrink_is_arr;
+kernel void hardshrink(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(hardshrink_is_arr)]],
+                      texture2d<half, access::read> in_tex[[texture(0), function_constant(hardshrink_is_tex)]],
+                      texture2d_array<half, access::write> out_arr[[texture(1), function_constant(hardshrink_is_arr)]],
+                      texture2d<half, access::write> out_tex[[texture(1), function_constant(hardshrink_is_tex)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+    const ushort oH = ushort_arg_2;
+    const ushort oW = ushort_arg_3;
+    const half lambda = (half)float_arg_0;
+    if (gid.x >= oW || gid.y >= oH) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    if (hardshrink_is_arr) {
+      half4 value = in_arr.read(gid_, gid.z);
+      half4 mask1 = half4(value <= lambda);
+      half4 mask2 = half4(value >= -lambda);
+      half4 outval = (1 - mask1)*value + (1 - mask2)*value;
+      out_arr.write(outval, gid_, gid.z);
+    } else {
+      half4 value = in_tex.read(gid_);
+      half4 mask1 = half4(value <= lambda);
+      half4 mask2 = half4(value >= -lambda);
+      half4 outval = (1 - mask1)*value + (1 - mask2)*value;
+      out_tex.write(outval, gid_);
+    }
+}
+
+constant bool leaky_relu_is_arr = (ushort_arg_0 > 1 || ushort_arg_1 > 4);
+constant bool leaky_relu_is_tex = !leaky_relu_is_arr;
+kernel void leaky_relu(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(leaky_relu_is_arr)]],
+                      texture2d<half, access::read> in_tex[[texture(0), function_constant(leaky_relu_is_tex)]],
+                      texture2d_array<half, access::write> out_arr[[texture(1), function_constant(leaky_relu_is_arr)]],
+                      texture2d<half, access::write> out_tex[[texture(1), function_constant(leaky_relu_is_tex)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+    const ushort oH = ushort_arg_2;
+    const ushort oW = ushort_arg_3;
+    const half negative_slope = (half)float_arg_0;
+    if (gid.x >= oW || gid.y >= oH) {
+        return;
+    }
+    ushort2 gid_ = gid.xy;
+    if (leaky_relu_is_arr) {
+      half4 value = in_arr.read(gid_, gid.z);
+      half4 is_negative = half4(value < 0.0);
+      half4 outval = is_negative*value*negative_slope + (1-is_negative)*value;
+      out_arr.write(outval, gid_, gid.z);
+    } else {
+      half4 value = in_tex.read(gid_);
+      half4 is_negative = half4(value < 0.0);
+      half4 outval = is_negative*value*negative_slope + (1-is_negative)*value;
+      out_tex.write(outval, gid_);
+    }
+}
+
 constant bool out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
 constant bool out_is_tex = !out_is_arr;
 constant bool in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
@@ -463,31 +519,6 @@ kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture
       out_tex.write(intex, gid.xy);
   }
 }
-
-constant bool resize_is_arr = (ushort_arg_4 > 1 || ushort_arg_5 > 4);
-constant bool resize_is_tex = !resize_is_arr;
-kernel void resize_nearest(texture2d_array<half, access::sample> in_arr[[texture(0), function_constant(resize_is_arr)]],
-                           texture2d<half, access::sample> in_tex[[texture(0), function_constant(resize_is_tex)]],
-                           texture2d_array<half, access::write> out_arr[[texture(1), function_constant(resize_is_arr)]],
-                           texture2d<half, access::write> out_tex[[texture(1), function_constant(resize_is_tex)]],
-                           ushort3 gid[[thread_position_in_grid]]) {
-    const ushort oH = ushort_arg_0;
-    const ushort oW = ushort_arg_1;
-    if (gid.x >= oW || gid.y >= oH) {
-        return;
-    }
-    const float height_scale = float(ushort_arg_2) / 10000;
-    const float width_scale = float(ushort_arg_3) / 10000;
-    constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
-    const int in_y = (int)(gid.y / height_scale);
-    const int in_x = (int)(gid.x / width_scale);
-    if(resize_is_arr) {
-        out_arr.write(in_arr.sample(s, float2(in_x, in_y), gid.z), gid.xy, gid.z);
-    } else {
-        out_tex.write(in_tex.sample(s, float2(in_x, in_y)), gid.xy);
-    }
-}
-
 
 constant bool reshape_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
 constant bool reshape_out_is_tex = !reshape_out_is_arr;

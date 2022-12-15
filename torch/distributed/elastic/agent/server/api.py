@@ -27,12 +27,12 @@ from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import (
     ProcessFailure,
-    Std,
     SignalException,
+    Std,
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-
+__all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'ElasticAgent', 'SimpleElasticAgent']
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
@@ -192,7 +192,7 @@ class WorkerState(str, Enum):
       INIT - worker group object created not yet started
       HEALTHY - workers running and healthy
       UNHEALTHY - workers running and unhealthy
-      STOPPED - workers stopped (interruped) by the agent
+      STOPPED - workers stopped (interrupted) by the agent
       SUCCEEDED - workers finished running (exit 0)
       FAILED - workers failed to successfully finish (exit !0)
 
@@ -722,10 +722,17 @@ class SimpleElasticAgent(ElasticAgent):
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
 
-    def get_agent_status_event(self, state: WorkerState) -> Event:
-        raw_error = traceback.format_exc() if state == WorkerState.FAILED else None
+    def get_event_failed(self) -> Event:
         return self._construct_event(
-            state.value, EventSource.AGENT, raw_error=raw_error
+            state="FAILED",
+            source=EventSource.AGENT,
+            raw_error=traceback.format_exc(),
+        )
+
+    def get_event_succeeded(self) -> Event:
+        return self._construct_event(
+            state="SUCCEEDED",
+            source=EventSource.AGENT,
         )
 
     def _record_worker_events(self, result: RunResult) -> None:

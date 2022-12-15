@@ -6,6 +6,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -43,7 +44,7 @@ class BisectPercentileOp final : public Operator<Context> {
         pct_upper_.size(),
         "Feature (raw) data and upper bound dimension should match.");
     n_features = pct_lens_.size();
-    index.reserve(n_features + 1);
+    index.resize(n_features + 1);
     index[0] = 0;
     for (int i = 1; i <= n_features; ++i) {
       index[i] = index[i - 1] + pct_lens_[i - 1];
@@ -62,23 +63,24 @@ class BisectPercentileOp final : public Operator<Context> {
     const auto batch_size = raw.size(0);
     const auto num_features = raw.size(1);
     CAFFE_ENFORCE_EQ(num_features, pct_lens_.size());
-    const float* raw_data = raw.template data<float>();
+    const float *const raw_data = raw.template data<float>();
 
     // Output
 
-    auto* pct = Output(PCT, raw.sizes(), at::dtype<float>());
-    float* pct_output = pct->template mutable_data<float>();
+    auto *const pct = Output(PCT, raw.sizes(), at::dtype<float>());
+    float *const pct_output = pct->template mutable_data<float>();
 
     // Compute percentile for each raw feature value
     int feature_start_index = 0;
     int feature_length = 0;
     int cur_index = 0;
 
-    for (int i = 0; i < num_features; ++i) {
+    for (const auto i : c10::irange(num_features)) {
       cur_index = i;
       feature_start_index = index[i];
       feature_length = pct_lens_[i];
-      for (int j = 0; j < batch_size; ++j) {
+      for (const auto j : c10::irange(batch_size)) {
+        (void)j; // Suppress unused variable warning
         pct_output[cur_index] = compute_percentile(
             pct_raw_.begin() + feature_start_index,
             pct_mapping_.begin() + feature_start_index,
@@ -106,20 +108,17 @@ class BisectPercentileOp final : public Operator<Context> {
   vector<int> index;
   vector<std::map<float, float>> fast_pct;
 
-  const float kEPSILON = 1e-10;
+  static constexpr float kEPSILON = 1e-10;
 
-  int binary_search(
+  int64_t binary_search(
       const std::vector<float>::iterator& data,
-      int lo,
-      int hi,
-      float val) {
-    int mid;
-    bool low_cond, high_cond;
-
+      int64_t lo,
+      int64_t hi,
+      const float val) {
     while (lo < hi) {
-      mid = (lo + hi) >> 1;
-      low_cond = (data[mid] <= val);
-      high_cond = (val < data[mid + 1]);
+      const auto mid = lo + (hi - lo) / 2;
+      const bool low_cond = (data[mid] <= val);
+      const bool high_cond = (val < data[mid + 1]);
       if (low_cond && high_cond) {
         return mid;
       } else if (!low_cond) {
@@ -146,20 +145,18 @@ class BisectPercentileOp final : public Operator<Context> {
       return 1.;
     }
 
-    float result;
     // Interpolation by binary search
     const auto k = binary_search(pct_raw_it, 0, size - 1, val);
 
     if (pct_raw_it[k] == val) {
       // Exact match
-      result = pct_mapping_it[k];
+      return pct_mapping_it[k];
     } else {
       // interpolation
-      float w = (val - pct_raw_it[k]) /
+      const float w = (val - pct_raw_it[k]) /
           (pct_raw_it[k + 1] - pct_raw_it[k] + kEPSILON);
-      result = (1 - w) * pct_upper_it[k] + w * pct_lower_it[k + 1];
+      return (1 - w) * pct_upper_it[k] + w * pct_lower_it[k + 1];
     }
-    return result;
   }
 };
 

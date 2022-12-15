@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -9,11 +11,11 @@ import warnings
 from torch._six import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, torch_to_numpy_dtype_dict)
+    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyOnCPUAndCUDA,
-    dtypesIfCPU, dtypesIfCUDA, largeTensorTest)
-from torch.testing._internal.common_dtype import get_all_dtypes
+    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
+    dtypesIfCUDA, largeTensorTest)
+from torch.testing._internal.common_dtype import all_types_and_complex_and, all_types, all_types_and
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -61,6 +63,7 @@ class TestShapeOps(TestCase):
                 self.assertEqual(x.select(dim, i), res2[i])
 
     # TODO: update to work on CUDA, too?
+    @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
     @onlyCPU
     def test_tolist(self, device):
         list0D = []
@@ -224,13 +227,12 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyOnCPUAndCUDA
-    @dtypesIfCPU(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
-                                 include_bfloat16=False))
-    @dtypesIfCUDA(*get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types())
+    @dtypesIfCUDA(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
@@ -339,7 +341,7 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -438,7 +440,7 @@ class TestShapeOps(TestCase):
         for dims in test_dims:
             self.assertEqual(size, list(data.flip(dims).size()))
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip_errors(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
         data = make_arg((2, 2, 2))
@@ -456,7 +458,7 @@ class TestShapeOps(TestCase):
     def _rand_shape(self, dim, min_size, max_size):
         return tuple(torch.randint(min_size, max_size + 1, (dim,)))
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip_numpy(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
@@ -474,6 +476,7 @@ class TestShapeOps(TestCase):
 
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
+    @largeTensorTest("81GB", "cpu")  # even for CUDA test, sufficient system memory is required
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
@@ -545,6 +548,7 @@ class TestShapeOps(TestCase):
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
 
+    @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
     @dtypes(torch.cfloat, torch.cdouble)
     def test_complex_rot90(self, device, dtype):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
@@ -565,7 +569,7 @@ class TestShapeOps(TestCase):
             t.nonzero()
             self.assertEqual(len(w), 0)
 
-    @dtypes(*get_all_dtypes(include_complex=False))
+    @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
     def test_nonzero(self, device, dtype):
 
         shapes = [
@@ -646,7 +650,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(traced_nontuple, expected_nontuple)
         self.assertEqual(traced_out, expected_nontuple)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
@@ -673,6 +677,16 @@ class TestShapeOps(TestCase):
         x = torch.randn(10, requires_grad=True)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
+
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_sparse_dense_dim(self, device, dtype):
+        for shape in [(), (2, ), (2, 3)]:
+            if dtype.is_complex or dtype.is_floating_point:
+                x = torch.rand(shape, device=device, dtype=dtype)
+            else:
+                x = torch.randint(-9, 9, shape, device=device, dtype=dtype)
+            self.assertEqual(x.sparse_dim(), 0)
+            self.assertEqual(x.dense_dim(), len(shape))
 
 instantiate_device_type_tests(TestShapeOps, globals())
 

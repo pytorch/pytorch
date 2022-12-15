@@ -37,11 +37,13 @@ namespace tensorexpr {
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
       output_bufs_(other.output_bufs_) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -50,22 +52,27 @@ LoopNest::LoopNest(
     const std::vector<Tensor>& output_tensors,
     const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
-std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
-  std::unordered_set<BufPtr> result;
+std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
+  std::vector<BufPtr> result;
+  std::unordered_set<BufPtr> result_set;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
-  for (auto buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
-      result.insert(buf);
+  for (const auto& buf : bufs) {
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
+        !result_set.count(buf)) {
+      result.push_back(buf);
+      result_set.insert(buf);
     }
   }
   return result;
@@ -102,7 +109,8 @@ class IndexFlattener : public IRMutator {
     return alloc<Load>(
         v->dtype(),
         v->buf(),
-        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
+        std::vector<ExprPtr>({flatten_index(
+            v->buf()->dims(), v->indices(), v->buf()->strides())}));
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -112,7 +120,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices())};
+        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides())};
     v->set_indices(indices);
     v->set_value(new_value);
     return v;
@@ -504,7 +512,7 @@ class Vectorizer : public IRMutator {
     // TODO: Can we change the logic of vectorizer so that we don't need this?
     bool any_change = false;
     std::vector<StmtPtr> stmts;
-    for (StmtPtr stmt : *v) {
+    for (const StmtPtr& stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
       if (stmt != stmt_new) {
         any_change = true;
@@ -586,7 +594,7 @@ bool LoopNest::vectorize(ForPtr f) {
 
   // Can't vectorize reduction axes.
   auto reductions = NodeFinder<ReduceOp>::find(f);
-  for (auto r : reductions) {
+  for (const auto& r : reductions) {
     if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
         r->reduce_args().end()) {
       return false;
@@ -618,12 +626,12 @@ bool LoopNest::vectorize(ForPtr f) {
 void LoopNest::initialize(
     const std::vector<Tensor>& output_tensors,
     const std::vector<Tensor>& tensors_to_compute) {
-  for (auto t : output_tensors) {
+  for (const auto& t : output_tensors) {
     output_bufs_.insert(t.buf());
   }
 
   std::vector<StmtPtr> loops;
-  for (Tensor t : tensors_to_compute) {
+  for (const Tensor& t : tensors_to_compute) {
     StmtPtr loop = t.stmt();
     if (loop->get_parent()) {
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
@@ -632,7 +640,7 @@ void LoopNest::initialize(
     }
     // Flatten initializers.
     if (BlockPtr block = to<Block>(loop)) {
-      for (auto s : block->stmts()) {
+      for (const auto& s : block->stmts()) {
         block->remove_stmt(s);
         loops.push_back(s);
       }
@@ -651,7 +659,7 @@ class FunctionInliner : public IRMutator {
         producer_(producer),
         outputs_(std::move(outputs)) {
     success_ = true;
-    for (auto i : producer->indices()) {
+    for (const auto& i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
@@ -685,13 +693,6 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        auto param_val = evalInt(func_caller_param);
-        if (!param_val || *param_val != 0) {
-          // We are implicitly assuming that if you have an index of 0, that
-          // must also be inlined into an index of 0.
-          success_ = false;
-          return nullptr;
-        }
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);
@@ -718,11 +719,11 @@ class FunctionInliner : public IRMutator {
         "ComputeInline: After rewriting body: ", std::to_string(result));
 
     // Remove the mappings we created for this function parameters.
-    for (auto v : index_vars) {
+    for (const auto& v : index_vars) {
       for (auto& pair : random_bindings_) {
         if (pair.second.erase(v)) {
           ExprPtr inlined = inline_mapping_[v];
-          for (auto nv : VarFinder::find(inlined)) {
+          for (const auto& nv : VarFinder::find(inlined)) {
             pair.second.insert(nv);
           }
         }
@@ -819,7 +820,7 @@ class FunctionInliner : public IRMutator {
       return v;
     }
     std::vector<StmtPtr> stmts;
-    for (StmtPtr stmt : *v) {
+    for (const StmtPtr& stmt : *v) {
       StmtPtr stmt_new = stmt->accept_mutator(this);
       if (!stmt_new) {
         continue;
@@ -854,7 +855,7 @@ class FunctionInliner : public IRMutator {
       }
     }
 
-    for (auto l : bindings_this_loop) {
+    for (const auto& l : bindings_this_loop) {
       res->body()->prepend_stmt(l);
       random_bindings_.erase(l);
     }
@@ -889,7 +890,7 @@ StmtPtr computeInlineImpl(
   }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
-    if (to<ExternalCall>(s)) {
+    if (to<ExternalCall>(s) || to<ExternalCallWithAlloc>(s)) {
       return nullptr;
     }
   }
@@ -897,7 +898,7 @@ StmtPtr computeInlineImpl(
   // Find producers.
   StorePtr relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(stmt);
-  for (auto s : stores) {
+  for (const auto& s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
@@ -965,7 +966,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
     auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
     auto input_bufs = getInputBufs();
 
-    for (auto buf : intermediate_bufs) {
+    for (const auto& buf : intermediate_bufs) {
       TORCH_INTERNAL_ASSERT(
           buf_load_store_uses.count(buf),
           buildErrorMessage(
@@ -988,7 +989,8 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         } else {
           // If S is not a store, it must be an ExternalCall.
           TORCH_INTERNAL_ASSERT(
-              to<ExternalCall>(stores[0].s),
+              to<ExternalCall>(stores[0].s) ||
+                  to<ExternalCallWithAlloc>(stores[0].s),
               buildErrorMessage(
                   "Expected stmt: " + std::to_string(stores[0].s) +
                   "\nto be either a Store or an ExternalCall in the fuser."));
@@ -1009,7 +1011,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
     bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
   }
 
-  for (auto b : bufs_to_inline) {
+  for (const auto& b : bufs_to_inline) {
     computeInline(b);
   }
 }
@@ -1039,7 +1041,24 @@ class LoadOrStoreUseFinder : public IRVisitor {
     }
     last_stmt_ = (StmtPtr)v;
 
-    for (BufPtr input_buf : v->buf_args()) {
+    for (const BufPtr& input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
+  void visit(ExternalCallWithAllocPtr v) override {
+    for (const auto& out_buf : v->buf_out_args()) {
+      if (stores_[out_buf].insert(last_stmt_).second) {
+        uses_[out_buf].push_back({(StmtPtr)v, true});
+      }
+    }
+    last_stmt_ = (StmtPtr)v;
+
+    for (const auto& input_buf : v->buf_args()) {
       if (loads_[input_buf].insert(last_stmt_).second) {
         uses_[input_buf].push_back({last_stmt_, false});
       }
@@ -1087,6 +1106,10 @@ class ContainedStmtsFinder : public IRVisitor {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
+  void visit(ExternalCallWithAllocPtr v) override {
+    contained_.insert((StmtPtr)v);
+    IRVisitor::visit(v);
+  }
   void visit(BlockPtr v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
@@ -1097,13 +1120,13 @@ class ContainedStmtsFinder : public IRVisitor {
 
 bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, BlockPtr b) {
   std::unordered_set<StmtPtr> not_found;
-  for (auto use : uses) {
+  for (const auto& use : uses) {
     not_found.insert(use.s);
   }
 
   ContainedStmtsFinder csf;
   const std::unordered_set<StmtPtr>& contained = csf.findContainedStmts(b);
-  for (auto s : contained) {
+  for (const auto& s : contained) {
     not_found.erase(s);
   }
   return not_found.empty();
@@ -1129,37 +1152,6 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(
-    StmtPtr stmt,
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /* = c10::nullopt*/) {
-  std::unordered_set<BufPtr> intermediate_bufs;
-  if (interm_bufs) {
-    intermediate_bufs = *interm_bufs;
-  } else {
-    intermediate_bufs = getIntermediateBufs();
-  }
-
-  if (intermediate_bufs.size() == 0ULL) {
-    return stmt;
-  }
-
-  BlockPtr b = to<Block>(stmt);
-  if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
-  }
-
-  std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> uses =
-      findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers at global scope.
-  for (BufPtr buf : intermediate_bufs) {
-    b->prepend_stmt(alloc<Allocate>(buf));
-    b->append_stmt(alloc<Free>(buf));
-  }
-
-  return b;
-}
-
 class StmtDeleter : public IRMutator {
  public:
   StmtDeleter(const std::unordered_set<StmtPtr>& targets) : targets_(targets) {}
@@ -1168,7 +1160,7 @@ class StmtDeleter : public IRMutator {
   StmtPtr mutate(BlockPtr v) override {
     std::vector<StmtPtr> stmts;
 
-    for (auto s : v->stmts()) {
+    for (const auto& s : v->stmts()) {
       if (targets_.count(s) == 0) {
         StmtPtr ns = s->accept_mutator(this);
         if (ns) {
@@ -1190,7 +1182,7 @@ void LoopNest::eliminateDeadStores() {
 
   std::unordered_set<StmtPtr> deadStores;
   std::vector<std::shared_ptr<AccessInfo>> outputAccesses;
-  for (auto o : getOutputBufs()) {
+  for (const auto& o : getOutputBufs()) {
     outputAccesses.push_back(checker.output(o));
   }
 
@@ -1216,17 +1208,12 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen(
-    const c10::optional<std::unordered_set<BufPtr>>&
-        interm_bufs /*= c10::nullopt*/) {
+void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
-
-  // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
@@ -1329,7 +1316,7 @@ bool isConditionalFromCat(
 bool areConstantsAndSorted(const std::vector<ExprPtr>& comp_values) {
   std::vector<int> comp_consts;
   comp_consts.reserve(comp_values.size());
-  for (auto c : comp_values) {
+  for (const auto& c : comp_values) {
     if (!c->isConstant()) {
       return false;
     }
@@ -1345,7 +1332,7 @@ bool LoopNest::optimizeConditionals() {
   // conditionals in that store.
   auto stores = NodeFinder<Store>::find(root_stmt_);
   std::unordered_set<ForPtr> split_fors;
-  for (auto store : stores) {
+  for (const auto& store : stores) {
     VarPtr cond_var = nullptr;
     // `comp_values` represent the list of compared values that will be
     // collected as we check for the expected pattern. Since that will
@@ -1452,7 +1439,7 @@ void LoopNest::vectorizeInnerLoops() {
       BlockPtr b = blocks.back();
       blocks.pop_back();
 
-      for (StmtPtr s : *b) {
+      for (const StmtPtr& s : *b) {
         if (ForPtr f = to<For>(s)) {
           worklist.push_back(f);
         } else if (BlockPtr b2 = to<Block>(s)) {
@@ -1470,7 +1457,7 @@ void LoopNest::vectorizeInnerLoops() {
 
     bool containsSubLoops = false;
     if (BlockPtr body = to<Block>(f->body())) {
-      for (StmtPtr s2 : *body) {
+      for (const StmtPtr& s2 : *body) {
         if (ForPtr f2 = to<For>(s2)) {
           containsSubLoops = true;
           worklist.push_back(f2);
@@ -1484,7 +1471,7 @@ void LoopNest::vectorizeInnerLoops() {
   }
 
   // vectorize inner loops.
-  for (ForPtr loop : innerLoops) {
+  for (const ForPtr& loop : innerLoops) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr split1;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1519,12 +1506,12 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceHead attempted on null loop", f);
+    throw malformed_input("sliceHead attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceHead attempted on loop with no parent", p);
+    throw malformed_input("sliceHead attempted on loop with no parent");
   }
 
   ExprPtr head_end = alloc<Min>(
@@ -1559,12 +1546,12 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceTail attempted on null loop", f);
+    throw malformed_input("sliceTail attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceTail attempted on loop with no parent", p);
+    throw malformed_input("sliceTail attempted on loop with no parent");
   }
 
   ExprPtr tail_start = alloc<Max>(
@@ -1598,13 +1585,16 @@ void LoopNest::splitWithTail(
     ForPtr* inner,
     ForPtr* tail) {
   if (!f) {
-    throw malformed_input("splitWithTail attempted on null loop", f);
+    throw malformed_input("splitWithTail attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("splitWithTail attempted on loop with no parent", p);
+    throw malformed_input("splitWithTail attempted on loop with no parent");
   }
+
+  // Normalize the loop to simplify start and stop bound computation
+  normalize(f);
 
   bool tail_is_needed = true;
   if (intValue(f->start()) && intValue(f->stop())) {
@@ -1813,7 +1803,7 @@ bool areEqual(ExprPtr expr1, ExprPtr expr2) {
 bool doesExprContainAnyVar(
     ExprPtr expr,
     const std::unordered_set<VarPtr>& vars) {
-  for (auto v : VarFinder::find(expr)) {
+  for (const auto& v : VarFinder::find(expr)) {
     if (vars.count(v)) {
       return true;
     }
@@ -1832,8 +1822,8 @@ bool areIndicesLoopIndependent(
     return false;
   }
   for (size_t i = 0; i < expr_list1.size(); ++i) {
-    auto expr1 = expr_list1[i];
-    auto expr2 = expr_list2[i];
+    const auto& expr1 = expr_list1[i];
+    const auto& expr2 = expr_list2[i];
     if (doesExprContainAnyVar(expr1, outer_loop_vars) ||
         doesExprContainAnyVar(expr2, outer_loop_vars)) {
       if (!areEqual(expr1, expr2)) {
@@ -1850,7 +1840,7 @@ bool LoopNest::hasLoopCarriedDependence(ForPtr loop) {
 
   std::unordered_set<VarPtr> outer_loop_vars = {loop->var()};
   auto outer_loops = LoopNest::getEnclosingLoopNest(loop);
-  for (auto l : outer_loops) {
+  for (const auto& l : outer_loops) {
     outer_loop_vars.insert(l->var());
   }
 
@@ -1953,7 +1943,7 @@ bool LoopNest::unsafeFuseLoops(
 
   // Check if all the loops have the same parent.
   auto root = loops.front()->get_parent();
-  for (auto l : loops) {
+  for (const auto& l : loops) {
     auto par = l->get_parent();
     if (par == nullptr) {
       return false;
@@ -1981,14 +1971,14 @@ bool LoopNest::unsafeFuseLoops(
       it != root_block->end(),
       buildErrorMessage(
           "Could not find the given loop in the root stmt in unsafeFuseLoop the fuser."));
-  for (auto l : loops) {
+  for (const auto& l : loops) {
     if (*it != l) {
       return false;
     }
     ++it;
   }
 
-  auto first_loop = loops.front();
+  const auto& first_loop = loops.front();
   // Fuse the loops by taking all the statements from the second loops
   // onwards and moving them into the first loop's body.
   // This way the final fused loop will be the same as the first loop.
@@ -2013,11 +2003,11 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   }
 
   // Check if bounds are the same for all the loops.
-  auto first_loop = loops.front();
+  const auto& first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
   for (size_t i = 1; i < loops.size(); ++i) {
-    auto curr_loop = loops[i];
+    const auto& curr_loop = loops[i];
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
     if (!areEqual(curr_loop_start, first_loop_start)) {
@@ -2051,7 +2041,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   return unsafeFuseLoops(loops, fused);
 }
 
-ForPtr findOuterFor(ForPtr a, ForPtr b) {
+ForPtr LoopNest::findOuterFor(ForPtr a, ForPtr b) {
   StmtPtr s = b; // guess b is the latter.
   while (s != nullptr) {
     if (s == a) {
@@ -2109,7 +2099,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   BlockPtr body = alloc<Block>(std::vector<StmtPtr>({}));
   body->splice(body->end(), inner->body());
 
-  ForPtr before{outer};
+  const ForPtr& before{outer};
   ForPtr after{nullptr};
   ForPtr last = internal_axes.front();
   StmtPtr newInner = body;
@@ -2142,7 +2132,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   // When reordering loop i and j we need to ensure that Statement A and C are
   // still both executed with the loop extents of i, and that the three
   // statements are not reordered (as much as possible).
-  for (auto loop : internal_axes) {
+  for (const auto& loop : internal_axes) {
     // If the inner loop had a component after the loop we must wrap it in a For
     // loop matching this level of the tree.
     if (after != nullptr) {
@@ -2184,7 +2174,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   std::swap(internal_axes.front(), internal_axes.back());
 
   // Create the reordered internals:
-  for (auto loop : internal_axes) {
+  for (const auto& loop : internal_axes) {
     newInner = loop->cloneWithNewBody(newInner);
   }
 
@@ -2345,7 +2335,7 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
   return true;
 }
 
-void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
+void LoopNest::fullUnroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
@@ -2366,7 +2356,7 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   int start_val = immediateAs<int>(start_expr);
   int stop_val = immediateAs<int>(stop_expr);
   for (int current = start_val; current < stop_val; ++current) {
-    for (auto stmt : f->body()->stmts()) {
+    for (const auto& stmt : f->body()->stmts()) {
       unrolled_stmts.push_back(SubstituteInClone(
           stmt, {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
     }
@@ -2377,10 +2367,26 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::unroll(ForPtr f) {
+void LoopNest::fullUnroll(ForPtr f) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   StmtPtr unrolled;
-  unroll(f, &unrolled);
+  fullUnroll(f, &unrolled);
+}
+
+void LoopNest::unroll(ForPtr f, int factor, ForPtr* tail) {
+  if (factor < 2) {
+    return;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr inner;
+  splitWithTail(f, factor, &inner, tail);
+  fullUnroll(inner);
+}
+
+void LoopNest::unroll(ForPtr f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr tail;
+  unroll(f, factor, &tail);
 }
 
 bool LoopNest::isNormalized(ForPtr f) {
@@ -2536,17 +2542,17 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
       parent,
       buildErrorMessage(
           "Expected parent stmt to be a non-null block in compressBuffer in the fuser."));
-  for (auto w : writes) {
+  for (const auto& w : writes) {
     parent = Block::getSharedParent(parent, w);
   }
-  for (auto r : reads) {
+  for (const auto& r : reads) {
     parent = Block::getSharedParent(parent, r);
   }
 
   // Collect all the loops that are above the common parent.
   auto loops = LoopNest::getEnclosingLoopNest(parent);
   std::unordered_set<VarPtr> loop_vars;
-  for (auto l : loops) {
+  for (const auto& l : loops) {
     loop_vars.insert(l->var());
   }
 
@@ -2563,7 +2569,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
             "Expected ranks to match in compressBuffer in the fuser."));
     for (size_t i = 0; i < indices.size(); ++i) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
-      for (auto iv : index_vars) {
+      for (const auto& iv : index_vars) {
         if (loop_vars.count(iv) == 0) {
           // A variable in this index is not in loop_vars.
           // This implies that this dimension cannot be optimized away.
@@ -2573,12 +2579,12 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
       }
     }
   };
-  for (auto s : stores) {
+  for (const auto& s : stores) {
     if (s->buf() == buf) {
       check_indices(s->indices());
     }
   }
-  for (auto l : loads) {
+  for (const auto& l : loads) {
     if (l->buf() == buf) {
       check_indices(l->indices());
     }
@@ -2614,12 +2620,12 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
     }
     return new_indices;
   };
-  for (auto s : stores) {
+  for (const auto& s : stores) {
     if (s->buf() == buf) {
       s->set_indices(get_new_indices(s->indices()));
     }
   }
-  for (auto l : loads) {
+  for (const auto& l : loads) {
     if (l->buf() == buf) {
       l->set_indices(get_new_indices(l->indices()));
     }
@@ -2627,7 +2633,7 @@ void LoopNest::compressBuffer(BufPtr buf, StmtPtr stmt) {
 }
 
 void LoopNest::compressAllBuffers(StmtPtr stmt) {
-  for (auto buf : BufFinder::find(stmt)) {
+  for (const auto& buf : BufFinder::find(stmt)) {
     compressBuffer(buf, stmt);
   }
 }
@@ -2673,7 +2679,7 @@ StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
   }
 
   StmtPtr res = nullptr;
-  for (auto s : writes) {
+  for (const auto& s : writes) {
     if (!res) {
       res = s;
       continue;
@@ -2716,7 +2722,7 @@ std::vector<ForPtr> LoopNest::getAllInnermostLoopsWritingToBuf(
   auto writes = getAllWritesToBuf(buf);
   std::vector<ForPtr> innermost_loops;
   innermost_loops.reserve(writes.size());
-  for (auto w : writes) {
+  for (const auto& w : writes) {
     innermost_loops.push_back(LoopNest::getParentLoop(w));
   }
   return innermost_loops;
@@ -2727,7 +2733,7 @@ std::vector<std::vector<ForPtr>> LoopNest::getAllLoopNestsWritingToBuf(
   auto writes = getAllWritesToBuf(buf);
   std::vector<std::vector<ForPtr>> loopnests;
   loopnests.reserve(writes.size());
-  for (auto w : writes) {
+  for (const auto& w : writes) {
     loopnests.emplace_back(LoopNest::getEnclosingLoopNest(w));
   }
   return loopnests;
@@ -2776,7 +2782,7 @@ static StorePtr getStoreStmtOfProducer(StmtPtr s) {
     return st;
   }
   if (BlockPtr b = to<Block>(s)) {
-    for (StmtPtr ss : *b) {
+    for (const StmtPtr& ss : *b) {
       if (StorePtr st = to<Store>(ss)) {
         return st;
       }
@@ -2863,7 +2869,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     StmtPtr consumer) {
   ReduceOpPtr reduceOp{nullptr};
   auto stores = NodeFinder<Store>::find(consumer);
-  for (auto store : stores) {
+  for (const auto& store : stores) {
     if (auto ro = to<ReduceOp>(store->value())) {
       if (store->buf() != producer) {
         continue;
@@ -2942,10 +2948,10 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     std::set<VarPtr> reduce_args(
         reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
     std::set<VarPtr> enclosing_vars;
-    for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
+    for (const auto& enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
       enclosing_vars.insert(enclosing_for_stmt->var());
     }
-    for (auto reduce_arg : reduce_args) {
+    for (const auto& reduce_arg : reduce_args) {
       if (enclosing_vars.find(reduce_arg) == enclosing_vars.end()) {
         on_reduce_axis = true;
       }
@@ -2975,7 +2981,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_params,
         reduceOp->reducer()(
             producer,
-            ExprHandle(alloc<Load>(tmp_buf, new_loop_vars_expr)),
+            alloc<Load>(tmp_buf, new_loop_vars_expr),
             tmp_params,
             {}));
 
@@ -3268,7 +3274,7 @@ class RfactorStoreRewriter : public IRMutator {
     ExprPtr body_new = v->body()->accept_mutator(this);
 
     std::vector<VarPtr> new_reduce_args;
-    for (auto r : v->reduce_args()) {
+    for (const auto& r : v->reduce_args()) {
       if (r != reduction_var_) {
         new_reduce_args.push_back(r);
       }

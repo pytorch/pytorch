@@ -1,10 +1,19 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
+#include <cpuinfo.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/from_blob.h>
+#endif
+
 
 #include <tuple>
 
@@ -80,7 +89,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   // determine the version based on IValue contents
   int version = -1;
   if (v.isTuple()) {
-    const auto& elements = v.toTuple()->elements();
+    const auto& elements = v.toTupleRef().elements();
     if (elements.size() > 0) {
       auto firstElement = elements[0];
       if (firstElement.isTensor()) {
@@ -105,7 +114,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   if (version == 1) {
     // version 1 - convert to version 3 manually
 
-    const auto& elements = v.toTuple()->elements();
+    const auto& elements = v.toTupleRef().elements();
 
     at::Tensor weight = elements[0].toTensor();
     c10::optional<at::Tensor> bias = elements[1].toOptional<at::Tensor>();
@@ -149,7 +158,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     return std::tie(version, config_vals, tensors);
   } else if (version == 2) {
     // version 2
-    const auto& elements = v.toTuple()->elements();
+    const auto& elements = v.toTupleRef().elements();
     std::vector<at::Tensor> non_optional = elements[1].toTensorList().vec();
     std::vector<c10::optional<at::Tensor>> optional;
 
@@ -306,6 +315,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   }
   for (const auto i : c10::irange(kSpatialDim)) {
     (void)i; // Suppress unused variable
+    TORCH_INTERNAL_ASSERT(idx < static_cast<int64_t>(config_vals.size()),
+        "Unexpected index = ", idx, " for config_vals of size ",
+        config_vals.size());
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }
@@ -325,6 +337,37 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");
 
   auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+        weight.value(), transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+    }
+#endif
+    return PackedConvWeight<kSpatialDim>::prepack(
+      weight.value(),
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose
+    );
+  } // x86
+#endif
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
@@ -358,6 +401,20 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     );
   }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+  if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+      weight.value(),
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose
+    );
+  }
+#endif // AT_MKLDNN_ENABLED()
 TORCH_CHECK(
   false,
   "Didn't find engine for when deserializing ConvPackedParams: ",

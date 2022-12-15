@@ -8,6 +8,10 @@ from .. import functional as F
 from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
                             _ratio_3_t, _ratio_2_t, _size_any_opt_t, _size_2_opt_t, _size_3_opt_t)
 
+__all__ = ['MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d',
+           'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'LPPool1d',
+           'LPPool2d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
+           'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
 
 class _MaxPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
@@ -84,10 +88,10 @@ class MaxPool1d(_MaxPoolNd):
     padding: _size_1_t
     dilation: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool1d(input, self.kernel_size, self.stride,
-                            self.padding, self.dilation, self.ceil_mode,
-                            self.return_indices)
+                            self.padding, self.dilation, ceil_mode=self.ceil_mode,
+                            return_indices=self.return_indices)
 
 
 class MaxPool2d(_MaxPoolNd):
@@ -122,7 +126,7 @@ class MaxPool2d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
+        padding: Implicit negative infinity padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool2d` later
@@ -158,10 +162,10 @@ class MaxPool2d(_MaxPoolNd):
     padding: _size_2_t
     dilation: _size_2_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool2d(input, self.kernel_size, self.stride,
-                            self.padding, self.dilation, self.ceil_mode,
-                            self.return_indices)
+                            self.padding, self.dilation, ceil_mode=self.ceil_mode,
+                            return_indices=self.return_indices)
 
 
 class MaxPool3d(_MaxPoolNd):
@@ -196,7 +200,7 @@ class MaxPool3d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on all three sides
+        padding: Implicit negative infinity padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool3d` later
@@ -236,10 +240,10 @@ class MaxPool3d(_MaxPoolNd):
     padding: _size_3_t
     dilation: _size_3_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool3d(input, self.kernel_size, self.stride,
-                            self.padding, self.dilation, self.ceil_mode,
-                            self.return_indices)
+                            self.padding, self.dilation, ceil_mode=self.ceil_mode,
+                            return_indices=self.return_indices)
 
 
 class _MaxUnpoolNd(Module):
@@ -287,6 +291,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("do other tests modify the global state?")
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
@@ -361,24 +366,30 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
-        >>> input = torch.tensor([[[[ 1.,  2,  3,  4],
-                                    [ 5,  6,  7,  8],
-                                    [ 9, 10, 11, 12],
-                                    [13, 14, 15, 16]]]])
+        >>> input = torch.tensor([[[[ 1.,  2.,  3.,  4.],
+                                    [ 5.,  6.,  7.,  8.],
+                                    [ 9., 10., 11., 12.],
+                                    [13., 14., 15., 16.]]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
         tensor([[[[  0.,   0.,   0.,   0.],
                   [  0.,   6.,   0.,   8.],
                   [  0.,   0.,   0.,   0.],
                   [  0.,  14.,   0.,  16.]]]])
+        >>> # Now using output_size to resolve an ambiguous size for the inverse
+        >>> input = torch.torch.tensor([[[[ 1.,  2.,  3., 4., 5.],
+                                          [ 6.,  7.,  8., 9., 10.],
+                                          [11., 12., 13., 14., 15.],
+                                          [16., 17., 18., 19., 20.]]]])
+        >>> output, indices = pool(input)
+        >>> # This call will not work without specifying output_size
+        >>> unpool(output, indices, output_size=input.size())
+        tensor([[[[ 0.,  0.,  0.,  0.,  0.],
+                  [ 0.,  7.,  0.,  9.,  0.],
+                  [ 0.,  0.,  0.,  0.,  0.],
+                  [ 0., 17.,  0., 19.,  0.]]]])
 
-        >>> # specify a different output size than input size
-        >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-        tensor([[[[  0.,   0.,   0.,   0.,   0.],
-                  [  6.,   0.,   8.,   0.,   0.],
-                  [  0.,   0.,   0.,  14.,   0.],
-                  [ 16.,   0.,   0.,   0.,   0.],
-                  [  0.,   0.,   0.,   0.,   0.]]]])
+
     """
 
     kernel_size: _size_2_t
@@ -502,7 +513,7 @@ class AvgPool1d(_AvgPoolNd):
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
     Shape:
-        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in}`.
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
         - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
@@ -514,7 +525,7 @@ class AvgPool1d(_AvgPoolNd):
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.,  4.,  6.]]])
+        tensor([[[2., 4., 6.]]])
     """
 
     kernel_size: _size_1_t
@@ -772,7 +783,7 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -784,7 +795,7 @@ class FractionalMaxPool3d(Module):
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
-    The max-pooling operation is applied in :math:`kTxkHxkW` regions by a stochastic
+    The max-pooling operation is applied in :math:`kT \times kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
@@ -797,6 +808,12 @@ class FractionalMaxPool3d(Module):
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool3d`. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, T_{in}, H_{in}, W_{in})` or :math:`(C, T_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, T_{out}, H_{out}, W_{out})` or :math:`(C, T_{out}, H_{out}, W_{out})`, where
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(T_{out}, H_{out}, W_{out})=\text{output\_ratio} \times (T_{in}, H_{in}, W_{in})`
 
     Examples:
         >>> # pool of cubic window of size=3, and target output size 13x12x11
@@ -835,7 +852,7 @@ class FractionalMaxPool3d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -1042,7 +1059,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     output_size: _size_2_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
@@ -1085,7 +1102,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     output_size: _size_3_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 
@@ -1180,7 +1197,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
                      be the same as that of the input.
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
         - Output: :math:`(N, C, S_{0}, S_{1}, S_{2})` or :math:`(C, S_{0}, S_{1}, S_{2})`,
           where :math:`S=\text{output\_size}`.
 

@@ -6,6 +6,8 @@ torch.linalg
 
 Common linear algebra operations.
 
+See :ref:`Linear Algebra Stability` for some common numerical edge-cases.
+
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
 
@@ -19,6 +21,7 @@ Matrix Properties
     norm
     vector_norm
     matrix_norm
+    diagonal
     det
     slogdet
     cond
@@ -33,12 +36,16 @@ Decompositions
 
     cholesky
     qr
+    lu
+    lu_factor
     eig
     eigvals
     eigh
     eigvalsh
     svd
     svdvals
+
+.. _linalg solvers:
 
 Solvers
 -------
@@ -48,7 +55,11 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
+    lu_solve
     lstsq
+
+.. _linalg inverses:
 
 Inverses
 --------
@@ -60,6 +71,16 @@ Inverses
     inv
     pinv
 
+Matrix Functions
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    matrix_exp
+    matrix_power
+
 Matrix Products
 ---------------
 
@@ -67,8 +88,9 @@ Matrix Products
     :toctree: generated
     :nosignatures:
 
+    cross
     matmul
-    matrix_power
+    vecdot
     multi_dot
     householder_product
 
@@ -82,6 +104,15 @@ Tensor Operations
     tensorinv
     tensorsolve
 
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
+
 Experimental Functions
 ----------------------
 .. autosummary::
@@ -90,3 +121,8 @@ Experimental Functions
 
     cholesky_ex
     inv_ex
+    solve_ex
+    lu_factor_ex
+    ldl_factor
+    ldl_factor_ex
+    ldl_solve

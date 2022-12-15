@@ -61,6 +61,10 @@ Creating TorchScript Code
     ScriptFunction
     freeze
     optimize_for_inference
+    enable_onednn_fusion
+    onednn_fusion_enabled
+    set_fusion_strategy
+    strict_fusion
     save
     load
     ignore
@@ -870,6 +874,11 @@ now supported.
             b = 2
         return x, b
 
+Fusion Backends
+~~~~~~~~~~~~~~~
+There are a couple of fusion backends available to optimize TorchScript execution. The default fuser on CPUs is NNC, which can perform fusions for both CPUs and GPUs. The default fuser on GPUs is NVFuser, which supports a wider range of operators and has demonstrated generated kernels with improved throughput. See the  `NVFuser documentation <https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/codegen/cuda/README.md>`_ for more details on usage and debugging.
+
+
 References
 ~~~~~~~~~~
 .. toctree::
@@ -877,3 +886,7 @@ References
 
     jit_python_reference
     jit_unsupported
+
+.. This package is missing doc. Adding it here for coverage
+.. This does not add anything to the rendered page.
+.. py:module:: torch.jit.mobile

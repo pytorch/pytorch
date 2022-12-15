@@ -1,15 +1,25 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -34,8 +44,8 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const int64_t channels, const int64_t height,
+    const int64_t width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w, scalar_t* top_data,
@@ -59,7 +69,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
-        if ((static_cast<accscalar_t>(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
+        if ((static_cast<accscalar_t>(val) > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
           maxval = static_cast<accscalar_t>(val);
         }
@@ -73,8 +83,8 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
-                                   const int channels, const int height,
-                                   const int width, const int pooled_height, const int pooled_width,
+                                   const int64_t channels, const int64_t height,
+                                   const int64_t width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
@@ -127,13 +137,13 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
         hstart += dilation_h;
       while(wstart < 0)
         wstart += dilation_w;
-      for (int ih = hstart; ih < hend; ih++) {
-        for (int iw = wstart; iw < wend; iw++) {
+      for (int ih = hstart; ih < hend; ih += dilation_h) {
+        for (int iw = wstart; iw < wend; iw += dilation_w) {
           int cached_index = threadIdx.x;
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
-            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
+            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || at::_isnan(val)) {
               out_cached[cached_index] = static_cast<accscalar_t>(val);
               out_mask_cached[cached_index] = ih * width + iw;
             }
@@ -165,9 +175,9 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
-__global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_diff,
-    const int64_t* top_mask, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+__global__ void max_pool_backward_nchw(const scalar_t* top_diff,
+    const int64_t* top_mask, const int num, const int64_t channels,
+    const int64_t height, const int64_t width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
@@ -198,15 +208,13 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int channels,
-                                    const int height, const int width, const int pooled_height,
+__global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
+                                    const int64_t* top_mask, const int nbatch, const int64_t channels,
+                                    const int64_t height, const int64_t width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
                                     const int out_stride_c, const int out_stride_h, const int out_stride_w,
-                                    const int in_stride_n, const int in_stride_c,
-                                    const int in_stride_h, const int in_stride_w,
                                     const int kernel_stride_C, const int kernel_size_C,
                                     scalar_t* bottom_diff) {
   extern __shared__ int smem[];
@@ -234,9 +242,9 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
   int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
+  int iendH = ::min(static_cast<int64_t>(istartH)+iH, height);
   int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
+  int iendW = ::min(static_cast<int64_t>(istartW)+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
@@ -395,7 +403,7 @@ const Tensor& indices) {
           max_pool_forward_nchw<scalar_t, scalar_t>
               <<<ceil_div(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
-                  nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   output_data, indices_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -415,14 +423,14 @@ IntArrayRef stride,
 IntArrayRef padding,
 IntArrayRef dilation,
 bool ceil_mode,
-const Tensor& indices,
+const Tensor& indices_,
 const Tensor& gradInput) {
   NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
+  TensorArg indices_arg{ indices_, "indices", 4 };
 
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
@@ -465,6 +473,8 @@ const Tensor& gradInput) {
   const int64_t out_stride_c = gradOutput.stride(-3);
   const int64_t out_stride_h = gradOutput.stride(-2);
   const int64_t out_stride_w = gradOutput.stride(-1);
+
+  const Tensor indices = indices_.contiguous(memory_format);
 
   gradInput.zero_();
 
@@ -515,15 +525,12 @@ const Tensor& gradInput) {
           // Please check comments at https://github.com/pytorch/pytorch/pull/34519.
           max_pool_backward_nhwc<scalar_t, accscalar_t>
           <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
-              count,
                   gradOutput_data,
                   indices_data,
                   nbatch,
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   out_stride_c, out_stride_h, out_stride_w,
-                  in_stride_n, in_stride_c,
-                  in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   gradInput_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -543,7 +550,6 @@ const Tensor& gradInput) {
 
           max_pool_backward_nchw<scalar_t, accscalar_t>
           <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
                   gradOutput_data,
                   indices_data,
                   nbatch,

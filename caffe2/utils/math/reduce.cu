@@ -5,9 +5,8 @@
 #include <limits>
 #include <numeric>
 #include <vector>
-
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/reduce.h>
@@ -419,12 +418,12 @@ void MomentsCUDA(
     return;
   }
   if (std::equal(X_dims, X_dims + ndim, Y_dims)) {
-    cudaMemcpyAsync(
+    C10_CUDA_CHECK(cudaMemcpyAsync(
         mean,
         X,
         sizeof(T) * X_size,
         cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
+        context->cuda_stream()));
     Set<T, CUDAContext>(Y_size, T(0), var, context);
     return;
   }

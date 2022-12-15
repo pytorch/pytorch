@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "onnx::Concat_0"
+    input: "onnx::Concat_1"
     output: "2"
     name: "Concat_0"
     op_type: "Concat"
@@ -14,9 +14,9 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Concat_0"
     type {
       tensor_type {
         elem_type: 1
@@ -32,7 +32,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Concat_1"
     type {
       tensor_type {
         elem_type: 1
@@ -65,5 +65,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

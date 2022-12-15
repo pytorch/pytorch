@@ -31,7 +31,7 @@ namespace inst {
 //! An easy way to view traces is to type `about://tracing` in Chrome or
 //! Chromium.
 //!
-class Trace : public NonCopyable {
+class TORCH_CUDA_CU_API Trace : public NonCopyable {
  public:
   using Clock = std::chrono::steady_clock;
 
@@ -45,11 +45,15 @@ class Trace : public NonCopyable {
     if (log_file_ != nullptr) {
       logEvent('B', name);
     }
-    nvtxRangePushA(name);
+    if (record_nvtx_range_) {
+      nvtxRangePushA(name);
+    }
   }
 
   void endEvent(const char* name) {
-    nvtxRangePop();
+    if (record_nvtx_range_) {
+      nvtxRangePop();
+    }
     if (log_file_ != nullptr) {
       logEvent('E', name);
     }
@@ -64,11 +68,12 @@ class Trace : public NonCopyable {
  private:
   FILE* log_file_ = nullptr;
   Clock::time_point start_timestamp_;
+  bool record_nvtx_range_ = true;
 };
 
 //! \internal Automatic scope for a perf marker
 //!   (normally used through the FUSER_PERF_SCOPE macro)
-class TraceScope : public NonCopyable {
+class TORCH_CUDA_CU_API TraceScope : public NonCopyable {
  public:
   explicit TraceScope(const char* event_name) : event_name_(event_name) {
     Trace::instance()->beginEvent(event_name_);

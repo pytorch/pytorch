@@ -36,5 +36,22 @@ std::vector<std::string> getUnresolvedClassAttributes(const ClassDef& def) {
   return ret;
 }
 
+/* static */ ClassDef ClassDef::create(
+    const SourceRange& range,
+    const Ident& name,
+    const Maybe<Expr>& superclass,
+    const List<Stmt>& body,
+    const List<Property>& properties,
+    const List<Assign>& assigns) {
+  return ClassDef(Compound::create(
+      TK_CLASS_DEF,
+      range,
+      {name,
+       superclass,
+       body,
+       Maybe<List<Property>>::create(range, properties),
+       Maybe<List<Assign>>::create(range, assigns)}));
+}
+
 } // namespace jit
 } // namespace torch

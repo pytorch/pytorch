@@ -5,6 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -21,7 +22,7 @@ class FloorOp final : public Operator<Context> {
 
     const float* Xdata = X.template data<float>();
     float* Ydata = Y->template mutable_data<float>();
-    for (int i = 0; i < X.numel(); ++i) {
+    for (const auto i : c10::irange(X.numel())) {
       Ydata[i] = std::floor(Xdata[i]);
     }
     return true;

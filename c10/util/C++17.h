@@ -36,11 +36,37 @@
  */
 
 namespace c10 {
+
+// in c++17 std::result_of has been superceded by std::invoke_result.  Since
+// c++20, std::result_of is removed.
+template <typename F, typename... args>
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+using invoke_result = typename std::invoke_result<F, args...>;
+#else
+using invoke_result = typename std::result_of<F && (args && ...)>;
+#endif
+
+template <typename F, typename... args>
+using invoke_result_t = typename invoke_result<F, args...>::type;
+
+// std::is_pod is deprecated in C++20, std::is_standard_layout and
+// std::is_trivial are introduced in C++11, std::conjunction has been introduced
+// in C++17.
+template <typename T>
+#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
+using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
+#else
+using is_pod = std::is_pod<T>;
+#endif
+
+template <typename T>
+constexpr bool is_pod_v = is_pod<T>::value;
+
 namespace guts {
 
 template <typename Base, typename Child, typename... Args>
 typename std::enable_if<
-    !std::is_array<Base>::value && !std::is_array<Base>::value &&
+    !std::is_array<Base>::value && !std::is_array<Child>::value &&
         std::is_base_of<Base, Child>::value,
     std::unique_ptr<Base>>::type
 make_unique_base(Args&&... args) {
@@ -114,7 +140,7 @@ using void_t = typename make_void<Ts...>::type;
 #define CUDA_HOST_DEVICE C10_HOST_DEVICE
 #endif
 
-#ifdef __cpp_lib_apply
+#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__)
 
 template <class F, class Tuple>
 CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
@@ -164,7 +190,7 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 template <typename Functor, typename... Args>
 typename std::enable_if<
     std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
+    typename c10::invoke_result_t<Functor, Args...>>::type
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
@@ -172,7 +198,7 @@ invoke(Functor&& f, Args&&... args) {
 template <typename Functor, typename... Args>
 typename std::enable_if<
     !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
+    typename c10::invoke_result_t<Functor, Args...>>::type
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }
@@ -334,23 +360,27 @@ decltype(auto) if_constexpr(
   if constexpr (Condition) {
     if constexpr (detail::function_takes_identity_argument<
                       ThenCallback>::value) {
-      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      // Note that we use static_cast<T&&>(t) instead of std::forward (or
+      // ::std::forward) because using the latter produces some compilation
+      // errors about ambiguous `std` on MSVC when using C++17. This static_cast
+      // is just what std::forward is doing under the hood, and is equivalent.
+      return static_cast<ThenCallback&&>(thenCallback)(detail::_identity());
     } else {
-      return ::std::forward<ThenCallback>(thenCallback)();
+      return static_cast<ThenCallback&&>(thenCallback)();
     }
   } else {
     if constexpr (detail::function_takes_identity_argument<
                       ElseCallback>::value) {
-      return ::std::forward<ElseCallback>(elseCallback)(detail::_identity());
+      return static_cast<ElseCallback&&>(elseCallback)(detail::_identity());
     } else {
-      return ::std::forward<ElseCallback>(elseCallback)();
+      return static_cast<ElseCallback&&>(elseCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
   return detail::_if_constexpr<Condition>::call(
-      ::std::forward<ThenCallback>(thenCallback),
-      ::std::forward<ElseCallback>(elseCallback));
+      static_cast<ThenCallback&&>(thenCallback),
+      static_cast<ElseCallback&&>(elseCallback));
 #endif
 }
 
@@ -362,15 +392,19 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
   if constexpr (Condition) {
     if constexpr (detail::function_takes_identity_argument<
                       ThenCallback>::value) {
-      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      // Note that we use static_cast<T&&>(t) instead of std::forward (or
+      // ::std::forward) because using the latter produces some compilation
+      // errors about ambiguous `std` on MSVC when using C++17. This static_cast
+      // is just what std::forward is doing under the hood, and is equivalent.
+      return static_cast<ThenCallback&&>(thenCallback)(detail::_identity());
     } else {
-      return ::std::forward<ThenCallback>(thenCallback)();
+      return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
   return if_constexpr<Condition>(
-      ::std::forward<ThenCallback>(thenCallback), [](auto) {});
+      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
 #endif
 }
 

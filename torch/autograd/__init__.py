@@ -9,15 +9,15 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 import torch
 import warnings
 
-from torch.types import _TensorOrTensors
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from torch.types import _TensorOrTensors, _size
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
-from ..overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
 from . import forward_ad
 from . import graph
@@ -26,14 +26,32 @@ from .. import _vmap_internals
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 _OptionalTensor = Optional[torch.Tensor]
+_ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
+
+
+def _calculate_shape(output: torch.Tensor, grad: torch.Tensor,
+                     is_grads_batched: bool) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
+    # is_same_size ensures that both tensors are either nested or non nested
+    if output.is_nested:
+        if is_grads_batched:
+            raise RuntimeError("Batched grads are not supported with Nested Tensor.")
+        out_shape = output._nested_tensor_size()
+        grad_shape = grad._nested_tensor_size()
+
+        return out_shape, grad_shape
+
+    reg_out_shape = output.shape
+    reg_grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
+    return reg_out_shape, reg_grad_shape
 
 def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor],
                 is_grads_batched: bool) -> Tuple[_OptionalTensor, ...]:
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            grad_shape = grad.shape if not is_grads_batched else grad.shape[1:]
-            if not out.shape == grad_shape:
+            first_grad = grad if not is_grads_batched else grad[0]
+            if not torch.is_same_size(out, first_grad):
+                out_shape, grad_shape = _calculate_shape(out, first_grad, is_grads_batched)
                 if is_grads_batched:
                     raise RuntimeError("If `is_grads_batched=True`, we interpret the first "
                                        "dimension of each grad_output as the batch dimension. "
@@ -41,17 +59,17 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
                                        "the shape of corresponding output, but a mismatch "
                                        "was detected: grad_output["
                                        + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
+                                       + str(grad_shape) + " and output["
                                        + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ". "
+                                       + str(out_shape) + ". "
                                        "If you only want some tensors in `grad_output` to be considered "
                                        "batched, consider using vmap.")
                 else:
                     raise RuntimeError("Mismatch in shape: grad_output["
                                        + str(grads.index(grad)) + "] has a shape of "
-                                       + str(grad.shape) + " and output["
+                                       + str(grad_shape) + " and output["
                                        + str(outputs.index(out)) + "] has a shape of "
-                                       + str(out.shape) + ".")
+                                       + str(out_shape) + ".")
             if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
                                    " are required to have the same dtype."
@@ -147,6 +165,12 @@ def backward(
             not provided, the gradient is accumulated into all the leaf Tensors that
             were used to compute the attr::tensors.
     """
+    if torch._C._are_functorch_transforms_active():
+        raise RuntimeError(
+            "backward() called inside a functorch transform. This is not "
+            "supported, please use functorch.grad or functorch.vjp instead "
+            "or call backward() outside of functorch transforms.")
+
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
         if grad_tensors is None:
@@ -235,20 +259,21 @@ def grad(
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
     """
-    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
-    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
-    overridable_args = outputs + inputs
+    t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
+    t_inputs = cast(Tuple[torch.Tensor, ...], (inputs,) if is_tensor_like(inputs) else tuple(inputs))
+    overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):
         return handle_torch_function(
             grad,
             overridable_args,
-            outputs,
-            inputs,
+            t_outputs,
+            t_inputs,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
             only_inputs=only_inputs,
             allow_unused=allow_unused,
+            is_grads_batched=is_grads_batched,
         )
 
     if not only_inputs:
@@ -256,8 +281,8 @@ def grad(
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
 
-    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
-    grad_outputs_ = _make_grads(outputs, grad_outputs_, is_grads_batched=is_grads_batched)
+    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))
+    grad_outputs_ = _make_grads(t_outputs, grad_outputs_, is_grads_batched=is_grads_batched)
 
     if retain_graph is None:
         retain_graph = create_graph
@@ -268,12 +293,12 @@ def grad(
     if is_grads_batched:
         def vjp(gO):
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-                outputs, gO, retain_graph, create_graph, inputs,
+                t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs)
+        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-            outputs, grad_outputs_, retain_graph, create_graph, inputs,
+            t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
 
 
@@ -295,20 +320,47 @@ def _is_checkpoint_valid():
 
 
 def variable(*args, **kwargs):
-    warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
-    return torch.tensor(*args, **kwargs)
+    raise RuntimeError("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
+
+# Monkey patching variable.Variable to fix FX codegen. FX generates a call by roughly doing
+# f"{fn.__module__}.{fn.__name__}(...). This yields torch.autograd.variable.Variable(...) in the
+# output of an FX graph.  Unfortunately the module name torch.autograd.variable is shadowed by the
+# deprecated function - variable(...).
+variable.Variable = Variable  # type: ignore[attr-defined]
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
-from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
-                                _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer, kineto_available,
-                                _supported_activities, _add_metadata_json, SavedTensor,
-                                _register_saved_tensors_default_hooks, _reset_saved_tensors_default_hooks)
+from torch._C._autograd import (
+    _add_metadata_json,
+    _disable_profiler,
+    _disable_profiler_legacy,
+    _enable_profiler,
+    _enable_profiler_legacy,
+    _enable_record_function,
+    _kineto_step,
+    _KinetoEvent,
+    _pop_saved_tensors_default_hooks,
+    _prepare_profiler,
+    _profiler_enabled,
+    _ProfilerResult,
+    _push_saved_tensors_default_hooks,
+    _record_function_with_args_enter,
+    _record_function_with_args_exit,
+    _set_empty_test_observer,
+    _supported_activities,
+    DeviceType,
+    kineto_available,
+    ProfilerEvent,
+    SavedTensor,
+)
 
-from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
-                                _prepare_profiler, _enable_profiler, _disable_profiler)
+from torch._C._profiler import ProfilerActivity, ProfilerConfig, ProfilerState
 
 from . import profiler
+
+def _register_py_tensor_class_for_device(device, cls):
+    if not isinstance(cls, type):
+        raise RuntimeError("cls isn't a typeinfo object")
+    torch._C._register_py_class_for_device(device, cls)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <sstream>
@@ -79,11 +79,16 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const Bool*) override;
   void handle(const Double*) override;
   void handle(const Int*) override;
+  void handle(const ComplexDouble*) override;
   void handle(const NamedScalar*) override;
 
+  void handle(const FullOp*) override;
+  void handle(const ARangeOp*) override;
+  void handle(const EyeOp*) override;
   void handle(const UnaryOp*) override;
   void handle(const BinaryOp*) override;
   void handle(const TernaryOp*) override;
+  void handle(const RNGOp*) override;
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
 

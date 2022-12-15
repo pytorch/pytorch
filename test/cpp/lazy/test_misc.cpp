@@ -1,19 +1,39 @@
 #include <gtest/gtest.h>
 #include <string>
 
-#include "torch/csrc/lazy/core/hash.h"
-#include "c10/util/int128.h"
+#include <c10/util/int128.h>
+#include <torch/csrc/lazy/core/hash.h>
 
 namespace torch {
 namespace lazy {
 
 template <typename T>
-void test_hash_repeatable_sensitive(T example_a, T example_b) {
+void test_hash_repeatable_sensitive(const T& example_a, const T& example_b) {
   // repeatable
   EXPECT_EQ(Hash(example_a), Hash(example_a));
+  EXPECT_EQ(MHash(example_a), MHash(example_a));
+  EXPECT_EQ(MHash(example_a, example_a), MHash(example_a, example_a));
 
   // sensitive
   EXPECT_NE(Hash(example_a), Hash(example_b));
+  EXPECT_NE(MHash(example_a), MHash(example_b));
+  EXPECT_NE(MHash(example_a, example_a), MHash(example_a, example_b));
+}
+
+TEST(HashTest, Scalar) {
+  c10::Scalar a(0);
+  c10::Scalar b(0);
+
+  // simulate some garbage in the unused bits of the
+  // the tagged union that is c10::Scalar, which is bigger
+  // than the size of the int64_t we're currently using it with
+  *((uint8_t*)&b) = 1;
+  // actual 'value' of the Scalar as a 64 bit int shouldn't have changed
+  EXPECT_EQ(a.toLong(), b.toLong());
+  // and hash should ignore this garbage
+  EXPECT_EQ(Hash(a), Hash(b));
+  EXPECT_EQ(MHash(a), MHash(b));
+  EXPECT_EQ(MHash(a, a), MHash(a, b));
 }
 
 TEST(HashTest, Sanity) {
@@ -47,10 +67,16 @@ TEST(HashTest, Sanity) {
       c10::optional<std::string>(c10::nullopt));
 
   // Containers
+  auto a = std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8});
+  auto b = std::vector<int32_t>({1, 1, 2, 3, 5, 8, 12});
+  test_hash_repeatable_sensitive(a, b);
   test_hash_repeatable_sensitive(
-      std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8}),
-      std::vector<int32_t>({1, 1, 2, 3, 5, 8, 12}));
+      c10::ArrayRef<int32_t>(a), c10::ArrayRef<int32_t>(b));
 
+  // vector<bool> is a special case bc it is implemented as vector<bit>
+  auto bool_a = std::vector<bool>({true, false, false, true});
+  auto bool_b = std::vector<bool>({true, true, false, true});
+  test_hash_repeatable_sensitive(bool_a, bool_b);
 }
 
 } // namespace lazy

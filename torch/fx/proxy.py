@@ -9,6 +9,9 @@ from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
+import torch.fx.traceback as fx_traceback
+
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
@@ -17,6 +20,14 @@ class TracerBase:
     # Feature flag for mutable schema checking
     # Enableby default in 1.12
     check_mutable_operations : bool = False
+    # Feature flag for assert tracing
+    trace_asserts : bool = False
+    # Feature flag for proxying accesses to buffer values
+    proxy_buffer_attributes : bool = False
+
+    # Name of the function to be traced. It will only be used when
+    # ``root`` is an instance of ``nn.Module``
+    traced_func_name: str = "forward"
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
@@ -65,7 +76,10 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
-        if self.record_stack_traces:
+        if fx_traceback.is_stack_trace_overridden():
+            stacks = fx_traceback.format_stack()
+            proxy.node.stack_trace = '\n'.join(reversed(stacks))
+        elif self.record_stack_traces:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
@@ -81,14 +95,23 @@ class TracerBase:
         symbolic tracing.
         """
         # We have to do a little dance here. Basically, walk up the callstack and
-        # record the first frame not in the FX source. This is the frame executing
+        # record the first frame not in the pytorch source. This is the frame executing
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
+        pt_files = ['torch/fx/proxy.py',
+                    'torch/fx/_symbolic_trace.py',
+                    'torch/fx/experimental/proxy_tensor.py',
+                    'torch/_ops.py',
+                    'torch/_tensor.py',
+                    'torch/utils/_python_dispatch.py',
+                    'torch/_prims_common/wrappers.py',
+                    'torch/_refs/__init__.py',
+                    'torch/_refs/nn/functional/__init__.py'
+                    ]
         while frame:
             frame = frame.f_back
-            if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
+            if frame and all(not frame.f_code.co_filename.endswith(file) for file in pt_files):
                 break
 
         if not frame:
@@ -126,7 +149,7 @@ class TracerBase:
                 def no_node(arg):
                     if isinstance(arg, Node):
                         raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           "Node. Got key: {k}")
+                                           f"Node. Got key: {k}")
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
@@ -134,12 +157,14 @@ class TracerBase:
         elif isinstance(a, slice):
             return slice(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
+        elif isinstance(a, range):
+            return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
+
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
-
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)
@@ -182,6 +207,10 @@ class GraphAppendingTracer(TracerBase):
     def __init__(self, graph: Graph):
         super().__init__()
         self.graph = graph
+
+@compatibility(is_backward_compatible=False)
+def assert_fn(x):
+    assert x
 
 @compatibility(is_backward_compatible=True)
 class TraceError(ValueError):
@@ -248,6 +277,27 @@ class Proxy:
         return self.tracer.iter(self)
 
     def __bool__(self) -> bool:
+        if self.tracer.trace_asserts:
+            # check if this boolean is used in an assertion, bytecode pattern for assertions
+            # is pretty stable for Python 3.7--3.9
+            frame = inspect.currentframe()
+            assert frame is not None
+            calling_frame = frame.f_back
+            assert calling_frame is not None
+            insts = list(dis.get_instructions(calling_frame.f_code))
+            cur = calling_frame.f_lasti // 2
+            inst = insts[cur]
+
+            if inst.opname == 'POP_JUMP_IF_TRUE':
+                first = insts[cur + 1]
+                assert inst.arg is not None
+                last = insts[inst.arg // 2 - 1]
+                starts_with_assert = (first.opname == 'LOAD_GLOBAL' and first.argval == 'AssertionError'
+                                      or first.opname == 'LOAD_ASSERTION_ERROR')
+                if starts_with_assert and last.opname == 'RAISE_VARARGS':
+                    self.tracer.create_proxy('call_function', assert_fn, (self,), {})
+                    return True
+
         return self.tracer.to_bool(self)
 
     @compatibility(is_backward_compatible=True)
@@ -285,6 +335,7 @@ class Proxy:
         else:
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
+
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):

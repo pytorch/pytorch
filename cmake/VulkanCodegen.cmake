@@ -7,12 +7,17 @@ set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 set(VULKAN_GEN_ARG_ENV "")
 
 if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+  list(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+endif()
+if(USE_VULKAN_FP16_INFERENCE)
+  list(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
 endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
   set(PYTHONPATH "$ENV{PYTHONPATH}")
-  set(ENV{PYTHONPATH} "$ENV{PYTHONPATH}:${CMAKE_CURRENT_LIST_DIR}/..")
+  set(NEW_PYTHONPATH ${PYTHONPATH})
+  list(APPEND NEW_PYTHONPATH "${CMAKE_CURRENT_LIST_DIR}/..")
+  set(ENV{PYTHONPATH} ${NEW_PYTHONPATH})
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
@@ -22,7 +27,7 @@ if(USE_VULKAN_SHADERC_RUNTIME)
     --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/glsl
     --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
-  set(ENV{PYTHONPATH} "$PYTHONPATH")
+  set(ENV{PYTHONPATH} ${PYTHONPATH})
 
   if(error_code)
     message(FATAL_ERROR "Failed to gen glsl.h and glsl.cpp with shaders sources for Vulkan backend")
@@ -55,18 +60,20 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
   endif()
 
   set(PYTHONPATH "$ENV{PYTHONPATH}")
-  set(ENV{PYTHONPATH} "$ENV{PYTHONPATH}:${CMAKE_CURRENT_LIST_DIR}/..")
+  set(NEW_PYTHONPATH ${PYTHONPATH})
+  list(APPEND NEW_PYTHONPATH "${CMAKE_CURRENT_LIST_DIR}/..")
+  set(ENV{PYTHONPATH} ${NEW_PYTHONPATH})
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen_vulkan_spv.py
+    ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_vulkan_spv.py
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
     --output-path ${VULKAN_GEN_OUTPUT_PATH}
     --glslc-path=${GLSLC_PATH}
     --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/spv
     --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
-  set(ENV{PYTHONPATH} "$PYTHONPATH")
+  set(ENV{PYTHONPATH} ${PYTHONPATH})
 
     if(error_code)
       message(FATAL_ERROR "Failed to gen spv.h and spv.cpp with precompiled shaders for Vulkan backend")

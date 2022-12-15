@@ -1,5 +1,6 @@
 #ifdef TORCH_ENABLE_LLVM
 
+#include <torch/csrc/jit/tensorexpr/external_functions.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -8,7 +9,12 @@
 #include <llvm/ExecutionEngine/Orc/CompileUtils.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
+// llvm::SCEVPredicate has virtual function but non-virtual destructor
+// https://github.com/llvm/llvm-project/blob/c1a0a213378a458fbea1a5c77b315c7dce08fd05/llvm/include/llvm/Analysis/ScalarEvolution.h#L198
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
+#pragma GCC diagnostic pop
 #include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/Orc/SymbolStringPool.h>
 #include <llvm/ExecutionEngine/RTDyldMemoryManager.h>
@@ -18,7 +24,6 @@
 #include <llvm/Support/CFGUpdate.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Host.h>
-#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
@@ -120,6 +125,8 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(
       absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
+  assertSuccess(
+      JD.define(absoluteSymbols({entry("nnc_aten_free", nnc_aten_free)})));
 }
 
 namespace llvm {
@@ -169,7 +176,16 @@ class TORCH_API PytorchLLVMJITImpl {
   }
 
   JITSymbol findSymbol(const std::string Name) {
+#if LLVM_VERSION_MAJOR >= 15
+    // Starting with llvm-15, LLJIT::lookup returns an address rather than a
+    // symbol. Even though an address is what we ultimately we want, we also
+    // want to avoid churning our internal APIs, so we wrap the returned address
+    // in a fake JITSymbol.
+    auto result = assertSuccess(LLJ->lookup(Name));
+    return JITSymbol(result.getValue(), JITSymbolFlags());
+#else
     return assertSuccess(LLJ->lookup(Name));
+#endif
   }
 
   bool hasSymbol(const std::string& Name) {
@@ -315,50 +331,6 @@ void dumpCFG(const llvm::cfg::Update<llvm::BasicBlock*>& update) {
   update.dump();
 }
 #endif
-
-std::string PytorchLLVMJIT::getUniqueFunctionName(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = existing_functions_.find(name);
-  if (it == existing_functions_.end()) {
-    existing_functions_[name] = 0;
-    return name;
-  }
-  existing_functions_[name] = it->second + 1;
-  std::string unique_name = name + "_" + std::to_string(it->second + 1);
-  return unique_name;
-}
-
-std::unordered_map<std::string, std::unique_ptr<PytorchLLVMJIT>>
-    PytorchLLVMJITCache::jit_cache_;
-std::mutex PytorchLLVMJITCache::mutex_;
-
-PytorchLLVMJIT* PytorchLLVMJITCache::getPytorchLLVMJITInstance(
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs) {
-  std::string cacheKey = getCacheKey(triple, cpu, attrs);
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto it = jit_cache_.find(cacheKey);
-  if (it != jit_cache_.end()) {
-    return it->second.get();
-  }
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmPrinters();
-  auto jit = std::make_unique<PytorchLLVMJIT>(triple, cpu, attrs);
-  auto jit_to_return = jit.get();
-  jit_cache_[cacheKey] = std::move(jit);
-  return jit_to_return;
-}
-
-std::string PytorchLLVMJITCache::getCacheKey(
-    c10::optional<std::string> triple,
-    c10::optional<std::string> cpu,
-    c10::optional<std::string> attrs) {
-  return "triple:" + std::string(triple ? *triple : "") +
-      "cpu:" + std::string(cpu ? *cpu : "") +
-      "attrs:" + std::string(attrs ? *attrs : "");
-}
 
 } // end namespace orc
 } // end namespace llvm

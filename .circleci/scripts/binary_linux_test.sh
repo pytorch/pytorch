@@ -1,9 +1,23 @@
 #!/bin/bash
 
-source /home/circleci/project/env
-cat >/home/circleci/project/ci_test_script.sh <<EOL
+OUTPUT_SCRIPT=${OUTPUT_SCRIPT:-/home/circleci/project/ci_test_script.sh}
+
+# only source if file exists
+if [[ -f /home/circleci/project/env ]]; then
+  source /home/circleci/project/env
+fi
+cat >"${OUTPUT_SCRIPT}" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 set -eux -o pipefail
+
+retry () {
+    "\$@"  || (sleep 1 && "\$@") || (sleep 2 && "\$@")
+}
+
+# Source binary env file here if exists
+if [[ -e "${BINARY_ENV_FILE:-/nofile}" ]]; then
+  source "${BINARY_ENV_FILE:-/nofile}"
+fi
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
@@ -23,16 +37,23 @@ fi
 
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
-if [[ "\$python_nodot" = *39* ]]; then
+PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *310* ]]; then
+  EXTRA_CONDA_FLAGS="-c=conda-forge"
+  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
+  # we set a lower boundary here just to be safe
+  NUMPY_PIN=">=1.21.2"
+  PROTOBUF_PACKAGE="protobuf>=3.19.0"
+fi
+
+if [[ "\$python_nodot" = *39*  ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu112" ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
-fi
+
 
 # Move debug wheels out of the the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -44,7 +65,8 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 # TODO there is duplicated and inconsistent test-python-env setup across this
 #   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
 #   conda build scripts themselves. These should really be consolidated
-pkg="/final_pkgs/\$(ls /final_pkgs)"
+# Pick only one package of multiple available (which happens as result of workflow re-runs)
+pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install
@@ -59,23 +81,24 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      defaults::protobuf \
+      ${PROTOBUF_PACKAGE} \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
-      # DESIRED_CUDA is in format cu90 or cu102
-      if [[ "${#DESIRED_CUDA}" == 4 ]]; then
-        cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
-      else
-        cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+
+      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+      CUDA_PACKAGE="cudatoolkit"
+      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" ]]; then
+        CUDA_PACKAGE="cuda"
       fi
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "\${CUDA_PACKAGE}=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg"
+  pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
   retry pip install -q future numpy protobuf typing-extensions six
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
@@ -92,4 +115,4 @@ EOL
 echo
 echo
 echo "The script that will run in the next step is:"
-cat /home/circleci/project/ci_test_script.sh
+cat "${OUTPUT_SCRIPT}"

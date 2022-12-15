@@ -1,4 +1,5 @@
 #include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <gtest/gtest.h>
 
 TEST(NumBits, CubTest) {
@@ -131,4 +132,54 @@ TEST(NumBits, CubTest) {
   ASSERT_EQ(get_num_bits(0b0111111111111111111111111111111111111111111111111111111111111111UL), 63);
   ASSERT_EQ(get_num_bits(0b1000000000000000000000000000000000000000000000000000000000000000UL), 64);
   ASSERT_EQ(get_num_bits(0b1111111111111111111111111111111111111111111111111111111111111111UL), 64);
+}
+
+__managed__ int input[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+TEST(InclusiveScanSplit, CubTest) {
+  if (!at::cuda::is_available()) return;
+  at::globalContext().lazyInitCUDA();  // This is required to use PyTorch's caching allocator.
+
+  int *output1;
+  cudaMallocManaged(&output1, sizeof(int) * 10);
+
+  cudaDeviceSynchronize();
+  at::cuda::cub::inclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, /*max_cub_size=*/2>(
+    input, output1, ::at_cuda_detail::cub::Sum(), 10);
+  cudaDeviceSynchronize();
+
+  ASSERT_EQ(output1[0], 1);
+  ASSERT_EQ(output1[1], 3);
+  ASSERT_EQ(output1[2], 6);
+  ASSERT_EQ(output1[3], 10);
+  ASSERT_EQ(output1[4], 15);
+  ASSERT_EQ(output1[5], 21);
+  ASSERT_EQ(output1[6], 28);
+  ASSERT_EQ(output1[7], 36);
+  ASSERT_EQ(output1[8], 45);
+  ASSERT_EQ(output1[9], 55);
+}
+
+TEST(ExclusiveScanSplit, CubTest) {
+  if (!at::cuda::is_available()) return;
+  at::globalContext().lazyInitCUDA();  // This is required to use PyTorch's caching allocator.
+
+  int *output2;
+  cudaMallocManaged(&output2, sizeof(int) * 10);
+
+  cudaDeviceSynchronize();
+  at::cuda::cub::exclusive_scan<int *, int *, ::at_cuda_detail::cub::Sum, int, /*max_cub_size=*/2>(
+    input, output2, ::at_cuda_detail::cub::Sum(), 0, 10);
+  cudaDeviceSynchronize();
+
+  ASSERT_EQ(output2[0], 0);
+  ASSERT_EQ(output2[1], 1);
+  ASSERT_EQ(output2[2], 3);
+  ASSERT_EQ(output2[3], 6);
+  ASSERT_EQ(output2[4], 10);
+  ASSERT_EQ(output2[5], 15);
+  ASSERT_EQ(output2[6], 21);
+  ASSERT_EQ(output2[7], 28);
+  ASSERT_EQ(output2[8], 36);
+  ASSERT_EQ(output2[9], 45);
 }

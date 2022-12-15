@@ -50,10 +50,10 @@ class NoObserver:
     def observe(self, node, env):
         pass
 
-DEFAULT_QUANTIZATION_PATTERNS = {}
+_DEFAULT_QUANTIZATION_PATTERNS = {}
 def register_pattern(pattern):
     def insert(fn):
-        DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
+        _DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
         return fn
     return insert
 
@@ -121,7 +121,7 @@ class ConvNormRelu(MinMaxObserver):
         weight_scale, weight_zp = _minmax_scale_zeropoint(min_val, max_val)
         qweight = torch.quantize_per_tensor(weight, weight_scale, weight_zp, torch.qint8)
 
-        ctor = torch.nn.intrinsic.quantized.ConvReLU2d if self.relu_node is not None else torch.nn.quantized.Conv2d
+        ctor = torch.ao.nn.intrinsic.quantized.ConvReLU2d if self.relu_node is not None else torch.ao.nn.quantized.Conv2d
 
         qconv = ctor(mod.in_channels, mod.out_channels, mod.kernel_size,
                      mod.stride, mod.padding, mod.dilation, mod.groups,
@@ -188,7 +188,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
 
 
 class Quantizer:
-    def __init__(self, mod, patterns=DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
+    def __init__(self, mod, patterns=_DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
         self.root = mod
         self.graph = mod.graph
         self.quant_ctor = quant_ctor

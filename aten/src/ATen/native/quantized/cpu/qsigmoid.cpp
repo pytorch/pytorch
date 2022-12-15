@@ -1,15 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <torch/library.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/sigmoid_native.h>
+#endif
+
 #include <algorithm>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -20,13 +29,18 @@ DEFINE_DISPATCH(qsigmoid_stub);
 Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_sigmoid(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
 
   Tensor qy;
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
 
@@ -121,7 +135,7 @@ class QSigmoid final {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
+    return qnnpack_sigmoid(std::move(qx), output_scale, output_zero_point);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;

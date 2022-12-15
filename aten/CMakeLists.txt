@@ -21,7 +21,9 @@ set(ATen_CPU_SRCS)
 set(ATen_CPU_TEST_SRCS)
 set(ATen_CPU_INCLUDE)
 set(ATen_THIRD_PARTY_INCLUDE)
-set(ATen_CUDA_SRCS)
+set(ATen_CUDA_CPP_SRCS)
+set(ATen_CUDA_CU_SRCS)
+set(ATen_CUDA_LINALG_SRCS)
 set(ATen_CUDA_SRCS_W_SORT_BY_KEY)
 set(ATen_CUDA_TEST_SRCS)
 set(ATen_CUDA_INCLUDE)
@@ -30,6 +32,8 @@ set(ATen_HIP_SRCS)
 set(ATen_HIP_SRCS_W_SORT_BY_KEY)
 set(ATen_HIP_TEST_SRCS)
 set(ATen_HIP_INCLUDE)
+set(ATen_MPS_SRCS)
+set(ATen_MPS_TEST_SRCS)
 set(ATen_VULKAN_TEST_SRCS)
 set(ATen_CPU_DEPENDENCY_LIBS)
 set(ATen_CUDA_DEPENDENCY_LIBS)
@@ -45,7 +49,6 @@ if(USE_CUDA)
 endif()
 
 set(TH_LINK_STYLE STATIC)
-add_subdirectory(src/TH)
 set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
@@ -53,7 +56,7 @@ set(TH_CPU_INCLUDE
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 
 if(USE_VULKAN)
-  list(APPEND ATen_CPU_INCLUDE ${CMAKE_BINARY_DIR}/vulkan)
+  list(APPEND ATen_CPU_INCLUDE ${CMAKE_BINARY_DIR}/vulkan ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/VulkanMemoryAllocator)
 endif()
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
@@ -68,12 +71,6 @@ endif()
 if(USE_CUDA AND USE_ROCM)
   message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
 endif()
-
-if(MSVC)
-  # we want to respect the standard, and we are bored of those **** .
-  add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
-endif(MSVC)
 
 if(USE_ROCM)
   # TODO: AT_HIP_ENABLED (change this once we represent HIP as HIP in
@@ -102,9 +99,15 @@ add_subdirectory(src/ATen)
 
 # Pass source, includes, and libs to parent
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
-set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_CU_SRCS ${ATen_CUDA_CU_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_CPP_SRCS ${ATen_CUDA_CPP_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_LINALG_SRCS ${ATen_CUDA_LINALG_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
+set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
+set(ATen_MPS_SRCS ${ATen_MPS_SRCS} PARENT_SCOPE)
+set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS_W_SORT_BY_KEY ${ATen_HIP_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)

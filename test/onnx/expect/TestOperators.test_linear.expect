@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
+    input: "onnx::Gemm_0"
     input: "weight"
     input: "bias"
     output: "3"
@@ -25,7 +25,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 5
     dims: 4
@@ -40,7 +40,7 @@ graph {
     raw_data: "\324BO\276@\245T>\350\377\245\275\374u\336\276&\212\304>"
   }
   input {
-    name: "input"
+    name: "onnx::Gemm_0"
     type {
       tensor_type {
         elem_type: 1
@@ -102,5 +102,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

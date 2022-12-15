@@ -19,7 +19,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -42,7 +42,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& name) override;
   std::string kind() const override {
     return "Class Namespace";
@@ -65,7 +65,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -112,7 +112,9 @@ SourceImporterImpl::SourceImporterImpl(
     const std::vector<at::IValue>* constant_table,
     SourceLoader source_loader,
     size_t version)
-    : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
+    : cu_(std::move(cu)),
+      source_loader_(std::move(source_loader)),
+      version_(version) {
   env_ = {
       {"torch", std::make_shared<BuiltinModule>("aten", version)},
       {"ops", std::make_shared<OpsValue>(version)},
@@ -133,7 +135,7 @@ TypePtr SourceImporterImpl::findNamedType(const QualifiedName& name) {
   parseSourceIfNeeded(name.prefix());
   auto it = to_be_defined_.find(name);
   if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
-    ClassDef cd(it->second);
+    ClassDef cd(std::move(it->second));
     to_be_defined_.erase(it);
     importNamedType(name.prefix(), cd);
   }
@@ -222,7 +224,7 @@ void SourceImporterImpl::LEGACY_import_methods(
 
 std::shared_ptr<SugaredValue> SourceImporterImpl::resolveValue(
     const std::string& name,
-    Function& m,
+    GraphFunction& m,
     const SourceRange& loc) {
   auto it = env_.find(name);
   if (it != env_.end()) {
@@ -314,6 +316,35 @@ c10::optional<Assign> SourceImporterImpl::
 
   // module demangled qualname -> ReplacementDescr
   static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+      {"__torch__.torch.ao.nn.quantized.modules.linear.LinearPackedParams",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.linear.Linear",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.dynamic.modules.linear.Linear",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv2d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+      {"__torch__.torch.ao.nn.quantized.modules.conv.Conv3d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+       {"_packed_params",
+        "Tensor",
+        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+      // BC Stuff
       {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
        {"_packed_params",
         "Tensor",
@@ -322,15 +353,7 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
-      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
-       {"_packed_params",
-        "Tensor",
-        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
       {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
-       {"_packed_params",
-        "Tensor",
-        "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
-      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
@@ -338,10 +361,10 @@ c10::optional<Assign> SourceImporterImpl::
        {"_packed_params",
         "Tensor",
         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
-      {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+      {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
        {"_packed_params",
         "Tensor",
-        "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+        "__torch__.torch.classes.quantized.LinearPackedParamsBase"}}};
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   static std::regex mangle_re("\\.___torch_mangle_\\d+");
   auto demangled_classname =
@@ -568,13 +591,16 @@ void SourceImporterImpl::importClass(
 
   cu_->register_type(class_type);
   const auto self = SimpleSelf(class_type);
+  // TODO (this will include the version number later)
   cu_->define(
       qualified_classname,
       /*properties=*/{},
       /*propResolvers=*/{},
       methods,
       method_resolvers,
-      &self);
+      &self,
+      /*shouldMangle=*/false,
+      /*operator_set_version=*/version_);
   cu_->define_hooks(
       qualified_classname,
       hooks,
@@ -720,7 +746,7 @@ void SourceImporterImpl::parseImports(Lexer& L) {
 
 std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     const SourceRange& loc,
-    Function& m,
+    GraphFunction& m,
     const std::string& name) {
   auto fullName = c10::QualifiedName(basename_, name);
   // Could be a ClassType or NamedTuple constructor

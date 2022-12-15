@@ -15,7 +15,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   output {
     name: "1"
     type {
@@ -28,5 +28,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

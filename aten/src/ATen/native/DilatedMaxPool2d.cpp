@@ -1,8 +1,18 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/Pool.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -68,13 +78,13 @@ bool ceil_mode) {
   /* resize output and indices */
   DimnameList maybe_names = input.has_names() ? input.names() : DimnameList{};
   if (input.ndimension() == 3) {
-    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output_raw_strided(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output_raw_strided(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
   } else {
-    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output_raw_strided(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
     /* indices will contain the locations for each output point */
-    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output_raw_strided(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
   }
 }
 
@@ -126,7 +136,6 @@ const Tensor& indices) {
   }
 
   /* sizes */
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
@@ -139,14 +148,13 @@ const Tensor& indices) {
     input,
     gradOutput,
     indices,
-    nbatch,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
     outputHeight_for_shape_check, outputWidth_for_shape_check,
     memory_format);
 
-  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format),
+  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
              input.has_names() ? input.names() : DimnameList{});
 }
 } // namespace meta

@@ -1,11 +1,11 @@
 #include <chrono>
 
 #include <c10/util/irange.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
-#include <torch/csrc/cuda/nccl.h>
 
 #include <gtest/gtest.h>
 
@@ -19,8 +19,9 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       const std::vector<at::Device>& devices,
       bool simulate_error,
       int rank,
-      c10d::OpType opType)
-      : WorkNCCL(devices, rank, opType), simulate_error_(simulate_error) {}
+      c10d::OpType opType,
+      uint64_t seq)
+      : WorkNCCL(devices, rank, opType, seq), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -61,9 +62,11 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       std::vector<at::Device> devices,
       int rank,
       c10d::OpType opType,
-      const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
+      const char* profilingTitle,
+      const c10::optional<std::vector<at::Tensor>>& inputs =
+          c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        devices, simulate_error_, rank, opType);
+        devices, simulate_error_, rank, opType, seq_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -88,8 +91,9 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       const std::vector<at::Device>& devices,
       bool set_timedout_error,
       int rank,
-      c10d::OpType opType)
-      : WorkNCCL(devices, rank, opType),
+      c10d::OpType opType,
+      uint64_t seq)
+      : WorkNCCL(devices, rank, opType, seq),
         set_timedout_error_(set_timedout_error) {}
 
  private:
@@ -118,9 +122,11 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       std::vector<at::Device> devices,
       int rank,
       c10d::OpType opType,
-      const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
+      const char* profilingTitle,
+      const c10::optional<std::vector<at::Tensor>>& inputs =
+          c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_, rank, opType);
+        devices, set_timedout_error_, rank, opType, seq_);
   }
 
   void set_timedout_error() {
@@ -180,8 +186,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(1000);
-  ProcessGroupNCCLSimulateErrors pg(
-      store_, 0, 1, options);
+  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -209,8 +214,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
-  ProcessGroupNCCLTimedOutErrors pg(
-      store_, 0, 1, options);
+  ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -232,8 +236,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
 
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
-  ProcessGroupNCCLSimulateErrors pg(
-      store_, 0, 1, options);
+  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   pg.barrier()->wait();

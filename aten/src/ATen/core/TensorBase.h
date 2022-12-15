@@ -7,19 +7,22 @@
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
-struct TensorOptions;
+class Scalar;
 }
 
 namespace torch { namespace autograd {
@@ -42,10 +45,10 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
+
 }
 
 // NOTE: [Tensor vs. TensorBase]
@@ -138,6 +141,11 @@ class TORCH_API TensorBase {
   c10::MaybeOwned<TensorBase> expect_contiguous(
       MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
 
+  const TensorBase& fill_(const c10::Scalar& scalar) const;
+  const TensorBase& zero_() const;
+
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
   }
@@ -150,16 +158,27 @@ class TORCH_API TensorBase {
     return at::isSignedType(this->scalar_type());
   }
 
-  int64_t size(int64_t dim) const {
+  c10::SymInt sym_size(int64_t dim) const {
+    return impl_->sym_size(dim);
+  }
+
+  c10::SymInt sym_stride(int64_t dim) const {
+    const auto sizes = this->sym_strides();
+    const auto ndim = static_cast<int64_t>(sizes.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return sizes()[dim];
+    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
+
+  }
+
+  int64_t size(int64_t dim) const {
+    return impl_->size(dim);
   }
 
   int64_t stride(int64_t dim) const {
+    const auto strides = this->strides();
+    const auto ndim = static_cast<int64_t>(strides.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return strides()[dim];
+    return strides[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
@@ -212,6 +231,12 @@ class TORCH_API TensorBase {
   IntArrayRef sizes() const {
     return impl_->sizes();
   }
+  c10::SymIntArrayRef sym_sizes() const {
+    return impl_->sym_sizes();
+  }
+  c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
+  }
   IntArrayRef strides() const {
     return impl_->strides();
   }
@@ -239,7 +264,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse()) {
+    if (layout() == at::kStrided) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
@@ -269,8 +294,24 @@ class TORCH_API TensorBase {
     return impl_->numel() * impl_->itemsize();
   }
 
+  c10::SymInt sym_nbytes() const {
+    TORCH_CHECK(layout () != at::kSparse,
+                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                "equivalent dense tensor, multiply numel() by element_size()");
+    return impl_->sym_numel() * impl_->itemsize();
+  }
+
   int64_t numel() const {
     return impl_->numel();
+  }
+
+  c10::SymInt sym_numel() const {
+    return impl_->sym_numel();
+  }
+
+  c10::SymInt sym_storage_offset() const {
+    return impl_->sym_storage_offset();
   }
 
   // Length of one array element in bytes.  This is the traditional
@@ -300,6 +341,14 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  inline bool _is_zerotensor() const {
+    return impl_->_is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
+  }
+
   inline bool is_conj() const {
     return impl_->is_conj();
   }
@@ -325,12 +374,12 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s layout.
-  Layout layout() const noexcept {
+  Layout layout() const {
     return impl_->layout();
   }
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`).
-  caffe2::TypeMeta dtype() const noexcept {
+  caffe2::TypeMeta dtype() const {
     return impl_->dtype();
   }
 
@@ -355,6 +404,12 @@ class TORCH_API TensorBase {
   bool is_cuda() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_cuda();
+  }
+
+  /// Returns if a `Tensor` has IPU backend.
+  bool is_ipu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ipu();
   }
 
   /// Returns if a `Tensor` has XPU backend.
@@ -408,10 +463,10 @@ class TORCH_API TensorBase {
     return impl_->is_mkldnn();
   }
 
-  /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const {
+  /// Returns if a `Tensor` is mps tensor.
+  bool is_mps() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_mlc();
+    return impl_->is_mps();
   }
 
   /// Returns if a `Tensor` is ort tensor.
@@ -447,6 +502,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
+  }
+
+  // Returns if a `Tensor` is a NestedTensor.
+  bool is_nested() const {
+    return impl_->is_nested();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
@@ -517,6 +577,10 @@ class TORCH_API TensorBase {
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    TORCH_CHECK(
+        impl_->numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
     return generic_packed_accessor<T,N,PtrTraits,int32_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
@@ -632,6 +696,22 @@ class TORCH_API TensorBase {
     return impl_->requires_grad();
   }
 
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
+  }
+
   /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
   /// to be used from functions that need to access the `Variable`'s equivalent `Tensor`
   /// (i.e. `Tensor` that shares the same storage and tensor metadata with the `Variable`).
@@ -671,9 +751,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(TensorBase)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(TensorBase)>::type, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -837,64 +917,13 @@ struct MaybeOwnedTraits<at::TensorBase> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };
 
 template <>
-struct ExclusivelyOwnedTraits<at::TensorBase> {
-  using repr_type = at::TensorBase;
-  using pointer_type = at::TensorBase*;
-  using const_pointer_type = const at::TensorBase*;
-
-  static repr_type nullRepr() {
-    return at::TensorBase();
-  }
-
-  template <class... Args>
-  static repr_type createInPlace(Args&&... args) {
-    return at::TensorBase(std::forward<Args>(args)...);
-  }
-
-  static repr_type moveToRepr(at::TensorBase&& x) {
-    return std::move(x);
-  }
-
-  static void destroyOwned(at::TensorBase& x) {
-    TensorImpl*const toDestroy = x.unsafeReleaseTensorImpl();
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(toDestroy != nullptr, "Tensor somehow got null TensorImpl?");
-    // May be 0 because UndefinedTensorImpl doesn't get its refcount
-    // incremented.
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with refcount ", toDestroy->refcount_, ", expected 1!");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->weakcount_ == 1 || (toDestroy->weakcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with weakcount ", toDestroy->weakcount_, ", expected 1!");
-    if (toDestroy != UndefinedTensorImpl::singleton()) {
-#ifndef NDEBUG
-      // Needed to pass the debug assertions in ~intrusive_ptr_target.
-      toDestroy->refcount_ = 0;
-      toDestroy->weakcount_ = 0;
-#endif
-      toDestroy->release_resources();
-      delete toDestroy;
-    }
-  }
-
-  static at::TensorBase take(at::TensorBase& x) {
-    return std::move(x);
-  }
-
-  static pointer_type getImpl(repr_type& x) {
-    return &x;
-  }
-
-  static const_pointer_type getImpl(const repr_type& x) {
-    return &x;
-  }
-};
+struct ExclusivelyOwnedTraits<at::TensorBase> : public c10::ExclusivelyOwnedTensorTraits<at::TensorBase> {};
 } // namespace c10
 
 namespace at {
@@ -913,4 +942,34 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
     return c10::MaybeOwned<TensorBase>::owned(__dispatch_contiguous(memory_format));
   }
 }
+
+namespace symint {
+
+template <typename T>
+using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+template <typename T>
+using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef sizes(const TensorBase& t) { return t.sizes(); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymInt size(const TensorBase& t, int64_t dim) { return t.sym_size(dim); }
+template <typename T, typename = enable_if_int<T>>
+int64_t size(const TensorBase& t, int64_t dim) { return t.size(dim); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef strides(const TensorBase& t) { return t.sym_strides(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef strides(const TensorBase& t) { return t.strides(); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymInt numel(const TensorBase& t) { return t.sym_numel(); }
+template <typename T, typename = enable_if_int<T>>
+int64_t numel(const TensorBase& t) { return t.numel(); }
+
+} // namespace symint
+
 } // namespace at

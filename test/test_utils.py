@@ -1,8 +1,7 @@
+# Owner(s): ["module: unknown"]
+
 import sys
 import os
-import contextlib
-import http
-import io
 import re
 import shutil
 import random
@@ -10,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from typing import List
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -17,11 +17,9 @@ from torch.utils.data import DataLoader
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
-import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
-from urllib.error import URLError
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -53,8 +51,8 @@ class TestCheckpoint(TestCase):
         module_lists_to_compare,
         num_chunks,
         input,
+        use_reentrant,
     ):
-
         # not checkpointed
         out = model(input)
         out_not_checkpointed = out.detach().clone()
@@ -71,7 +69,9 @@ class TestCheckpoint(TestCase):
             detached.requires_grad = True
 
             # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out = checkpoint_sequential(
+                model_to_compare, num_chunks, detached, use_reentrant=use_reentrant
+            )
             out_checkpointed = out.detach().clone()
             model.zero_grad()
             out.sum().backward()
@@ -98,21 +98,26 @@ class TestCheckpoint(TestCase):
 
             def forward(self, input_var):
                 self.counter += 1
-                return input_var
+                # For reentrant, need to have autograd actually
+                # pack a tensor to trigger recomp
+                ret = input_var * torch.tensor(2.)
+                return ret
 
         # checkpointed
-        modules = [Net() for _ in range(10)]
-        for m in modules:
-            self.assertEqual(m.counter, 0)
-        input_var = torch.randn(3, 4, requires_grad=True)
-        out = checkpoint_sequential(modules, 2, input_var)
-        for m in modules:
-            self.assertEqual(m.counter, 1)
-        out.sum().backward()
-        for m in modules[:(len(modules) // 2)]:
-            self.assertEqual(m.counter, 2)
-        for m in modules[(len(modules) // 2):]:
-            self.assertEqual(m.counter, 1)
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                modules = [Net() for _ in range(10)]
+                for m in modules:
+                    self.assertEqual(m.counter, 0)
+                input_var = torch.randn(3, 4, requires_grad=True)
+                out = checkpoint_sequential(modules, 2, input_var, use_reentrant=use_reentrant)
+                for m in modules:
+                    self.assertEqual(m.counter, 1)
+                out.sum().backward()
+                for m in modules[:(len(modules) // 2)]:
+                    self.assertEqual(m.counter, 2)
+                for m in modules[(len(modules) // 2):]:
+                    self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
         model = nn.Sequential(
@@ -134,27 +139,42 @@ class TestCheckpoint(TestCase):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
+        # works with use_reentrant=False, and grads are the same
+        out = model(input_var)
+        grads_no_checkpoint = torch.autograd.grad(
+            outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        out_checkpoint = checkpoint_sequential(modules, chunks, input_var, use_reentrant=False)
+        # check outputs are the same
+        self.assertEqual(out_checkpoint, out)
+        grads_checkpoint = torch.autograd.grad(
+            outputs=[out_checkpoint], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        self.assertEqual(grads_no_checkpoint, grads_checkpoint)
 
     def test_checkpoint(self):
-        model = nn.Sequential(
-            nn.Linear(100, 50),
-            nn.ReLU(),
-            nn.Linear(50, 20),
-            nn.ReLU(),
-            nn.Linear(20, 5),
-            nn.ReLU()
-        )
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = nn.Sequential(
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU()
+                )
 
-        # Compare uncheckpointed model with its checkpointed counterparts
-        # In addition to running checkpoint_sequential on the nn.Sequential
-        # instance, we also run the function on the list of functions within
-        # the module.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.children()), model],
-            2,
-            torch.randn(1, 100, requires_grad=True)
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts
+                # In addition to running checkpoint_sequential on the nn.Sequential
+                # instance, we also run the function on the list of functions within
+                # the module.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.children()), model],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
@@ -175,15 +195,18 @@ class TestCheckpoint(TestCase):
                     input = layer(input)
                 return input
 
-        model = ModuleListNet()
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.module_list.children()), model.module_list],
-            2,
-            torch.randn(1, 100, requires_grad=True),
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.module_list.children()), model.module_list],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
         class Two(nn.Module):
@@ -194,8 +217,10 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -203,9 +228,10 @@ class TestCheckpoint(TestCase):
                 pass
 
         model = nn.Sequential(Noop())
-
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -261,6 +287,19 @@ class TestCheckpoint(TestCase):
             grad_no_checkpointing = inp.grad
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
+        inp = torch.randn(2, device='cuda').requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+        # This should run without error
+
 
     def test_checkpoint_non_tensor(self):
 
@@ -352,8 +391,67 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpointing_without_reentrant_early_free(self):
+        # I don't know how to check if the temporary saved variable buffer
+        # get de-allocated directly. So using cuda memory usage as a proxy
+
+        def _do_test(fn, should_free):
+            stats: List[int] = []
+
+            def track(x, idx):
+                # Track that at each step of the backward, some Tensor were
+                # de-allocated (which correspond to the checkpoint storage being
+                # emptied at each step)
+                def hook(_unused):
+                    self.assertEqual(len(stats), idx)
+                    torch.cuda.synchronize()
+                    stats.append(torch.cuda.memory_allocated())
+                    if idx > 0:
+                        if should_free:
+                            self.assertLess(stats[idx], stats[idx - 1])
+                        else:
+                            self.assertEqual(stats[idx], stats[idx - 1])
+
+                x.register_hook(hook)
+
+            def test_fn(x):
+                # The main property of this function is that it contains multiple
+                # operations that save gradients in a chain.
+                x = x ** 2
+                track(x, 2)
+                x = x ** 2
+                track(x, 1)
+                x = x ** 2
+                track(x, 0)
+                x = x ** 2
+                return x.sum()
+
+            fn(test_fn)
+
+            return stats
+
+        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x.grad = torch.zeros_like(x)
+
+        # In a regular backward, buffers get eagerly freed
+        non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
+
+        # In a retain_grad backward, buffers get preserved
+        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+
+        # In a regular backward with checkpoint, buffers get eagerly freed
+        checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
+
+        # In a retain_grad backward with checkpoint, buffers get preserved
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+
+        self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
+        self.assertEqual(retain_stats, checkpoint_retain_stats)
+
 class TestDataLoaderUtils(TestCase):
     def setUp(self):
+        super().setUp()
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 
@@ -409,12 +507,6 @@ class TestDataLoaderUtils(TestCase):
 
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
-
-
-class TestFFI(TestCase):
-    def test_deprecated(self):
-        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -518,6 +610,7 @@ class TestBottleneck(TestCase):
 from torch.utils.collect_env import get_pretty_env_info
 
 
+@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
@@ -584,147 +677,6 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-def sum_of_state_dict(state_dict):
-    s = 0
-    for _, v in state_dict.items():
-        s += v.sum()
-    return s
-
-SUM_OF_HUB_EXAMPLE = 431080
-TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
-
-@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
-class TestHub(TestCase):
-    @retry(URLError, tries=3)
-    def test_load_from_github(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            source='github',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False)
-        hub_model = hub.load(
-            local_dir,
-            'mnist',
-            source='local',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    def test_load_from_branch(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example:ci/test_slash',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    def test_set_dir(self):
-        temp_dir = tempfile.gettempdir()
-        hub.set_dir(temp_dir)
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
-        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
-
-    @retry(URLError, tries=3)
-    def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
-        self.assertObjectIn('mnist', entry_lists)
-
-    @retry(URLError, tries=3)
-    def test_download_url_to_file(self):
-        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
-        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
-        loaded_state = torch.load(temp_file)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    @retry(http.client.RemoteDisconnected, tries=3)
-    def test_load_state_dict_from_url(self):
-        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    def test_load_zip_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-    # Test the default zipfile serialization format produced by >=1.6 release.
-    @retry(URLError, tries=3)
-    def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-
-    def test_hub_dir(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub.get_dir(), dirname)
-
-    @retry(URLError, tries=3)
-    def test_hub_parse_repo_info(self):
-        # If the branch is specified we just parse the input and return
-        self.assertEqual(
-            torch.hub._parse_repo_info('a/b:c'),
-            ('a', 'b', 'c')
-        )
-        # For torchvision, the default branch is main
-        self.assertEqual(
-            torch.hub._parse_repo_info('pytorch/vision'),
-            ('pytorch', 'vision', 'main')
-        )
-        # For the torchhub_example repo, the default branch is still master
-        self.assertEqual(
-            torch.hub._parse_repo_info('ailzhang/torchhub_example'),
-            ('ailzhang', 'torchhub_example', 'master')
-        )
-
-    @retry(URLError, tries=3)
-    def test_load_state_dict_from_url_with_name(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            file_name = 'test_file'
-            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
-            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
-            self.assertEqual(sum_of_state_dict(loaded_state),
-                             SUM_OF_HUB_EXAMPLE)
-
-    @retry(URLError, tries=3)
-    def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(
-                ValueError,
-                'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -756,32 +708,6 @@ class TestAssert(TestCase):
         ms(x)
         with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
-
-
-class TestCrashHandler(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
-    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
-    def test_python_exception_writing(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            torch.utils._crash_handler.enable_minidumps(temp_dir)
-            torch.utils._crash_handler.enable_minidumps_on_exceptions()
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 0)
-
-            f = io.StringIO()
-            with contextlib.redirect_stderr(f):
-                try:
-                    @torch.jit.script
-                    def x(i: int):
-                        return i + "2"  # type: ignore[operator]
-                except RuntimeError as e:
-                    pass
-
-            files = os.listdir(temp_dir)
-            self.assertEqual(len(files), 1)
-            self.assertTrue(files[0].endswith(".dmp"))
-            torch.utils._crash_handler.disable_minidumps()
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
@@ -863,6 +789,14 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
+
+
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
 
 
 if __name__ == '__main__':

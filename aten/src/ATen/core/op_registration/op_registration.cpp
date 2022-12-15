@@ -7,6 +7,11 @@
 #endif
 
 namespace c10 {
+namespace impl {
+void build_feature_required_feature_not_available(const char* feature) {
+    TORCH_CHECK(false, "Required feature '" + std::string(feature) + "' is not available");
+}
+}
 
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
 static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");

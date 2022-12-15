@@ -13,7 +13,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {
@@ -42,5 +42,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "3"
+    output: "onnx::Reshape_3"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -17,14 +17,19 @@ graph {
     }
   }
   node {
-    input: "0"
-    input: "3"
-    output: "4"
+    input: "onnx::Reshape_0"
+    input: "onnx::Reshape_3"
+    output: "onnx::Shape_4"
     name: "Reshape_1"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    output: "5"
+    output: "onnx::Reshape_5"
     name: "Constant_2"
     op_type: "Constant"
     attribute {
@@ -38,14 +43,19 @@ graph {
     }
   }
   node {
-    input: "1"
-    input: "5"
-    output: "6"
+    input: "onnx::Reshape_1"
+    input: "onnx::Reshape_5"
+    output: "onnx::Shape_6"
     name: "Reshape_3"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    output: "7"
+    output: "onnx::Reshape_7"
     name: "Constant_4"
     op_type: "Constant"
     attribute {
@@ -59,35 +69,40 @@ graph {
     }
   }
   node {
-    input: "2"
-    input: "7"
-    output: "8"
+    input: "onnx::Reshape_2"
+    input: "onnx::Reshape_7"
+    output: "onnx::Shape_8"
     name: "Reshape_5"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    input: "4"
-    output: "9"
+    input: "onnx::Shape_4"
+    output: "onnx::Concat_9"
     name: "Shape_6"
     op_type: "Shape"
   }
   node {
-    input: "6"
-    output: "10"
+    input: "onnx::Shape_6"
+    output: "onnx::Concat_10"
     name: "Shape_7"
     op_type: "Shape"
   }
   node {
-    input: "8"
-    output: "11"
+    input: "onnx::Shape_8"
+    output: "onnx::Concat_11"
     name: "Shape_8"
     op_type: "Shape"
   }
   node {
-    input: "9"
-    input: "10"
-    input: "11"
-    output: "12"
+    input: "onnx::Concat_9"
+    input: "onnx::Concat_10"
+    input: "onnx::Concat_11"
+    output: "onnx::Expand_12"
     name: "Concat_9"
     op_type: "Concat"
     attribute {
@@ -97,7 +112,7 @@ graph {
     }
   }
   node {
-    output: "13"
+    output: "onnx::Concat_13"
     name: "Constant_10"
     op_type: "Constant"
     attribute {
@@ -111,10 +126,10 @@ graph {
     }
   }
   node {
-    input: "9"
-    input: "13"
-    input: "13"
-    output: "14"
+    input: "onnx::Concat_9"
+    input: "onnx::Concat_13"
+    input: "onnx::Concat_13"
+    output: "onnx::Reshape_14"
     name: "Concat_11"
     op_type: "Concat"
     attribute {
@@ -124,21 +139,26 @@ graph {
     }
   }
   node {
-    input: "4"
-    input: "14"
-    output: "15"
+    input: "onnx::Shape_4"
+    input: "onnx::Reshape_14"
+    output: "onnx::Expand_15"
     name: "Reshape_12"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    input: "15"
-    input: "12"
+    input: "onnx::Expand_15"
+    input: "onnx::Expand_12"
     output: "16"
     name: "Expand_13"
     op_type: "Expand"
   }
   node {
-    output: "17"
+    output: "onnx::Concat_17"
     name: "Constant_14"
     op_type: "Constant"
     attribute {
@@ -152,10 +172,10 @@ graph {
     }
   }
   node {
-    input: "17"
-    input: "10"
-    input: "17"
-    output: "18"
+    input: "onnx::Concat_17"
+    input: "onnx::Concat_10"
+    input: "onnx::Concat_17"
+    output: "onnx::Reshape_18"
     name: "Concat_15"
     op_type: "Concat"
     attribute {
@@ -165,21 +185,26 @@ graph {
     }
   }
   node {
-    input: "6"
-    input: "18"
-    output: "19"
+    input: "onnx::Shape_6"
+    input: "onnx::Reshape_18"
+    output: "onnx::Expand_19"
     name: "Reshape_16"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    input: "19"
-    input: "12"
+    input: "onnx::Expand_19"
+    input: "onnx::Expand_12"
     output: "20"
     name: "Expand_17"
     op_type: "Expand"
   }
   node {
-    output: "21"
+    output: "onnx::Concat_21"
     name: "Constant_18"
     op_type: "Constant"
     attribute {
@@ -193,10 +218,10 @@ graph {
     }
   }
   node {
-    input: "21"
-    input: "21"
-    input: "11"
-    output: "22"
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_11"
+    output: "onnx::Reshape_22"
     name: "Concat_19"
     op_type: "Concat"
     attribute {
@@ -206,22 +231,27 @@ graph {
     }
   }
   node {
-    input: "8"
-    input: "22"
-    output: "23"
+    input: "onnx::Shape_8"
+    input: "onnx::Reshape_22"
+    output: "onnx::Expand_23"
     name: "Reshape_20"
     op_type: "Reshape"
+    attribute {
+      name: "allowzero"
+      i: 0
+      type: INT
+    }
   }
   node {
-    input: "23"
-    input: "12"
+    input: "onnx::Expand_23"
+    input: "onnx::Expand_12"
     output: "24"
     name: "Expand_21"
     op_type: "Expand"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Reshape_0"
     type {
       tensor_type {
         elem_type: 1
@@ -234,7 +264,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "onnx::Reshape_1"
     type {
       tensor_type {
         elem_type: 1
@@ -247,7 +277,7 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "onnx::Reshape_2"
     type {
       tensor_type {
         elem_type: 1
@@ -318,5 +348,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

@@ -14,7 +14,11 @@ namespace int8 {
 class Int8SigmoidOp final : public Operator<CPUContext> {
  public:
   explicit Int8SigmoidOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
+      : Operator<CPUContext>(operator_def, ws) {
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+        ws_ = ws;
+#endif
+      }
 
   ~Int8SigmoidOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -29,8 +33,8 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    CHECK_EQ(Y_zero_point, 0);
-    CHECK_EQ(Y_scale, 1.0f / 256.0f);
+    TORCH_CHECK_EQ(Y_zero_point, 0);
+    TORCH_CHECK_EQ(Y_scale, 1.0f / 256.0f);
 
     /*
      * Record quantization parameters for the input, because if the op is
@@ -91,7 +95,9 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
   }
 
  private:
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK Sigmoid operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

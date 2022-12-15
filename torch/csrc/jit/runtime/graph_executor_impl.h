@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -39,7 +40,7 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
-bool getAutodiffSubgraphInlining();
+bool TORCH_API getAutodiffSubgraphInlining();
 
 void debugSetFusionGroupInlining(bool state);
 bool getFusionGroupInlining();
@@ -78,7 +79,7 @@ struct GraphExecutorImplBase {
 
   virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
-      size_t remaining_bailout_depth) = 0;
+      c10::optional<size_t> remaining_bailout_depth = c10::nullopt) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

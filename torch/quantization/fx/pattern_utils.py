@@ -8,10 +8,25 @@ here.
 """
 from torch.ao.quantization.fx.pattern_utils import (
     QuantizeHandler,
-    MatchResult,
-    register_fusion_pattern,
+    _register_fusion_pattern,
     get_default_fusion_patterns,
-    register_quant_pattern,
+    _register_quant_pattern,
     get_default_quant_patterns,
     get_default_output_activation_post_process_map
 )
+
+# QuantizeHandler.__module__ = _NAMESPACE
+_register_fusion_pattern.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_fusion_patterns.__module__ = "torch.quantization.fx.pattern_utils"
+_register_quant_pattern.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_quant_patterns.__module__ = "torch.quantization.fx.pattern_utils"
+get_default_output_activation_post_process_map.__module__ = "torch.quantization.fx.pattern_utils"
+
+# __all__ = [
+#     "QuantizeHandler",
+#     "_register_fusion_pattern",
+#     "get_default_fusion_patterns",
+#     "_register_quant_pattern",
+#     "get_default_quant_patterns",
+#     "get_default_output_activation_post_process_map",
+# ]

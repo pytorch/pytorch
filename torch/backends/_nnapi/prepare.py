@@ -3,6 +3,10 @@ from typing import Optional, List
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
 
+ANEURALNETWORKS_PREFER_LOW_POWER = 0
+ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER = 1
+ANEURALNETWORKS_PREFER_SUSTAINED_SPEED = 2
+
 
 class NnapiModule(torch.nn.Module):
     """Torch Module that wraps an NNAPI Compilation.
@@ -24,6 +28,8 @@ class NnapiModule(torch.nn.Module):
         weights: List[torch.Tensor],
         inp_mem_fmts: List[int],
         out_mem_fmts: List[int],
+        compilation_preference: int,
+        relax_f32_to_f16: bool,
     ):
         super().__init__()
         self.shape_compute_module = shape_compute_module
@@ -33,6 +39,8 @@ class NnapiModule(torch.nn.Module):
         self.out_mem_fmts = out_mem_fmts
         self.out_templates = []
         self.comp = None
+        self.compilation_preference = compilation_preference
+        self.relax_f32_to_f16 = relax_f32_to_f16
 
     @torch.jit.export
     def init(self, args: List[torch.Tensor]):
@@ -40,7 +48,8 @@ class NnapiModule(torch.nn.Module):
         self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
-        comp.init(self.ser_model, self.weights)
+        comp.init2(self.ser_model, self.weights, self.compilation_preference, self.relax_f32_to_f16)
+
         self.comp = comp
 
     def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
@@ -68,7 +77,7 @@ class NnapiModule(torch.nn.Module):
             fmt = self.out_mem_fmts[idx]
             # These constants match the values in DimOrder in serializer.py
             # TODO: See if it's possible to use those directly.
-            if fmt == 0:
+            if fmt in (0, 2):
                 pass
             elif fmt == 1:
                 outs[idx] = outs[idx].permute(0, 3, 1, 2)
@@ -76,16 +85,27 @@ class NnapiModule(torch.nn.Module):
                 raise Exception("Invalid mem_fmt")
         return outs
 
-def convert_model_to_nnapi(model, inputs, serializer=None):
+def convert_model_to_nnapi(
+    model,
+    inputs,
+    serializer=None,
+    return_shapes=None,
+    use_int16_for_qint16=False,
+    compilation_preference=ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
+    relax_f32_to_f16=False,
+):
     (shape_compute_module, ser_model_tensor, used_weights, inp_mem_fmts, out_mem_fmts,
-     retval_count) = process_for_nnapi(model, inputs, serializer)
+     retval_count) = process_for_nnapi(model, inputs, serializer, return_shapes, use_int16_for_qint16)
 
     nnapi_model = NnapiModule(
         shape_compute_module,
         ser_model_tensor,
         used_weights,
         inp_mem_fmts,
-        out_mem_fmts)
+        out_mem_fmts,
+        compilation_preference,
+        relax_f32_to_f16
+    )
 
     class NnapiInterfaceWrapper(torch.nn.Module):
         """NNAPI list-ifying and de-list-ifying wrapper.
@@ -114,15 +134,15 @@ def convert_model_to_nnapi(model, inputs, serializer=None):
     )
     return wrapper_model
 
-def process_for_nnapi(model, inputs, serializer=None):
+def process_for_nnapi(model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False):
     model = torch.jit.freeze(model)
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
 
-    serializer = serializer or _NnapiSerializer(config=None)
+    serializer = serializer or _NnapiSerializer(config=None, use_int16_for_qint16=use_int16_for_qint16)
     (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
-     retval_count) = serializer.serialize_model(model, inputs)
+     retval_count) = serializer.serialize_model(model, inputs, return_shapes)
     ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
 
     # We have to create a new class here every time this function is called

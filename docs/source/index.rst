@@ -28,13 +28,35 @@ Features described in this documentation are classified by release status:
   binary distributions like PyPI or Conda, except sometimes behind run-time
   flags, and are at an early stage for feedback and testing.
 
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: Community
+
+   community/*
 
 .. toctree::
    :glob:
    :maxdepth: 1
-   :caption: Notes
+   :caption: Developer Notes
 
    notes/*
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: torch.compile
+   :hidden:
+
+   dynamo/index
+   dynamo/installation
+   dynamo/get-started
+   dynamo/guards-overview
+   dynamo/custom-backends
+   dynamo/deep-dive
+   dynamo/troubleshooting
+   dynamo/faq
+   ir
 
 .. toctree::
    :maxdepth: 1
@@ -42,9 +64,11 @@ Features described in this documentation are classified by release status:
 
    cpp_index
    Javadoc <https://pytorch.org/javadoc/>
+   torch::deploy <deploy>
 
 .. toctree::
-   :maxdepth: 1
+   :glob:
+   :maxdepth: 2
    :caption: Python API
 
    torch
@@ -53,27 +77,35 @@ Features described in this documentation are classified by release status:
    tensors
    tensor_attributes
    tensor_view
+   torch.amp <amp>
    torch.autograd <autograd>
+   torch.library <library>
    cuda
-   torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
+   torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.tensor.parallel <distributed.tensor.parallel>
+   torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
+   torch._dynamo <_dynamo>
    torch.fft <fft>
    futures
    fx
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.monitor <monitor>
+   torch.signal <signal>
    torch.special <special>
    torch.overrides
    torch.package <package>
    profiler
    nn.init
    onnx
+   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -81,6 +113,8 @@ Features described in this documentation are classified by release status:
    quantization
    rpc
    torch.random <random>
+   masked
+   torch.nested <nested>
    sparse
    storage
    torch.testing <testing>
@@ -89,6 +123,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
@@ -96,24 +131,19 @@ Features described in this documentation are classified by release status:
    type_info
    named_tensor
    name_inference
-   torch.__config__ <__config__>
+   torch.__config__ <config_mod>
 
 .. toctree::
    :maxdepth: 1
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
+   TorchData <https://pytorch.org/data>
+   TorchRec <https://pytorch.org/torchrec>
+   TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
-
-.. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: Community
-
-   community/*
 
 Indices and tables
 ==================

@@ -1,3 +1,5 @@
+# Owner(s): ["module: multiprocessing"]
+
 import contextlib
 import gc
 import os
@@ -256,7 +258,7 @@ class TestMultiprocessing(TestCase):
             self.assertTrue(e.is_set())
             self.assertTrue(data[0].eq(4).all())
             self.assertTrue(data[1].eq(4).all())
-            p.join(1)
+            p.join(100)
             self.assertFalse(p.is_alive())
 
         def test_receive():
@@ -278,7 +280,7 @@ class TestMultiprocessing(TestCase):
             # collect them properly
             del t1, t2
             e.set()
-            p.join(1)
+            p.join(100)
             self.assertFalse(p.is_alive())
 
         with leak_checker(self) as lc:
@@ -381,7 +383,12 @@ class TestMultiprocessing(TestCase):
     def test_autograd_errors(self):
         ctx = mp.get_context('fork')
         simple_autograd_function()
-        with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+        # Autograd only uses thread when GPUs are involved
+        if torch.cuda.is_available() or torch.backends.mps.is_available():
+            with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 
@@ -411,8 +418,7 @@ class TestMultiprocessing(TestCase):
         t = []
         for _ in range(5):
             t.append(q.get())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(t[0], torch.full([5], 0.))
+        self.assertEqual(t[0], torch.full([5], 0, dtype=torch.int32))
         del t
         e.set()
         p.join(1)
@@ -635,7 +641,7 @@ if __name__ == "__main__":
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
-        c2p.put(1)  # nofity synchronization is done in child
+        c2p.put(1)  # notify synchronization is done in child
         p2c.get()  # wait for parent to finish before destructing child event
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -746,7 +752,7 @@ if __name__ == "__main__":
 
         self.assertEqual(var.data, torch.ones(5, 5, device=device))
         self.assertEqual(var.grad.data, torch.ones(5, 5, device=device) * 4)
-        p.join(1)
+        p.join(100)
         self.assertFalse(p.is_alive())
 
     # Check sharing a cudaMalloc allocation with different types of storage.

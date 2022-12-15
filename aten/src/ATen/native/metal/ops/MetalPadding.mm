@@ -13,7 +13,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-// API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   TORCH_CHECK(input.is_metal());
 
@@ -35,7 +35,7 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   }
 
   std::vector<int64_t> output_size(input_dim);
-  for (size_t d = 0; d < input_dim; ++d) {
+  for (int d = 0; d < input_dim; ++d) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     }
@@ -86,7 +86,7 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("reflection_pad2d", TORCH_FN(reflection_pad2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
 };
 
 }

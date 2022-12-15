@@ -49,7 +49,7 @@ bool needTrimGrad(Node* n) {
 bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
-      "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor)",
+      "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
@@ -218,7 +218,7 @@ class GradientHelper {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* input_list;
       if (grad_values.size() == 1 &&
-          grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
+          grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
       } else {
         input_list =
@@ -236,7 +236,7 @@ class GradientHelper {
       return {};
     } else if (
         node->matches(
-            "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor)")) {
+            "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor")) {
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
           aten::_slow_conv2d_backward,
@@ -246,7 +246,6 @@ class GradientHelper {
            node->namedInput(attr::kernel_size),
            node->namedInput(attr::stride),
            node->namedInput(attr::padding),
-           outputs.at(1),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
@@ -357,6 +356,28 @@ static Value* createAutogradAdd(Value* a, Value* b) {
   return graph->insertNode(graph->create(prim::AutogradAdd, {a, b}))->output();
 }
 
+namespace {
+bool outputRequiresGrad(Value* output) {
+  if (output->type()->castRaw<TensorType>() == nullptr) {
+    return output->requires_grad();
+  }
+  c10::optional<bool> requiresGrad =
+      output->type()->expectRef<TensorType>().requiresGrad();
+  if (requiresGrad.has_value()) {
+    return *requiresGrad;
+  }
+
+  Node* n = output->node();
+  if (n->kind() != prim::profile) {
+    return true;
+  }
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return true;
+  }
+  return n->ty(attr::profiled_type)->requires_grad();
+}
+} // namespace
+
 // Before:
 //   - grad_desc has field f initialized to the original 0-stage graph
 // After:
@@ -368,7 +389,7 @@ static Value* createAutogradAdd(Value* a, Value* b) {
 static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto& graph = *grad_desc.f;
   // note: reverse_node is intentionally not inserted to avoid
-  // accidentally acting on it (e.g. in elminate dead code),
+  // accidentally acting on it (e.g. in eliminate dead code),
   // std::cout << *reverse_node << to view its state.
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
@@ -396,7 +417,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value* output = outputs[i];
-    if (!output->requires_grad())
+    if (!outputRequiresGrad(output))
       continue;
     Value* output_grad = reverse_block->addInput()->setType(output->type());
     GRAPH_DEBUG(

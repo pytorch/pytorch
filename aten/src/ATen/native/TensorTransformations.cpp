@@ -1,12 +1,33 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/IndexKernel.h>  // for flip_stub
 
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/DimVector.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/atleast_1d_native.h>
+#include <ATen/ops/atleast_2d_native.h>
+#include <ATen/ops/atleast_3d_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/flip_native.h>
+#include <ATen/ops/fliplr_native.h>
+#include <ATen/ops/flipud_native.h>
+#include <ATen/ops/roll_native.h>
+#include <ATen/ops/rot90_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace at {
@@ -22,7 +43,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   // Count dimensions in which we need to do work
   int n = 0;
   auto strides = DimVector(self.strides());
-  for(int64_t i = 0; i < total_dims; i++) {
+  for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
       n++;
       strides[i] = 0;
@@ -61,7 +82,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   //   - We move the pointer to the opposite vertex of the cube
   //   - We iterate in the opposite direction (invert the strides)
 
-  for (int i=0; i<iter.ndim(); i++){
+  for (const auto i : c10::irange(iter.ndim())) {
     // We know that an dimension has a zero stride and self[i] does not, as we defined above
     // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
     // strides_self[i] == 0. We do not want to do anything there
@@ -96,7 +117,7 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   }
   auto t0 = self.narrow(dim, start, size-start);
   auto t1 = self.narrow(dim, 0, start);
-  return at::cat({t0, t1}, dim);
+  return at::cat({std::move(t0), std::move(t1)}, dim);
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
@@ -207,6 +228,10 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   };
   std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
+}
+
+Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+  return self.to(kComplexHalf, false, false, memory_format);
 }
 
 DEFINE_DISPATCH(flip_stub);

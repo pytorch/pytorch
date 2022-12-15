@@ -29,8 +29,12 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
-        with torch.cuda.device(device):
+        # setting device manager is expensive, so we avoid it unless necessary
+        if device is None or "_cdata" in kwargs:
             return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+        else:
+            with torch.cuda.device(device):
+                return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
@@ -130,7 +134,7 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            return super(Stream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+            return super(ExternalStream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
 class Event(torch._C._CudaEventBase):
@@ -179,7 +183,11 @@ class Event(torch._C._CudaEventBase):
         r"""Makes all future work submitted to the given stream wait for this
         event.
 
-        Use ``torch.cuda.current_stream()`` if no stream is specified."""
+        Use ``torch.cuda.current_stream()`` if no stream is specified.
+
+        .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
+            `CUDA Event documentation`_ for more info.
+        """
         if stream is None:
             stream = torch.cuda.current_stream()
         super(Event, self).wait(stream)

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 
 from torch.testing._internal.common_quantization import (
@@ -67,11 +69,11 @@ class TestModelNumericsEager(QuantizationTestCase):
                 fq_model = torch.ao.quantization.QuantWrapper(my_model)
                 fq_model.train()
                 fq_model.qconfig = torch.ao.quantization.default_qat_qconfig
-                torch.ao.quantization.fuse_modules(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+                torch.ao.quantization.fuse_modules_qat(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
                 torch.ao.quantization.prepare_qat(fq_model)
                 fq_model.eval()
                 fq_model.apply(torch.ao.quantization.disable_fake_quant)
-                fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                fq_model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 fq_model(calib_data)
                 fq_model.apply(torch.ao.quantization.enable_fake_quant)
                 fq_model.apply(torch.ao.quantization.disable_observer)
@@ -103,11 +105,11 @@ class TestModelNumericsEager(QuantizationTestCase):
                     fq_model = torch.ao.quantization.QuantWrapper(my_model)
                     fq_model.train()
                     fq_model.qconfig = qconfig
-                    torch.ao.quantization.fuse_modules(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
+                    torch.ao.quantization.fuse_modules_qat(fq_model.module, [['conv1', 'bn1', 'relu1']], inplace=True)
                     torch.ao.quantization.prepare_qat(fq_model)
                     fq_model.eval()
                     fq_model.apply(torch.ao.quantization.disable_fake_quant)
-                    fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    fq_model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                     fq_model(calib_data)
                     fq_model.apply(torch.ao.quantization.enable_fake_quant)
                     fq_model.apply(torch.ao.quantization.disable_observer)

@@ -1,9 +1,7 @@
 import bisect
-import functools
 import warnings
+import math
 from typing import (
-    Callable,
-    Dict,
     Generic,
     Iterable,
     Iterator,
@@ -12,40 +10,27 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    Union
 )
 
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator, randperm
 from torch._utils import _accumulate
-from torch.utils.data._typing import _DataPipeMeta
 
 from ... import Generator, Tensor
 
+__all__ = [
+    "Dataset",
+    "IterableDataset",
+    "TensorDataset",
+    "ConcatDataset",
+    "ChainDataset",
+    "Subset",
+    "random_split",
+]
+
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
-
-UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
-                              'groupby',   # As it returns DataChunks
-                              '_dataframes_as_tuples',  # As it unpacks DF
-                              'trace_as_dataframe',  # As it used to mark DF for tracing
-                              ]
-
-class DataChunk(list, Generic[T]):
-    def __init__(self, items):
-        super().__init__(items)
-        self.items = items
-
-    def as_str(self, indent=''):
-        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-        return res
-
-    def __iter__(self) -> Iterator[T]:
-        for i in super().__iter__():
-            yield i
-
-    def raw_iterator(self):
-        for i in self.items:
-            yield i
 
 
 class Dataset(Generic[T_co]):
@@ -63,7 +48,6 @@ class Dataset(Generic[T_co]):
       sampler that yields integral indices.  To make it work with a map-style
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
-    functions: Dict[str, Callable] = {}
 
     def __getitem__(self, index) -> T_co:
         raise NotImplementedError
@@ -75,36 +59,8 @@ class Dataset(Generic[T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
 
-    def __getattr__(self, attribute_name):
-        if attribute_name in Dataset.functions:
-            function = functools.partial(Dataset.functions[attribute_name], self)
-            return function
-        else:
-            raise AttributeError
 
-    @classmethod
-    def register_function(cls, function_name, function):
-        cls.functions[function_name] = function
-
-    @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
-        if function_name in cls.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
-
-        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
-            result_pipe = cls(source_dp, *args, **kwargs)
-            if isinstance(result_pipe, Dataset):
-                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
-                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
-                        result_pipe = result_pipe.trace_as_dataframe()
-
-            return result_pipe
-
-        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
-        cls.functions[function_name] = function
-
-
-class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
+class IterableDataset(Dataset[T_co]):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -150,16 +106,19 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [3, 5, 4, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [3, 4, 5, 6]
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12)))
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
@@ -203,12 +162,9 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         [3, 5, 4, 6]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
-    functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
-
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
@@ -218,30 +174,6 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
-    def __getattr__(self, attribute_name):
-        if attribute_name in IterableDataset.functions:
-            function = functools.partial(IterableDataset.functions[attribute_name], self)
-            return function
-        else:
-            raise AttributeError
-
-    def __reduce_ex__(self, *args, **kwargs):
-        if IterableDataset.reduce_ex_hook is not None:
-            try:
-                return IterableDataset.reduce_ex_hook(self)
-            except NotImplementedError:
-                pass
-        return super().__reduce_ex__(*args, **kwargs)
-
-    @classmethod
-    def set_reduce_ex_hook(cls, hook_fn):
-        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
-        IterableDataset.reduce_ex_hook = hook_fn
-
-class DFIterDataPipe(IterableDataset):
-    def _is_dfpipe(self):
-        return True
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
@@ -338,7 +270,7 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            total += len(d)
+            total += len(d)  # type: ignore[arg-type]
         return total
 
 
@@ -366,22 +298,53 @@ class Subset(Dataset[T_co]):
         return len(self.indices)
 
 
-def random_split(dataset: Dataset[T], lengths: Sequence[int],
+def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+
+    If a list of fractions that sum up to 1 is given,
+    the lengths will be computed automatically as
+    floor(frac * len(dataset)) for each fraction provided.
+
+    After computing the lengths, if there are any remainders, 1 count will be
+    distributed in round-robin fashion to the lengths
+    until there are no remainders left.
+
     Optionally fix the generator for reproducible results, e.g.:
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
+    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
+    ...   ).manual_seed(42))
 
     Args:
         dataset (Dataset): Dataset to be split
-        lengths (sequence): lengths of splits to be produced
+        lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
+    if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
+        subset_lengths: List[int] = []
+        for i, frac in enumerate(lengths):
+            if frac < 0 or frac > 1:
+                raise ValueError(f"Fraction at index {i} is not between 0 and 1")
+            n_items_in_split = int(
+                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
+            )
+            subset_lengths.append(n_items_in_split)
+        remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
+        # add 1 to all the lengths in round-robin fashion until the remainder is 0
+        for i in range(remainder):
+            idx_to_add_at = i % len(subset_lengths)
+            subset_lengths[idx_to_add_at] += 1
+        lengths = subset_lengths
+        for i, length in enumerate(lengths):
+            if length == 0:
+                warnings.warn(f"Length of split at index {i} is 0. "
+                              f"This might result in an empty dataset.")
+
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):
+    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths), generator=generator).tolist()
+    indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[call-overload]
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]

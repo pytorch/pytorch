@@ -1,45 +1,52 @@
 if(INTERN_BUILD_MOBILE)
-  if(BUILD_CAFFE2_MOBILE)
-    caffe2_binary_target("predictor_verifier.cc")
-    caffe2_binary_target("speed_benchmark.cc")
-  else()
-    caffe2_binary_target("speed_benchmark_torch.cc")
-    if(NOT BUILD_LITE_INTERPRETER)
-      caffe2_binary_target("compare_models_torch.cc")
-    endif()
+  caffe2_binary_target("speed_benchmark_torch.cc")
+  caffe2_binary_target("load_benchmark_torch.cc")
+  if(NOT BUILD_LITE_INTERPRETER)
+    caffe2_binary_target("compare_models_torch.cc")
   endif()
   return()
 endif()
 
-caffe2_binary_target("convert_caffe_image_db.cc")
-caffe2_binary_target("convert_db.cc")
-caffe2_binary_target("make_cifar_db.cc")
-caffe2_binary_target("make_mnist_db.cc")
+if(BUILD_CAFFE2)
+  caffe2_binary_target("convert_caffe_image_db.cc")
+  caffe2_binary_target("convert_db.cc")
+  caffe2_binary_target("make_cifar_db.cc")
+  caffe2_binary_target("make_mnist_db.cc")
+  caffe2_binary_target("predictor_verifier.cc")
+  caffe2_binary_target("speed_benchmark.cc")
+  caffe2_binary_target("split_db.cc")
+  caffe2_binary_target("print_registered_core_operators.cc")
+
+  if(USE_OBSERVERS)
+    caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
+    target_include_directories(caffe2_benchmark PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../modules)
+  endif()
+
+  caffe2_binary_target("at_launch_benchmark.cc")
+  target_include_directories(at_launch_benchmark PUBLIC
+    ${CMAKE_BINARY_DIR}/aten/src)
+
+  caffe2_binary_target("intra_inter_benchmark.cc")
+  target_include_directories(intra_inter_benchmark PUBLIC
+    ${CMAKE_BINARY_DIR}/aten/src)
+
+  caffe2_binary_target("run_plan.cc")
+  caffe2_binary_target("db_throughput.cc")
+
+  # ---[ tutorials
+  caffe2_binary_target("tutorial_blob.cc")
+endif()
+
 caffe2_binary_target("parallel_info.cc")
 target_include_directories(parallel_info PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
-
-caffe2_binary_target("intra_inter_benchmark.cc")
-target_include_directories(intra_inter_benchmark PUBLIC
-  ${CMAKE_BINARY_DIR}/aten/src)
-
-caffe2_binary_target("at_launch_benchmark.cc")
-target_include_directories(at_launch_benchmark PUBLIC
-  ${CMAKE_BINARY_DIR}/aten/src)
 
 caffe2_binary_target("record_function_benchmark.cc")
 target_include_directories(record_function_benchmark PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src)
 
-caffe2_binary_target("predictor_verifier.cc")
-caffe2_binary_target("print_registered_core_operators.cc")
-caffe2_binary_target("run_plan.cc")
-caffe2_binary_target("speed_benchmark.cc")
 caffe2_binary_target("speed_benchmark_torch.cc")
 caffe2_binary_target("compare_models_torch.cc")
-caffe2_binary_target("split_db.cc")
-
-caffe2_binary_target("db_throughput.cc")
 
 if(BUILD_TEST)
   # Core overhead benchmark
@@ -94,17 +101,10 @@ if(USE_OPENCV)
   target_link_libraries(convert_image_to_tensor ${OpenCV_LIBS})
 endif()
 
-if(USE_OBSERVERS)
-  caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
-endif()
-
 if(USE_OBSERVERS AND USE_OPENCV)
   caffe2_binary_target("convert_and_benchmark.cc")
   target_link_libraries(convert_and_benchmark ${OpenCV_LIBS})
 endif()
-
-# ---[ tutorials
-caffe2_binary_target("tutorial_blob.cc")
 
 caffe2_binary_target("dump_operator_names.cc")
 caffe2_binary_target("optimize_for_mobile.cc")

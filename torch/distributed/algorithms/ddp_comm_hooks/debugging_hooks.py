@@ -1,12 +1,14 @@
 from typing import Any
 
 import torch
-import torch.distributed as dist
+from torch.distributed import GradBucket
+
+__all__ = ["noop_hook"]
 
 
-def noop_hook(_: Any, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
+def noop_hook(_: Any, bucket: GradBucket) -> torch.futures.Future[torch.Tensor]:
     """
-    This DDP communication hook returns the a future that wraps the input,
+    This DDP communication hook returns a future that wraps the input,
     so it is a noop that does not incur any communication overheads.
 
     This hook should **only** be used for headroom analysis of allreduce optimization,
@@ -18,6 +20,7 @@ def noop_hook(_: Any, bucket: dist.GradBucket) -> torch.futures.Future[torch.Ten
     some factors such as the overlap between allreduce and computation or the desynchronization across ranks.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(None, noop_hook)
     """
     fut: torch.futures.Future[torch.Tensor] = torch.futures.Future()

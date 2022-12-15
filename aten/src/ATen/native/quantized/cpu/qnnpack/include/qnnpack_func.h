@@ -1,5 +1,7 @@
 #pragma once
-#include <conv_utils.h>
+
+#include <cstdlib>
+#include <qnnpack/operator.h>
 
 namespace qnnpack {
 class PrePackConvWeights final {
@@ -112,6 +114,7 @@ enum pytorch_qnnp_status qnnpackConv(
     const pytorch_qnnp_operator_t convolution,
     void* packed_weights,
     const size_t batch_size,
+    const size_t input_depth,
     const size_t input_height,
     const size_t input_width,
     const uint8_t input_zero_point,

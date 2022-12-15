@@ -3,7 +3,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
-#include <mutex>  // for std::call_once
 
 namespace at {
 namespace cuda {
@@ -166,6 +165,8 @@ CUDA_STUB1(cuModuleUnload, CUmodule);
 CUDA_STUB3(cuDevicePrimaryCtxGetState, CUdevice, unsigned int *, int *);
 CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *);
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *);
+CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int);
+CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction);
 
 // Irregularly shaped functions
 CUresult CUDAAPI cuLaunchKernel(CUfunction f,
@@ -186,6 +187,36 @@ CUresult CUDAAPI cuLaunchKernel(CUfunction f,
   return fn(f,
             gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
             sharedMemBytes, hStream, kernelParams, extra);
+}
+
+// Irregularly shaped functions
+CUresult CUDAAPI cuLaunchCooperativeKernel(
+    CUfunction f,
+    unsigned int gridDimX,
+    unsigned int gridDimY,
+    unsigned int gridDimZ,
+    unsigned int blockDimX,
+    unsigned int blockDimY,
+    unsigned int blockDimZ,
+    unsigned int sharedMemBytes,
+    CUstream hStream,
+    void** kernelParams) {
+  auto fn = reinterpret_cast<decltype(&cuLaunchCooperativeKernel)>(
+      getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuLaunchCooperativeKernel");
+  lazyNVRTC.cuLaunchCooperativeKernel = fn;
+  return fn(
+      f,
+      gridDimX,
+      gridDimY,
+      gridDimZ,
+      blockDimX,
+      blockDimY,
+      blockDimZ,
+      sharedMemBytes,
+      hStream,
+      kernelParams);
 }
 
 CUresult CUDAAPI cuModuleLoadDataEx(CUmodule *module,

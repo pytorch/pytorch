@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/irange.h>
+
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #ifndef _USE_MATH_DEFINES
@@ -8,9 +10,9 @@
 #include <math.h>
 #endif
 
-#include <stdint.h>
-#include <cmath>
 #include <array>
+#include <cmath>
+#include <cstdint>
 
 namespace at {
 
@@ -155,7 +157,7 @@ private:
     data_.seed_ = seed;
     data_.seeded_ = true;
     data_.state_[0] = seed & 0xffffffff;
-    for(int j = 1; j < MERSENNE_STATE_N; j++) {
+    for (const auto j : c10::irange(1, MERSENNE_STATE_N)) {
       data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
     }
     data_.left_ = 1;

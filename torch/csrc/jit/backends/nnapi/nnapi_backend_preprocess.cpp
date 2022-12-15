@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
@@ -96,7 +97,7 @@ c10::IValue preprocess(
   // transform Python lists to C++ c10::List
   c10::List<at::Tensor> weights(
       py::cast<std::vector<at::Tensor>>(nnapi_processed[2]));
-  for (int i = 0; i < weights.size(); i++) {
+  for (auto i = 0U; i < weights.size(); i++) {
     weights.set(i, weights.get(i).contiguous());
   }
   c10::List<int64_t> inp_mem_fmts(

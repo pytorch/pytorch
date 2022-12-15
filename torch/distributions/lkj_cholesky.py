@@ -14,13 +14,14 @@ from torch.distributions import constraints, Beta
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['LKJCholesky']
 
 class LKJCholesky(Distribution):
     r"""
     LKJ distribution for lower Cholesky factor of correlation matrices.
     The distribution is controlled by ``concentration`` parameter :math:`\eta`
     to make the probability of the correlation matrix :math:`M` generated from
-    a Cholesky factor propotional to :math:`\det(M)^{\eta - 1}`. Because of that,
+    a Cholesky factor proportional to :math:`\det(M)^{\eta - 1}`. Because of that,
     when ``concentration == 1``, we have a uniform distribution over Cholesky
     factors of correlation matrices. Note that this distribution samples the
     Cholesky factor of correlation matrices and not the correlation matrices
@@ -33,6 +34,7 @@ class LKJCholesky(Distribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> l = LKJCholesky(3, 0.5)
         >>> l.sample()  # l @ l.T is a sample of a correlation 3x3 matrix
         tensor([[ 1.0000,  0.0000,  0.0000],
@@ -112,7 +114,7 @@ class LKJCholesky(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         diag_elems = value.diagonal(dim1=-1, dim2=-2)[..., 1:]
-        order = torch.arange(2, self.dim + 1)
+        order = torch.arange(2, self.dim + 1, device=self.concentration.device)
         order = 2 * (self.concentration - 1).unsqueeze(-1) + self.dim - order
         unnormalized_log_pdf = torch.sum(order * diag_elems.log(), dim=-1)
         # Compute normalization constant (page 1999 of [1])

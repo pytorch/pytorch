@@ -27,10 +27,12 @@ const std::vector<std::string> functions = {
 
         def AD_sum_backward(grad,
                             sizes: List[int],
-                            dims: List[int],
+                            dims: Optional[List[int]],
                             keepdim: bool):
             if not keepdim and len(sizes) > 0:
-                if len(dims) == 1:
+                if dims is None:
+                    return grad.expand(sizes)
+                elif len(dims) == 1:
                     return grad.unsqueeze(dims[0]).expand(sizes)
                 else:
                     res = AD_unsqueeze_multiple(grad, dims, len(sizes))
@@ -57,7 +59,7 @@ const std::vector<std::string> functions = {
             return torch.mean(self, dtype=dtype), backward
 
         def mean_1(self,
-                   dim: List[int],
+                   dim: Optional[List[int]],
                    keepdim: bool,
                    *,
                    dtype: Optional[int]):
@@ -93,14 +95,20 @@ const std::vector<std::string> functions = {
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
         def AD_safe_size(sizes: List[int],
-                         dims: List[int]):
+                         dims: Optional[List[int]]):
             if len(sizes) == 0:
                 return 1
 
             size = 1
-            for i in range(len(dims)):
-                d = dims[i]
-                size *= sizes[d]
+
+            if dims is None:
+              for s in sizes:
+                size *= s
+
+            else:
+              for i in range(len(dims)):
+                  d = dims[i]
+                  size *= sizes[d]
 
             return size
 
@@ -141,13 +149,13 @@ const std::vector<std::string> functions = {
             return std_out, backward
 
         def std_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -174,12 +182,12 @@ const std::vector<std::string> functions = {
             return torch.var(self, unbiased), backward
 
         def var_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
@@ -478,6 +486,24 @@ const std::vector<std::string> functions = {
                 grad_tensor2 = (grad * tensor1)._grad_sum_to_size(tensor2_size)
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
+
+        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None
+
+            return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
+
+        def _autocast_to_reduced_precision(self,
+                                          cuda_enabled : bool,
+                                          cpu_enabled : bool,
+                                          cuda_dtype : int,
+                                          cpu_dtype : int):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None, None, None
+
+            return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
 
         def _dim_arange(like,
                         dim: int):
@@ -895,16 +921,17 @@ const std::vector<std::string> functions = {
                 return grad_output * torch.where(self > 0, 1.0, negative_slope).type_as(result), None
             return result, backward
 
-        def gelu(self):
-            result = torch.gelu(self)
+        def gelu(self : Tensor, *, approximate : str):
+            result = torch.gelu(self, approximate=approximate)
             def backward(grad_output):
-                m_2_sqrtpi = 1.12837916709551257390
-                m_sqrt1_2 = 0.707106781186547524401
-                alpha = m_sqrt1_2
-                beta = m_2_sqrtpi * m_sqrt1_2 * 0.5
-                cdf = (torch.erf(self * m_sqrt1_2) + 1.0) * 0.5
-                pdf = beta * torch.exp(self * self * -0.5)
-                return grad_output * (cdf + self * pdf)
+                return torch.gelu_backward(grad_output, self, approximate=approximate), None
+            return result, backward
+
+        def silu(self):
+            result = torch.silu(self)
+            def backward(grad_output):
+                input_sigmoid = torch.sigmoid(self)
+                return grad_output * (input_sigmoid * (1 + self * (1 - input_sigmoid)))
             return result, backward
 
         def hardswish(self):
@@ -1051,11 +1078,12 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self, *, memory_format: Optional[int]):
-            def backward(grad_output):
-                return None
+        # TODO: Fix rand_like to match expected format
+        # def rand_like(self, *, memory_format: Optional[int]):
+        #    def backward(grad_output):
+        #        return None
 
-            return torch.rand_like(self, memory_format=memory_format), backward
+        #    return torch.rand_like(self, memory_format=memory_format), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
@@ -1141,7 +1169,7 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm_disabled(input : Tensor,
+        def layer_norm(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1156,40 +1184,16 @@ const std::vector<std::string> functions = {
                 return grad_input, None, grad_weight, grad_bias, None, None
             return output, backward
 
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
-
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            # if `train == false` we need to set `p1m` to 0 so `scale == 1`
+            p1m = (1. - p) * float(train)
+            scale = 1. / (float(p1m == 0.) + p1m)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
                 return grad_input, None, None
             return res, backward
 
@@ -1368,6 +1372,15 @@ const std::vector<std::string> functions = {
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
 
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
+
         def fmod(self,
                  other: number):
             def backward(grad_output):
@@ -1537,7 +1550,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
@@ -1551,6 +1564,17 @@ void loadModule(const CompilationUnit& module) {
     Value* context;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
+
+    // checks that num forward graph inputs equals num backward graph outputs
+    TORCH_CHECK(
+        pair.forward->inputs().size() ==
+            unpackOutputs(pair.backward->outputs().vec()).size(),
+        "The autodiff implementation of ",
+        method->name(),
+        " backward() returns an incorrect number of values: ",
+        unpackOutputs(pair.backward->outputs().vec()).size(),
+        " instead of ",
+        pair.forward->inputs().size());
 
     // do surgery on the forward function to remove the closure tuple and
     // replace it with the context variable:

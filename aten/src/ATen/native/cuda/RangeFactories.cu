@@ -1,6 +1,6 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -8,20 +8,39 @@
 #include <cmath>
 #include <limits>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/range_native.h>
+#endif
+
 #define GPU_LAMBDA __device__ __host__
 
 namespace {
 
-constexpr int num_threads = C10_WARP_SIZE * 2;
+#if defined(USE_ROCM)
+constexpr int num_threads() {
+  return 128;
+}
+#else
+constexpr int num_threads() {
+  return C10_WARP_SIZE * 2;
+}
+#endif
 constexpr int thread_work_size = 1;
-constexpr int block_work_size = thread_work_size * num_threads;
+constexpr int block_work_size = thread_work_size * num_threads();
 
 template<typename index_t, typename func_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
+    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
@@ -38,10 +57,10 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
-    elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads(), 0, stream>>>(N, f, output.data_ptr<scalar_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
@@ -51,16 +70,8 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for linspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -110,16 +121,8 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<
   return result;
 }
 
-Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for logspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -215,6 +218,13 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
+    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+              std::isfinite(static_cast<double>(xend)),
+              "unsupported range: ", xstart, " -> ", xend);
+    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+              "upper bound and larger bound inconsistent with step sign");
+
     // we use double precision for (start - end) / step
     // to compute size_d for consistency across devices.
     // The problem with using accscalar_t is that accscalar_t might be float32 on gpu for a float32 scalar_t,
@@ -224,19 +234,12 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
     if (std::is_same<scalar_t, int64_t>::value) {
-      size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
-                          / step.to<accscalar_t>());
+      int64_t sgn = (xstep > 0) - (xstep < 0);
+      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
                           / step.to<double>());
     }
-
-    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
-              std::isfinite(static_cast<double>(xend)),
-              "unsupported range: ", xstart, " -> ", xend);
-    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-              "upper bound and larger bound inconsistent with step sign");
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
               "invalid size, possible overflow?");

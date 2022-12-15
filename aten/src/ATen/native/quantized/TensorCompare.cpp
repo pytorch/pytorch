@@ -14,6 +14,19 @@ Tensor max_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).max(/*dim=*/0));
 }
 
+Tensor& max_quantized_unary_out(const Tensor& self, Tensor& out) {
+  // TODO this implementation is inefficient for now.
+  TORCH_CHECK(self.device() == out.device());
+
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(self.dtype()),
+      typeMetaToScalarType(out.dtype())));
+  Tensor temp = max_quantized_cpu(self);
+  at::native::resize_output(out, temp.sizes());
+  out.copy_(temp);
+  return out;
+}
+
 Tensor min_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).min(/*dim=*/0));
 }
@@ -33,13 +46,6 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
       at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),
       sort_indicies);
-}
-
-std::tuple<Tensor, Tensor> sort_quantized_cpu(
-    const Tensor& self,
-    int64_t dim,
-    bool descending) {
-  return sort_quantized_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
 } // namespace native

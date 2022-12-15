@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -36,17 +35,24 @@ class TORCH_API Reducer {
     return init_;
   }
 
-  ReduceOpPtr operator()(
-      BufPtr result_buf,
+  ExprHandle operator()(
+      BufHandle result_buf,
       ExprHandle body,
-      const std::vector<ExprPtr>& output,
-      const std::vector<VarPtr>& inner) const;
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
   ReduceOpPtr operator()(
       BufPtr result_buf,
       ExprPtr body,
       const std::vector<ExprPtr>& output,
       const std::vector<VarPtr>& inner) const;
+
+  ExprHandle operator()(
+      BufHandle result_buf,
+      BufHandle acc_buf,
+      ExprHandle body,
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
   // Polymorphic handling of Body functions with a variety of parameters.
   static ExprHandle getReduceBody(
@@ -111,6 +117,16 @@ class TORCH_API Reducer {
     auto e = interaction(accum, body);
     return e.node();
   }
+  static ExprHandle complete(
+      BufHandle accumulator,
+      ReduceInteraction interaction,
+      ExprHandle body,
+      const std::vector<ExprHandle>& output_args,
+      const std::vector<VarHandle>& reduce_args) {
+    ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
+    auto e = interaction(accum, body);
+    return e;
+  }
 
  private:
   ExprPtr init_;
@@ -132,7 +148,39 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
+        reducer_(reducer) {
+    result_buf_ = nullptr;
+    acc_buf_ = nullptr;
+    ri_operand_ = nullptr;
+  }
+
+  ReduceOp(
+      ExprPtr body,
+      std::vector<VarPtr> reduce_args,
+      BufPtr result_buf,
+      BufPtr acc_buf,
+      ExprPtr ri_operand,
+      const Reducer& reducer)
+      : ExprNodeBase(body->dtype()),
+        body_(body),
+        reduce_args_(std::move(reduce_args)),
+        result_buf_(result_buf),
+        acc_buf_(acc_buf),
+        ri_operand_(ri_operand),
         reducer_(reducer) {}
+
+  static ExprHandle make(
+      ExprHandle body,
+      std::vector<VarHandle> reduce_args,
+      const Reducer& reducer);
+
+  static ExprHandle make(
+      ExprHandle body,
+      std::vector<VarHandle> reduce_args,
+      BufHandle result_buf,
+      BufHandle acc_buf,
+      ExprHandle ri_operand,
+      const Reducer& reducer);
 
   // return the body expression which obtains the value to be reduced.
   ExprPtr body() const {
@@ -149,9 +197,36 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
     return reduce_args_;
   }
 
+  void setAccBuf(BufHandle acc_buf) {
+    acc_buf_ = acc_buf.node();
+  }
+  BufPtr getAccBuf() {
+    return acc_buf_;
+  }
+
+  void setResultBuf(BufHandle buf) {
+    result_buf_ = buf.node();
+  }
+  BufPtr getResultBuf() {
+    return result_buf_;
+  }
+
+  void setRiOperand(ExprHandle ri_operand) {
+    ri_operand_ = ri_operand.node();
+  }
+  ExprPtr getRiOperand() {
+    return ri_operand_;
+  }
+
  private:
+  // body_ = reducer_->interaction_(result_buf_, ri_operand_)
   ExprPtr body_;
   std::vector<VarPtr> reduce_args_;
+
+  BufPtr result_buf_;
+  BufPtr acc_buf_;
+  ExprPtr ri_operand_;
+
   const Reducer reducer_;
 };
 

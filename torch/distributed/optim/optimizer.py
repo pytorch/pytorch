@@ -1,19 +1,22 @@
-from typing import List, Optional
 import logging
 
+from collections import defaultdict
+from threading import Lock
+from typing import List, Optional
+
+import torch
+import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
-from torch.distributed.optim import functional_optim_map
-import torch.distributed.autograd as dist_autograd
+from .utils import functional_optim_map
 
-
-from collections import defaultdict
-from threading import Lock
+__all__ = ["DistributedOptimizer"]
 
 logger = logging.getLogger(__name__)
+
 
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
 # compile the FunctionalOptimizer class into TorchScript
@@ -30,6 +33,7 @@ class _ScriptLocalOptimizerInterface(object):
     def step(self, autograd_ctx_id: int) -> None:
         pass
 
+
 class _ScriptLocalOptimizer(nn.Module):
     # TorchScript does not support multithread concurrent compiling.
     # request_callback might invoke concurrent compiling, so we
@@ -39,10 +43,7 @@ class _ScriptLocalOptimizer(nn.Module):
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         super().__init__()
         self._local_params = [rref.local_value() for rref in local_params_rref]
-        self.optim = optim_cls(
-            self._local_params,
-            *args,
-            **kwargs)
+        self.optim = optim_cls(self._local_params, *args, **kwargs)
 
     @jit.export
     def step(self, autograd_ctx_id: int):
@@ -70,10 +71,7 @@ class _LocalOptimizer(object):
 
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         self._local_params = [rref.local_value() for rref in local_params_rref]
-        self.optim = optim_cls(
-            self._local_params,
-            *args,
-            **kwargs)
+        self.optim = optim_cls(self._local_params, *args, **kwargs)
 
     def step(self, autograd_ctx_id):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
@@ -85,8 +83,7 @@ class _LocalOptimizer(object):
 
 
 def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
-    return rpc.RRef(
-        _LocalOptimizer(optim_cls, local_params_rref, *args, **kwargs))
+    return rpc.RRef(_LocalOptimizer(optim_cls, local_params_rref, *args, **kwargs))
 
 
 def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
@@ -100,16 +97,16 @@ def _new_script_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
 
     with _ScriptLocalOptimizer.compile_lock:
         script_optim = jit.script(optim)
-        return rpc.RRef(
-            script_optim, _ScriptLocalOptimizerInterface)
+        return rpc.RRef(script_optim, _ScriptLocalOptimizerInterface)
+
 
 @jit.script
 def _script_local_optimizer_step(
-    local_optim_rref: RRef[_ScriptLocalOptimizerInterface],
-    autograd_ctx_id: int
+    local_optim_rref: RRef[_ScriptLocalOptimizerInterface], autograd_ctx_id: int
 ) -> None:
     local_optim = local_optim_rref.local_value()
     local_optim.step(autograd_ctx_id)
+
 
 def _wait_for_all(rpc_futs):
     # TODO: improve error propagation
@@ -160,6 +157,7 @@ class DistributedOptimizer:
         kwargs: arguments to pass to the optimizer constructor on each worker.
 
     Example::
+        >>> # xdoctest: +SKIP("distributed")
         >>> import torch.distributed.autograd as dist_autograd
         >>> import torch.distributed.rpc as rpc
         >>> from torch import optim
@@ -186,6 +184,7 @@ class DistributedOptimizer:
     """
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
+        torch._C._log_api_usage_once("torch.distributed.optim.DistributedOptimizer")
         per_worker_params_rref = defaultdict(list)
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
@@ -194,7 +193,7 @@ class DistributedOptimizer:
             optim_ctor = functional_optim_map.get(optimizer_class)
         else:
             optim_ctor = optimizer_class
-        self.is_functional_optim = (optim_ctor != optimizer_class)
+        self.is_functional_optim = optim_ctor != optimizer_class
 
         if self.is_functional_optim:
             optimizer_new_func = _new_script_local_optimizer
@@ -243,9 +242,11 @@ class DistributedOptimizer:
 
         rpc_futs = []
         for optimizer in self.remote_optimizers:
-            rpc_futs.append(rpc.rpc_async(
-                optimizer.owner(),
-                optimizer_step_func,
-                args=(optimizer, context_id),
-            ))
+            rpc_futs.append(
+                rpc.rpc_async(
+                    optimizer.owner(),
+                    optimizer_step_func,
+                    args=(optimizer, context_id),
+                )
+            )
         _wait_for_all(rpc_futs)

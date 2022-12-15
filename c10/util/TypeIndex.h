@@ -12,8 +12,13 @@ namespace util {
 
 // TODO Make it work for more compilers
 
+// Intel compiler works
+#if defined(__INTEL_COMPILER)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+
 // Clang works
-#if defined(__clang__)
+#elif defined(__clang__)
 
 // except for NVCC
 #if defined(__CUDACC__)
@@ -132,7 +137,7 @@ inline constexpr uint64_t type_index_impl() {
 // of this function, including its template parameter, i.e. including the
 // type we want an id for. We use this name and run crc64 on it to get a type
 // id.
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
   return crc64(__FUNCSIG__, sizeof(__FUNCSIG__)).checksum();
 #elif defined(__clang__)
   return crc64(__PRETTY_FUNCTION__, sizeof(__PRETTY_FUNCTION__)).checksum();
@@ -151,13 +156,28 @@ inline constexpr type_index get_type_index() {
   // type index through std::integral_constant.
   return type_index{std::integral_constant<
       uint64_t,
-      detail::type_index_impl<std::remove_cv_t<std::decay_t<T>>>()>::value};
+      detail::type_index_impl<std::decay_t<T>>()>::value};
 #else
   // There's nothing in theory preventing us from running this on device code
   // except for nvcc throwing a compiler error if we enable it.
   return (abort(), type_index(0));
 #endif
 }
+
+#if !defined(TORCH_PEDANTIC)
+// Use precomputed hashsum for std::string
+// Needed to workaround ambiguity in class name resolution
+// into __PRETTY_FUNCION__ when abovementioned class is defined in inlined
+// namespace. In multi-ABI C++ library, `std::string` is an alias to
+// `std::__cxx11::basic_string<char>` which depending on compiler flags can be
+// resolved to `basic_string<char>` either in `std` namespace or in
+// `std::__cxx11` one (`__cxx11` is an inline namespace)
+template <>
+inline constexpr type_index get_type_index<std::string>() {
+  // hashsum for std::basic_string<char>
+  return type_index{4193213214807308375ULL};
+}
+#endif
 
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR string_view

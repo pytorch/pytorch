@@ -84,6 +84,8 @@ import torch.utils.show_pickle
 
 DEFAULT_EXTRA_FILE_SIZE_LIMIT = 16 * 1024
 
+__all__ = ['get_storage_info', 'hierarchical_pickle', 'get_model_info', 'get_inline_skeleton',
+           'burn_in_info', 'get_info_and_burn_skeleton']
 
 def get_storage_info(storage):
     assert isinstance(storage, torch.utils.show_pickle.FakeObject)
@@ -120,7 +122,11 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__.") or typename.startswith("torch.jit.LoweredModule."):
+        if (
+            typename.startswith("__torch__.") or
+            typename.startswith("torch.jit.LoweredWrapper.") or
+            typename.startswith("torch.jit.LoweredModule.")
+        ):
             assert data.args == ()
             return {
                 "__module_type__": typename,
@@ -128,7 +134,10 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            storage, offset, size, stride, requires_grad, hooks = data.args
+            if len(data.args) == 6:
+                storage, offset, size, stride, requires_grad, hooks = data.args
+            else:
+                storage, offset, size, stride, requires_grad, hooks, metadata = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
@@ -254,7 +263,22 @@ def get_model_info(
             # Parse debug info and add begin/end markers if not present
             # to ensure that we cover the entire source code.
             debug_info_t = pickle.loads(raw_debug)
-            assert isinstance(debug_info_t, tuple)
+            text_table = None
+
+            if (len(debug_info_t) == 3 and
+                    isinstance(debug_info_t[0], str) and
+                    debug_info_t[0] == 'FORMAT_WITH_STRING_TABLE'):
+                _, text_table, content = debug_info_t
+
+                def parse_new_format(line):
+                    # (0, (('', '', 0), 0, 0))
+                    num, ((text_indexes, fname_idx, offset), start, end), tag = line
+                    text = ''.join(text_table[x] for x in text_indexes)  # type: ignore[index]
+                    fname = text_table[fname_idx]  # type: ignore[index]
+                    return num, ((text, fname, offset), start, end), tag
+
+                debug_info_t = map(parse_new_format, content)
+
             debug_info = list(debug_info_t)
             if not debug_info:
                 debug_info.append((0, (('', '', 0), 0, 0)))

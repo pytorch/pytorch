@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
+
 import json
 import os
 import shutil
@@ -12,7 +14,7 @@ from torch.distributed.elastic.multiprocessing.errors import (
     ProcessFailure,
     record,
 )
-from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
+from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 
 
 class SentinelError(Exception):
@@ -34,7 +36,8 @@ def good_fn():
 @record
 def raise_child_failure_error_fn(name, child_error_file=""):
     if child_error_file:
-        _write_error(SentinelError("foobar"), child_error_file)
+        with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": child_error_file}):
+            ErrorHandler().record_exception(SentinelError("foobar"))
     pf = ProcessFailure(local_rank=0, pid=997, exitcode=1, error_file=child_error_file)
     raise ChildFailedError(name, {0: pf})
 
@@ -62,7 +65,10 @@ class ApiTest(unittest.TestCase):
             )
 
     def failure_with_error_file(self, exception):
-        _write_error(exception, self.test_error_file)
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            ErrorHandler().record_exception(exception)
         return ProcessFailure(
             local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
         )

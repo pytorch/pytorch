@@ -11,23 +11,27 @@ from torch.utils.data.sampler import (
 from torch.utils.data.dataset import (
     ChainDataset,
     ConcatDataset,
-    DataChunk,
     Dataset,
-    Dataset as MapDataPipe,
-    DFIterDataPipe,
     IterableDataset,
-    IterableDataset as IterDataPipe,
     Subset,
     TensorDataset,
     random_split,
+)
+from torch.utils.data.datapipes.datapipe import (
+    DFIterDataPipe,
+    DataChunk,
+    IterDataPipe,
+    MapDataPipe,
 )
 from torch.utils.data.dataloader import (
     DataLoader,
     _DatasetKind,
     get_worker_info,
+    default_collate,
+    default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data._decorator import (
+from torch.utils.data.datapipes._decorator import (
     argument_validation,
     functional_datapipe,
     guaranteed_datapipes_determinism,
@@ -35,14 +39,13 @@ from torch.utils.data._decorator import (
     runtime_validation,
     runtime_validation_disabled,
 )
-from torch.utils.data.dataloader_experimental import DataLoader2
-from torch.utils.data import communication
 
 __all__ = ['BatchSampler',
            'ChainDataset',
            'ConcatDataset',
+           'DFIterDataPipe',
+           'DataChunk',
            'DataLoader',
-           'DataLoader2',
            'Dataset',
            'DistributedSampler',
            'IterDataPipe',
@@ -57,7 +60,8 @@ __all__ = ['BatchSampler',
            'WeightedRandomSampler',
            '_DatasetKind',
            'argument_validation',
-           'communication',
+           'default_collate',
+           'default_convert',
            'functional_datapipe',
            'get_worker_info',
            'guaranteed_datapipes_determinism',
@@ -68,8 +72,3 @@ __all__ = ['BatchSampler',
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)
-
-
-################################################################################
-# import subpackage
-################################################################################

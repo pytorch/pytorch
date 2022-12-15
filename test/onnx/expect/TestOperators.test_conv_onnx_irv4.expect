@@ -40,7 +40,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 13
     dims: 16
@@ -96,5 +96,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

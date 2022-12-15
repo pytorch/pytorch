@@ -1,4 +1,6 @@
-#include <conv_utils.h>
+#include <pytorch_qnnpack.h>
+#include <qnnpack/log.h>
+#include <qnnpack/operator.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
 #include <cstring>
@@ -13,16 +15,18 @@ PrePackConvWeights::PrePackConvWeights(
   enum pytorch_qnnp_ukernel_type ukernel_type = convolution->ukernel_type;
   const uint32_t kernel_width = convolution->kernel_width;
   const uint32_t kernel_height = convolution->kernel_height;
+  // deconvolution leaves this 0 for now, remove when deconvolution supports 3d
+  const uint32_t kernel_depth =
+      convolution->kernel_depth ? convolution->kernel_depth : 1;
   const uint32_t groups = convolution->groups;
-  output_channels_ = convolution->group_output_channels * groups;
 
   if (convolution->transpose &&
       ukernel_type != pytorch_qnnp_ukernel_type_conv) {
     pytorch_qnnp_log_error("Wrong micro-kernel for deconvolution");
-    assert("QNNPACK Runtime Error.");
+    assert(false && "QNNPACK Runtime Error.");
   }
 
-  const size_t kernel_size = kernel_height * kernel_width;
+  const size_t kernel_size = kernel_height * kernel_width * kernel_depth;
   switch (ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
       const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
@@ -34,7 +38,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_weights_size);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
 
       switch (kernel_size) {
@@ -50,7 +54,7 @@ PrePackConvWeights::PrePackConvWeights(
           break;
         case 25:
           /* change this later */
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -63,7 +67,7 @@ PrePackConvWeights::PrePackConvWeights(
               bias,
               packed_weights_,
               true);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -77,7 +81,7 @@ PrePackConvWeights::PrePackConvWeights(
               (char*)packed_weights_ +
                   (10 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
               false);
-          pytorch_pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_2d_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -90,6 +94,62 @@ PrePackConvWeights::PrePackConvWeights(
               bias,
               (char*)packed_weights_ +
                   (20 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
+              false);
+          break;
+        case 27:
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              0,
+              1,
+              kernel,
+              bias,
+              packed_weights_,
+              true);
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              1,
+              2,
+              kernel,
+              bias,
+              (char*)packed_weights_ +
+                  (kernel_depth * kernel_height +
+                   sizeof(int32_t) / sizeof(uint8_t)) *
+                      c_stride,
+              false);
+          pytorch_pack_q8dw_3d_w_dilation(
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              groups,
+              cr,
+              0,
+              kernel_depth,
+              0,
+              kernel_height,
+              2,
+              3,
+              kernel,
+              bias,
+              (char*)packed_weights_ +
+                  (2 * kernel_depth * kernel_height +
+                   sizeof(int32_t) / sizeof(uint8_t)) *
+                      c_stride,
               false);
           break;
         default:
@@ -114,7 +174,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_group_weights_size * groups);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
       /* The XZP ukernel needs the padding to be 0 */
       memset(packed_weights_, 0, packed_group_weights_size * groups);
@@ -151,7 +211,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_group_weights_size * groups);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
       // We likely won't needs this once packing functions are appropriately
       // modified. Remove it then.

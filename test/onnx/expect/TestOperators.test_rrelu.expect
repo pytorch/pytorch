@@ -5,27 +5,15 @@ graph {
   node {
     input: "input"
     output: "1"
-    name: "RandomUniformLike_0"
-    op_type: "RandomUniformLike"
+    name: "LeakyRelu_0"
+    op_type: "LeakyRelu"
     attribute {
-      name: "high"
-      f: 0.333333343
-      type: FLOAT
-    }
-    attribute {
-      name: "low"
-      f: 0.125
+      name: "alpha"
+      f: 0.229166672
       type: FLOAT
     }
   }
-  node {
-    input: "input"
-    input: "1"
-    output: "2"
-    name: "PRelu_1"
-    op_type: "PRelu"
-  }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {
@@ -49,7 +37,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
@@ -72,5 +60,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

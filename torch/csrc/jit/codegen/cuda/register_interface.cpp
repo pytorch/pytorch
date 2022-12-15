@@ -24,10 +24,23 @@ class RegisterInterface {
     ptr->fn_fuse_graph = &CudaFuseGraph;
     ptr->fn_can_fuse_n = &isFusibleCudaFusionGroup;
     ptr->fn_insert_profile_inodes = &InsertProfileNodes;
+    ptr->fn_profile_n = &shouldProfileNode;
+    ptr->fn_skip_n = &skipNodeKind;
+    ptr->fn_analyze_view = &analyzeViewConstraint;
   }
 };
 
 static RegisterInterface register_interface_;
+
+class RegisterNVFuserPass {
+ public:
+  RegisterNVFuserPass() {
+    NVFuserPassManager::registerPass(true);
+  }
+};
+
+static RegisterNVFuserPass register_nvfuser_pass_;
+
 } // namespace
 
 } // namespace cuda

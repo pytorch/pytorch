@@ -10,7 +10,7 @@ namespace rpc {
 
 namespace {
 
-std::vector<IValue> toIValues(const Message& message, MessageType type) {
+c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
   TORCH_INTERNAL_ASSERT(
       type == message.type(),
       "Expecting message of type ",
@@ -129,13 +129,13 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values).vec());
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(

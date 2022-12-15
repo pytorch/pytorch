@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_rpc import _get_current_rpc_agent
 
+__all__ = ["RPCExecMode", "serialize", "deserialize", "PythonUDF", "RemoteException"]
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
@@ -167,6 +168,8 @@ class _InternalRPCPickler:
             callee modules."""
             )
             ret = AttributeError(except_str)
+            # Ensure the stack trace gets preserved
+            ret.__cause__ = e
 
         # restore _thread_local_tensor_tables.recv_tables if return
         # from nested call, otherwise clean up the table
@@ -215,7 +218,20 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
+        exception_msg = result.msg.encode("utf-8").decode("unicode_escape")
+        # We wrap exception re-creation here in case some exception classes
+        # cannot be constructed directly from a string.
+        exc = None
+        try:
+            exc = result.exception_type(exception_msg)
+        except BaseException as e:
+            raise RuntimeError(  # noqa: B904
+                f"Failed to create original exception type. Error msg was {str(e)}"
+                f" Original exception on remote side was {exception_msg}"
+            ) from e
+
+        if exc is not None:
+            raise exc
 
 
 def _build_rpc_profiling_key(

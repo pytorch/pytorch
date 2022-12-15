@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 
 import torch

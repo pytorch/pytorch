@@ -1,13 +1,16 @@
+import errno
 import os
 import shutil
 import tempfile
 import unittest
 from collections import namedtuple
+from typing import List
 
 import caffe2.python.hypothesis_test_util as htu
 import hypothesis.strategies as st
 import numpy as np
 import torch
+from torch import Tensor
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace, model_helper, brew
 from hypothesis import given, settings
@@ -20,12 +23,6 @@ class TestWorkspace(unittest.TestCase):
             [], "testblob", shape=[1, 2, 3, 4], value=1.0
         )
         workspace.ResetWorkspace()
-
-    def testRootFolder(self):
-        self.assertEqual(workspace.ResetWorkspace(), True)
-        self.assertEqual(workspace.RootFolder(), ".")
-        self.assertEqual(workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
-        self.assertEqual(workspace.RootFolder(), "/tmp/caffe-workspace-test")
 
     def testWorkspaceHasBlobWithNonexistingName(self):
         self.assertEqual(workspace.HasBlob("non-existing"), False)
@@ -783,8 +780,7 @@ class MyModule(torch.jit.ScriptModule):
         return x + y + z
 
     @torch.jit.script_method
-    def multi_input_tensor_list(self, tensor_list):  # pyre-ignore: PT type annotations
-        # type: (List[Tensor]) -> Tensor
+    def multi_input_tensor_list(self, tensor_list: List[Tensor]) -> Tensor:
         return tensor_list[0] + tensor_list[1] + tensor_list[2]
 
     @torch.jit.script_method

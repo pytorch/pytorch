@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -13,23 +13,13 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class GpuLower;
-
 //! Detect almost all IterDomains that are derived from trivial
 //! reductons.
 class TORCH_CUDA_CU_API TrivialReductionInfo {
  public:
-  void build(Fusion* fusion, GpuLower* gpu_lower);
+  void build(Fusion* fusion);
 
   bool isDerived(IterDomain* id) const;
-  bool isDerivedFromRoot(IterDomain* id) const;
-
-  bool isDerived(kir::IterDomain* id) const;
-  bool isDerivedFromRoot(kir::IterDomain* id) const;
-
- private:
-  //! Convert the sets to KIR sets
-  void buildKir(Fusion* fusion, GpuLower* gpu_lower);
 
  private:
   //! IterDomains that are derived only from trivial
@@ -48,9 +38,6 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
   //! trivial reductions. These domains do not need to manifest as
   //! for-loops.
   std::unordered_set<IterDomain*> domains_derived_from_root_;
-
-  std::unordered_set<kir::IterDomain*> kir_domains_;
-  std::unordered_set<kir::IterDomain*> kir_domains_derived_from_root_;
 };
 
 } // namespace cuda

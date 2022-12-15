@@ -1,13 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <cuda_runtime.h>
 #include <type_traits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_sparse_matmul_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/for_each.h>
@@ -60,7 +70,7 @@ Tensor _to_csr_int(const Tensor& rowIndices, int64_t dim, int64_t nnz) {
 #pragma push
 // NVCC complains that confirm_mult_size is not used,
 // but it is used in specializations of CusparseMatrixMultiplyOp below
-#pragma diag_suppress 177   // Function was declared but never referenced
+#pragma nv_diag_suppress 177   // Function was declared but never referenced
 int confirm_mult_size(const std::vector<int>& mat1_size, const std::vector<int>& mat2_size) {
   TORCH_CHECK(
       mat1_size[1] == mat2_size[0],
@@ -724,13 +734,13 @@ void sparse_sparse_matmul_cuda_kernel(
 
   output_values.set_(csr_output.csr_values_);
   output_indices.resize_({2, nnz});
-  auto output_indices_accessor = output_indices.packed_accessor<int64_t, 2>();
+  auto output_indices_accessor = output_indices.packed_accessor64<int64_t, 2>();
 
   auto csr_output_pointers_accessor =
-      csr_output.csr_pointers_.packed_accessor<int, 1>();
+      csr_output.csr_pointers_.packed_accessor64<int, 1>();
 
   auto csr_output_ind_accessor =
-      csr_output.csr_indices_.packed_accessor<int, 1>();
+      csr_output.csr_indices_.packed_accessor64<int, 1>();
 
   auto major_dim = result.size(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();

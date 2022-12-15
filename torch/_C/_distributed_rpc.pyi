@@ -2,9 +2,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union, overload
 from datetime import timedelta
 import enum
 import torch
+from torch.types import Device
 from . import Future
-from ._autograd import ProfilerConfig, ProfilerState, ProfilerEvent
+from ._autograd import ProfilerEvent
 from ._distributed_c10d import ProcessGroup, Store
+from ._profiler import ActiveProfilerType, ProfilerConfig, ProfilerState
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
@@ -32,7 +34,7 @@ class WorkerInfo:
     def __repr__(self) -> str: ...
 
 class RpcAgent:
-    def join(self, shutdown: bool = False): ...
+    def join(self, shutdown: bool = False, timeout: float = 0): ...
     def sync(self): ...
     def shutdown(self): ...
     @overload
@@ -68,6 +70,7 @@ class PyRRef:
 class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
     num_worker_threads: int
     device_maps: Dict[str, Dict[torch.device, torch.device]]
+    devices: List[torch.device]
     def __init__(
         self,
         num_worker_threads: int,
@@ -75,7 +78,7 @@ class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
         _channels: Optional[List],
         rpc_timeout: float = _DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = _DEFAULT_INIT_METHOD,
-        device_maps: Dict[str, Dict[torch.device, torch.device]] = dict(),
+        device_maps: Dict[str, Dict[torch.device, torch.device]] = {},
         devices: List[torch.device] = list()): ...
     def _set_device_map(self, to: str, device_map: Dict[torch.device, torch.device]): ...
 
@@ -85,13 +88,12 @@ class TensorPipeAgent(RpcAgent):
         store: Store,
         name: str,
         worker_id: int,
-        world_size: int,
-        pg: ProcessGroup,
+        world_size: Optional[int],
         opts: _TensorPipeRpcBackendOptionsBase,
         reverse_device_maps: Dict[str, Dict[torch.device, torch.device]],
         devices: List[torch.device],
     ): ...
-    def join(self): ...
+    def join(self, shutdown: bool = False, timeout: float = 0): ...
     def shutdown(self): ...
     @overload
     def get_worker_info(self) -> WorkerInfo: ...
@@ -101,6 +103,17 @@ class TensorPipeAgent(RpcAgent):
     def get_worker_info(self, id: int) -> WorkerInfo: ...
     def get_worker_infos(self) -> List[WorkerInfo]: ...
     def _get_device_map(self, dst: WorkerInfo) -> Dict[torch.device, torch.device]: ...
+    def _update_group_membership(
+        self,
+        worker_info: WorkerInfo,
+        my_devices: List[torch.device],
+        reverse_device_map: Dict[str, Dict[torch.device, torch.device]],
+        is_join: bool): ...
+    def _get_backend_options(self) -> _TensorPipeRpcBackendOptionsBase: ...
+    @property
+    def is_static_group(self) -> bool: ...
+    @property
+    def store(self) -> Store: ...
 
 def _is_current_rpc_agent_set() -> bool: ...
 def _get_current_rpc_agent()-> RpcAgent: ...

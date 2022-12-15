@@ -1,26 +1,29 @@
 #pragma once
 
-#include <ATen/core/ATenGeneral.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/LinalgBackend.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
-#include <c10/util/Exception.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/QEngine.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/CallOnce.h>
+#include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
-#include <cstdint>
 
 namespace at {
 
 class Tensor;
+
+enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 
 class TORCH_API Context {
  public:
@@ -52,10 +55,10 @@ class TORCH_API Context {
   static bool isPinnedPtr(void* data) {
     return detail::getCUDAHooks().isPinnedPtr(data);
   }
-  static bool hasOpenMP() ;
-  static bool hasMKL() ;
-  static bool hasLAPACK() ;
-  static bool hasMKLDNN() ;
+  static bool hasOpenMP();
+  static bool hasMKL();
+  static bool hasLAPACK();
+  static bool hasMKLDNN();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -68,8 +71,20 @@ class TORCH_API Context {
   static long versionCUDART() {
     return detail::getCUDAHooks().versionCUDART();
   }
+  static bool hasCuDNN() {
+    return detail::getCUDAHooks().hasCuDNN();
+  }
+  static long versionCuDNN() {
+    return detail::getCUDAHooks().versionCuDNN();
+  }
+  static bool hasCuSOLVER() {
+    return detail::getCUDAHooks().hasCuSOLVER();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
+  }
+  static bool hasIPU() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
   }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
@@ -77,35 +92,21 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
   }
-  static bool hasMLC() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
-  }
+  static bool hasMPS();
+
   static bool hasORT() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
-  THCState* lazyInitCUDA() {
-    std::call_once(thc_init,[&] {
-      thc_state = detail::getCUDAHooks().initCUDA();
-    });
-    return thc_state.get();
+  void lazyInitCUDA() {
+    c10::call_once(thc_init, [&] { detail::getCUDAHooks().initCUDA(); });
   }
-  THHState* lazyInitHIP() {
-    std::call_once(thh_init,[&] {
-      thh_state = detail::getHIPHooks().initHIP();
-    });
-    return thh_state.get();
+  void lazyInitHIP() {
+    c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
-  }
-  THCState* getTHCState() {
-    // AT_ASSERT(thc_state);
-    return thc_state.get();
-  }
-  THHState* getTHHState() {
-    return thh_state.get();
   }
 
   static bool setFlushDenormal(bool on);
@@ -120,25 +121,53 @@ class TORCH_API Context {
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
+  int benchmarkLimitCuDNN() const;
+  void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
+  // Note [Disabling Fused SDP Kernels]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Flash and Memory Efficient SDP kernels are enabled by default.
+  // However, they can be disabled by setting
+  // at::globalContext().setUserEnabledFlashSDP(false) flag.
+  // This is useful for debugging purposes. For example, if you want to
+  // compare the performance of the flash SDP kernels with the unfused
+  // kernel, you can disable the flash SDP kernels. By disabling
+  // the math SDP kernel, you can force your code to use flash kernels.
+  // The math SDP kernel can be disabled by setting
+  // at::globalContext().setUserEnabledMathSDP(false) flag.
+  void setSDPUseFlash(bool);
+  bool userEnabledFlashSDP() const;
+
+  void setSDPUseMemEfficient(bool);
+  bool userEnabledMemEfficientSDP() const;
+
+  void setSDPUseMath(bool);
+  bool userEnabledMathSDP() const;
+
+  at::LinalgBackend linalgPreferredBackend() const;
+  void setLinalgPreferredBackend(at::LinalgBackend);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Operations in PyTorch that normally act nondeterministically, but have an alternate
-  // deterministic implementation, should satisfy the following requirements:
+  // Operations in PyTorch that normally act nondeterministically, but have an
+  // alternate deterministic implementation, should satisfy the following
+  // requirements:
   //
   // * Include this comment: "See Note [Enabling Deterministic Operations]"
   //
-  // * Check the value of `at::globalContext().deterministicAlgorithms()` to toggle
+  // * Check the value of `at::globalContext().deterministicAlgorithms()` to
+  // toggle
   //   between nondeterministic and deterministic implementations.
   //
-  // * Have an entry in the list of PyTorch operations that toggle between nondeterministic
-  //   and deterministic implementations, in the docstring of `use_deterministic_algorithms()`
-  //   in torch/__init__.py
+  // * Have an entry in the list of PyTorch operations that toggle between
+  // nondeterministic
+  //   and deterministic implementations, in the docstring of
+  //   `use_deterministic_algorithms()` in torch/__init__.py
   //
-  // `example_func()` below shows an example of toggling between nondeterministic and
-  // deterministic implementations:
+  // `example_func()` below shows an example of toggling between
+  // nondeterministic and deterministic implementations:
   //
   //    void example_func() {
   //      // See Note [Enabling Deterministic Operations]
@@ -150,12 +179,14 @@ class TORCH_API Context {
   //    }
 
   bool deterministicAlgorithms() const;
-  void setDeterministicAlgorithms(bool);
+  bool deterministicAlgorithmsWarnOnly() const;
+  void setDeterministicAlgorithms(bool, bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Operations in PyTorch that act nondeterministically and do not have an alternate
-  // deterministic implementation should satisfy the following requirements:
+  // Operations in PyTorch that act nondeterministically and do not have an
+  // alternate deterministic implementation should satisfy the following
+  // requirements:
   //
   // * Include this comment: "See Note [Writing Nondeterministic Operations]"
   //
@@ -180,8 +211,8 @@ class TORCH_API Context {
   //   included in the `test_cublas_config_nondeterministic_alert` test. Any new
   //   tests should ideally follow a pattern similar to the existing ones.
   //
-  // `example_func()` below shows an example of the comments and error-throwing code
-  // for a nondeterministic operation:
+  // `example_func()` below shows an example of the comments and error-throwing
+  // code for a nondeterministic operation:
   //
   //    void example_func() {
   //      // See Note [Writing Nondeterministic Operations]
@@ -193,19 +224,25 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true
   static void alertNotDeterministic(c10::string_view const& caller);
 
-  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA >= 10.2, and
-  // CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or ":4096:8". For more details:
+  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
+  // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
+  // ":4096:8". For more details:
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
+  void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
+  Float32MatmulPrecision float32MatmulPrecision() const;
+  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
+  bool allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
-  static const std::vector<at::QEngine>& supportedQEngines() ;
-  static bool isXNNPACKAvailable() ;
+  static const std::vector<at::QEngine>& supportedQEngines();
+  static bool isXNNPACKAvailable();
   // This method is used to release the original weight after pre-packing.
   // It should be called once before loading/running the model.
   // NB: By default it is set to true for mobile builds.
@@ -230,24 +267,34 @@ class TORCH_API Context {
     }
   }
   static bool checkCuBLASConfigDeterministic();
-  std::once_flag thc_init;
-  std::once_flag thh_init;
+  c10::once_flag thc_init;
+  c10::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
+  bool _deterministic_algorithms_warn_only = false;
+  bool enabled_flashSDP = true;
+  bool enabled_mem_efficientSDP = true;
+  bool enabled_mathSDP = true;
+#ifdef USE_ROCM
+  bool benchmark_cudnn = true;
+#else
   bool benchmark_cudnn = false;
+#endif
+  Float32MatmulPrecision float32_matmul_precision =
+      at::Float32MatmulPrecision::HIGHEST;
+  int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
-  bool allow_tf32_cublas = true;
+  bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
-  #ifdef C10_MOBILE
+  at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
+#ifdef C10_MOBILE
   bool release_original_weights = true;
-  #else
+#else
   bool release_original_weights = false;
-  #endif
+#endif
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
-  std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
-  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -260,7 +307,9 @@ static inline void init() {
 
 TORCH_API Allocator* getCPUAllocator();
 
-static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
+static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(
+    Backend p,
+    ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       p, s);
 }
@@ -280,6 +329,11 @@ static inline DeprecatedTypeProperties& HIP(ScalarType s) {
       Backend::HIP, s);
 }
 
+static inline DeprecatedTypeProperties& MPS(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::MPS, s);
+}
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
@@ -288,12 +342,16 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline bool hasIPU() {
+  return globalContext().hasIPU();
+}
+
 static inline bool hasXLA() {
   return globalContext().hasXLA();
 }
 
-static inline bool hasMLC() {
-  return globalContext().hasMLC();
+static inline bool hasMPS() {
+  return globalContext().hasMPS();
 }
 
 static inline bool hasORT() {
@@ -351,10 +409,9 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
-    for (int i = 0; i < num_gpus; i++) {
+    for (const auto i : c10::irange(num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
-        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
-      );
+          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
       {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
@@ -376,8 +433,20 @@ struct TORCH_API NoTF32Guard {
   NoTF32Guard();
   ~NoTF32Guard();
   static bool should_disable_tf32();
-private:
+
+ private:
   bool changed = false;
 };
+
+#ifdef USE_ROCM
+struct TORCH_API ROCmBackwardPassGuard {
+  ROCmBackwardPassGuard();
+  ~ROCmBackwardPassGuard();
+  static bool is_backward_pass();
+
+ private:
+  static thread_local bool is_backward_pass_;
+};
+#endif
 
 } // namespace at

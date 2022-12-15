@@ -1,10 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -37,8 +48,7 @@ static void max_pool3d_with_indices_single_out_frame(
           int dilationH)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       /* loop over output */
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
@@ -120,8 +130,7 @@ static void max_pool3d_with_indices_out_frame(
           int dilationT, int dilationW, int dilationH)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       max_pool3d_with_indices_single_out_frame(
         input_data   + p * istride,
         output_data  + p * ostride,
@@ -285,8 +294,7 @@ static void max_pool3d_with_indices_backward_single_out_frame(
           int dilationH)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
       scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
       int64_t *indz_p_k = indz_p + k * otime * owidth * oheight;
@@ -330,8 +338,7 @@ static void max_pool3d_with_indices_backward_out_frame(
           int dilationT, int dilationW, int dilationH)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       max_pool3d_with_indices_backward_single_out_frame<scalar_t>(
         gradInput_data + p * istride,
         gradOutput_data + p * ostride,

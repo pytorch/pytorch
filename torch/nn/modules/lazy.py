@@ -5,6 +5,7 @@ import warnings
 import torch
 from ..parameter import is_lazy
 
+__all__ = ['LazyModuleMixin']
 
 class _LazyProtocol(Protocol):
     """This is to avoid errors with mypy checks for
@@ -73,6 +74,7 @@ class LazyModuleMixin:
     These "dry runs" send inputs of the correct size, dtype, and device through
     the network and to each one of its lazy modules. After this the network can be used as usual.
 
+    >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
     ...    def __init__(self):
     ...        super().__init__()
@@ -89,7 +91,7 @@ class LazyModuleMixin:
     >>> lazy_mlp = LazyMLP()
     >>> # transforms the network's device and dtype
     >>> # NOTE: these transforms can and should be applied after construction and before any 'dry runs'
-    >>> lazy_mlp = mlp.cuda().double()
+    >>> lazy_mlp = lazy_mlp.cuda().double()
     >>> lazy_mlp
     LazyMLP( (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
       (relu1): ReLU()

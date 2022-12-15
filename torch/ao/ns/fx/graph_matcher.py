@@ -81,7 +81,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # be made configurable later if needed.
             for _reverse_fusion_ops, base_op_idx in get_reversed_fusions():
                 is_match = end_node_matches_reversed_fusion(
-                    cur_end_node, _reverse_fusion_ops, self.gm)
+                    cur_end_node, _reverse_fusion_ops, self.gm, self.seen_nodes)
                 if is_match:
                     # navigate to the base node
                     for rev_fusion_idx in range(len(_reverse_fusion_ops) - 1):

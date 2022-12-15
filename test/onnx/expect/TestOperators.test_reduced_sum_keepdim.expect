@@ -3,24 +3,34 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
-    name: "ReduceSum_0"
-    op_type: "ReduceSum"
+    output: "onnx::ReduceSum_1"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "axes"
-      ints: 2
-      type: INTS
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
+  }
+  node {
+    input: "onnx::ReduceSum_0"
+    input: "onnx::ReduceSum_1"
+    output: "2"
+    name: "ReduceSum_1"
+    op_type: "ReduceSum"
     attribute {
       name: "keepdims"
       i: 1
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::ReduceSum_0"
     type {
       tensor_type {
         elem_type: 1
@@ -42,7 +52,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
@@ -65,5 +75,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

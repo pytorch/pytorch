@@ -26,12 +26,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     Args:
         mod (:class:`ScriptModule`): a module to be frozen
-
         preserved_attrs (Optional[List[str]]): a list of attributes to preserve in addition to the forward method.
-        Attributes modified in preserved methods will also be preserved.
-
+            Attributes modified in preserved methods will also be preserved.
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
+            preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
 
     Returns:
         Frozen :class:`ScriptModule`.
@@ -84,6 +82,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         assert frozen_module(torch.tensor(1)) == torch.tensor(13)
 
     Note:
+        Freezing submodule attributes is also supported:
+        frozen_module = torch.jit.freeze(scripted_module, preserved_attrs=["submodule.version"])
+
+    Note:
         If you're not sure why an attribute is not being inlined as a constant, you can run
         `dump_alias_db` on frozen_module.forward.graph to see if freezing has detected the
         attribute is being modified.
@@ -110,15 +112,22 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
-    run_frozen_optimizations(out, optimize_numerics)
+
+    preserved_methods = [x for x in preserved_attrs if mod._c._has_method(x)]
+    run_frozen_optimizations(out, optimize_numerics, preserved_methods)
 
     return out
 
-def run_frozen_optimizations(mod, optimize_numerics: bool = True):
+
+def run_frozen_optimizations(
+    mod, optimize_numerics: bool = True, preserved_methods: Optional[List[str]] = None
+):
     r"""
     Runs a series of optimizations looking for patterns that occur in frozen graphs.
-    The current set of optimizations is:
+    The current set of optimizations includes:
         - Dropout Removal
+        - Pretranspose Linear Layers
+        - Concat Linear Layers with same input Tensor
         - Conv -> Batchnorm folding
         - Conv -> Add/Sub folding
         - Conv -> Mul/Div folding
@@ -127,9 +136,9 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
         mod (:class:`ScriptModule`): a frozen module to be optimized
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose`
+        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_close`
         when applied on a single transformation, however in a module where many transformations are applied
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Conv -> Batchnorm folding,
+        the rtol or atol may no longer fall within the default `assert_close` tolerance. Conv -> Batchnorm folding,
         Conv-Add/Sub, and Conv -> Mul/Div folding all may alter numerics.
 
     Returns:
@@ -153,17 +162,19 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    # xxx: keep in sync with frozen_graph_optimization.cpp
-    # intentionally duplicated to make to make it easier to create custom optimization sequence
-    torch._C._jit_pass_remove_dropout(mod._c)
-    if optimize_numerics:
-        # run a couple times to capture Conv -> Mul -> Add etc
-        for _ in range(2):
-            torch._C._jit_pass_fold_frozen_conv_bn(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
-            torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
+    if mod._c._has_method("forward"):
+        torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
-def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
+    if preserved_methods is None:
+        preserved_methods = []
+
+    for method in preserved_methods:
+        torch._C._jit_pass_optimize_frozen_graph(
+            mod.__getattr__(method).graph, optimize_numerics
+        )
+
+
+def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]] = None) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
     purposes of inference. If the model is not already frozen, optimize_for_inference
@@ -197,9 +208,12 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
             "optimize_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
 
-    if hasattr(mod, "training"):
-        mod = freeze(mod.eval())
+    if other_methods is None:
+        other_methods = []
 
-    torch._C._jit_pass_convert_frozen_ops_to_mkldnn(mod.graph)
-    torch._C._jit_pass_fuse_frozen_conv_add_relu(mod.graph)
+    if hasattr(mod, "training"):
+        mod = freeze(mod.eval(), preserved_attrs=other_methods)
+
+    torch._C._jit_pass_optimize_for_inference(mod._c, other_methods)
+
     return mod

@@ -29,8 +29,6 @@ struct Tree;
 using TreeRef = c10::intrusive_ptr<Tree>;
 using TreeList = at::SmallVector<TreeRef, 4>;
 
-static const TreeList empty_trees = {};
-
 struct Tree : c10::intrusive_ptr_target {
   Tree(int kind_) : kind_(kind_) {}
   int kind() const {
@@ -46,6 +44,7 @@ struct Tree : c10::intrusive_ptr_target {
     throw std::runtime_error("stringValue can only be called on TK_STRING");
   }
   virtual const TreeList& trees() const {
+    static const TreeList empty_trees = {};
     return empty_trees;
   }
   const TreeRef& tree(size_t i) const {
@@ -149,11 +148,11 @@ struct Compound : public Tree {
     return false;
   }
   TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
-    TreeList trees_;
+    TreeList ret;
     for (auto& t : trees()) {
-      trees_.push_back(fn(t));
+      ret.push_back(fn(t));
     }
-    return Compound::create(kind(), range(), std::move(trees_));
+    return Compound::create(kind(), range(), std::move(ret));
   }
 
   const SourceRange& range() const override {

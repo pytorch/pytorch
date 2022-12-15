@@ -10,10 +10,12 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 :: able to see what our cl.exe commands are (since you can actually
 :: just copy-paste them into a local Windows setup to just rebuild a
 :: single file.)
-set CMAKE_VERBOSE_MAKEFILE=1
+:: log sizes are too long, but leaving this here incase someone wants to use it locally
+:: set CMAKE_VERBOSE_MAKEFILE=1
 
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
+
 
 call %INSTALLER_DIR%\install_mkl.bat
 if errorlevel 1 exit /b
@@ -27,7 +29,9 @@ call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call %INSTALLER_DIR%\install_miniconda3.bat
+:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
+:: We just need to activate it here
+call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
@@ -88,6 +92,7 @@ if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
 :: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
 set SCCACHE_IDLE_TIMEOUT=0
+set SCCACHE_IGNORE_SERVER_IO_ERROR=1
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
@@ -97,23 +102,20 @@ set CXX=sccache-cl
 set CMAKE_GENERATOR=Ninja
 
 if "%USE_CUDA%"=="1" (
-  copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
-
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
   :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
-  :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
-  :: the calls are redirected to sccache. sccache looks for the actual nvcc
-  :: in PATH, and then pass the arguments to it.
-  :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
-  :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  :: CMake requires a single command as CUDA_NVCC_EXECUTABLE, so we push the wrappers
+  :: randomtemp.exe and sccache.exe into a batch file which CMake invokes.
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.4/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   if errorlevel 1 exit /b
   if not errorlevel 0 exit /b
-  set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
-  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
-  set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
+  echo @"%TMP_DIR_WIN%\bin\randomtemp.exe" "%TMP_DIR_WIN%\bin\sccache.exe" "%CUDA_PATH%\bin\nvcc.exe" %%* > "%TMP_DIR%/bin/nvcc.bat"
+  cat %TMP_DIR%/bin/nvcc.bat
+  set CUDA_NVCC_EXECUTABLE=%TMP_DIR%/bin/nvcc.bat
+  for /F "usebackq delims=" %%n in (`cygpath -m "%CUDA_PATH%\bin\nvcc.exe"`) do set CMAKE_CUDA_COMPILER=%%n
+  set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
 @echo off
@@ -133,27 +135,28 @@ if "%REBUILD%" == "" (
     if not errorlevel 0 exit /b
   )
 )
-:: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
-if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
-   set BUILD_SPLIT_CUDA=ON
-)
 
-python setup.py install --cmake && sccache --show-stats && (
+python setup.py bdist_wheel
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
+sccache --show-stats
+python -c "import os, glob; os.system('python -mpip install ' + glob.glob('dist/*.whl')[0] + '[opt-einsum]')"
+(
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torchgen %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\functorch && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
     if errorlevel 1 exit /b
     if not errorlevel 0 exit /b
 
     :: export test times so that potential sharded tests that'll branch off this build will use consistent data
-    python test/run_test.py --export-past-test-times %PYTORCH_FINAL_PACKAGE_DIR%/.pytorch-test-times.json
+    python tools/stats/export_test_times.py
+    copy /Y ".pytorch-test-times.json" "%PYTORCH_FINAL_PACKAGE_DIR%"
 
     :: Also save build/.ninja_log as an artifact
     copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
 
-sccache --show-stats > stats.txt
-python -m tools.stats.upload_sccache_stats stats.txt
-rm stats.txt
+sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+sccache --stop-server

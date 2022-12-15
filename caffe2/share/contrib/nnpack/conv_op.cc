@@ -3,7 +3,6 @@
 
 #include "caffe2/core/common.h"
 
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -131,10 +130,9 @@ NNPACKConvOp::getConvolutionTransformStrategy() const {
   return nnp_convolution_transform_strategy_compute;
 }
 
-nnp_activation
-NNPACKConvOp::getActivationType() const {
-  auto activation = OperatorBase::GetSingleArgument<std::string>(
-    "activation", "identity");
+nnp_activation NNPACKConvOp::getActivationType() const {
+  auto activation =
+      OperatorBase::GetSingleArgument<std::string>("activation", "identity");
   if (activation == "identity") {
     return nnp_activation_identity;
   } else if (activation == "Relu") {
@@ -180,19 +178,23 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     biasData = dummyBias_.data();
   }
 
-  const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
-                               .height = static_cast<size_t>(X.dim32(2))};
+  const nnp_size input_size = {
+      .width = static_cast<size_t>(X.dim32(3)),
+      .height = static_cast<size_t>(X.dim32(2))};
   // filter is MCHW
-  const nnp_size kernel_size = {.width = static_cast<size_t>(filter.dim32(3)),
-                                .height = static_cast<size_t>(filter.dim32(2))};
+  const nnp_size kernel_size = {
+      .width = static_cast<size_t>(filter.dim32(3)),
+      .height = static_cast<size_t>(filter.dim32(2))};
   // pad is tblr
-  const nnp_padding padding = {.top = static_cast<size_t>(pad_t()),
-                               .right = static_cast<size_t>(pad_r()),
-                               .bottom = static_cast<size_t>(pad_b()),
-                               .left = static_cast<size_t>(pad_l())};
+  const nnp_padding padding = {
+      .top = static_cast<size_t>(pad_t()),
+      .right = static_cast<size_t>(pad_r()),
+      .bottom = static_cast<size_t>(pad_b()),
+      .left = static_cast<size_t>(pad_l())};
 
-  const nnp_size output_subsample = {.width = static_cast<size_t>(stride_w()),
-                                     .height = static_cast<size_t>(stride_h())};
+  const nnp_size output_subsample = {
+      .width = static_cast<size_t>(stride_w()),
+      .height = static_cast<size_t>(stride_h())};
   initNNPACK();
 
 #if !defined(USE_INTERNAL_PTHREADPOOL_IMPL)

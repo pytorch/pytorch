@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/script.h>
 #include <torch/cuda.h>
 
@@ -44,7 +45,7 @@ void get_operator_from_registry_and_execute() {
   const auto manual = custom_op(torch::ones(5), 2.0, 3);
 
   TORCH_INTERNAL_ASSERT(output.size() == 3);
-  for (size_t i = 0; i < output.size(); ++i) {
+  for (const auto i : c10::irange(output.size())) {
     TORCH_INTERNAL_ASSERT(output[i].allclose(torch::ones(5) * 2));
     TORCH_INTERNAL_ASSERT(output[i].allclose(manual[i]));
   }
@@ -163,10 +164,10 @@ void test_move_to_dtype(const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
       torch::jit::load(path_to_exported_script_module);
 
-  module.to(torch::kInt);
+  module.to(torch::kFloat16);
 
   helpers::check_all_parameters(module, [](const torch::Tensor& tensor) {
-    return tensor.dtype() == torch::kInt;
+    return tensor.dtype() == torch::kFloat16;
   });
 
   module.to(torch::kDouble);

@@ -1,14 +1,12 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 from textwrap import dedent
 from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_SANDCASTLE,
-    run_tests,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from .common import PackageTestCase
@@ -117,6 +115,29 @@ class TestPackageScript(PackageTestCase):
                 fake.uses_script_class(input), loaded.uses_script_class(input)
             )
         )
+
+    def test_package_script_class_referencing_self(self):
+        import package_a.fake_script_class as fake
+
+        obj = fake.UsesIdListFeature()
+        # intentionally script here to fill the compilation cache, to make sure
+        # there is no false sharing between scripted types coming from the
+        # package vs. outside environment.
+        torch.jit.script(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        obj_loaded = importer.load_pickle("obj", "obj.pkl")
+        scripted_obj_loaded = torch.jit.script(obj_loaded)
+
+        # Make sure the scripted object can be serialized without error.
+        buffer2 = scripted_obj_loaded.save_to_buffer()
+        torch.jit.load(BytesIO(buffer2))
 
     def test_different_package_script_class(self):
         """Test a case where the script class defined in the package is
@@ -513,10 +534,7 @@ class TestPackageScript(PackageTestCase):
         Test tensors shared across eager and ScriptModules on load
         are the same.
         """
-        from package_a.test_module import (
-            ModWithTensor,
-            ModWithTwoSubmodsAndTensor,
-        )
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
         shared_tensor = torch.ones(3, 3)
 
@@ -570,10 +588,7 @@ class TestPackageScript(PackageTestCase):
         the backing cpp TensorImpl is. We load/save storages based off of this
         cpp TensorImpl and not the python identity.
         """
-        from package_a.test_module import (
-            ModWithTensor,
-            ModWithTwoSubmodsAndTensor,
-        )
+        from package_a.test_module import ModWithTensor, ModWithTwoSubmodsAndTensor
 
         shared_tensor = torch.ones(3, 3)
 

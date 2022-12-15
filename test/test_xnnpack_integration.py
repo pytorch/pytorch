@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: mobile"]
+
 import unittest
 
 import torch
@@ -12,13 +14,14 @@ from hypothesis import strategies as st
 import io
 import itertools
 
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_TSAN
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN fails with XNNPACK. Does not seem to have a good reason for failures.")
 class TestXNNPACKOps(TestCase):
+    @unittest.skip("Fails on some platforms, see https://github.com/pytorch/pytorch/issues/73488")
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
            weight_output_dim=st.integers(2, 64),
@@ -50,7 +53,6 @@ class TestXNNPACKOps(TestCase):
         packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
-
 
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
@@ -181,6 +183,7 @@ class TestXNNPACKOps(TestCase):
                      " Please build with USE_XNNPACK=1.")
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN fails with XNNPACK. Does not seem to have a good reason for failures.")
 class TestXNNPACKSerDes(TestCase):
+    @unittest.skip("Fails on some platforms, see https://github.com/pytorch/pytorch/issues/73488")
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
            weight_output_dim=st.integers(2, 64),
@@ -435,6 +438,7 @@ class TestXNNPACKSerDes(TestCase):
         xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
+    @unittest.skip("Fails on some platforms, see https://github.com/pytorch/pytorch/issues/73488")
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
            height=st.integers(5, 64),
@@ -983,6 +987,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
+    @unittest.skipIf(IS_FBCODE, "T137513244")
     def test_conv1d_basic(self):
         batch_size_list = range(1, 3)
         input_channels_per_group_list = range(10, 12)

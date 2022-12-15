@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -191,113 +192,9 @@ __global__ void indexSparseUnionKernel(
   *resultNnz = r_i;
 }
 
-template <typename Op, typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
-C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
-__global__ void valueSparseIntersectionKernel(
-    Op op,
-    TensorInfo<indexT, IndexType> r_indices,
-    TensorInfo<indexT, IndexType> t_indices,
-    TensorInfo<indexT, IndexType> s_indices,
-    TensorInfo<Real, IndexType> r_values,
-    TensorInfo<Real, IndexType> t_values,
-    TensorInfo<Real, IndexType> s_values,
-    const IndexType t_nnz, const IndexType s_nnz) {
-  IndexType t_indskip = t_indices.strides[0];
-  IndexType s_indskip = s_indices.strides[0];
-  int64_t match, d;
-  int64_t nDimI = r_indices.sizes[0];
-  IndexType valueSize = r_values.strides[0];
-  IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz && s_i < s_nnz) {
-    match = 1;
-    for (d = 0; d < nDimI; d++) {
-      if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
-        t_i++;
-        match = 0;
-        break;
-      }
-      if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
-        s_i++;
-        match = 0;
-        break;
-      }
-    }
-    if (!match) continue;
-    applyOp3(op, valueSize, r_values, r_i++, t_values, t_i++, s_values, s_i++);
-  }
-}
-
-// TODO find a way to parallelize this...
-template <typename IndexType, typename Real>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
-C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
-__global__ void indexSparseIntersectionKernel(
-    TensorInfo<indexT, IndexType> r_indices,
-    TensorInfo<indexT, IndexType> t_indices,
-    TensorInfo<indexT, IndexType> s_indices,
-    const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
-  IndexType r_indskip = r_indices.strides[0];
-  IndexType t_indskip = t_indices.strides[0];
-  IndexType s_indskip = s_indices.strides[0];
-  int64_t match, d;
-  int64_t nDimI = r_indices.sizes[0];
-  IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz && s_i < s_nnz) {
-    match = 1;
-    for (d = 0; d < nDimI; d++) {
-      if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
-        t_i++;
-        match = 0;
-        break;
-      }
-      if (t_indices.data[d * t_indskip + t_i] > s_indices.data[d * s_indskip + s_i]) {
-        s_i++;
-        match = 0;
-        break;
-      }
-    }
-    if (!match) continue;
-    for (d = 0; d < nDimI; d++) {
-      r_indices.data[d * r_indskip + r_i] = t_indices.data[d * t_indskip + t_i];
-    }
-    r_i++; t_i++; s_i++;
-  }
-  *resultNnz = r_i;
-}
-
-// template <typename Dtype, typename Acctype>
-// __global__ void coalesceValuesKernel_gridStrided(
-//   long *segment_offsets, long *value_indices,
-//   Dtype *values, Dtype *newValues,
-//   long nnz, long newNnz, long stride) {
-//
-//   long chunksPerSeg = THCCeilDiv(stride, (long) blockDim.x);
-//   long numChunks = newNnz * chunksPerSeg;
-//   long chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
-//   long chunkStride = gridDim.x * blockDim.y;
-//
-//   for (long chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
-//     long featureDim = (chunk % chunksPerSeg) * blockDim.x + threadIdx.x;
-//     if (featureDim < stride) {
-//       auto valFeat = values + featureDim;
-//       long seg = chunk / chunksPerSeg;
-//       auto begin = segment_offsets[seg];
-//       auto end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
-//       Acctype valSum = static_cast<Acctype>::to(0);
-//       for (long valIdx = begin; valIdx < end; valIdx++) {
-//         const long valRow = value_indices[valIdx] * stride;
-//         valSum += static_cast<Acctype>::to(valFeat[valRow]);
-//       }
-//       newValues[seg * stride + featureDim] = static_cast<Dtype>::to(valSum);
-//     }
-//   }
-// }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
@@ -321,7 +218,6 @@ __global__ void coalesceValuesKernel(
     for (int row = begin; row < end; row++) {
       const int valueRow = ((int) value_indices[row]) * stride;
 
-
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
@@ -339,6 +235,56 @@ __global__ void coalesceValuesKernel(
       if (featureDim < stride)
       {
         newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
+      }
+    }
+  }
+}
+
+// coalesceValuesKernel when Dtype/Acctype is bool. Can be eliminated using
+// `if constexpr` when CUDA codes will be compiled under C++-17, see
+// gh-56055 for blockers.
+template<typename Dtype>
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
+__global__ void coalesceValuesKernel(
+  int64_t *segment_offsets, int64_t *value_indices,
+  bool *values, bool *newValues,
+  int64_t nnz, int64_t newNnz, int64_t stride) {
+
+  int seg = blockIdx.x * 4 + threadIdx.y;
+
+  // Number of values processed by each thread (grain size)
+  const int SZ = 4;
+
+  if (seg < newNnz) {
+    const int newValueRow = seg * stride;
+    const int begin = segment_offsets[seg];
+    const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+    const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+    bool tmp[SZ];
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++) {
+      tmp[ii] = 0;
+    }
+    for (int row = begin; row < end; row++) {
+      const int valueRow = ((int) value_indices[row]) * stride;
+
+      #pragma unroll
+      for (int ii = 0; ii < SZ; ii++)
+      {
+        int featureDim = startFeature + ii * C10_WARP_SIZE;
+        if (featureDim < stride)
+        {
+          tmp[ii] |= values[valueRow + featureDim];
+        }
+      }
+    }
+    #pragma unroll
+    for (int ii = 0; ii < SZ; ii++)
+    {
+      int featureDim = startFeature + ii * C10_WARP_SIZE;
+      if (featureDim < stride)
+      {
+        newValues[newValueRow + featureDim] = tmp[ii];
       }
     }
   }

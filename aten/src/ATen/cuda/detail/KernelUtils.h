@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <limits>
+#include <c10/util/Exception.h>
 
 namespace at { namespace cuda { namespace detail {
 

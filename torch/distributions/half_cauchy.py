@@ -7,6 +7,7 @@ from torch.distributions.transforms import AbsTransform
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
 
+__all__ = ['HalfCauchy']
 
 class HalfCauchy(TransformedDistribution):
     r"""
@@ -17,6 +18,7 @@ class HalfCauchy(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = HalfCauchy(torch.tensor([1.0]))
         >>> m.sample()  # half-cauchy distributed with scale=1
         tensor([ 2.3214])
@@ -25,7 +27,7 @@ class HalfCauchy(TransformedDistribution):
         scale (float or Tensor): scale of the full Cauchy distribution
     """
     arg_constraints = {'scale': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
@@ -46,6 +48,10 @@ class HalfCauchy(TransformedDistribution):
         return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
 
     @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
+
+    @property
     def variance(self):
         return self.base_dist.variance
 
@@ -55,7 +61,7 @@ class HalfCauchy(TransformedDistribution):
         value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
                                 device=self.base_dist.scale.device)
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        log_prob[value.expand(log_prob.shape) < 0] = -inf
+        log_prob = torch.where(value >= 0, log_prob, -inf)
         return log_prob
 
     def cdf(self, value):

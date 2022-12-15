@@ -1,6 +1,12 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/variable.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#endif
+
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
@@ -14,8 +20,9 @@ namespace autograd {
 // NB: This code duplicates existing logic at torch/autograd/__init__.py and
 // torch._C._EngineBase.run_backward in torch/csrc/autograd/python_engine.cpp
 // This is a purely C++ API for Autograd without any dependencies on python
-// it can be exposed in PyTorch C++ API and TorchScript. We will need to maintain
-// the logic equality of this file and the python file together if one changes.
+// it can be exposed in PyTorch C++ API and TorchScript. We will need to
+// maintain the logic equality of this file and the python file together if one
+// changes.
 // TODO: Make the Python API above to just call this C++ API.
 variable_list _make_grads(
     const variable_list& outputs,
@@ -30,13 +37,18 @@ variable_list _make_grads(
         TORCH_CHECK(
             output.numel() == 1,
             "grad can be implicitly created only for scalar outputs");
-        new_grads.emplace_back(at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+        new_grads.emplace_back(
+            at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
       }
     }
   } else {
     TORCH_CHECK(
         num_tensors == num_gradients,
-        "got ", num_tensors, " tensors and ", num_gradients, " gradients");
+        "got ",
+        num_tensors,
+        " tensors and ",
+        num_gradients,
+        " gradients");
     for (const auto i : c10::irange(outputs.size())) {
       const Variable& output = outputs[i];
       const Variable& grad_output = grad_outputs[i];
@@ -45,16 +57,22 @@ variable_list _make_grads(
           TORCH_CHECK(
               output.numel() == 1,
               "grad can be implicitly created only for scalar outputs");
-          new_grads.emplace_back(at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+          new_grads.emplace_back(
+              at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
         }
       } else {
         TORCH_CHECK(
-          grad_output.is_complex() == output.is_complex(),
-          "For complex Tensors, both grad_output and output are required ",
-          "to have the same dtype. Mismatch in dtype: grad_output[",
-          grad_output, "] has a dtype of ", grad_output.scalar_type(),
-          " and output[", output, "] has a dtype of ", output.scalar_type(),
-          ".");
+            grad_output.is_complex() == output.is_complex(),
+            "For complex Tensors, both grad_output and output are required ",
+            "to have the same dtype. Mismatch in dtype: grad_output[",
+            grad_output,
+            "] has a dtype of ",
+            grad_output.scalar_type(),
+            " and output[",
+            output,
+            "] has a dtype of ",
+            output.scalar_type(),
+            ".");
         // grad output is defined, just append to the new_grads
         new_grads.emplace_back(grad_output);
       }
@@ -73,12 +91,14 @@ variable_list run_backward(
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
-  for(const auto i : c10::irange(num_tensors)) {
+  for (const auto i : c10::irange(num_tensors)) {
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
     TORCH_CHECK(
         gradient_edge.function,
-        "element ", i, " of tensors does not require grad and does not have a grad_fn");
+        "element ",
+        i,
+        " of tensors does not require grad and does not have a grad_fn");
     roots.push_back(std::move(gradient_edge));
   }
 
@@ -109,7 +129,12 @@ variable_list run_backward(
   }
 
   variable_list grad_inputs = Engine::get_default_engine().execute(
-      roots, grad_outputs, keep_graph, create_graph, accumulate_grad, output_edges);
+      roots,
+      grad_outputs,
+      keep_graph,
+      create_graph,
+      accumulate_grad,
+      output_edges);
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
@@ -135,7 +160,14 @@ void backward(
   if (!retain_graph) {
     retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, inputs, /*allow_unused=*/true, /*accumulate_grad=*/true);
+  run_backward(
+      tensors,
+      gradients,
+      retain_graph.value(),
+      create_graph,
+      inputs,
+      /*allow_unused=*/true,
+      /*accumulate_grad=*/true);
 }
 
 variable_list grad(
@@ -150,9 +182,14 @@ variable_list grad(
     retain_graph = create_graph;
   }
   return run_backward(
-    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused, /*accumulate_grad=*/false);
+      outputs,
+      gradients,
+      retain_graph.value(),
+      create_graph,
+      inputs,
+      allow_unused,
+      /*accumulate_grad=*/false);
 }
-
 
 namespace forward_ad {
 

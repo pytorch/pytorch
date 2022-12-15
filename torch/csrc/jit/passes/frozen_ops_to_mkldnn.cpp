@@ -1,6 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/native/layer_norm.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -243,9 +244,15 @@ Operation createUnaryOp(
     auto a_it = at::native::itensor_from_mkldnn(a);
     auto mkldnn_raw_data = a_it.get_data_handle();
     auto a_options_with_strided = a.options().layout(c10::kStrided);
+
+    // tensor's physical size could be bigger than a logical one
+    // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
+    // we use it to compute `nelem` for `aten` ops
+    auto nelem = static_cast<int64_t>(
+        a_it.get_desc().get_size() / elementSize(a.scalar_type()));
     // we also wrap `a` storage into an aten tensor
     auto in_aten =
-        at::from_blob(mkldnn_raw_data, {a.numel()}, a_options_with_strided);
+        at::from_blob(mkldnn_raw_data, {nelem}, a_options_with_strided);
 
     auto out_raw_data = mkldnn_raw_data;
     auto out = a;
@@ -262,12 +269,9 @@ Operation createUnaryOp(
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
     }
 
-    // tensor's physical size could be bigger than a logical one
-    // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
-    // we use it to compute `nelem` for `aten` ops
     TORCH_INTERNAL_ASSERT(
         a_it.get_desc().get_size() % elementSize(a.scalar_type()) == 0);
-    auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
+
     auto out_aten = at::from_blob(
         out_raw_data, {static_cast<int64_t>(nelem)}, a_options_with_strided);
     aten_op(out_aten, in_aten);
@@ -292,7 +296,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
   weight = weight_ival.toTensor();
 
-  auto shape = pop(stack).toIntVector();
+  auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
   at::Tensor dst, mean, rstd;
@@ -322,9 +326,11 @@ Operation BroadOp(const Node* node) {
 
       auto exp_a = a;
       auto exp_b = b;
+      int stacked = 0;
       // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
+        ++stacked;
       } else if (out_numel == a.numel()) {
         exp_a = a.reshape(out_size);
       } else {
@@ -335,13 +341,17 @@ Operation BroadOp(const Node* node) {
 
       if (b_size.equals(out_size)) {
         push(stack, b);
+        ++stacked;
       } else if (out_numel == b.numel()) {
         exp_b = b.reshape(out_size);
       } else {
         exp_b = b.to_dense().expand(out_size).to_mkldnn();
       }
 
-      {
+      if (stacked < 2) {
+        if (stacked == 1) {
+          pop(stack);
+        }
         // If one of the inputs was expanded and converted to nchw/nhwc
         // we might end up in a very bad spot if the second argument
         // is in a blocked format. In this case, MKLDNN uses its
@@ -755,7 +765,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       body_node->replaceInput(1, node->outputs().at(1));
     }
     if (body_node->kind() == aten::mul &&
-        body_node->input(1)->type()->isSubtypeOf(NumberType::get())) {
+        body_node->input(1)->type()->isSubtypeOf(*NumberType::get())) {
       body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNScalarMul"));
       body_node->destroy();
       continue;
@@ -930,8 +940,7 @@ class MKLDNNSubgraphSlicer {
       return true;
     }
     // see [mkldnn perf strategy]
-    return frozenMkldnnCompatibleLinearNode(node) ||
-        frozenMkldnnCompatibleConvNode(node);
+    return frozenMkldnnCompatibleConvNode(node);
   }
 
  private:
@@ -982,6 +991,7 @@ class MKLDNNSubgraphSlicer {
       case aten::relu:
       case aten::relu6:
       case aten::gelu:
+      case aten::prelu:
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
@@ -1022,7 +1032,7 @@ class MKLDNNSubgraphSlicer {
     if (n->kind() == aten::mul) {
       return n->input(0)->type()->cast<TensorType>() &&
           (n->input(1)->type()->cast<TensorType>() ||
-           n->input(1)->type()->isSubtypeOf(NumberType::get()));
+           n->input(1)->type()->isSubtypeOf(*NumberType::get()));
     }
 
     if (n->kind() == aten::dropout) {

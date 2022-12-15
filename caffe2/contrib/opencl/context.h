@@ -36,7 +36,7 @@ class OpenCLContext final {
  public:
   explicit OpenCLContext();
   explicit OpenCLContext(const DeviceOption& option) {
-    DCHECK_EQ(option.device_type(), PROTO_OPENCL);
+    TORCH_DCHECK_EQ(option.device_type(), PROTO_OPENCL);
     OpenCLContext();
   }
   ~OpenCLContext() {}

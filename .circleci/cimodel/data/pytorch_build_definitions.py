@@ -185,7 +185,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master", "nightly"],
+            filters=gen_filter_dict(branches_list=["master", "main", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -201,7 +201,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master", "nightly"],
+            filters=gen_filter_dict(branches_list=["master", "main", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -239,7 +239,8 @@ def instantiate_configs(only_slow_gradcheck):
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
-        is_noarch = fc.find_prop("is_noarch") or False
+        is_crossref = fc.find_prop("is_crossref") or False
+        is_dynamo = fc.find_prop("is_dynamo") or False
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
@@ -283,8 +284,11 @@ def instantiate_configs(only_slow_gradcheck):
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if is_noarch:
-            parms_list_ignored_for_docker_image.append("noarch")
+        if is_crossref:
+            parms_list_ignored_for_docker_image.append("crossref")
+
+        if is_dynamo:
+            parms_list_ignored_for_docker_image.append("dynamo")
 
         if is_onnx:
             parms_list.append("onnx")
@@ -334,13 +338,12 @@ def instantiate_configs(only_slow_gradcheck):
             build_only=build_only,
         )
 
-        # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
+        # run docs builds on "pytorch-linux-xenial-py3.7-gcc5.4". Docs builds
         # should run on a CPU-only build that runs on all PRs.
-        # XXX should this be updated to a more modern build? Projects are
-        #     beginning to drop python3.6
+        # XXX should this be updated to a more modern build?
         if (
             distro_name == "xenial"
-            and fc.find_prop("pyver") == "3.6"
+            and fc.find_prop("pyver") == "3.7"
             and cuda_version is None
             and parallel_backend is None
             and not is_vulkan

@@ -145,7 +145,7 @@ TEST(IRParserTest, InferredTypeIsTensor) {
 graph(%a):
   return (%a))IR",
       &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
 }
 
 TEST(IRParserTest, ValueReuse) {
@@ -260,7 +260,7 @@ TEST(IRParserTest, FileCheck) {
       return (%a))IR";
 
   parseIR(text, &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
+  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
   torch::jit::testing::FileCheck().run(text, *graph);
 }
 
@@ -301,7 +301,6 @@ graph(%a : Float(4, 5),
 TEST(IRParserTest, MalformedStrides) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
-  bool error_thrown = false;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(parseIR(
       R"IR(

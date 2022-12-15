@@ -6,6 +6,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import SigmoidTransform
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 
+__all__ = ['LogitRelaxedBernoulli', 'RelaxedBernoulli']
 
 class LogitRelaxedBernoulli(Distribution):
     r"""
@@ -99,8 +100,9 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = RelaxedBernoulli(torch.tensor([2.2]),
-                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
+        ...                      torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
         tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
 

@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import AbstractContextManager
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
@@ -35,6 +35,8 @@ IS_MACOS = sys.platform == "darwin"
 
 log = logging.getLogger(__name__)
 
+__all__ = ["SignalException", "Std", "to_map", "RunProcsResult", "PContext", "get_std_cm", "MultiprocessContext",
+           "SubprocessHandler", "SubprocessContext"]
 
 class SignalException(Exception):
     """
@@ -47,7 +49,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: FrameType) -> None:
+def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will
@@ -334,22 +336,9 @@ class PContext(abc.ABC):
             self._stderr_tail.stop()
 
 
-class _nullcontext(AbstractContextManager):
-    # TODO remove and replace in favor of contextlib.nullcontext
-    # when torch drops support for python3.6
-    def __init__(self, enter_result=None):
-        self.enter_result = enter_result
-
-    def __enter__(self):
-        return self.enter_result
-
-    def __exit__(self, *excinfo):
-        pass
-
-
 def get_std_cm(std_rd: str, redirect_fn):
     if IS_WINDOWS or IS_MACOS or not std_rd:
-        return _nullcontext()
+        return nullcontext()
     else:
         return redirect_fn(std_rd)
 
@@ -548,7 +537,7 @@ class MultiprocessContext(PContext):
         for proc in self._pc.processes:
             if proc.is_alive():
                 log.warning(
-                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
                 )
                 try:
                     os.kill(proc.pid, _get_kill_signal())
@@ -725,7 +714,7 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
                 )
                 handler.close(death_sig=_get_kill_signal())
                 handler.proc.wait()

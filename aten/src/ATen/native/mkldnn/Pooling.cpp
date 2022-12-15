@@ -1,10 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_avg_pool2d_native.h>
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/avg_pool3d_backward_native.h>
+#include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/mkldnn_adaptive_avg_pool2d_backward_native.h>
+#include <ATen/ops/mkldnn_adaptive_avg_pool2d_native.h>
+#include <ATen/ops/mkldnn_max_pool2d_backward_native.h>
+#include <ATen/ops/mkldnn_max_pool2d_native.h>
+#include <ATen/ops/mkldnn_max_pool3d_backward_native.h>
+#include <ATen/ops/mkldnn_max_pool3d_native.h>
+#endif
 
 
 #if !AT_MKLDNN_ENABLED()
@@ -78,6 +95,12 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& self,
 
 Tensor mkldnn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) {
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d: ATen not compiled with MKLDNN support");
+}
+
+Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
@@ -229,7 +252,7 @@ static Tensor _mkldnn_pooling(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (size_t i = 2; i < input.sizes().size(); ++i) {
+      for (const auto i : c10::irange(2, input.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -252,7 +275,7 @@ static Tensor _mkldnn_pooling(
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
   // can reduce the memory use.
   if (ideep::algorithm::pooling_max == algo
-      && !(input.requires_grad() && at::GradMode::is_enabled())) {
+      && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
 
@@ -318,7 +341,7 @@ static Tensor _mkldnn_pooling_backward(
           false /*ceil_mode */);
 
       all_equal = true;
-      for (size_t i = 2; i < input.sizes().size(); ++i) {
+      for (const auto i : c10::irange(2, input.sizes().size())) {
         if (output_sizes[i] < output_sizes_ceil[i]) {
            padding_vec_r[i - 2]++;
            all_equal = false;
@@ -479,7 +502,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
   std::vector<int64_t> kernel_size(input.dim() - 2);
-  for (int64_t i = 2; i < input.dim(); ++i) {
+  for (const auto i : c10::irange(2, input.dim())) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i - 2];
     TORCH_CHECK(s2 != 0, "output size can not be zero");
@@ -495,13 +518,22 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*padding*/ {0, 0},
       /*dilation*/ {1, 1},
       /*ceil_mode*/ false,
-      /*algo*/ ideep::algorithm::pooling_avg);
+      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
+}
+
+Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: in-place mkldnn operations are not supported yet");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: in-place mkldnn operations are not supported yet");
+  auto tmp_output = at::native::mkldnn_adaptive_avg_pool2d(input, output_size);
+  at::native::resize_output(output, tmp_output.sizes());
+  output.copy_(tmp_output);
+  return output;
 }
 
 Tensor mkldnn_max_pool2d_backward(

@@ -4,10 +4,9 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -36,39 +35,53 @@ void codegenOutputQuery(
     int& major,
     int& minor,
     bool& compile_to_sass) {
-  int nvrtc_major = 0, nvrtc_minor = 0;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&major, &minor));
+  compile_to_sass = false;
+#else
+  using CudaVersion = std::pair<int, int>;
+  CudaVersion nvrtc_version;
+  AT_CUDA_NVRTC_CHECK(
+      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
 
-  // Short-circuits if NVRTC version too low
-  AT_ASSERT(nvrtc_major >= 6);
+  TORCH_CHECK(
+      nvrtc_version.first >= 6,
+      "NVRTC versions less than 6 are not supported. Is: ",
+      nvrtc_version.first);
 
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  major = prop->major;
-  minor = prop->minor;
-  if (nvrtc_major <= 7 && prop->major > 5) { // 7 supports 2-5.x
-    major = 5;
-    minor = 0;
-  } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
-    major = 6;
-    minor = 0;
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-  } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
-    major = 7;
-    minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
-  } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
-    major = 7;
-    minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
-  } else if (
-      nvrtc_major == 11 && nvrtc_minor == 0 &&
-      prop->major >= 8) { // 11.0 supports 3.5-8.0
-    major = 8;
-    minor = 0;
+  // Version supported by device
+  // Usually any lower version works too but is less efficient
+  const CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
+  // Maximum version supported by the driver, cap dev_version to this
+  CudaVersion max_dev_version;
+  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
+    max_dev_version = CudaVersion(5, 0);
+  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
+    max_dev_version = CudaVersion(6, 0);
+  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
+    max_dev_version = CudaVersion(7, 2);
+  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
+    max_dev_version = CudaVersion(7, 5);
+  } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
+    max_dev_version = CudaVersion(8, 0);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second < 8) {
+    max_dev_version = CudaVersion(8, 6);
+  } else {
+    // If the driver version is unknown (i.e. newer than this code)
+    // assume the driver supports this device
+    max_dev_version = dev_version;
   }
-
-  // if we are clamping major/minor, sass is not compatible
-  compile_to_sass = ((major == prop->major) && (minor == prop->minor));
+  if (dev_version > max_dev_version) {
+    major = max_dev_version.first;
+    minor = max_dev_version.second;
+    // if we are clamping major/minor, sass is not compatible
+    compile_to_sass = false;
+  } else {
+    major = dev_version.first;
+    minor = dev_version.second;
+    compile_to_sass = true;
+  }
+#endif
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
@@ -114,7 +127,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++14"};
+  std::vector<const char*> args = {"--std=c++17"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
@@ -135,7 +148,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       std::to_string(major) + std::to_string(minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const std::vector<const char*> args = {
-      "--std=c++14", compute.c_str(), "-default-device"};
+      "--std=c++17", compute.c_str(), "-default-device"};
 #endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());

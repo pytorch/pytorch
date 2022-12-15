@@ -1,10 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
-torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/resize_native.h>
+#endif
+
+int register_embedding_params();
 
 at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
@@ -67,7 +79,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
     // For sub-byte tensors this will copy the packed bytes over since the
     // sub_byte qtensors are expected to store data in packed format.
     at::parallel_for(0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-      for (int64_t row = start_idx; row < end_idx; ++row) {
+      for (const auto row : c10::irange(start_idx, end_idx)) {
         const std::uint8_t* input_row = input + row * input_columns;
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
@@ -89,9 +101,8 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
 
 namespace at {
 namespace native {
-namespace {
 
-Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
+Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
   // quantization channel. E.g. for a 2D embedding bag, this has
   // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
@@ -108,7 +119,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   // assert(unpacked_weights.size() == torch.Size([2, 10, 3]))
   const auto packed_weight_sizes = packed_weight.sizes();
   const auto col_dim = packed_weight_sizes.size() - 1;
-  const int32_t input_rows = c10::size_to_dim_(col_dim, packed_weight_sizes);
+  const int64_t input_rows = c10::size_to_dim_(col_dim, packed_weight_sizes);
   const int32_t input_columns = packed_weight_sizes[col_dim];
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
@@ -117,36 +128,41 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
 
   std::vector<int64_t> output_shape = packed_weight_sizes.vec();
   output_shape[col_dim] = output_columns;
-  at::Tensor output = at::empty(
-      output_shape,
-      packed_weight.options().dtype(kFloat),
-      packed_weight.suggest_memory_format());
-  float* output_data = output.data_ptr<float>();
+  at::native::resize_(output, output_shape);
+  auto output_contig = output.expect_contiguous();
+  float* output_data = output_contig->data_ptr<float>();
 
 #ifdef USE_FBGEMM
-    at::parallel_for(
-      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
-            input_data + row * input_columns,
-            1,
-            input_columns,
-            output_data + row * output_columns);
-        }
-      });
+  at::parallel_for(0, input_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
+    fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
+        input_data + start_idx * input_columns,
+        end_idx - start_idx,
+        input_columns,
+        output_data + start_idx * output_columns);
+  });
 #else
-  for (auto row: c10::irange(input_rows)) {
+  for (auto row : c10::irange(input_rows)) {
     const std::uint8_t* input_row = input_data + row * input_columns;
     const float* input_row_scale_zp =
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output_data + row * output_columns;
 
-    for(auto col: c10::irange(output_columns)) {
+    for (auto col : c10::irange(output_columns)) {
       output_row[col] =
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
   } // input_rows
 #endif // USE_FBGEMM
+  return output;
+}
+
+namespace {
+Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
+  at::Tensor output = at::empty(
+      {},
+      packed_weight.options().dtype(kFloat),
+      packed_weight.suggest_memory_format());
+  qembeddingbag_byte_unpack_out(output, packed_weight);
   return output;
 }
 
@@ -171,19 +187,17 @@ Tensor _qembeddingbag_nbit_unpack_helper(
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
 #ifdef USE_FBGEMM
-    at::parallel_for(
-      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(BIT_RATE,
-            input_data + row * input_columns,
-            1,
-            input_columns,
-            output_data + row * output_dimensions[1]);
-        }
-      });
+  at::parallel_for(0, input_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
+    fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(
+        BIT_RATE,
+        input_data + start_idx * input_columns,
+        end_idx - start_idx,
+        input_columns,
+        output_data + start_idx * output_dimensions[1]);
+  });
 #else
   auto output_columns = output_dimensions[1];
-  for (auto row: c10::irange(input_rows)) {
+  for (auto row : c10::irange(input_rows)) {
     float* output_row = output_data + row * output_columns;
     const std::uint8_t* input_row = input_data + row * input_columns;
     const at::Half* input_row_scale_zp = reinterpret_cast<const at::Half*>(
@@ -192,7 +206,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
     float scale = input_row_scale_zp[0];
     float zero_point = input_row_scale_zp[1];
 
-    for (int col = 0; col < output_columns; ++col) {
+    for (const auto col : c10::irange(output_columns)) {
       std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];
       quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
       quantized &= (1 << BIT_RATE) - 1;

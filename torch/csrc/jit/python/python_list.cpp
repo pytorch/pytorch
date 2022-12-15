@@ -4,6 +4,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_list.h>
+#include <torch/csrc/utils/pybind.h>
 #include <stdexcept>
 
 namespace torch {
@@ -251,7 +252,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               for (py::handle obj : iter) {
                 iter_list.append(toIValue(
-                    py::object(obj, /*is_borrowed*/ true),
+                    py::reinterpret_borrow<py::object>(obj),
                     self->type()->getElementType()));
               }
             } catch (const py::cast_error& e) {

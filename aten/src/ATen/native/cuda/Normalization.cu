@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
@@ -6,6 +7,24 @@
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/batch_norm_backward_elemt_native.h>
+#include <ATen/ops/batch_norm_backward_reduce_native.h>
+#include <ATen/ops/batch_norm_elemt_native.h>
+#include <ATen/ops/batch_norm_gather_stats_native.h>
+#include <ATen/ops/batch_norm_gather_stats_with_counts_native.h>
+#include <ATen/ops/batch_norm_stats_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 
@@ -29,8 +48,11 @@ bool is_mixed_type(const Tensor& input, const Args&... parameters) {
 }
 
 inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
-  return (self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
-          (self.is_contiguous() && self.strides()[1] == 1));
+  return (
+    self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+    self.is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+    (self.is_contiguous() && self.strides()[1] == 1)
+  );
 }
 
 enum class Impl {
@@ -449,6 +471,22 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
       save_mean,
       save_invstd);
   return std::make_tuple(output, save_mean, save_invstd);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
+  return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double epsilon) {
+  return batch_norm_cuda(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
+  return batch_norm_cuda_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon, output, save_mean, save_invstd);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cuda_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double epsilon, Tensor& output, Tensor& save_mean, Tensor& save_invstd) {
+  return batch_norm_cuda_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_invstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {

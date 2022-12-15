@@ -8,12 +8,14 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/constant_map.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
-
 namespace torch {
 namespace jit {
 
@@ -58,13 +60,13 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     if (type->kind() == TypeKind::OptionalType) {
       type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
       // recursive optional type is not supported
-      AT_ASSERT(type->kind() != TypeKind::OptionalType);
+      TORCH_INTERNAL_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
-      if (elem_type->isSubtypeOf(TensorType::get())) {
-        AT_ASSERTM(
+      if (elem_type->isSubtypeOf(*TensorType::get())) {
+        TORCH_INTERNAL_ASSERT(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
@@ -91,36 +93,36 @@ void preprocessCaffe2Ops(Block* block) {
       size_t origin_inputs_index = 0;
       for (const auto& arg : args) {
         auto type = arg.type();
-        AT_ASSERT(origin_inputs_index < origin_inputs.size());
+        TORCH_INTERNAL_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
         if (type->kind() == TypeKind::OptionalType &&
             origin_input->mustBeNone()) {
           continue;
         }
-        if (type->isSubtypeOf(TensorType::get())) {
+        if (type->isSubtypeOf(*TensorType::get())) {
           it->addInput(origin_input);
         } else if (
             type->kind() == TypeKind::BoolType ||
             type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
         } else if (type->kind() == TypeKind::FloatType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
           const auto& elem_type = type->castRaw<ListType>()->getElementType();
-          AT_ASSERT(
+          TORCH_INTERNAL_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
-          if (elem_type->isSubtypeOf(TensorType::get())) {
-            AT_ASSERT(list_node->kind(), prim::ListConstruct);
+          if (elem_type->isSubtypeOf(*TensorType::get())) {
+            TORCH_INTERNAL_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
@@ -130,7 +132,7 @@ void preprocessCaffe2Ops(Block* block) {
             if (list_node->kind() == prim::ListConstruct) {
               for (const auto* elem_input : list_node->inputs()) {
                 const auto* constant_node = elem_input->node();
-                AT_ASSERT(constant_node->kind() == prim::Constant);
+                TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
                 values.push_back(constant_node->f(attr::value));
               }
             } else { // is a constant list
@@ -167,8 +169,16 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  try {
+    BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  } catch (std::runtime_error& ex) {
+    ONNX_LOG(
+        "ONNX graph being constructed during exception:\n",
+        new_graph->toString());
+    throw;
+  }
   GRAPH_DUMP("after ToONNX: ", new_graph);
+  ConstantValueMap::ClearMaps();
   return new_graph;
 }
 
@@ -233,8 +243,9 @@ void NodeToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     std::unordered_map<Value*, Value*>& env) {
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
-  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
+  py::object onnx_globals = py::module::import("torch.onnx._globals");
+  py::object onnx_registration =
+      py::module::import("torch.onnx._internal.registration");
 
   // Setup all the lambda helper functions.
 
@@ -264,11 +275,35 @@ void NodeToONNX(
     }
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
-    auto opset_version =
-        py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
+    auto opset_version = py::cast<int>(
+        onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version"));
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        bool exist_in_env =
+            (env.end() !=
+             std::find_if(
+                 env.begin(), env.end(), [&outputs, i](const auto& vt) {
+                   return vt.second == outputs[i];
+                 }));
+        // Update ONNX value debug name with ATen value debug name if existed.
+        // Skip if ONNX value already exist in environment.
+        // This implies the op is a noop, and the value is owned by
+        // other node created elsewhere.
+        if (old->hasDebugName() && !exist_in_env) {
+          auto old_name = outputs[i]->debugName();
+          auto new_name = old->debugNameBase();
+          auto debug_names = new_block->owningGraph()->debugNames();
+          auto exist_name = debug_names.find(new_name);
+          outputs[i]->setDebugName(new_name);
+          if (exist_name != debug_names.end()) {
+            // setDebugName changes name of existing value with same name.
+            // Set again to revert the changes, but update name for new value
+            // with suffix.
+            exist_name->second->setDebugName(new_name);
+          }
+          ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
+        }
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
@@ -287,21 +322,32 @@ void NodeToONNX(
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          const_node->output()->node()->setSourceRange(node->sourceRange());
-          const_node->output()->node()->setScope(node->scope());
+          const_node->copyMetadata(node);
           new_block->appendNode(const_node);
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          // ConstantValueMap has been set in shape inference,
-          // set_constant_value_map = false here to avoid redundancy.
+          // An update in ConstantValueMap is also needed here, since
+          // the user setType can be only accessed in this step, and it
+          // should be reliable.
           MergeInferredTypeAndSetMap(
-              outputs[i], old->type(), outputs[i]->type(), false);
+              outputs[i], old->type(), outputs[i]->type());
+          // non ONNX node with no type given will throw out the warnings here.
+          UpdateReliable(
+              outputs[i],
+              AreInputsReliableOrStatic(outputs[i]->node()),
+              /*no_type_warning=*/true);
+          // For the node type that does not have ComputeConstant logic, it may
+          // have reliable shape but its shape is not in ConstantValueMap. So we
+          // need to update ConstantValueMap.
+          UpdateShapeConstantIfReliable(outputs[i]);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
-          outputs[i]->node()->setSourceRange(node->sourceRange());
-          outputs[i]->node()->setScope(node->scope());
+          // Do not set metadata if outputs[i] is already in env.
+          if (!exist_in_env) {
+            outputs[i]->node()->copyMetadata(node);
+          }
           env[old] = outputs[i];
         }
       } else {
@@ -328,6 +374,21 @@ void NodeToONNX(
     for (const auto i : c10::irange(node->outputs().size())) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
       env[node->output(i)] = n_->output(i);
+    }
+  };
+
+  // Inline the prim::PythonOp sub-block nodes and append them to the onnx graph
+  auto inlineAutograd = [&](Node* PythonOpNode) {
+    for (auto subblock : PythonOpNode->blocks()) {
+      for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
+        env[subblock->inputs()[i]] = env[PythonOpNode->inputs()[i]];
+      }
+      for (auto* node : subblock->nodes()) {
+        NodeToONNX(node, new_block, operator_export_type, env);
+      }
+      for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
+        env[PythonOpNode->outputs()[i]] = env[subblock->outputs()[i]];
+      }
     }
   };
 
@@ -368,20 +429,37 @@ void NodeToONNX(
       py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
+    Graph* g = new_block->owningGraph();
+    std::unordered_set<Node*> nodes_before;
+    for (auto node : g->nodes()) {
+      nodes_before.emplace(node);
+    }
+
     WithInsertPoint insert_point_guard(new_block);
-    WithCurrentScope scope_guard(*new_block->owningGraph(), n->scope());
+    WithCurrentScope scope_guard(*g, n->scope());
+
+    // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+    // Python. Check #87343 for details.
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        new_block->owningGraph(),
+        g->shared_from_this(),
         new_block,
         n,
         py_inputs,
         env,
         operator_export_type);
 
+    // Find new nodes that have been created by _run_symbolic_function and
+    // propagate metadata
+    for (auto node : g->nodes()) {
+      if (nodes_before.find(node) == nodes_before.end()) {
+        node->copyMetadata(n);
+      }
+    }
+
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
-    GRAPH_DUMP("after processSymbolicOutput: ", new_block->owningGraph());
+    GRAPH_DUMP("after processSymbolicOutput: ", g);
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
@@ -392,16 +470,41 @@ void NodeToONNX(
       pyobj = func->get();
     }
 
-    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    py::object is_registered_op = onnx_registry.attr("is_registered_op")(
-        "prim_PythonOp", "", opset_version);
-    if (!py::hasattr(pyobj, "symbolic") &&
-        (!PyObject_IsTrue(is_registered_op.ptr()))) {
-      // Simply clone the node, unless either
+    py::object opset_version =
+        onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version");
+    // NOTE(justinchuby): Call the internal registry to register the symbolic
+    // method defined in the module.
+    bool is_registered_op =
+        onnx_registration.attr("registry")
+            .attr("is_registered_op")("prim::PythonOp", opset_version)
+            .cast<bool>();
+    if (!py::hasattr(pyobj, "symbolic") && !is_registered_op) {
+      // Inline the subgraph within the prim::PythonOp unless
+      // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      cloneNode(op);
+      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX ||
+          operator_export_type ==
+              ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+        try {
+          inlineAutograd(op);
+        } catch (const std::exception& ex) {
+          TORCH_WARN(
+              "Unable to inline PythonOp: ",
+              op->name(),
+              " due to the following exception\n",
+              ex.what(),
+              "prim::PythonOp will be exported as is and without being inlined\n",
+              "Try exporting with the following alternatives: \n",
+              "1) Set operator_export_type to ONNX_FALLTHROUGH mode\n",
+              "2) Register a symbolic method for the prim::PythonOp ",
+              op->name());
+          cloneNode(op);
+        }
+      } else {
+        cloneNode(op);
+      }
       return;
     }
 
@@ -436,22 +539,35 @@ void NodeToONNX(
       // Call the symbolic function
       // Use a little trampoline function so we can give good error messages
       // upon argument mismatch
-      onnx_registry.attr("register_op")(
-          op->name(), pyobj.attr("symbolic"), "", opset_version);
+      // Register as a custom operator
+      // TODO: Find a more elegant way to do this without having to touch
+      // internal Python modules.
+      // TODO(justinchuby): Define a namespace for these Python Ops.
+      onnx_registration.attr("registry")
+          .attr("register")(
+              "::" + op->name(),
+              opset_version,
+              pyobj.attr("symbolic"),
+              /* custom */ true);
+
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
           py_symbolic_args);
 
       processSymbolicOutput(op->name(), op, raw_output);
     } else {
-      TORCH_INTERNAL_ASSERT(PyObject_IsTrue(is_registered_op.ptr()));
+      TORCH_INTERNAL_ASSERT(is_registered_op);
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_function")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,

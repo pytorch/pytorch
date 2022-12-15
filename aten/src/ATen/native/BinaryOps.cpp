@@ -1,42 +1,152 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
 #include <type_traits>
+#include <utility>
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/MemoryOverlap.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorMeta.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
-
-#include <torch/library.h>
+#else
+#include <ATen/ops/_add_relu_native.h>
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_test_serialization_subcmul_native.h>
+#include <ATen/ops/_to_copy.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/add_ops.h>
+#include <ATen/ops/and_native.h>
+#include <ATen/ops/arctan2_native.h>
+#include <ATen/ops/atan2.h>
+#include <ATen/ops/atan2_native.h>
+#include <ATen/ops/bitwise_and.h>
+#include <ATen/ops/bitwise_and_native.h>
+#include <ATen/ops/bitwise_left_shift.h>
+#include <ATen/ops/bitwise_left_shift_native.h>
+#include <ATen/ops/bitwise_or.h>
+#include <ATen/ops/bitwise_or_native.h>
+#include <ATen/ops/bitwise_right_shift.h>
+#include <ATen/ops/bitwise_right_shift_native.h>
+#include <ATen/ops/bitwise_xor.h>
+#include <ATen/ops/bitwise_xor_native.h>
+#include <ATen/ops/copysign.h>
+#include <ATen/ops/copysign_native.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/div_ops.h>
+#include <ATen/ops/divide_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/eq_native.h>
+#include <ATen/ops/floor_divide.h>
+#include <ATen/ops/floor_divide_native.h>
+#include <ATen/ops/fmax_native.h>
+#include <ATen/ops/fmin_native.h>
+#include <ATen/ops/fmod.h>
+#include <ATen/ops/fmod_native.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/gcd_native.h>
+#include <ATen/ops/ge.h>
+#include <ATen/ops/ge_native.h>
+#include <ATen/ops/greater_equal_native.h>
+#include <ATen/ops/greater_native.h>
+#include <ATen/ops/gt.h>
+#include <ATen/ops/gt_native.h>
+#include <ATen/ops/heaviside_native.h>
+#include <ATen/ops/hypot_native.h>
+#include <ATen/ops/igamma.h>
+#include <ATen/ops/igamma_native.h>
+#include <ATen/ops/igammac.h>
+#include <ATen/ops/igammac_native.h>
+#include <ATen/ops/lcm_native.h>
+#include <ATen/ops/ldexp.h>
+#include <ATen/ops/ldexp_native.h>
+#include <ATen/ops/le.h>
+#include <ATen/ops/le_native.h>
+#include <ATen/ops/less_equal_native.h>
+#include <ATen/ops/less_native.h>
+#include <ATen/ops/linalg_cross_native.h>
+#include <ATen/ops/linalg_cross_ops.h>
+#include <ATen/ops/logaddexp2_native.h>
+#include <ATen/ops/logaddexp_native.h>
+#include <ATen/ops/logical_and.h>
+#include <ATen/ops/logical_and_native.h>
+#include <ATen/ops/logical_or.h>
+#include <ATen/ops/logical_or_native.h>
+#include <ATen/ops/logical_xor.h>
+#include <ATen/ops/logical_xor_native.h>
+#include <ATen/ops/logit_backward_native.h>
+#include <ATen/ops/lshift_native.h>
+#include <ATen/ops/lt.h>
+#include <ATen/ops/lt_native.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/maximum.h>
+#include <ATen/ops/maximum_native.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/minimum.h>
+#include <ATen/ops/minimum_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/mul_ops.h>
+#include <ATen/ops/multiply_native.h>
+#include <ATen/ops/ne.h>
+#include <ATen/ops/ne_native.h>
+#include <ATen/ops/nextafter_native.h>
+#include <ATen/ops/not_equal_native.h>
+#include <ATen/ops/or_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/remainder.h>
+#include <ATen/ops/remainder_native.h>
+#include <ATen/ops/rshift_native.h>
+#include <ATen/ops/rsub_native.h>
+#include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_t.h>
+#include <ATen/ops/special_chebyshev_polynomial_t_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_u.h>
+#include <ATen/ops/special_chebyshev_polynomial_u_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_v.h>
+#include <ATen/ops/special_chebyshev_polynomial_v_native.h>
+#include <ATen/ops/special_chebyshev_polynomial_w.h>
+#include <ATen/ops/special_chebyshev_polynomial_w_native.h>
+#include <ATen/ops/special_gammainc_native.h>
+#include <ATen/ops/special_gammaincc_native.h>
+#include <ATen/ops/special_hermite_polynomial_h.h>
+#include <ATen/ops/special_hermite_polynomial_h_native.h>
+#include <ATen/ops/special_hermite_polynomial_he.h>
+#include <ATen/ops/special_hermite_polynomial_he_native.h>
+#include <ATen/ops/special_laguerre_polynomial_l.h>
+#include <ATen/ops/special_laguerre_polynomial_l_native.h>
+#include <ATen/ops/special_legendre_polynomial_p.h>
+#include <ATen/ops/special_legendre_polynomial_p_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_t.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_t_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_u.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_u_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_v.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_v_native.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_w.h>
+#include <ATen/ops/special_shifted_chebyshev_polynomial_w_native.h>
+#include <ATen/ops/special_xlog1py.h>
+#include <ATen/ops/special_xlog1py_native.h>
+#include <ATen/ops/special_xlogy_native.h>
+#include <ATen/ops/special_zeta.h>
+#include <ATen/ops/special_zeta_native.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/subtract_native.h>
+#include <ATen/ops/tanh_backward_native.h>
+#include <ATen/ops/true_divide_native.h>
+#include <ATen/ops/xlogy.h>
+#include <ATen/ops/xlogy_native.h>
+#include <ATen/ops/xor_native.h>
+#endif
 
 namespace at {
-namespace native {
-
-// These are still needed because we don't have C++ conversions from number
-// types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
-// to Python.
-
-static void check_convert(const Scalar& scalar, ScalarType scalarType) {
-  // Validate that is possible to convert scalar to tensor dtype without
-  // overflow
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::Bool,
-      at::ScalarType::BFloat16,
-      at::ScalarType::Half,
-      scalarType,
-      "check_convert",
-      [&] { scalar.to<scalar_t>(); });
-}
-
-static Tensor wrapped_scalar_tensor_and_check_convert(
-    const Scalar& scalar,
-    Tensor tensor) {
-  check_convert(scalar, tensor.scalar_type());
-  return at::native::wrapped_scalar_tensor(scalar);
-}
-
-} // namespace native
 
 namespace meta {
 
@@ -86,6 +196,54 @@ TORCH_META_FUNC(special_xlog1py) (const Tensor& self, const Tensor& other) {
 
 TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_t) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_u) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_v) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_chebyshev_polynomial_w) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_hermite_polynomial_h) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_hermite_polynomial_he) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_laguerre_polynomial_l) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_legendre_polynomial_p) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_shifted_chebyshev_polynomial_t) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_shifted_chebyshev_polynomial_u) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_shifted_chebyshev_polynomial_v) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
+}
+
+TORCH_META_FUNC(special_shifted_chebyshev_polynomial_w) (const Tensor& self, const Tensor& n) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, n);
 }
 
 TORCH_META_FUNC2(copysign, Tensor) (
@@ -194,36 +352,16 @@ TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
     build_binary_op(maybe_get_output(), self, other);
 }
 
-void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& result) {
-  // Validate that is possible to convert zero-dim tensor's dtype to other dtype
-  // without overflow
-  if (self.scalar_type() != other.scalar_type()) {
-    if (self.dim() != 0 && other.dim() == 0) {
-      native::check_convert(other.item(), self.scalar_type());
-    } else if (self.dim() == 0 && other.dim() != 0) {
-      native::check_convert(self.item(), other.scalar_type());
-    }
-  }
-  // In-place operation To avoid overflow during type promotion we will check that
-  // both dtypes of self and other are same
-  if (result.is_same(self)) {
-    TORCH_CHECK(self.dtype() == other.dtype(),
-                "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-                other.dtype(), " for argument 'other'");
-  }
-}
-
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
   TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
     const Tensor& result = maybe_get_output();                              \
-    comparison_op_check(self, other, result);                               \
-    build_comparison_op(result, self, other);                               \
+    build_borrowing_comparison_op(result, self, other);                     \
   }                                                                         \
                                                                             \
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
     auto other_tensor =                                                     \
-        native::wrapped_scalar_tensor_and_check_convert(other, self);       \
-    build_comparison_op(maybe_get_output(), self, other_tensor);            \
+        native::wrapped_scalar_tensor(other);                               \
+    build_borrowing_except_last_argument_comparison_op(maybe_get_output(), self, other_tensor);  \
   }
 
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq);
@@ -238,10 +376,9 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 namespace native {
 
-DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
-DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
@@ -282,18 +419,23 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
-
-TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
-) {
-  add_stub(device_type(), *this, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
-}
+DEFINE_DISPATCH(chebyshev_polynomial_t_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_u_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_v_stub);
+DEFINE_DISPATCH(chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(hermite_polynomial_h_stub);
+DEFINE_DISPATCH(hermite_polynomial_he_stub);
+DEFINE_DISPATCH(laguerre_polynomial_l_stub);
+DEFINE_DISPATCH(legendre_polynomial_p_stub);
+DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
+DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
+DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
+DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  sub_stub(device_type(), *this, alpha);
+  add_stub(device_type(), *this, -alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
@@ -333,6 +475,54 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_u_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_v_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_v_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_chebyshev_polynomial_w_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  chebyshev_polynomial_w_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_hermite_polynomial_h_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  hermite_polynomial_h_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_hermite_polynomial_he_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  hermite_polynomial_he_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_laguerre_polynomial_l_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  laguerre_polynomial_l_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_legendre_polynomial_p_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  legendre_polynomial_p_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_t_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  shifted_chebyshev_polynomial_t_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_u_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  shifted_chebyshev_polynomial_u_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_v_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  shifted_chebyshev_polynomial_v_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_shifted_chebyshev_polynomial_w_out) (const Tensor& self, const Tensor& n, const Tensor& result) {
+  shifted_chebyshev_polynomial_w_stub(device_type(), *this);
 }
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
@@ -395,6 +585,198 @@ Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result
   return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
 }
 
+Tensor special_chebyshev_polynomial_t(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_t(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_t(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_t_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_t_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_u(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_u(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_u_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_u_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_chebyshev_polynomial_v(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_v(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_v(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_v_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_v_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_v_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_v_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_chebyshev_polynomial_w(const Scalar& x, const Tensor& n) {
+  return at::special_chebyshev_polynomial_w(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
+  return at::special_chebyshev_polynomial_w(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_chebyshev_polynomial_w_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_w_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_chebyshev_polynomial_w_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_chebyshev_polynomial_w_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_hermite_polynomial_h(const Scalar& x, const Tensor& n) {
+  return at::special_hermite_polynomial_h(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_hermite_polynomial_h(const Tensor& x, const Scalar& n) {
+  return at::special_hermite_polynomial_h(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_hermite_polynomial_h_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_hermite_polynomial_h_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_hermite_polynomial_h_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_hermite_polynomial_he(const Scalar& x, const Tensor& n) {
+  return at::special_hermite_polynomial_he(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_hermite_polynomial_he(const Tensor& x, const Scalar& n) {
+  return at::special_hermite_polynomial_he(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_hermite_polynomial_he_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_hermite_polynomial_he_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_hermite_polynomial_he_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_hermite_polynomial_he_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_laguerre_polynomial_l(const Scalar& x, const Tensor& n) {
+  return at::special_laguerre_polynomial_l(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_laguerre_polynomial_l(const Tensor& x, const Scalar& n) {
+  return at::special_laguerre_polynomial_l(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_laguerre_polynomial_l_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_laguerre_polynomial_l_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_laguerre_polynomial_l_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_laguerre_polynomial_l_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_legendre_polynomial_p(const Scalar& x, const Tensor& n) {
+  return at::special_legendre_polynomial_p(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_legendre_polynomial_p(const Tensor& x, const Scalar& n) {
+  return at::special_legendre_polynomial_p(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_legendre_polynomial_p_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_legendre_polynomial_p_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_legendre_polynomial_p_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_legendre_polynomial_p_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_shifted_chebyshev_polynomial_t(const Scalar& x, const Tensor& n) {
+  return at::special_shifted_chebyshev_polynomial_t(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_shifted_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
+  return at::special_shifted_chebyshev_polynomial_t(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_shifted_chebyshev_polynomial_t_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_t_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_shifted_chebyshev_polynomial_t_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_t_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_shifted_chebyshev_polynomial_u(const Scalar& x, const Tensor& n) {
+  return at::special_shifted_chebyshev_polynomial_u(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_shifted_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
+  return at::special_shifted_chebyshev_polynomial_u(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_shifted_chebyshev_polynomial_u_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_u_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_shifted_chebyshev_polynomial_u_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_u_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_shifted_chebyshev_polynomial_v(const Scalar& x, const Tensor& n) {
+  return at::special_shifted_chebyshev_polynomial_v(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_shifted_chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
+  return at::special_shifted_chebyshev_polynomial_v(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_shifted_chebyshev_polynomial_v_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_v_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_shifted_chebyshev_polynomial_v_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_v_out(result, self, wrapped_scalar_tensor(n));
+}
+
+Tensor special_shifted_chebyshev_polynomial_w(const Scalar& x, const Tensor& n) {
+  return at::special_shifted_chebyshev_polynomial_w(wrapped_scalar_tensor(x), n);
+}
+
+Tensor special_shifted_chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
+  return at::special_shifted_chebyshev_polynomial_w(x, wrapped_scalar_tensor(n));
+}
+
+Tensor& special_shifted_chebyshev_polynomial_w_out(const Scalar& self, const Tensor& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_w_out(result, wrapped_scalar_tensor(self), n);
+}
+
+Tensor& special_shifted_chebyshev_polynomial_w_out(const Tensor& self, const Scalar& n, Tensor& result) {
+  return at::special_shifted_chebyshev_polynomial_w_out(result, self, wrapped_scalar_tensor(n));
+}
+
 Tensor& special_gammainc_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::igamma_out(result, self, other);
 }
@@ -413,6 +795,18 @@ Tensor special_gammaincc(const Tensor& self, const Tensor& other) {
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   atan2_stub(device_type(), *this);
+}
+
+Tensor arctan2(const Tensor& self, const Tensor& other) {
+  return at::atan2(self, other);
+}
+
+Tensor& arctan2_(Tensor& self, const Tensor& other) {
+  return self.atan2_(other);
+}
+
+Tensor& arctan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::atan2_out(result, self, other);
 }
 
 Tensor& add_relu_impl(
@@ -440,7 +834,7 @@ Tensor& add_relu_impl(
     max_val = std::numeric_limits<double>::max();
   } else {
     TORCH_INTERNAL_ASSERT(
-        "Unsupported datatype for add_relu:", self.dtype().name());
+        false, "Unsupported datatype for add_relu:", self.dtype().name());
   }
 
   result = iter.output();
@@ -575,16 +969,8 @@ Tensor& true_divide_(Tensor& self, const Scalar& divisor) {
 }
 
 Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_WARN_ONCE(
-    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
-    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-    "This results in incorrect rounding for negative values.\n"
-    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
-  );
-  // FIXME: Not actually doing floor division (#43874)
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_trunc_stub(iter.device_type(), iter);
+  div_floor_stub(iter.device_type(), iter);
   if (!result.defined()) {
     result = iter.output();
   }
@@ -592,17 +978,9 @@ Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  TORCH_WARN_ONCE(
-    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
-    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
-    "This results in incorrect rounding for negative values.\n"
-    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
-  );
-  // FIXME: Not actually doing floor division (#43874)
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  div_trunc_stub(iter.device_type(), iter);
+  div_floor_stub(iter.device_type(), iter);
   return iter.output();
 }
 
@@ -618,6 +996,109 @@ Tensor mul(const Tensor& self, const Scalar& other) {
 
 Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
+}
+
+Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
+  self.values().mul_(other);
+  return self;
+}
+
+Device correct_out_device(const Tensor& self, const Tensor& other) {
+  if (self.device() == at::kCPU){
+      return other.device();
+  } else {
+    return self.device();
+  }
+}
+
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+}
+
+Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      // 0/0, return full NAN
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::quiet_NaN(), meta_out.options().device(out_device));
+    }
+    else {
+      // 0/x, return zero tensor
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
+  else {
+    if (other._is_zerotensor()) {
+      // x/0, return full INF
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::infinity(), meta_out.options().device(out_device));
+    }
+    else {
+      // x/y -- unreachable, see TORCH_INTERNAL_ASSERT above
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
+}
+
+Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  auto meta_out = at::_ops::add_Tensor::redispatch(
+      meta_dks, self.to(device_), other.to(device_), alpha);
+
+  auto get_out_like = [&] (const Tensor& tensor)
+  {
+      auto sizes = meta_out.sizes();
+      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+  };
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+    auto res = get_out_like(other);
+    return alpha.equal(1) ? std::move(res) : res.mul(alpha);
+  } else {
+    return get_out_like(self);
+  }
+}
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, alpha);
+}
+
+Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, -alpha);
+}
+
+Tensor linalg_cross_zerotensor(
+  const Tensor& input,
+  const Tensor& other,
+  const int64_t dim)
+{
+  auto out_device = correct_out_device(input, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type
+  // promotion logic (see add_zerotensor)
+  auto device = Device(DeviceType::Meta);
+  auto meta_out = at::_ops::linalg_cross::redispatch(
+    c10::DispatchKeySet(at::DispatchKey::Meta),
+    input.to(device),
+    other.to(device),
+    dim);
+
+  return at::_efficientzerotensor(
+    meta_out.sizes(),
+    meta_out.options().device(out_device));
 }
 
 // multiply, alias for mul
@@ -716,6 +1197,10 @@ Tensor bitwise_and(const Tensor& self, const Scalar& other) {
   return at::bitwise_and(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_and(const Scalar& self, const Tensor& other) {
+  return at::bitwise_and(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_and_(Tensor& self, const Scalar& other) {
   return self.bitwise_and_(wrapped_scalar_tensor(other));
 }
@@ -745,6 +1230,10 @@ Tensor bitwise_or(const Tensor& self, const Scalar& other) {
   return at::bitwise_or(self, wrapped_scalar_tensor(other));
 }
 
+Tensor bitwise_or(const Scalar& self, const Tensor& other) {
+  return at::bitwise_or(wrapped_scalar_tensor(self), other);
+}
+
 Tensor& bitwise_or_(Tensor& self, const Scalar& other) {
   return self.bitwise_or_(wrapped_scalar_tensor(other));
 }
@@ -772,6 +1261,10 @@ Tensor& bitwise_xor_out(const Tensor& self, const Scalar& other, Tensor& result)
 
 Tensor bitwise_xor(const Tensor& self, const Scalar& other) {
   return at::bitwise_xor(self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_xor(const Scalar& self, const Tensor& other) {
+  return at::bitwise_xor(wrapped_scalar_tensor(self), other);
 }
 
 Tensor& bitwise_xor_(Tensor& self, const Scalar& other) {
@@ -804,7 +1297,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __lshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -817,7 +1310,7 @@ Tensor& __ilshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __ilshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   lshift_stub(iter.device_type(), iter);
   return self;
@@ -828,19 +1321,19 @@ TORCH_IMPL_FUNC(bitwise_left_shift_out) (const Tensor& self, const Tensor& other
 }
 
 Tensor& bitwise_left_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_left_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_left_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_left_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_left_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_left_shift(wrapped_scalar_tensor(self), other);
 }
 
 Tensor __rshift__(const Tensor& self, const Tensor& other) {
@@ -852,7 +1345,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
 
 Tensor __rshift__(const Tensor& self, const Scalar& other) {
   Tensor result;
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(result, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return iter.output();
@@ -865,7 +1358,7 @@ Tensor& __irshift__(Tensor& self, const Tensor& other) {
 }
 
 Tensor& __irshift__(Tensor& self, const Scalar& other) {
-  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto wrapper = wrapped_scalar_tensor(other);
   auto iter = TensorIterator::binary_op(self, self, wrapper);
   rshift_stub(iter.device_type(), iter);
   return self;
@@ -876,31 +1369,23 @@ TORCH_IMPL_FUNC(bitwise_right_shift_out) (const Tensor& self, const Tensor& othe
 }
 
 Tensor& bitwise_right_shift_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_right_shift_(Tensor& self, const Scalar& other) {
-  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other).toType(self.scalar_type()));
+  return at::bitwise_right_shift_out(self, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
-  return at::bitwise_right_shift(wrapped_scalar_tensor(self).toType(other.scalar_type()), other);
+  return at::bitwise_right_shift(wrapped_scalar_tensor(self), other);
 }
 
 template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
-  // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
-  if (self.scalar_type() != other.scalar_type()) {
-    if (self.dim() != 0 && other.dim() == 0) {
-      check_convert(other.item(), self.scalar_type());
-    } else if (self.dim() == 0 && other.dim() != 0) {
-      check_convert(self.item(), other.scalar_type());
-    }
-  }
   auto iter = TensorIterator::comparison_op(result, self, other);
   stub(iter.device_type(), iter);
   return result;
@@ -912,31 +1397,24 @@ Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl)
   return out_impl(result, self, other);
 }
 
-// To avoid overflow during type promotion we will check that both dtypes of self and other are same
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   return out_impl(self, self, other);
 }
 
-// validates that is possible to convert Scalar other to self's dtype without overflow.
-// This behavior is unique to comparison ops; arithmetic operations don't do this.
-// In the future, we should reconsider this inconsistency and decide if we want to add the same check to arithmetic ops.
 template <typename OutImpl>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(result, self, wrapped_scalar_tensor_and_check_convert(other, self));
+  return out_impl(result, self, wrapped_scalar_tensor(other));
 }
 
 template <typename OutImpl>
 Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return comparison_op(self, wrapped_scalar_tensor_and_check_convert(other, self), out_impl);
+  return comparison_op(self, wrapped_scalar_tensor(other), out_impl);
 }
 
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
-  return out_impl(self, self, wrapped_scalar_tensor_and_check_convert(other, self));
+  return out_impl(self, self, wrapped_scalar_tensor(other));
 }
 
 // We need explicit cast to OutFunc because each *_out func is overloaded twice. Without An explicit cast, merely

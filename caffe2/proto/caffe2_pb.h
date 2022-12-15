@@ -76,8 +76,7 @@ inline TORCH_API DeviceTypeProto TypeToProto(const DeviceType& t) {
   }
 }
 
-inline TORCH_API caffe2::DeviceOption DeviceToOption(
-    const at::Device& device) {
+inline TORCH_API caffe2::DeviceOption DeviceToOption(const at::Device& device) {
   caffe2::DeviceOption option;
   auto type = device.type();
   option.set_device_type(TypeToProto(type));
@@ -109,7 +108,7 @@ inline TORCH_API caffe2::DeviceOption DeviceToOption(
   return option;
 }
 
-inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
+inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption& option) {
   auto type = option.device_type();
   c10::DeviceIndex id = -1;
   switch (type) {

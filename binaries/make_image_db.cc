@@ -251,7 +251,7 @@ void ConvertImageDataset(
     // Synthesize key for this entry
     auto key_len = snprintf(
         key_cstr, sizeof(key_cstr), "%08d_%s", i, lines[i].first.c_str());
-    DCHECK_LE(key_len, sizeof(key_cstr));
+    TORCH_DCHECK_LE(key_len, sizeof(key_cstr));
 
     // Put in db
     transaction->Put(string(key_cstr), std::move(value));

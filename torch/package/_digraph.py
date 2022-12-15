@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Set
+from typing import List, Set
 
 
 class DiGraph:
@@ -18,6 +18,11 @@ class DiGraph:
         # Nested dict of node -> predecessor node -> nothing.
         self._pred = {}
 
+        # Keep track of the order in which nodes are added to
+        # the graph.
+        self._node_order = {}
+        self._insertion_idx = 0
+
     def add_node(self, n, **kwargs):
         """Add a node to the graph.
 
@@ -29,6 +34,8 @@ class DiGraph:
             self._node[n] = kwargs
             self._succ[n] = {}
             self._pred[n] = {}
+            self._node_order[n] = self._insertion_idx
+            self._insertion_idx += 1
         else:
             self._node[n].update(kwargs)
 
@@ -38,14 +45,8 @@ class DiGraph:
         ``u`` and ``v`` will be created if they do not already exist.
         """
         # add nodes
-        if u not in self._node:
-            self._node[u] = {}
-            self._succ[u] = {}
-            self._pred[u] = {}
-        if v not in self._node:
-            self._node[v] = {}
-            self._succ[v] = {}
-            self._pred[v] = {}
+        self.add_node(u)
+        self.add_node(v)
 
         # add the edge
         self._succ[u][v] = True
@@ -137,6 +138,24 @@ class DiGraph:
                     working_set.append(n)
 
         return result_graph.to_dot()
+
+    def first_path(self, dst: str) -> List[str]:
+        """Returns a list of nodes that show the first path that resulted in dst being added to the graph."""
+        path = []
+
+        while dst:
+            path.append(dst)
+            candidates = self._pred[dst].keys()
+            dst, min_idx = "", None
+            for candidate in candidates:
+                idx = self._node_order.get(candidate, None)
+                if idx is None:
+                    break
+                if min_idx is None or idx < min_idx:
+                    min_idx = idx
+                    dst = candidate
+
+        return list(reversed(path))
 
     def to_dot(self) -> str:
         """Returns the dot representation of the graph.

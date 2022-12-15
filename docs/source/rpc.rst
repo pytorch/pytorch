@@ -16,7 +16,7 @@ machines.
     CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
     Not all features of the RPC package are yet compatible with CUDA support and
     thus their use is discouraged. These unsupported features include: RRefs,
-    JIT compatibility, dist autograd and dist optimizier, and profiling. These
+    JIT compatibility, dist autograd and dist optimizer, and profiling. These
     shortcomings will be addressed in future releases.
 
 .. note ::
@@ -190,6 +190,18 @@ Example::
     :members:
     :inherited-members:
 
+.. note ::
+  The RPC framework does not automatically retry any
+  :meth:`~torch.distributed.rpc.rpc_sync`,
+  :meth:`~torch.distributed.rpc.rpc_async` and
+  :meth:`~torch.distributed.rpc.remote` calls. The reason being that there is
+  no way the RPC framework can determine whether an operation is idempotent or
+  not and whether it is safe to retry. As a result, it is the application's
+  responsibility to deal with failures and retry if necessary. RPC communication
+  is based on TCP and as a result failures could happen due to network failures
+  or intermittent network connectivity issues. In such scenarios, the application
+  needs to retry appropriately with reasonable backoffs to ensure the network
+  isn't overwhelmed by aggressive retries.
 
 .. _rref:
 
@@ -261,11 +273,7 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 Distributed Optimizer
 ---------------------
 
-.. warning ::
-    Distributed optimizer is not currently supported when using CUDA tensors
-
-.. automodule:: torch.distributed.optim
-    :members: DistributedOptimizer
+See the `torch.distributed.optim <https://pytorch.org/docs/master/distributed.optim.html>`__ page for documentation on distributed optimizers.
 
 Design Notes
 ------------

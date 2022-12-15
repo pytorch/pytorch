@@ -1,6 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_bicubic2d_aa.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_backward.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_native.h>
+#include <ATen/ops/upsample_bicubic2d.h>
+#include <ATen/ops/upsample_bicubic2d_backward.h>
+#include <ATen/ops/upsample_bicubic2d_backward_native.h>
+#include <ATen/ops/upsample_bicubic2d_native.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -16,7 +33,7 @@ TORCH_META_FUNC(upsample_bicubic2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(upsample_bicubic2d_backward) (
@@ -33,7 +50,7 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
       grad_output.dim() == 4,
       "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
 
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
         "Expected grad_output to have the same shape as output;",
@@ -41,7 +58,46 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
+}
+
+TORCH_META_FUNC(_upsample_bicubic2d_aa) (
+  const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
+) {
+  auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
+
+  // Allow for empty batch size but not other dimensions
+  TORCH_CHECK(
+      input.numel() != 0 || c10::multiply_integers(input.sizes().begin() + 1, input.sizes().end()),
+      "Non-empty 4D data tensor expected but got a tensor with sizes ",
+      input.sizes());
+
+  set_output_raw_strided(0, full_output_size, {}, input.options());
+}
+
+TORCH_META_FUNC(_upsample_bicubic2d_aa_backward) (
+  const Tensor& grad_output,
+  IntArrayRef output_size,
+  IntArrayRef input_size,
+  bool align_corners,
+  c10::optional<double> scales_h,
+  c10::optional<double> scales_w
+) {
+  auto full_output_size = native::upsample_2d_common_check(input_size, output_size);
+
+  TORCH_CHECK(
+      grad_output.dim() == 4,
+      "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
+
+  for (const auto i : c10::irange(4)) {
+    TORCH_CHECK(
+        grad_output.size(i) == full_output_size[i],
+        "Expected grad_output to have the same shape as output;",
+        " output.size(", i, ") = ", full_output_size[i],
+        " but got grad_output.size(", i, ") = ", grad_output.size(i));
+  }
+
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 } // namespace meta
@@ -65,11 +121,11 @@ static void upsample_bicubic2d_backward_out_frame(
 
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
-    for (int64_t output_y = 0; output_y < output_height; output_y++) {
-      for (int64_t output_x = 0; output_x < output_width; output_x++) {
+    for (const auto output_y : c10::irange(output_height)) {
+      for (const auto output_x : c10::irange(output_width)) {
         scalar_t* in = &idata[output_y * input_width + output_x];
         scalar_t* out = &odata[output_y * output_width + output_x];
-        for (int64_t c = 0; c < channels; ++c) {
+        for (const auto c C10_UNUSED : c10::irange(channels)) {
           in[0] = out[0];
           in += input_width * input_height;
           out += output_width * output_height;
@@ -84,8 +140,8 @@ static void upsample_bicubic2d_backward_out_frame(
   const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners, scales_w);
 
-  for (int64_t output_y = 0; output_y < output_height; output_y++) {
-    for (int64_t output_x = 0; output_x < output_width; output_x++) {
+  for (const auto output_y : c10::irange(output_height)) {
+    for (const auto output_x : c10::irange(output_width)) {
       scalar_t* in = idata;
       scalar_t* out = odata;
 
@@ -105,11 +161,11 @@ static void upsample_bicubic2d_backward_out_frame(
       get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
       get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
 
-      for (int64_t c = 0; c < channels; c++) {
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         scalar_t out_value = out[output_y * output_width + output_x];
 
-        for (int64_t i = 0; i < 4; i++) {
-          for (int64_t j = 0; j < 4; j++) {
+        for (const auto i : c10::irange(4)) {
+          for (const auto j : c10::irange(4)) {
             upsample_increment_value_bounded<scalar_t>(
                 in,
                 input_width,
@@ -146,7 +202,7 @@ static void upsample_bicubic2d_backward_kernel(
 
   auto grad_output = grad_output_.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
         scalar_t* idata = grad_input.data_ptr<scalar_t>();
         scalar_t* odata = grad_output.data_ptr<scalar_t>();
@@ -191,6 +247,30 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_cpu) (
   upsample_bicubic2d_backward_kernel(grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_cpu) (
+    const Tensor& input,
+    IntArrayRef output_size,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w,
+    const Tensor& output
+) {
+  _upsample_bicubic2d_aa_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
+}
+
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_backward_out_cpu) (
+    const Tensor& grad_output,
+    IntArrayRef output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w,
+    const Tensor& grad_input
+) {
+  grad_input.zero_();
+  _upsample_bicubic2d_aa_backward_kernel(kCPU, grad_input, grad_output, align_corners, scales_h, scales_w);
+}
+
 // vec variants
 
 using at::native::upsample::compute_output_size;
@@ -198,7 +278,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_bicubic2d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
@@ -207,19 +287,20 @@ Tensor upsample_bicubic2d(
   return at::upsample_bicubic2d(input, osize, align_corners, scale_h, scale_w);
 }
 
-Tensor upsample_bicubic2d_backward(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
+Tensor _upsample_bicubic2d_aa(
+    const Tensor& input,
+    at::OptionalIntArrayRef output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_bicubic2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
+  return at::_upsample_bicubic2d_aa(input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_bicubic2d_kernel);
+DEFINE_DISPATCH(_upsample_bicubic2d_aa_kernel);
+DEFINE_DISPATCH(_upsample_bicubic2d_aa_backward_kernel);
 
 } // namespace native
 } // namespace at

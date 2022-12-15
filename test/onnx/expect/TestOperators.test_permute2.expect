@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::Transpose_0"
     output: "1"
     name: "Transpose_0"
     op_type: "Transpose"
@@ -18,9 +18,9 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Transpose_0"
     type {
       tensor_type {
         elem_type: 1
@@ -77,5 +77,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

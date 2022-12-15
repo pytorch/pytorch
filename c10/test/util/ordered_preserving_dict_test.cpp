@@ -4,6 +4,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <gtest/gtest.h>
 
@@ -15,14 +16,15 @@ using dict_int_int =
     ska_ordered::order_preserving_flat_hash_map<int64_t, int64_t>;
 
 dict_int_int test_dict(dict_int_int& dict) {
-  for (int64_t i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     dict[i] = i + 1;
   }
 
-  int64_t i = 0;
+  int64_t entry_i = 0;
   for (auto entry : dict) {
-    TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
-    ++i;
+    TORCH_INTERNAL_ASSERT(
+        entry.first == entry_i && entry.second == entry_i + 1);
+    ++entry_i;
   }
 
   // erase a few entries by themselves
@@ -33,29 +35,32 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   // erase via iterators
   auto begin = dict.begin();
-  for (size_t i = 0; i < 20; ++i)
+  for (const auto i : c10::irange(20)) {
+    (void)i; // Suppress unused variable warning
     begin++;
+  }
 
   auto end = begin;
-  for (size_t i = 0; i < 20; ++i) {
+  for (const auto i : c10::irange(20)) {
+    (void)i; // Suppress unused variable warning
     erase_set.insert(end->first);
     end++;
   }
   dict.erase(begin, end);
 
-  std::vector<size_t> order;
-  for (size_t i = 0; i < 100; ++i) {
+  std::vector<int64_t> order;
+  for (const auto i : c10::irange(100)) {
     if (!erase_set.count(i)) {
       order.push_back(i);
     }
   }
 
-  i = 0;
+  entry_i = 0;
   for (auto entry : dict) {
-    TORCH_INTERNAL_ASSERT(order[i] == entry.first);
-    TORCH_INTERNAL_ASSERT(dict[order[i]] == entry.second);
-    TORCH_INTERNAL_ASSERT(entry.second == order[i] + 1);
-    i++;
+    TORCH_INTERNAL_ASSERT(order[entry_i] == entry.first);
+    TORCH_INTERNAL_ASSERT(dict[order[entry_i]] == entry.second);
+    TORCH_INTERNAL_ASSERT(entry.second == order[entry_i] + 1);
+    entry_i++;
   }
   TORCH_INTERNAL_ASSERT(dict.size() == order.size());
   return dict;
@@ -113,12 +118,12 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
   for (auto init_dict_size : {27, 34, 41}) {
     bad_hash_dict dict;
-    for (int64_t i = 0; i < init_dict_size; ++i) {
+    for (const auto i : c10::irange(init_dict_size)) {
       dict[i] = i + 1;
     }
 
     int64_t i = 0;
-    for (auto entry : dict) {
+    for (const auto& entry : dict) {
       TORCH_INTERNAL_ASSERT(entry.first == i && entry.second == i + 1);
       ++i;
     }
@@ -131,20 +136,22 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     // erase a few entries via iterator
     auto begin = dict.begin();
-    for (size_t i = 0; i < 10; ++i) {
+    for (const auto j : c10::irange(10)) {
+      (void)j; // Suppress unused variable warning
       begin++;
     }
     auto end = begin;
-    for (size_t i = 0; i < 7; ++i) {
+    for (const auto j : c10::irange(7)) {
+      (void)j; // Suppress unused variable warning
       erase_set.insert(end->first);
       end++;
     }
     dict.erase(begin, end);
 
     std::vector<int64_t> order;
-    for (int64_t i = 0; i < init_dict_size; ++i) {
-      if (!erase_set.count(i)) {
-        order.push_back(i);
+    for (const auto j : c10::irange(init_dict_size)) {
+      if (!erase_set.count(j)) {
+        order.push_back(j);
       }
     }
 
@@ -167,7 +174,7 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   // check values
   const int nb_values = 1000;
   std::vector<std::pair<int, int>> values;
-  for (int i = 0; i < nb_values; i++) {
+  for (const auto i : c10::irange(nb_values)) {
     // NOLINTNEXTLINE(modernize-use-emplace,performance-inefficient-vector-operation)
     values.push_back(std::make_pair(i, i + 1));
   }
@@ -190,7 +197,7 @@ TEST(OrderedPreservingDictTest, test_range_erase_all) {
   // insert x values, delete all
   const std::size_t nb_values = 1000;
   dict_int_int map;
-  for (size_t i = 0; i < nb_values; ++i) {
+  for (const auto i : c10::irange(nb_values)) {
     map[i] = i + 1;
   }
   auto it = map.erase(map.begin(), map.end());
@@ -204,12 +211,12 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   using HMap =
       ska_ordered::order_preserving_flat_hash_map<std::string, std::int64_t>;
 
-  const std::size_t nb_values = 1000;
+  const int64_t nb_values = 1000;
   HMap map;
-  for (size_t i = 0; i < nb_values; ++i) {
+  for (const auto i : c10::irange(nb_values)) {
     map[c10::guts::to_string(i)] = i;
     auto begin = map.begin();
-    for (size_t j = 0; j <= i; ++j, begin++) {
+    for (int64_t j = 0; j <= i; ++j, begin++) {
       TORCH_INTERNAL_ASSERT(begin->second == j);
     }
   }
@@ -305,7 +312,7 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
 
   const std::size_t nb_values = 100;
   HMap map;
-  for (size_t i = 0; i < nb_values; ++i) {
+  for (const auto i : c10::irange(nb_values)) {
     map[c10::guts::to_string(i)] = c10::guts::to_string(i);
   }
 

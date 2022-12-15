@@ -1,25 +1,46 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 
-#include <ATen/AccumulateType.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/_embedding_bag_native.h>
+#include <ATen/ops/_embedding_bag_forward_only_native.h>
+#include <ATen/ops/_embedding_bag_dense_backward_native.h>
+#include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#endif
 
 #include <ATen/cuda/cub.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <c10/macros/Macros.h>
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+#include <thrust/iterator/reverse_iterator.h>
+#endif
 
 namespace at {
 namespace native {
 
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+#endif
 
 namespace {
 
@@ -157,10 +178,6 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    int64_t padding_idx) {
   auto indices = indices_.contiguous();
 
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
-
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   ptrdiff_t num_indices = indices.numel();
 
   if (num_indices == 0) {
@@ -168,25 +185,54 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     return at::zeros({num_weights, grad.size(1)}, grad.options());
   }
 
-  int64_t stride = grad_weight.stride(0);
-
   auto sorted_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto orig_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor count;
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
     auto range = at::arange(num_indices, indices.options());
-    int64_t nbits = cuda::cub::get_num_bits(num_weights);
-    cuda::cub::sort_pairs(
+    // int64_t nbits = cuda::cub::get_num_bits(num_weights);
+    cuda::cub::radix_sort_pairs(
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);
-
-    if (scale_grad_by_freq) {
-      count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
-    }
   });
+
+  if (scale_grad_by_freq) {
+    count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      // Compute an increasing sequence per unique item in sortedIndices:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 1 2 3 1 2 1 1 2
+      auto sorted_data = sorted_indices.data_ptr<index_t>();
+      auto count_data = count.data_ptr<index_t>();
+      cuda::cub::inclusive_sum_by_key(
+        sorted_data,
+        at_cuda_detail::cub::ConstantInputIterator<index_t>(1),
+        count_data,
+        num_indices
+      );
+
+      // Take the maximum of each count per unique key in reverse:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 3 3 3 2 2 1 2 2
+      cuda::cub::inclusive_scan_by_key(
+        thrust::make_reverse_iterator(sorted_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        at_cuda_detail::cub::Max(),
+        num_indices
+      );
+    });
+#else
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
+      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
+    });
+#endif
+  }
   return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
       count, num_weights, padding_idx, mode == MODE_MEAN, offset2bag,
       bag_size, per_sample_weights);
@@ -412,14 +458,6 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   }
 }
 
-template <typename scalar_t>
-__inline__ __device__
-static scalar_t warpReduceSum(scalar_t val) {
-  for (int offset = C10_WARP_SIZE/2; offset > 0; offset /= 2)
-    val += WARP_SHFL_DOWN(val, offset);
-  return val;
-}
-
 template <typename scalar_t, typename index_t>
 __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const scalar_t* grad, int64_t grad_stride0, int64_t grad_stride1,
@@ -450,7 +488,7 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
             weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
       }
     }
-    result = warpReduceSum<accscalar_t>(result);
+    result = cuda_utils::WarpReduceSum<accscalar_t>(result);
     if (thread_in_warp == 0) {
       output[sample_idx] = result;
     }
@@ -481,7 +519,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.size(1) == embedding_features);
 
   const int threads_per_block = 512;
-  const int warps_per_block = threads_per_block / C10_WARP_SIZE;
+  const int warps_per_block = threads_per_block / at::cuda::warp_size();
 
   dim3 block(threads_per_block);
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);

@@ -1,12 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_max_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_max_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -18,12 +28,12 @@ namespace native {
 
 namespace {
 
-__device__ inline int start_index(int a, int b, int c) {
-  return (int)std::floor((float)(a * c) / b);
+__device__ inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-__device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)((a + 1) * c) / b);
+__device__ inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 // 5d tensor B x D x T x H x W
@@ -95,7 +105,7 @@ __global__ void adaptivemaxpool(
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             T val = ptr_input[ih*istrideH + iw*istrideW];
-            if ((val > max) || THCNumerics<T>::isnan(val)) {
+            if ((val > max) || at::_isnan(val)) {
               max = val;
               argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW;
             }
@@ -304,7 +314,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_out_cuda)
 
   checkAllSameGPU(
       __func__, {output_arg, indices_arg, input_arg});
-  if (input.numel() == 0) {
+  if (input.numel() == 0 || output.numel() == 0) {
     return;
   }
 

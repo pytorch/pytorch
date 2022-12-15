@@ -1,13 +1,13 @@
 #pragma once
 
-#include <c10/core/TensorOptions.h>
-#include <c10/core/Scalar.h>
-#include <c10/core/QScheme.h>
+#include <ATen/Dimname.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/Dimname.h>
 
 namespace c10 {
 struct Storage;

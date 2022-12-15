@@ -6,6 +6,7 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_boundsinference.cpp
   ${TENSOREXPR_TEST_ROOT}/test_conv.cpp
   ${TENSOREXPR_TEST_ROOT}/test_cpp_codegen.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_dynamic_shapes.cpp
   ${TENSOREXPR_TEST_ROOT}/test_expr.cpp
   ${TENSOREXPR_TEST_ROOT}/test_external_calls.cpp
   ${TENSOREXPR_TEST_ROOT}/test_graph_opt.cpp
@@ -15,11 +16,14 @@ set(TENSOREXPR_TEST_SRCS
   ${TENSOREXPR_TEST_ROOT}/test_loopnest.cpp
   ${TENSOREXPR_TEST_ROOT}/test_memdependency.cpp
   ${TENSOREXPR_TEST_ROOT}/test_ops.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_quantization.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_memplanning.cpp
   ${TENSOREXPR_TEST_ROOT}/test_reductions.cpp
   ${TENSOREXPR_TEST_ROOT}/test_registerizer.cpp
   ${TENSOREXPR_TEST_ROOT}/test_simplify.cpp
   ${TENSOREXPR_TEST_ROOT}/test_te_fuser_pass.cpp
   ${TENSOREXPR_TEST_ROOT}/test_type.cpp
+  ${TENSOREXPR_TEST_ROOT}/test_type_specializations.cpp
 )
 
 if(USE_CUDA)

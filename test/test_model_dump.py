@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: mobile"]
+
 import sys
 import os
 import io
@@ -8,9 +10,10 @@ import urllib
 import unittest
 
 import torch
+import torch.backends.xnnpack
 import torch.utils.model_dump
 import torch.utils.mobile_optimizer
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, skipIfNoXNNPACK
 from torch.testing._internal.common_quantized import supported_qengines
 
 
@@ -128,6 +131,8 @@ class TestModelDump(TestCase):
 
         with tempfile.NamedTemporaryFile() as tf:
             torch.jit.save(torch.jit.script(SimpleModel()), tf)
+            # Actually write contents to disk so we can read it below
+            tf.flush()
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
@@ -168,6 +173,7 @@ class TestModelDump(TestCase):
         qmodel = self.get_quant_model()
         self.do_dump_model(torch.jit.script(qmodel))
 
+    @skipIfNoXNNPACK
     @unittest.skipUnless("qnnpack" in supported_qengines, "QNNPACK not available")
     def test_optimized_quantized_model(self):
         qmodel = self.get_quant_model()

@@ -1,9 +1,28 @@
 // Returns unique elements of input tensor.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <c10/util/irange.h>
+#include <c10/util/Load.h>
 
-#include <set>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/equal.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/unbind.h>
+#include <ATen/ops/unique_consecutive_native.h>
+#include <ATen/ops/unique_dim_consecutive_native.h>
+#include <ATen/ops/unique_dim_native.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,6 +42,53 @@ namespace native{
 
 namespace {
 
+// Extract the unique elements from [begin, end) into a new Tensor
+template <typename scalar_t>
+Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
+                       bool sorted, const TensorOptions &options) {
+  // Create unordered set of elements
+  auto set = std::unordered_set<scalar_t>(begin, end);
+
+  // Write the output tensor
+  Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
+  scalar_t *output_data = output.data_ptr<scalar_t>();
+  std::copy(set.begin(), set.end(), output_data);
+  if (sorted) {
+    std::sort(output_data, output_data + set.size());
+  }
+  return output;
+}
+
+// Specialization for boolean inputs, since we can't construct a set
+// directly from an array of bool as it won't handle invalid byte values.
+// See NOTE [Loading boolean values]
+Tensor unique_elements(const bool* begin, const bool* end,
+                       bool /*sorted*/, const TensorOptions &options) {
+  // Instead of a set, track whether a value has been seen
+  std::array<bool, 2> seen;
+  seen.fill(false);
+
+  for (; begin != end; ++begin) {
+    seen[c10::load(begin)] = true;
+    if (seen[false] && seen[true]) {
+      break;
+    }
+  }
+
+  // Write the output tensor
+  int64_t num_elem = seen[false] + seen[true];
+  Tensor output = at::empty({num_elem}, options);
+  bool *output_data = output.data_ptr<bool>();
+
+  if (seen[false]) {
+    *output_data++ = false;
+  }
+  if (seen[true]) {
+    *output_data++ = true;
+  }
+  return output;
+}
+
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
     const Tensor& self,
@@ -32,44 +98,38 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
   int64_t numel = input.numel();
-  Tensor output;
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
-  std::unordered_set<scalar_t> set(input_data, input_data + numel);
-  output = at::empty({static_cast<int64_t>(set.size())}, input.options());
-  scalar_t *output_data = output.data_ptr<scalar_t>();
-  if (sorted) {
-    std::vector<scalar_t> vec(set.begin(), set.end());
-    std::sort(vec.begin(), vec.end());
-    std::copy(vec.begin(), vec.end(), output_data);
-  } else {
-    std::copy(set.begin(), set.end(), output_data);
-  }
+  Tensor output = unique_elements(input_data, input_data + numel,
+                                  sorted, input.options());
+  const scalar_t *output_data = output.data_ptr<scalar_t>();
 
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
-    for (int64_t i = 0; i < output.numel(); ++i) {
+    for (const auto i : c10::irange(output.numel())) {
       inverse_map[output_data[i]] = i;
     }
-    for(int64_t i = 0; i < numel; ++i) {
-      inverse_indices_data[i] = inverse_map[input_data[i]];
+    for (const auto i : c10::irange(numel)) {
+      const auto val = c10::load(&input_data[i]);
+      inverse_indices_data[i] = inverse_map[val];
     }
     if (return_counts) {
       std::unordered_map<scalar_t, int64_t> counts_map;
       counts_map.reserve(output.numel());
-      for (int64_t i = 0; i < output.numel(); ++i) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_map[output_data[i]] = 0;
       }
-      for(int64_t i = 0; i < numel; i++) {
-        counts_map[input_data[i]] += 1;
+      for (const auto i : c10::irange(numel)) {
+        const auto val = c10::load(&input_data[i]);
+        counts_map[val] += 1;
       }
       counts.resize_(output.sizes());
       counts.fill_(0);
       int64_t *counts_data = counts.data_ptr<int64_t>();
-      for(int64_t i = 0; i < output.numel(); i++) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_data[i] = counts_map[output_data[i]];
       }
     }
@@ -97,7 +157,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *output_data = output.data_ptr<scalar_t>();
     int64_t *inverse_data = inverse_indices.data_ptr<int64_t>();;
     int64_t *counts_data = nullptr;
-    *output_data = *input_data;
+    scalar_t last_value = c10::load(input_data);
+    *output_data = last_value;
 
     if (return_counts) {
       counts.resize_({numel});
@@ -106,9 +167,14 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *p = output_data;
     int64_t *q = counts_data;
     int64_t last = 0;
-    for (int64_t i = 0; i < numel; i++) {
-      if (input_data[i] != *p) {
-        *(++p) = input_data[i];
+    if (return_inverse) {
+      inverse_data[0] = 0;
+    }
+    for (const auto i : c10::irange(1, numel)) {
+      const auto value = c10::load(&input_data[i]);
+      if (value != last_value) {
+        *(++p) = value;
+        last_value = value;
         if (return_counts) {
           *(q++) = i - last;
           last = i;
@@ -148,7 +214,8 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
     ForwardIt result = first;
     ForwardIt previous = first;
     int64_t *current_counts = counts_data;
-    for (ForwardIt current = first; current != last; current++) {
+    inverse_data[*(indices_data++)] = 0;
+    for (ForwardIt current = std::next(first); current != last; current++) {
       if (!at::equal(*current, *result)) {
         *(++result) = std::move(*current);
         *(current_counts++) = std::distance(previous, current);
@@ -177,7 +244,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
       TORCH_CHECK(
           num_zero_dims == 1,
           "Number of zero sized dimensions is more than one, so unique cannot be applied ")
-      Tensor output = at::empty({0}, self.options());
+      Tensor output = at::empty(sizes, self.options());
       Tensor inverse_indices =
           at::empty({0}, self.options().dtype(kLong));
       Tensor counts = at::empty({0}, self.options().dtype(kLong));
@@ -202,9 +269,9 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   if (!consecutive) {
     std::sort(indices.begin(), indices.end(),
       [&](int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
-          scalar_t lhs = input_flat_ptr[i + a * numel];
-          scalar_t rhs = input_flat_ptr[i + b * numel];
+        for (const auto i : c10::irange(numel)) {
+          scalar_t lhs = c10::load(&input_flat_ptr[i + a * numel]);
+          scalar_t rhs = c10::load(&input_flat_ptr[i + b * numel]);
           if (lhs < rhs) {
             return true;
           } else if (lhs > rhs) {
@@ -218,7 +285,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor input_sorted;
   if (!consecutive) {
     input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {
@@ -235,7 +302,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   // reshape back
   auto output = at::stack(input_unbind, 0);
-  auto new_sizes = std::vector<int64_t>(orig_sizes);
+  auto new_sizes = std::vector<int64_t>(std::move(orig_sizes));
   new_sizes[0] = -1;
   output = output.view(new_sizes);
   output = output.transpose(0, dim);

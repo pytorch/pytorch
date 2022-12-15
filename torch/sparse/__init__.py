@@ -2,6 +2,7 @@
 from typing import Optional, Tuple, List, Union
 
 import torch
+from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
 # A workaround to support both TorchScript and MyPy:
@@ -24,35 +25,43 @@ __all__ = [
 ]
 
 
-def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
-          beta: float = 1., alpha: float = 1.) -> Tensor:
-    r"""
-    This function does exact same thing as :func:`torch.addmm` in the forward,
-    except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
-    need to have `sparse_dim = 2`. Note that the gradients of :attr:`mat1` is a
-    coalesced sparse tensor.
+addmm = _add_docstr(_sparse._sparse_addmm, r"""
+sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
-    Args:
-        mat (Tensor): a dense matrix to be added
-        mat1 (Tensor): a sparse matrix to be multiplied
-        mat2 (Tensor): a dense matrix to be multiplied
-        beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
-        alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
-    """
-    return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
+This function does exact same thing as :func:`torch.addmm` in the forward,
+except that it supports backward for sparse COO matrix :attr:`mat1`.
+When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
+When inputs are COO tensors, this function also supports backward for both inputs.
+
+Supports both CSR and COO storage formats.
+
+.. note::
+    This function doesn't support computing derivaties with respect to CSR matrices.
+
+Args:
+    mat (Tensor): a dense matrix to be added
+    mat1 (Tensor): a sparse matrix to be multiplied
+    mat2 (Tensor): a dense matrix to be multiplied
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+""")
 
 
-def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
-    r"""
+mm = _add_docstr(_sparse._sparse_mm, r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
+    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, if :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
-    :math:`(n \times p)` tensor. :attr:`mat1` need to have `sparse_dim = 2`.
-    This function also supports backward for both matrices. Note that the gradients of
-    :attr:`mat1` is a coalesced sparse tensor.
+    :math:`(n \times p)` tensor.
+    When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
+    When inputs are COO tensors, this function also supports backward for both inputs.
+
+    Supports both CSR and COO storage formats.
+
+.. note::
+    This function doesn't support computing derivaties with respect to CSR matrices.
 
     Args:
-        mat1 (SparseTensor): the first sparse matrix to be multiplied
+        mat1 (Tensor): the first sparse matrix to be multiplied
         mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
 
     Shape:
@@ -85,10 +94,60 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
                                [0, 1, 2, 0, 1, 2]]),
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
-    """
-    if mat1.is_sparse and mat2.is_sparse:
-        return torch._sparse_sparse_matmul(mat1, mat2)
-    return torch._sparse_mm(mat1, mat2)
+    """)
+
+
+sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
+sparse.sampled_addmm(input, mat1, mat2, *, beta=1., alpha=1., out=None) -> Tensor
+
+Performs a matrix multiplication of the dense matrices :attr:`mat1` and :attr:`mat2` at the locations
+specified by the sparsity pattern of :attr:`input`. The matrix :attr:`input` is added to the final result.
+
+Mathematically this performs the following operation:
+
+.. math::
+
+    \text{out} = \alpha\ (\text{mat1} \mathbin{@} \text{mat2})*\text{spy}(\text{input}) + \beta\ \text{input}
+
+where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`input`, :attr:`alpha`
+and :attr:`beta` are the scaling factors.
+:math:`\text{spy}(\text{input})` has value 1 at the positions where :attr:`input` has non-zero values, and 0 elsewhere.
+
+.. note::
+    :attr:`input` must be a sparse CSR tensor. :attr:`mat1` and :attr:`mat2` must be dense tensors.
+    This function is implemented only for tensors on CUDA devices.
+
+Args:
+    input (Tensor): a sparse CSR matrix of shape `(m, n)` to be added and used to compute
+        the sampled matrix multiplication
+    mat1 (Tensor): a dense matrix of shape `(m, k)` to be multiplied
+    mat2 (Tensor): a dense matrix of shape `(k, n)` to be multiplied
+
+Keyword args:
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> input = torch.eye(3, device='cuda').to_sparse_csr()
+    >>> mat1 = torch.randn(3, 5, device='cuda')
+    >>> mat2 = torch.randn(5, 3, device='cuda')
+    >>> torch.sparse.sampled_addmm(input, mat1, mat2)
+    tensor(crow_indices=tensor([0, 1, 2, 3]),
+        col_indices=tensor([0, 1, 2]),
+        values=tensor([ 0.2847, -0.7805, -0.1900]), device='cuda:0',
+        size=(3, 3), nnz=3, layout=torch.sparse_csr)
+    >>> torch.sparse.sampled_addmm(input, mat1, mat2).to_dense()
+    tensor([[ 0.2847,  0.0000,  0.0000],
+        [ 0.0000, -0.7805,  0.0000],
+        [ 0.0000,  0.0000, -0.1900]], device='cuda:0')
+    >>> torch.sparse.sampled_addmm(input, mat1, mat2, beta=0.5, alpha=0.5)
+    tensor(crow_indices=tensor([0, 1, 2, 3]),
+        col_indices=tensor([0, 1, 2]),
+        values=tensor([ 0.1423, -0.3903, -0.0950]), device='cuda:0',
+        size=(3, 3), nnz=3, layout=torch.sparse_csr)
+""")
 
 
 def sum(input: Tensor, dim: DimOrDims = None,
@@ -120,6 +179,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                            torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],
@@ -159,45 +219,141 @@ def sum(input: Tensor, dim: DimOrDims = None,
             return torch._sparse_sum(input, dtype=dtype)
 
 
-def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax function.
+softmax = _add_docstr(_sparse._sparse_softmax, r"""
+sparse.softmax(input, dim, *, dtype=None) -> Tensor
 
-    Softmax is defined as:
+Applies a softmax function.
 
-    :math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
+Softmax is defined as:
 
-    where :math:`i, j` run over sparse tensor indices and unspecified
-    entries are ignores. This is equivalent to defining unspecified
-    entries as negative infinity so that :math:`exp(x_k) = 0` when the
-    entry with index :math:`k` has not specified.
+:math:`\text{Softmax}(x_{i}) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
-    It is applied to all slices along `dim`, and will re-scale them so
-    that the elements lie in the range `[0, 1]` and sum to 1.
+where :math:`i, j` run over sparse tensor indices and unspecified
+entries are ignores. This is equivalent to defining unspecified
+entries as negative infinity so that :math:`exp(x_k) = 0` when the
+entry with index :math:`k` has not specified.
 
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which softmax will be computed.
-        dtype (:class:`torch.dtype`, optional): the desired data type
-          of returned tensor.  If specified, the input tensor is
-          casted to :attr:`dtype` before the operation is
-          performed. This is useful for preventing data type
-          overflows. Default: None
-    """
-    return torch._sparse_softmax(input, dim, dtype=dtype)
+It is applied to all slices along `dim`, and will re-scale them so
+that the elements lie in the range `[0, 1]` and sum to 1.
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type
+        of returned tensor.  If specified, the input tensor is
+        casted to :attr:`dtype` before the operation is
+        performed. This is useful for preventing data type
+        overflows. Default: None
+""")
 
 
-def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax function followed by logarithm.
+log_softmax = _add_docstr(_sparse._sparse_log_softmax, r"""
+sparse.log_softmax(input, dim, *, dtype=None) -> Tensor
 
-    See :class:`~torch.sparse.softmax` for more details.
+Applies a softmax function followed by logarithm.
 
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which softmax will be computed.
-        dtype (:class:`torch.dtype`, optional): the desired data type
-          of returned tensor.  If specified, the input tensor is
-          casted to :attr:`dtype` before the operation is
-          performed. This is useful for preventing data type
-          overflows. Default: None
-    """
-    return torch._sparse_log_softmax(input, dim, dtype=dtype)
+See :class:`~torch.sparse.softmax` for more details.
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type
+        of returned tensor.  If specified, the input tensor is
+        casted to :attr:`dtype` before the operation is
+        performed. This is useful for preventing data type
+        overflows. Default: None
+""")
+
+
+spdiags = _add_docstr(
+    _sparse._spdiags,
+    r"""
+sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
+
+Creates a sparse 2D tensor by placing the values from rows of
+:attr:`diagonals` along specified diagonals of the output
+
+The :attr:`offsets` tensor controls which diagonals are set.
+
+- If :attr:`offsets[i]` = 0, it is the main diagonal
+- If :attr:`offsets[i]` < 0, it is below the main diagonal
+- If :attr:`offsets[i]` > 0, it is above the main diagonal
+
+The number of rows in :attr:`diagonals` must match the length of :attr:`offsets`,
+and an offset may not be repeated.
+
+Args:
+    diagonals (Tensor): Matrix storing diagonals row-wise
+    offsets (Tensor): The diagonals to be set, stored as a vector
+    shape (2-tuple of ints): The desired shape of the result
+Keyword args:
+    layout (:class:`torch.layout`, optional): The desired layout of the
+        returned tensor. ``torch.sparse_coo``, ``torch.sparse_csc`` and ``torch.sparse_csr``
+        are supported. Default: ``torch.sparse_coo``
+
+Examples:
+
+Set the main and first two lower diagonals of a matrix::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3))
+    >>> s
+    tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
+                           [0, 1, 2, 0, 1, 0]]),
+           values=tensor([0, 1, 2, 3, 4, 6]),
+           size=(3, 3), nnz=6, layout=torch.sparse_coo)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+
+Change the output layout::
+
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
+    tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3), layout=torch.sparse_csr)
+    >>> s
+    tensor(crow_indices=tensor([0, 1, 3, 6]),
+           col_indices=tensor([0, 0, 1, 0, 1, 2]),
+           values=tensor([0, 3, 1, 6, 4, 2]), size=(3, 3), nnz=6,
+           layout=torch.sparse_csr)
+    >>> s.to_dense()
+    tensor([[0, 0, 0],
+            [3, 1, 0],
+            [6, 4, 2]])
+
+Set partial diagonals of a large output::
+
+    >>> diags = torch.tensor([[1, 2], [3, 4]])
+    >>> offsets = torch.tensor([0, -1])
+    >>> torch.sparse.spdiags(diags, offsets, (5, 5)).to_dense()
+    tensor([[1, 0, 0, 0, 0],
+            [3, 2, 0, 0, 0],
+            [0, 4, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+
+.. note::
+
+    When setting the values along a given diagonal the index into the diagonal
+    and the index into the row of :attr:`diagonals` is taken as the
+    column index in the output. This has the effect that when setting a diagonal
+    with a positive offset `k` the first value along that diagonal will be
+    the value in position `k` of the row of :attr:`diagonals`
+
+Specifying a positive offset::
+
+    >>> diags = torch.tensor([[1, 2, 3], [1, 2, 3], [1, 2, 3]])
+    >>> torch.sparse.spdiags(diags, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
+    tensor([[1, 2, 3, 0, 0],
+            [0, 2, 3, 0, 0],
+            [0, 0, 3, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
+""")

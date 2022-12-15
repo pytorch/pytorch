@@ -8,10 +8,21 @@ import pickle
 import tempfile
 
 import torch
+from torch.utils.data.datapipes.utils.common import StreamWrapper
 
 
-__all__ = ["basichandlers", "imagehandler", "videohandler", "audiohandler",
-           "mathandler", "Decoder", "extension_extract_fn"]
+__all__ = [
+    "Decoder",
+    "ImageHandler",
+    "MatHandler",
+    "audiohandler",
+    "basichandlers",
+    "extension_extract_fn",
+    "handle_extension",
+    "imagehandler",
+    "mathandler",
+    "videohandler",
+]
 
 
 ################################################################
@@ -137,13 +148,13 @@ class ImageHandler:
             import numpy as np
         except ImportError as e:
             raise ModuleNotFoundError("Package `numpy` is required to be installed for default image decoder."
-                                      "Please use `pip install numpy` to install the package")
+                                      "Please use `pip install numpy` to install the package") from e
 
         try:
             import PIL.Image
         except ImportError as e:
             raise ModuleNotFoundError("Package `PIL` is required to be installed for default image decoder."
-                                      "Please use `pip install Pillow` to install the package")
+                                      "Please use `pip install Pillow` to install the package") from e
 
         imagespec = self.imagespec
         atype, etype, mode = imagespecs[imagespec]
@@ -189,7 +200,7 @@ def videohandler(extension, data):
     except ImportError as e:
         raise ModuleNotFoundError("Package `torchvision` is required to be installed for default video file loader."
                                   "Please use `pip install torchvision` or `conda install torchvision -c pytorch`"
-                                  "to install the package")
+                                  "to install the package") from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -210,7 +221,7 @@ def audiohandler(extension, data):
     except ImportError as e:
         raise ModuleNotFoundError("Package `torchaudio` is required to be installed for default audio file loader."
                                   "Please use `pip install torchaudio` or `conda install torchaudio -c pytorch`"
-                                  "to install the package")
+                                  "to install the package") from e
 
     with tempfile.TemporaryDirectory() as dirname:
         fname = os.path.join(dirname, f"file.{extension}")
@@ -229,7 +240,7 @@ class MatHandler:
         except ImportError as e:
             raise ModuleNotFoundError("Package `scipy` is required to be installed for mat file."
                                       "Please use `pip install scipy` or `conda install scipy`"
-                                      "to install the package")
+                                      "to install the package") from e
         self.sio = sio
         self.loadmat_kwargs = loadmat_kwargs
 
@@ -273,14 +284,20 @@ class Decoder:
             return
         self.handlers = list(handler) + self.handlers
 
+    @staticmethod
+    def _is_stream_handle(data):
+        obj_to_check = data.file_obj if isinstance(data, StreamWrapper) else data
+        return isinstance(obj_to_check, io.BufferedIOBase) or isinstance(obj_to_check, io.RawIOBase)
+
     def decode1(self, key, data):
         if not data:
             return data
 
         # if data is a stream handle, we need to read all the content before decoding
-        if isinstance(data, io.BufferedIOBase) or isinstance(data, io.RawIOBase):
+        if Decoder._is_stream_handle(data):
             ds = data
-            data = data.read()
+            # The behavior of .read can differ between streams (e.g. HTTPResponse), hence this is used instead
+            data = b"".join(data)
             ds.close()
 
         for f in self.handlers:

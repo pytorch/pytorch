@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -21,11 +21,7 @@ void batch_permutation_loop(
   long numBytes = K * sizeof(float);
   if (forwards) {
 #ifdef _OPENMP
-#if (_OPENMP >= 201307)
-#pragma omp parallel for simd
-#else
 #pragma omp parallel for
-#endif
 #endif
     for (int n = 0; n < N; n++) {
       int origIdx = n * K;
@@ -93,7 +89,7 @@ bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BatchPermutation,
     IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);

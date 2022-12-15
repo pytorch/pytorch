@@ -1,0 +1,31 @@
+name: Get workflow job id
+
+description: Get the ID of the workflow job that is currently running.
+
+inputs:
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
+
+outputs:
+  job-id:
+    description: The retrieved workflow job id
+    value: ${{ steps.get-job-id.outputs.job-id }}
+
+runs:
+  using: composite
+  steps:
+    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      id: get-job-id
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        shell: bash
+        timeout_minutes: 10
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eux
+          python3 -m pip install requests==2.26.0
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"

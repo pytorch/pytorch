@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
 
+#include <ATen/ScalarOps.h>
+
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Conversion] in pattern_conversion.h
 
@@ -47,6 +49,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
        end,
        step});
 
+  sliced_index_n->copyMetadata(insertBefore);
   auto sliced_index = sliced_index_n->insertBefore(insertBefore)->output();
   return sliced_index;
 }
@@ -127,7 +130,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
       cur_dim++;
     }
 
-    AT_ASSERT(cur_dim == dim);
+    TORCH_INTERNAL_ASSERT(cur_dim == dim);
     if (node->kind() == aten::slice) {
       auto size = CreateSizeOfDim(orig_data, dim, index_put_node);
       auto index_tensor = ConvertSliceToIndex(node, size, index_put_node);
@@ -143,8 +146,8 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
           std::forward_as_tuple(index_tensor, aten::select));
       dim_offset++;
     } else {
-      AT_ERROR(
-          "Unexpected node kind ",
+      TORCH_CHECK(
+          false,
           node->kind().toDisplayString(),
           " Expected aten::slice or aten::select.");
     }
@@ -162,7 +165,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   }
 
   // Each dimension should have its associated index tensor.
-  AT_ASSERT((int64_t)dim_index_map.size() == cur_dim);
+  TORCH_INTERNAL_ASSERT((int64_t)dim_index_map.size() == cur_dim);
   return dim_index_map;
 }
 
@@ -187,7 +190,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   size_t tensor_ind_count = 0;
   for (const auto i : c10::irange(dim_index_map.size())) {
     auto index_i = dim_index_map.find(i);
-    AT_ASSERT(index_i != dim_index_map.end());
+    TORCH_INTERNAL_ASSERT(index_i != dim_index_map.end());
     if (index_i->second.orig_node_kind == aten::index) {
       if (i < min_index_dim)
         min_index_dim = i;
@@ -199,7 +202,8 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 
   if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) &&
       tensor_ind_count != 0) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.",
         "Check https://pytorch.org/docs/stable/onnx.html#indexing for details");
   }
@@ -209,7 +213,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   for (const auto i : c10::irange(dim_index_map.size())) {
     size_t ind_size = 0;
     auto index_i = dim_index_map.find(i);
-    AT_ASSERT(index_i != dim_index_map.end());
+    TORCH_INTERNAL_ASSERT(index_i != dim_index_map.end());
     Value* index = index_i->second.index;
     switch (index_i->second.orig_node_kind) {
       case aten::select:
@@ -227,7 +231,8 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
         break;
       }
       default:
-        AT_ERROR("Unexpected node kind ", index_i->second.orig_node_kind);
+        TORCH_CHECK(
+            false, "Unexpected node kind ", index_i->second.orig_node_kind);
     }
 
     if (ind_size != 1) {
@@ -321,6 +326,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
        index_put_node->input(2),
        index_put_node->input(3)});
   new_index_put_node->insertBefore(index_put_node);
+  new_index_put_node->copyMetadata(index_put_node);
   auto new_index_put = new_index_put_node->output();
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);

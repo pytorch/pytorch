@@ -1,10 +1,19 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Pow.h>
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/float_power_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/result_type.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -20,14 +29,14 @@ TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {
               "Integers to negative integer powers are not allowed.");
 
   auto common_dtype = at::result_type(base, exp);
-  build_unary_op(maybe_get_output(), base.to(common_dtype));
+  build_output_borrowing_argument_owning_unary_op(maybe_get_output(), base.to(common_dtype));
 }
 
 TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
     // This overload doesn't directly use TensorIterator. It attempts to short-circuit,
     // but otherwise redispatches to the Tensor_Tensor overload.
     auto dtype = maybe_get_output().defined() ? maybe_get_output().scalar_type() : at::result_type(base, exp);
-    set_output(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.has_names() ? exp.names() : ArrayRef<Dimname>());
+    set_output_raw_strided(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.has_names() ? exp.names() : ArrayRef<Dimname>());
 }
 
 } // namespace meta

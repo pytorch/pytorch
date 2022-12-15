@@ -1,15 +1,24 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/empty.h>
+#endif
 
 namespace ao {
 namespace sparse {
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 
@@ -64,7 +73,7 @@ at::Tensor PackedLinearWeight::apply_impl(
     // Process the per channel quantization.
     output_multiplier_float.resize(out_channels, 0.0);
     act_times_w_scale.resize(out_channels, 1.0f);
-    for (int i = 0; i < out_channels; ++i) {
+    for (const auto i : c10::irange(out_channels)) {
       act_times_w_scale[i] = (input_scale_float * w_scale[i]);
       output_multiplier_float[i] =
           act_times_w_scale[i] / static_cast<float>(output_scale);
@@ -126,7 +135,7 @@ at::Tensor PackedLinearWeight::apply_impl(
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       fbgemm::trRequantizationParams_t reqParams = {
           input_zero_point_int32,
           w_zp.data(),
@@ -238,6 +247,7 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(
       TORCH_SELECTIVE_NAME("sparse::qlinear"),
       TORCH_FN(QLinearInt8<false>::run));

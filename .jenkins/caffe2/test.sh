@@ -45,8 +45,8 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-# Don't run cpp tests a second time in the sharded ort_test2 job
-if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+# Only run cpp tests in the first shard, don't run cpp tests a second time in the second shard
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   echo "Running C++ tests.."
   for test in $(find "$cpp_test_dir" -executable -type f); do
     case "$test" in
@@ -134,53 +134,39 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/ideep/pool_op_test.py")
 fi
 
-# NB: Warnings are disabled because they make it harder to see what
-# the actual erroring test is
 echo "Running Python tests.."
-if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-  # locale setting is required by click package with py3
-  for loc in "en_US.utf8" "C.UTF-8"; do
-    if locale -a | grep "$loc" >/dev/null 2>&1; then
-      export LC_ALL="$loc"
-      export LANG="$loc"
-      break;
-    fi
-  done
-fi
+# locale setting is required by click package
+for loc in "en_US.utf8" "C.UTF-8"; do
+  if locale -a | grep "$loc" >/dev/null 2>&1; then
+    export LC_ALL="$loc"
+    export LANG="$loc"
+    break;
+  fi
+done
 
 # Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
 export DNNL_MAX_CPU_ISA=AVX2
 
-pip install --user pytest-sugar
-"$PYTHON" \
-  -m pytest \
-  -x \
-  -v \
-  --disable-warnings \
-  --junit-xml="$pytest_reports_dir/result.xml" \
-  --ignore "$caffe2_pypath/python/test/executor_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-  ${rocm_ignore_test[@]} \
-  "$caffe2_pypath/python" \
-  "${EXTRA_TESTS[@]}"
-
-#####################
-# torchvision tests #
-#####################
-if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  # Check out torch/vision at 0.9.0-rc1 commit
-  # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
-  pip install -q --user ninja
-  # JIT C++ extensions require ninja, so put it into PATH.
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
-  if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user flatbuffers==2.0
-    wget https://ortpypackage.blob.core.windows.net/ort-nightly/ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-    pip install -q --user ort_nightly-1.8.0.dev202107131-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-  fi
-  "$ROOT_DIR/scripts/onnx/test.sh"
+# Should still run even in the absence of SHARD_NUMBER
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+  # TODO(sdym@meta.com) remove this when the linked issue resolved.
+  # py is temporary until https://github.com/Teemu/pytest-sugar/issues/241 is fixed
+  pip install --user py==1.11.0
+  pip install --user pytest-sugar
+  # NB: Warnings are disabled because they make it harder to see what
+  # the actual erroring test is
+  "$PYTHON" \
+    -m pytest \
+    -x \
+    -v \
+    --disable-warnings \
+    --junit-xml="$pytest_reports_dir/result.xml" \
+    --ignore "$caffe2_pypath/python/test/executor_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+    --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+    --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
+    ${rocm_ignore_test[@]} \
+    "$caffe2_pypath/python" \
+    "${EXTRA_TESTS[@]}"
 fi

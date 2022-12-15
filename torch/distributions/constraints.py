@@ -16,13 +16,17 @@ The following constraints are implemented:
 - ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
+- ``constraints.positive_semidefinite``
+- ``constraints.positive_definite``
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.symmetric``
 - ``constraints.stack``
+- ``constraints.square``
+- ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
 
@@ -48,12 +52,15 @@ __all__ = [
     'multinomial',
     'nonnegative_integer',
     'positive',
+    'positive_semidefinite',
     'positive_definite',
     'positive_integer',
     'real',
     'real_vector',
     'simplex',
+    'square',
     'stack',
+    'symmetric',
     'unit_interval',
 ]
 
@@ -152,7 +159,7 @@ class _DependentProperty(property, _Dependent):
                 return constraints.interval(self.low, self.high)
 
     Args:
-        fn (callable): The function to be decorated.
+        fn (Callable): The function to be decorated.
         is_discrete (bool): Optional value of ``.is_discrete`` in case this
             can be computed statically. If not provided, access to the
             ``.is_discrete`` attribute will raise a NotImplementedError.
@@ -456,16 +463,53 @@ class _CorrCholesky(Constraint):
         return _LowerCholesky().check(value) & unit_row_norm
 
 
-class _PositiveDefinite(Constraint):
+class _Square(Constraint):
     """
-    Constrain to positive-definite matrices.
+    Constrain to square matrices.
     """
     event_dim = 2
 
     def check(self, value):
-        # Assumes that the matrix or batch of matrices in value are symmetric
-        # info == 0 means no error, that is, it's SPD
-        return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
+        return torch.full(
+            size=value.shape[:-2],
+            fill_value=(value.shape[-2] == value.shape[-1]),
+            dtype=torch.bool,
+            device=value.device
+        )
+
+
+class _Symmetric(_Square):
+    """
+    Constrain to Symmetric square matrices.
+    """
+
+    def check(self, value):
+        square_check = super().check(value)
+        if not square_check.all():
+            return square_check
+        return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
+
+
+class _PositiveSemidefinite(_Symmetric):
+    """
+    Constrain to positive-semidefinite matrices.
+    """
+    def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.eigvalsh(value).ge(0).all(-1)
+
+
+class _PositiveDefinite(_Symmetric):
+    """
+    Constrain to positive-definite matrices.
+    """
+    def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
 class _Cat(Constraint):
@@ -557,6 +601,9 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
+square = _Square()
+symmetric = _Symmetric()
+positive_semidefinite = _PositiveSemidefinite()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack

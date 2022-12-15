@@ -58,7 +58,7 @@ class FunctionCounts(object):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
+    def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
             FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
@@ -90,13 +90,13 @@ class FunctionCounts(object):
 
     def __add__(
         self,
-        other,  # type: FunctionCounts
+        other: "FunctionCounts",
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: c)
 
     def __sub__(
         self,
-        other,  # type: FunctionCounts
+        other: "FunctionCounts",
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
@@ -137,7 +137,7 @@ class FunctionCounts(object):
 
     def _merge(
         self,
-        second,   # type: FunctionCounts
+        second: "FunctionCounts",
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
         assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
@@ -209,7 +209,7 @@ class CallgrindStats(object):
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
 
-        See `FunctionCounts.denoise()` for an explation of the `denoise` arg.
+        See `FunctionCounts.denoise()` for an explanation of the `denoise` arg.
         """
         stats = self.stmt_exclusive_stats
         return (stats.denoise() if denoise else stats).sum()
@@ -217,7 +217,7 @@ class CallgrindStats(object):
     # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
     def delta(
         self,
-        other,  # type: CallgrindStats
+        other: "CallgrindStats",
         inclusive: bool = False,
     ) -> FunctionCounts:
         """Diff two sets of counts.
@@ -251,7 +251,7 @@ class CallgrindStats(object):
             -23234231 /tmp/second_build_dir/thing.c:foo(...)
 
         Stripping prefixes can ameliorate this issue by regularizing the
-        strings and causing better cancellation of equivilent call sites
+        strings and causing better cancellation of equivalent call sites
         when diffing.
         """
         def strip(stats: FunctionCounts) -> FunctionCounts:
@@ -820,10 +820,10 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == Check that subprocess matches parent =====================================
             # =============================================================================
-            if sys.executable != "{parent_interpreter}":
+            if os.path.realpath(sys.executable) != "{parent_interpreter}":
                 log_failure(
                     "Interpreter mismatch:\n"
-                    f"  {{sys.executable}}\n    vs.\n  {parent_interpreter}"
+                    f"  {{os.path.realpath(sys.executable)}}\n    vs.\n  {parent_interpreter}"
                 )
 
             if torch.__file__ != "{torch_file}":
@@ -888,7 +888,7 @@ class _ValgrindWrapper(object):
             num_threads=task_spec.num_threads,
             error_log_repr=repr(error_log),
             stat_log=stat_log,
-            parent_interpreter=sys.executable,
+            parent_interpreter=os.path.realpath(sys.executable),
             torch_file=torch.__file__,
             bindings_import=(
                 "import torch._C as callgrind_bindings" if bindings is None

@@ -153,6 +153,19 @@ if((NOT BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "flexi")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "flexiblas")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "flexi")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
   check_fortran_libraries(
   BLAS_LIBRARIES
@@ -279,12 +292,17 @@ endif()
 # Generic BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "generic")))
+  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+    set(GENERIC_BLAS "blas")
+  else()
+    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
+  endif()
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS
   sgemm
   ""
-  "blas")
+  "${GENERIC_BLAS}")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
   endif(BLAS_LIBRARIES)
@@ -365,6 +383,16 @@ IF (BLAS_LIBRARIES)
     SET(CMAKE_REQUIRED_LIBRARIES)
   ENDIF(CMAKE_CROSSCOMPILING)
   cmake_pop_check_state()
+ENDIF(BLAS_LIBRARIES)
+
+# Blas has bfloat16 support?
+IF(BLAS_LIBRARIES)
+  SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  check_function_exists("sbgemm_" BLAS_HAS_SBGEMM)
+  set(CMAKE_REQUIRED_LIBRARIES)
+  IF(BLAS_HAS_SBGEMM)
+    add_compile_options(-DBLAS_HAS_SBGEMM)
+  ENDIF(BLAS_HAS_SBGEMM)
 ENDIF(BLAS_LIBRARIES)
 
 # epilogue

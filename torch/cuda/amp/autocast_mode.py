@@ -5,16 +5,41 @@ try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
-    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 from torch._six import string_classes
+from typing import Any
 
-class autocast(torch.autocast_mode.autocast):
+__all__ = ["autocast", "custom_fwd", "custom_bwd"]
+
+class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
-    def __init__(self, enabled=True, dtype=torch.float16, cache_enabled=True):
+
+    def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.float16, cache_enabled : bool = True):
+        if torch._jit_internal.is_scripting():
+            self._enabled = enabled
+            self.device = "cuda"
+            self.fast_dtype = dtype
+            return
         super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
+
+    def __enter__(self):
+        if torch._jit_internal.is_scripting():
+            return self
+        return super().__enter__()
+
+    # TODO: discuss a unified TorchScript-friendly API for autocast
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+        if torch._jit_internal.is_scripting():
+            return
+        return super().__exit__(exc_type, exc_val, exc_tb)
+
+    def __call__(self, func):
+        if torch._jit_internal.is_scripting():
+            return func
+        return super().__call__(func)
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
@@ -47,9 +72,7 @@ def _cast(value, dtype):
 # this also works:
 #     @custom_fwd(cast_inputs=torch.float)
 #     def forward(...):
-# TODO:  when python 2 support is dropped, change the signature to
-# def custom_fwd(fwd=None, *, cast_inputs=None) with internal changes following the link above.
-def custom_fwd(fwd=None, **kwargs):
+def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
@@ -66,21 +89,11 @@ def custom_fwd(fwd=None, **kwargs):
         :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
     """
     if fwd is None:
-        if len(kwargs) == 0:
-            cast_inputs = None
-        else:
-            assert len(kwargs) == 1
-            cast_inputs = kwargs["cast_inputs"]
         return functools.partial(custom_fwd, cast_inputs=cast_inputs)
-
-    if len(kwargs) == 0:
-        cast_inputs = None
-    else:
-        assert len(kwargs) == 1
-        cast_inputs = kwargs["cast_inputs"]
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):
+        args[0]._dtype = torch.get_autocast_gpu_dtype()
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
@@ -107,6 +120,6 @@ def custom_bwd(bwd):
     """
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
-        with autocast(args[0]._fwd_used_autocast):
+        with autocast(enabled=args[0]._fwd_used_autocast, dtype=args[0]._dtype):
             return bwd(*args, **kwargs)
     return decorate_bwd

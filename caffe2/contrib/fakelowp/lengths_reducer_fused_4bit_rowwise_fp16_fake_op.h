@@ -85,7 +85,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
     const auto scale_bias_offset = 2 * sizeof(at::Half);
     const int64_t input_fused_block_size = input_block_size + scale_bias_offset;
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       if (!use_fp16_for_embedding_only) {
         memset(rowTempSums[0].data(), 0, sizeof(float) * output_block_size);
         memset(rowTempSums[1].data(), 0, sizeof(float) * output_block_size);
@@ -135,7 +135,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         // Unpack int4 elements
         std::vector<float> input_rounded(output_block_size);
         int k = 0;
-        for (int j = 0; j < input_block_size; j++) {
+        for (const auto j : c10::irange(input_block_size)) {
           input_rounded[k++] =
               input[input_fused_block_size * indices_data[current] + j] & 0x0f;
           input_rounded[k++] =
@@ -150,7 +150,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
               input_rounded.data(),
               product_rounded.data());
 
-          for (int j = 0; j < output_block_size; ++j) {
+          for (const auto j : c10::irange(output_block_size)) {
             product_rounded[j] += bias;
           }
 
@@ -190,7 +190,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
       }
 
       if (!use_fp16_for_embedding_only) {
-        for (int j = 0; j < output_block_size; ++j) {
+        for (const auto j : c10::irange(output_block_size)) {
           out[j] = rowTempSums[0][j] + rowTempSums[1][j];
         }
         fbgemm::RoundToFloat16(

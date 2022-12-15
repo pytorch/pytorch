@@ -12,7 +12,7 @@ namespace jit {
 bool insertableTensor(const at::Tensor& ten) {
   // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
   // or gradients because we have no way of serializing them & are mutable
-  return !ten.requires_grad() && ten.has_storage();
+  return !ten.requires_grad() && ten.has_storage() && !ten.is_nested();
 }
 
 bool insertableIValue(const IValue& ivalue) {
@@ -27,7 +27,7 @@ bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isList() || ivalue.isTuple()) {
     c10::ArrayRef<IValue> elems;
     if (ivalue.isTuple()) {
-      elems = ivalue.toTuple()->elements();
+      elems = ivalue.toTupleRef().elements();
     } else {
       elems = ivalue.toListRef();
     }
@@ -102,7 +102,7 @@ c10::optional<Value*> tryInsertConstant(
       return c10::nullopt;
     }
   } else if (val.isString()) {
-    n->s_(attr::value, val.toString()->string());
+    n->s_(attr::value, val.toStringRef());
     n->output()->setType(StringType::get());
   } else if (val.isDevice()) {
     std::stringstream ss;
@@ -126,7 +126,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isObject()) {
     const auto& ref = val.toObjectRef();
     // see: [Constant Object Weak CompilationUnit Reference]
-    if (!ref.type()->is_module() && ref.is_weak_compilation_ref()) {
+    if (!ref.type()->is_module() &&
+        (ref.is_weak_compilation_ref() ||
+         ref.is_empty_strong_compilation_ref())) {
       n->ival_(attr::value, val);
       n->output()->setType(val.type());
     } else {
@@ -153,20 +155,20 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
   const Node* node = v->node();
   const TypePtr& type = v->type();
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return node->t(attr::value);
-  } else if (type->isSubtypeOf(BoolType::get())) {
+  } else if (type->isSubtypeOf(*BoolType::get())) {
     return (bool)node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {
     return node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::c) {
     return node->c(attr::value);
   } else if (

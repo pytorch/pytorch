@@ -46,13 +46,13 @@ class SignedLog1pBench : public benchmark::Fixture {
         "input", {input_size_int_[0], input_size_int_[1]}, kFloat);
     Tensor abs_result = Compute(
         "aten_abs",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return abs(input_ph.load(m, n));
         });
     Tensor log1p_result = Compute(
         "aten_log1p",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return log1p(abs_result.load(m, n));
         });
@@ -60,7 +60,7 @@ class SignedLog1pBench : public benchmark::Fixture {
         computeSign({input_ph}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return sign_result.load(m, n) * log1p_result.load(m, n);
         });
@@ -94,13 +94,13 @@ class SignedLog1pBench : public benchmark::Fixture {
         "input", {input_size_int_[0], input_size_int_[1]}, kFloat);
     Tensor abs_result = Compute(
         "aten_abs",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return abs(input_ph.load(m, n));
         });
     Tensor log_vml_result = Compute(
         "aten_log1p",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return log_vml(abs_result.load(m, n) + ExprHandle(1));
         });
@@ -108,7 +108,7 @@ class SignedLog1pBench : public benchmark::Fixture {
         computeSign({input_ph}, {input_size_int_[0], input_size_int_[1]});
     Tensor output = Compute(
         "aten_mul",
-        {{input_size_int_[0], "M"}, {input_size_int_[1], "N"}},
+        {input_size_int_[0], input_size_int_[1]},
         [&](const VarHandle& m, const VarHandle& n) {
           return sign_result.load(m, n) * log_vml_result.load(m, n);
         });

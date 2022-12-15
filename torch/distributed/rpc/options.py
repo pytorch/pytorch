@@ -1,13 +1,13 @@
-from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
-from . import constants as rpc_contants
+from typing import Dict, List, Optional, Union
 
 import torch
-
-from typing import Dict, List, Optional, Union
+from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+from . import constants as rpc_contants
 
 
 DeviceType = Union[int, str, torch.device]
 
+__all__ = ["TensorPipeRpcBackendOptions"]
 
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
@@ -19,11 +19,12 @@ def _to_device(device: DeviceType) -> torch.device:
     return device
 
 
-def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.device, torch.device]:
-    full_device_map : Dict[torch.device, torch.device] = {}
-    reverse_map : Dict[torch.device, torch.device] = {}
-    for k in device_map:
-        v = device_map[k]
+def _to_device_map(
+    device_map: Dict[DeviceType, DeviceType]
+) -> Dict[torch.device, torch.device]:
+    full_device_map: Dict[torch.device, torch.device] = {}
+    reverse_map: Dict[torch.device, torch.device] = {}
+    for k, v in device_map.items():
         k, v = torch.device(k), torch.device(v)
         if v in reverse_map:
             raise ValueError(
@@ -37,7 +38,6 @@ def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.devic
 
 def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
     return list(map(_to_device, devices))
-
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
@@ -73,6 +73,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             requests, the agent will properly synchronize CUDA streams for
             all devices in this ``List``.
     """
+
     def __init__(
         self,
         *,
@@ -81,17 +82,15 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
         device_maps: Optional[Dict[str, Dict[DeviceType, DeviceType]]] = None,
         devices: Optional[List[DeviceType]] = None,
-        _transports: List = None,
-        _channels: List = None,
+        _transports: Optional[List] = None,
+        _channels: Optional[List] = None,
     ):
         full_device_maps = (
-            {} if device_maps is None else
-            {k : _to_device_map(v) for k, v in device_maps.items()}
+            {}
+            if device_maps is None
+            else {k: _to_device_map(v) for k, v in device_maps.items()}
         )
-        full_device_list = (
-            [] if devices is None else
-            _to_device_list(devices)
-        )
+        full_device_list = [] if devices is None else _to_device_list(devices)
         super().__init__(
             num_worker_threads,
             _transports,
@@ -109,12 +108,13 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         device placement configurations.
 
         Args:
-            worker_name (str): Callee name.
+            to (str): Callee name.
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be
                 invertible.
 
-        Example::
+        Example:
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')

@@ -5,14 +5,16 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
+
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
@@ -279,6 +281,8 @@ public:
     }
     return b;
   }
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wignored-qualifiers"
   Vectorized<BFloat16> map(const __m512 (*const vop)(__m512)) const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -286,6 +290,7 @@ public:
     const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  #pragma clang diagnostic pop
   Vectorized<BFloat16> abs() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -673,32 +678,32 @@ Vectorized<BFloat16> inline operator^(const Vectorized<BFloat16>& a, const Vecto
   return _mm512_xor_si512(a, b);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::eq(const Vectorized<BFloat16>& other) const {
   return (*this == other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::ne(const Vectorized<BFloat16>& other) const {
   return (*this != other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::gt(const Vectorized<BFloat16>& other) const {
   return (*this > other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::ge(const Vectorized<BFloat16>& other) const {
   return (*this >= other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::lt(const Vectorized<BFloat16>& other) const {
   return (*this < other) & Vectorized<BFloat16>(1.0f);
 }
 
-Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::le(const Vectorized<BFloat16>& other) const {
   return (*this <= other) & Vectorized<BFloat16>(1.0f);
 }
 
 // frac. Implement this here so we can use subtraction
-Vectorized<BFloat16> Vectorized<BFloat16>::frac() const {
+inline Vectorized<BFloat16> Vectorized<BFloat16>::frac() const {
   return *this - this->trunc();
 }
 
@@ -796,6 +801,43 @@ inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
 }
 
 template <>
+inline void convert(const float* src, BFloat16* dst, int64_t n) {
+  int64_t i;
+  for (i = 0; i + Vectorized<BFloat16>::size() <= n; i += Vectorized<BFloat16>::size()) {
+    __m512 a = _mm512_loadu_ps(&src[i]);
+    __m512 b = _mm512_loadu_ps(&src[i + 16]);
+
+    __m512i bf = cvtfp32_bf16(a, b);
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(&dst[i]), bf);
+  }
+  for (; i < n; i++) {
+    dst[i] = c10::convert<BFloat16>(src[i]);
+  }
+}
+
+template <>
+inline void convert(const double* src, BFloat16* dst, int64_t n) {
+  auto load_float = [](const double *src) -> __m512 {
+    // Load one float vector from an array of doubles
+    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
+    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
+    return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
+  };
+
+  int64_t i;
+  for (i = 0; i + Vectorized<BFloat16>::size() <= n; i += Vectorized<BFloat16>::size()) {
+    __m512 a = load_float(&src[i]);
+    __m512 b = load_float(&src[i + 16]);
+
+    __m512i bf = cvtfp32_bf16(a, b);
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(&dst[i]), bf);
+  }
+  for (; i < n; i++) {
+    dst[i] = c10::convert<BFloat16>(src[i]);
+  }
+}
+
+template <>
 Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& c) {
   __m512 a_lo, a_hi;
@@ -826,7 +868,9 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(c
   __at_align__ float arr[K];
   __at_align__ BFloat16 arr2[K];
   a.store(arr2);
-  convert(arr2, arr, K);
+  for (const auto k : c10::irange(K)) {
+    arr[k] = c10::convert<float>(arr2[k]);
+  }
   return std::make_tuple(
       Vectorized<float>::loadu(arr),
       Vectorized<float>::loadu(arr + Vectorized<float>::size()));
@@ -838,21 +882,23 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
   __at_align__ BFloat16 arr2[K];
   a.store(arr);
   b.store(arr + Vectorized<float>::size());
-  convert(arr, arr2, K);
+  for (const auto k : c10::irange(K)) {
+    arr2[k] = c10::convert<BFloat16>(arr[k]);
+  }
   return Vectorized<BFloat16>::loadu(arr2);
 }
 
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
   auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
   __m512 out_values;
   cvtbf16_fp32(values, out_values);
   out = out_values;
 }
 
-void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
   auto vec = Vectorized<c10::BFloat16>::loadu(data);
   __m512 out1_values, out2_values;
   cvtbf16_fp32(vec, out1_values, out2_values);
@@ -860,15 +906,15 @@ void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vec
   out2 = out2_values;
 }
 #else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
   __at_align__ float values[Vectorized<float>::size()];
-  for (int k = 0; k < Vectorized<float>::size(); ++k) {
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
     values[k] = data[k];
   }
   out = Vectorized<float>::loadu(values);
 }
 
-void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
   load_fp32_from_bf16(data, out1);
   data += Vectorized<float>::size();
   load_fp32_from_bf16(data, out2);

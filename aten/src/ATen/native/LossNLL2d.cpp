@@ -1,10 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_native.h>
+#include <ATen/ops/zeros_like.h>
+
+#include <utility>
+#endif
 
 namespace at {
 namespace native {
@@ -109,9 +123,9 @@ static void nll_loss2d_forward_out_frame(
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = (int64_t)target_acc[b][h][w];
 
             if (cur_target == ignore_index) {
@@ -176,8 +190,8 @@ static void nll_loss2d_forward_out_frame(
   const int64_t level_mask = level_step - 1;
 
   int64_t num_ignored = 0;
-  for (int64_t b = 0; b < batch_size; b++) {
-    for (int64_t elem = 0; elem < map_size; elem++) {
+  for (const auto b : c10::irange(batch_size)) {
+    for (const auto elem : c10::irange(map_size)) {
       const int64_t cur_target = target_data[b * map_size + elem];
       if (cur_target == ignore_index) {
         ++num_ignored;
@@ -286,9 +300,9 @@ static void nll_loss2d_backward_out_frame(
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = target_acc[b][h][w];
             if (cur_target == ignore_index) {
               continue;
@@ -329,8 +343,8 @@ static void nll_loss2d_backward_out_frame(
                                                    : grad_output_value);
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
-      for (int64_t elem = 0; elem < map_size; elem++) {
+    for (const auto b : c10::irange(start, end)) {
+      for (const auto elem : c10::irange(map_size)) {
         const int64_t t = target_data[b * map_size + elem];
 
         if (t != ignore_index) {
@@ -472,12 +486,21 @@ Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::o
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
+Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
 Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
 } // namespace native

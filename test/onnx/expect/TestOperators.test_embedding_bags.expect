@@ -3,41 +3,365 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "weight"
-    input: "input"
-    input: "offsets"
-    output: "3"
-    output: "4"
+    output: "onnx::Loop_33"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 9
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     output: "5"
-    output: "6"
-    op_type: "ATen"
+    name: "Constant_1"
+    op_type: "Constant"
     attribute {
-      name: "include_last_offset"
-      i: 0
-      type: INT
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
+  }
+  node {
+    input: "input"
+    output: "onnx::Gather_6"
+    name: "Shape_2"
+    op_type: "Shape"
+  }
+  node {
+    output: "onnx::Gather_7"
+    name: "Constant_3"
+    op_type: "Constant"
     attribute {
-      name: "mode"
-      i: 1
-      type: INT
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
+  }
+  node {
+    input: "onnx::Gather_6"
+    input: "onnx::Gather_7"
+    output: "onnx::Unsqueeze_8"
+    name: "Gather_4"
+    op_type: "Gather"
     attribute {
-      name: "operator"
-      s: "embedding_bag"
-      type: STRING
-    }
-    attribute {
-      name: "scale_grad_by_freq"
-      i: 0
-      type: INT
-    }
-    attribute {
-      name: "sparse"
+      name: "axis"
       i: 0
       type: INT
     }
   }
-  name: "torch-jit-export"
+  node {
+    output: "onnx::Unsqueeze_9"
+    name: "Constant_5"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Unsqueeze_8"
+    input: "onnx::Unsqueeze_9"
+    output: "onnx::Concat_10"
+    name: "Unsqueeze_6"
+    op_type: "Unsqueeze"
+  }
+  node {
+    input: "offsets"
+    input: "onnx::Concat_10"
+    output: "onnx::Slice_11"
+    name: "Concat_7"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    output: "onnx::Slice_12"
+    name: "Constant_8"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_13"
+    name: "Constant_9"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_14"
+    name: "Constant_10"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\177"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Slice_15"
+    name: "Constant_11"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Slice_11"
+    input: "onnx::Slice_13"
+    input: "onnx::Slice_14"
+    input: "onnx::Slice_12"
+    input: "onnx::Slice_15"
+    output: "onnx::Shape_16"
+    name: "Slice_12"
+    op_type: "Slice"
+  }
+  node {
+    input: "onnx::Shape_16"
+    output: "onnx::Gather_17"
+    name: "Shape_13"
+    op_type: "Shape"
+  }
+  node {
+    output: "onnx::Gather_18"
+    name: "Constant_14"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Gather_17"
+    input: "onnx::Gather_18"
+    output: "onnx::Loop_19"
+    name: "Gather_15"
+    op_type: "Gather"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Loop_19"
+    input: "onnx::Loop_33"
+    output: "20"
+    name: "Loop_16"
+    op_type: "Loop"
+    attribute {
+      name: "body"
+      g {
+        node {
+          input: "onnx::Slice_11"
+          input: "21"
+          output: "23"
+          name: "Gather_17"
+          op_type: "Gather"
+          attribute {
+            name: "axis"
+            i: 0
+            type: INT
+          }
+        }
+        node {
+          input: "onnx::Shape_16"
+          input: "21"
+          output: "24"
+          name: "Gather_18"
+          op_type: "Gather"
+          attribute {
+            name: "axis"
+            i: 0
+            type: INT
+          }
+        }
+        node {
+          output: "25"
+          name: "Constant_19"
+          op_type: "Constant"
+          attribute {
+            name: "value"
+            t {
+              dims: 1
+              data_type: 7
+              raw_data: "\000\000\000\000\000\000\000\000"
+            }
+            type: TENSOR
+          }
+        }
+        node {
+          input: "23"
+          input: "25"
+          output: "26"
+          name: "Unsqueeze_20"
+          op_type: "Unsqueeze"
+        }
+        node {
+          output: "27"
+          name: "Constant_21"
+          op_type: "Constant"
+          attribute {
+            name: "value"
+            t {
+              dims: 1
+              data_type: 7
+              raw_data: "\000\000\000\000\000\000\000\000"
+            }
+            type: TENSOR
+          }
+        }
+        node {
+          input: "24"
+          input: "27"
+          output: "28"
+          name: "Unsqueeze_22"
+          op_type: "Unsqueeze"
+        }
+        node {
+          input: "input"
+          input: "26"
+          input: "28"
+          input: "5"
+          output: "29"
+          name: "Slice_23"
+          op_type: "Slice"
+        }
+        node {
+          input: "weight"
+          input: "29"
+          output: "30"
+          name: "Gather_24"
+          op_type: "Gather"
+          attribute {
+            name: "axis"
+            i: 0
+            type: INT
+          }
+        }
+        node {
+          input: "30"
+          output: "31"
+          name: "ReduceMean_25"
+          op_type: "ReduceMean"
+          attribute {
+            name: "axes"
+            ints: 0
+            type: INTS
+          }
+          attribute {
+            name: "keepdims"
+            i: 0
+            type: INT
+          }
+        }
+        node {
+          input: "onnx::Loop_33"
+          output: "32"
+          name: "Cast_26"
+          op_type: "Cast"
+          attribute {
+            name: "to"
+            i: 9
+            type: INT
+          }
+        }
+        name: "torch_jit1"
+        input {
+          name: "21"
+          type {
+            tensor_type {
+              elem_type: 7
+              shape {
+              }
+            }
+          }
+        }
+        input {
+          name: "22"
+          type {
+            tensor_type {
+              elem_type: 9
+              shape {
+              }
+            }
+          }
+        }
+        output {
+          name: "32"
+          type {
+            tensor_type {
+              elem_type: 9
+              shape {
+              }
+            }
+          }
+        }
+        output {
+          name: "31"
+          type {
+            tensor_type {
+              elem_type: 1
+              shape {
+                dim {
+                  dim_param: "Loop20_dim_1"
+                }
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+  }
+  name: "torch_jit"
   initializer {
     dims: 10
     dims: 8
@@ -88,16 +412,16 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "20"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 1
+            dim_param: "Loop20_dim_0"
           }
           dim {
-            dim_value: 8
+            dim_param: "Loop20_dim_1"
           }
         }
       }
@@ -105,5 +429,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

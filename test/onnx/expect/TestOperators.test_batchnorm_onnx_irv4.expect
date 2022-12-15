@@ -21,8 +21,13 @@ graph {
       f: 0.9
       type: FLOAT
     }
+    attribute {
+      name: "training_mode"
+      i: 0
+      type: INT
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 2
     data_type: 1
@@ -93,5 +98,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

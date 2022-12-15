@@ -13,6 +13,7 @@ void ReplayTransformations::handle(Expr* e) {
   switch (e->getExprType().value()) {
     case (ExprType::Split):
     case (ExprType::Merge):
+    case (ExprType::Swizzle2D):
       break;
     default:
       TORCH_INTERNAL_ASSERT(
@@ -45,7 +46,8 @@ void ReplayTransformations::handle(Split* s) {
       "Transform traversal failed, modified a node but it was not a leaf node.");
 
   // Replay the split onto mapped
-  auto outs = IterDomain::split(mapped, s->factor(), s->innerSplit());
+  auto outs = IterDomain::split(
+      mapped, s->factor(), s->innerSplit(), s->startOffset(), s->stopOffset());
   // Remove mapped from the leaf IDs
   leaf_ids_.erase(mapped);
 
@@ -129,13 +131,63 @@ void ReplayTransformations::handle(Merge* m) {
   id_map_[m->out()] = out;
 }
 
+void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
+  // Grab our input to the split node
+  auto id_in_x = swizzle_2d->inX();
+  auto id_in_y = swizzle_2d->inY();
+
+  // Make sure we have a corresponding entry in our map pointing to the ID we're
+  // going to replay the swizzle on
+  auto it_x = id_map_.find(id_in_x);
+  auto it_y = id_map_.find(id_in_y);
+
+  if (it_x == id_map_.end() || it_y == id_map_.end()) {
+    if (error_on_failure_) {
+      TORCH_INTERNAL_ASSERT(
+          false, "Transform traversal failed, dependencies not met.");
+    } else {
+      return;
+    }
+  }
+
+  auto mapped_x = (*it_x).second;
+  auto mapped_y = (*it_y).second;
+
+  // Make sure this ID is a leaf ID (meaning it has no uses we generated)
+  TORCH_INTERNAL_ASSERT(
+      leaf_ids_.find(mapped_x) != leaf_ids_.end() &&
+          leaf_ids_.find(mapped_y) != leaf_ids_.end(),
+      "Transform traversal failed, modified a node but it was not a leaf node.");
+
+  auto outs = std::make_pair(mapped_x, mapped_y);
+
+  if (replay_swizzle_) {
+    // Replay the swizzle onto mapped
+    outs = IterDomain::swizzle(swizzle_2d->swizzleType(), mapped_x, mapped_y);
+
+    // Remove mapped from the leaf IDs
+    leaf_ids_.erase(mapped_x);
+    leaf_ids_.erase(mapped_y);
+  }
+
+  // Add outputs to leaf IDs
+  leaf_ids_[outs.first] = counter++;
+  leaf_ids_[outs.second] = counter++;
+
+  // Update our ID map to include these outputs
+  id_map_[swizzle_2d->outX()] = outs.first;
+  id_map_[swizzle_2d->outY()] = outs.second;
+}
+
 ReplayTransformations::ReplayTransformations(
     const std::vector<IterDomain*>& _target_domain,
     std::unordered_map<IterDomain*, IterDomain*> _id_map,
-    bool _error_on_failure)
+    bool _error_on_failure,
+    bool replay_swizzle)
     : target_domain_(_target_domain),
       id_map_(std::move(_id_map)),
-      error_on_failure_(_error_on_failure) {
+      error_on_failure_(_error_on_failure),
+      replay_swizzle_(replay_swizzle) {
   // Make sure id_map has all the inputs needed to replay target_domain
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(target_domain_.begin(), target_domain_.end()));
@@ -172,7 +224,7 @@ void ReplayTransformations::runReplay() {
   // Switch outDomain to a vector to start the traversal
   std::vector<Val*> traversal_vals(
       target_domain_.begin(), target_domain_.end());
-  traverseFrom(traversal_vals[0]->fusion(), traversal_vals);
+  traverseTo(traversal_vals[0]->fusion(), traversal_vals);
 
   if (error_on_failure_)
     TORCH_INTERNAL_ASSERT(
@@ -219,15 +271,19 @@ BestEffortReplay::BestEffortReplay(
     const std::vector<IterDomain*>& replay_domain,
     const std::vector<IterDomain*>& target_domain,
     std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
-    std::unordered_map<IterDomain*, IterDomain*> forward_id_map)
+    std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map,
+    std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map,
+    bool skip_swizzle)
     : target2replay_id_map_(std::move(target2replay_map)),
-      forward_id_map_(std::move(forward_id_map)) {
+      replay_forward_id_map_(std::move(replay_forward_id_map)),
+      target_forward_id_map_(std::move(target_forward_id_map)),
+      skip_swizzle_(skip_swizzle) {
   for (auto entry : target2replay_id_map_) {
     leaf_ids_[entry.second] = counter++;
   }
 
   // Grab expr history of iter domains in target_domain
-  std::vector<Expr*> target_exprs = ExprSort::getExprs(
+  std::vector<Expr*> target_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(target_domain.begin(), target_domain.end()));
 
@@ -238,10 +294,21 @@ BestEffortReplay::BestEffortReplay(
   // replay_domain map.
 
   // Map replay domain's IterDomains to the Exprs they're used in
-  std::vector<Expr*> replay_exprs = ExprSort::getExprs(
+  std::vector<Expr*> replay_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
 
+  // Track which id's in replay have to be replayed to guarantee rfactor
+  // transformations. The iteration domains in the rfactor axes don't have
+  // to be used in a matching expression in target, so we want to exclude those.
+  // Only the iteration domains [root_domains, rfactor) domains have to be used
+  // in matching transformation to guarantee rfactor domain is consistent.
+  // However, if any rfactor id was used to produce the rfactor domain, we need
+  // transformations on them to match the target exactly.
+  std::unordered_set<IterDomain*> replay_rfactor_ids;
+
+  // Track which expressions iteration domains are used, they should only be
+  // used in one expression.
   std::unordered_map<IterDomain*, Expr*> replay_id2expr_map;
   for (auto replay_expr : replay_exprs) {
     for (auto id : ir_utils::filterByType<IterDomain>(replay_expr->inputs())) {
@@ -249,13 +316,40 @@ BestEffortReplay::BestEffortReplay(
           replay_id2expr_map.find(id) == replay_id2expr_map.end(),
           "Error trying to map rfactor root domain during replay.",
           " An IterDomain was found to be used in more than one expression.");
-      // Only want to forward rfactor in map
+
       replay_id2expr_map[id] = replay_expr;
     }
+
+    // Only want to forward rfactor in map
+    auto out_ids = ir_utils::filterByType<IterDomain>(replay_expr->outputs());
+    if (std::any_of(out_ids.begin(), out_ids.end(), [](IterDomain* id) {
+          return id->isRFactorProduct();
+        })) {
+      auto inp_ids = ir_utils::filterByType<IterDomain>(replay_expr->inputs());
+      replay_rfactor_ids.insert(inp_ids.begin(), inp_ids.end());
+    }
+  }
+
+  std::unordered_map<IterDomain*, Expr*> target_id2expr_map;
+  for (auto target_expr : target_exprs) {
+    for (auto id : ir_utils::filterByType<IterDomain>(target_expr->inputs())) {
+      TORCH_INTERNAL_ASSERT(
+          target_id2expr_map.insert({id, target_expr}).second,
+          "BestEffortReplay : Unexpected multi-use of id",
+          id);
+    }
+  }
+
+  if (skip_swizzle_) {
+    // Progress through all swizzle ops if we are skipping
+    //  swizzles on the mapping.
+    skipSwizzles(target_id2expr_map, replay_id2expr_map);
   }
 
   std::string err_str(
       "Error during replay, a transformation was called that conflicts with an rfactor call.");
+
+  bool any_target_expr_contains_broadcast_id = false;
 
   // Iterate through target IterDomains' history and compare with what we
   // recorded from replay_domain
@@ -270,15 +364,15 @@ BestEffortReplay::BestEffortReplay(
             target_inps_filtered.begin(),
             target_inps_filtered.end(),
             [&](IterDomain* target_inp) {
-              return this->inForwardMap(target_inp);
+              return this->inTargetForwardMap(target_inp);
             })) {
       for (auto target_inp : target_inps_filtered) {
-        if (inForwardMap(target_inp)) {
+        if (inTargetForwardMap(target_inp)) {
           auto target2replay_it = target2replay_id_map_.find(target_inp);
           if (target2replay_it != target2replay_id_map_.end()) {
             // Replace target_inp entry in target2replay_id_map_ with forwarded
             // id
-            target2replay_id_map_[getForwardedId(target_inp)] =
+            target2replay_id_map_[getTargetForwardedId(target_inp)] =
                 target2replay_it->second;
             target2replay_id_map_.erase(target_inp);
           }
@@ -291,6 +385,14 @@ BestEffortReplay::BestEffortReplay(
     std::vector<IterDomain*> target_id_inps(
         target_inps_filtered.begin(), target_inps_filtered.end());
 
+    bool target_expr_contains_broadcast_id = std::any_of(
+        target_inps_filtered.begin(),
+        target_inps_filtered.end(),
+        [](IterDomain* id) { return id->isBroadcast(); });
+    any_target_expr_contains_broadcast_id =
+        any_target_expr_contains_broadcast_id ||
+        target_expr_contains_broadcast_id;
+
     std::vector<IterDomain*> replay_inps =
         std::vector<IterDomain*>(target_id_inps.size(), nullptr);
 
@@ -302,16 +404,20 @@ BestEffortReplay::BestEffortReplay(
       // checking).
       auto it = target2replay_id_map_.find(target_id_inps[t_i]);
       if (it != target2replay_id_map_.end()) {
-        replay_inps[t_i] = getForwardedId(it->second);
+        replay_inps[t_i] = getReplayForwardedId(it->second);
       } else {
         missing_replay_input = true;
       }
     }
 
     // Check if any of the associated replay id's are part of an rfactor domain
-    bool replay_has_rfactor_inp =
-        std::any_of(replay_inps.begin(), replay_inps.end(), [](IterDomain* id) {
-          return id == nullptr ? false : id->isRFactorProduct();
+    bool replay_has_rfactor_inp = std::any_of(
+        replay_inps.begin(),
+        replay_inps.end(),
+        [&replay_rfactor_ids](IterDomain* id) {
+          return id == nullptr ? false
+                               : id->isRFactorProduct() &&
+                  (replay_rfactor_ids.find(id) != replay_rfactor_ids.end());
         });
 
     // If some replay id inputs are part of rfactor, make sure all target
@@ -327,12 +433,20 @@ BestEffortReplay::BestEffortReplay(
               return replay_id2expr_map.find(id) == replay_id2expr_map.end();
             }
           });
-      TORCH_INTERNAL_ASSERT(no_missing_exprs, err_str);
+      // View operation creates a TensorView with rfactor. After view, broadcast
+      // operation adds iterDomains for any size-1 dimensions. Therefore, the
+      // target domain (broadcast) may contain broadcast ids that are not
+      // present in the replay domain (view). In this case, we skip any target
+      // expressions that contain broadcast ids.
+      TORCH_INTERNAL_ASSERT(
+          no_missing_exprs || any_target_expr_contains_broadcast_id, err_str);
     }
 
     // If any inputs are missing, continue as this expr doesn't match.
     if (missing_replay_input) {
-      TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
+      TORCH_INTERNAL_ASSERT(
+          !replay_has_rfactor_inp || any_target_expr_contains_broadcast_id,
+          err_str);
       continue;
     }
 
@@ -398,14 +512,27 @@ BestEffortReplay::BestEffortReplay(
       auto r_split = replay_expr->as<Split>();
       auto t_split = target_expr->as<Split>();
       if (!r_split->factor()->sameAs(t_split->factor()) ||
-          r_split->innerSplit() != t_split->innerSplit()) {
+          r_split->innerSplit() != t_split->innerSplit() ||
+          !r_split->startOffset()->sameAs(t_split->startOffset()) ||
+          !r_split->stopOffset()->sameAs(t_split->stopOffset())) {
+        TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
+        continue;
+      }
+    }
+
+    // Need to match swizzle type and parameters if
+    //  not skipping swizzles in this mapping pass.
+    if (!skip_swizzle_ && replay_expr->etype() == ExprType::Swizzle2D) {
+      auto r_swizzle_2d = replay_expr->as<Swizzle2D>();
+      auto t_swizzle_2d = target_expr->as<Swizzle2D>();
+      if (!(r_swizzle_2d->swizzleType() == t_swizzle_2d->swizzleType())) {
         TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
         continue;
       }
     }
 
     // Take replay expr inputs out of map:
-    for (size_t t_i = 0; t_i < target_id_inps.size(); t_i++) {
+    for (const auto t_i : c10::irange(target_id_inps.size())) {
       auto t_inp = target_id_inps[t_i];
       auto r_orig_inp = target2replay_id_map_.at(t_inp);
       auto r_maybe_forwarded_inp = replay_inps[t_i];
@@ -431,6 +558,12 @@ BestEffortReplay::BestEffortReplay(
             r_out->as<IterDomain>();
         leaf_ids_[r_out->as<IterDomain>()] = counter++;
       }
+    }
+
+    if (skip_swizzle_) {
+      // Progress through all swizzle ops if we are skipping
+      //  swizzles on the mapping.
+      skipSwizzles(target_id2expr_map, replay_id2expr_map);
     }
   }
 }
@@ -533,7 +666,7 @@ struct ConsumerForwardingInfo {
     auto consumer_bcast_ids_not_in_producer =
         consumer_bcast_roots_not_in_producer;
 
-    std::vector<Expr*> consumer_history = ExprSort::getExprs(
+    std::vector<Expr*> consumer_history = StmtSort::getExprs(
         FusionGuard::getCurFusion(),
         std::vector<Val*>(
             consumer->domain()->domain().begin(),
@@ -587,7 +720,175 @@ struct ConsumerForwardingInfo {
   }
 };
 
+// Maps that track information relevant to best effort replay about
+// trivial-reduction axes in producer
+//
+// For example if we have producer: T0[i0, r1, r2, i3] and consumer:
+// T1[i0, i3]
+//
+// If producer transformations are:
+// -> T[i0, r1, r2, i3]
+// -> T[i0*r1, r2, i3]
+// -> T[i0*r1*r2, i3]
+//
+// forwarding_map would forward i0->i0*r1 and i0*r1->i0*r1*r2
+// compliment_map would have the i0->r1 and i0*r1->r2
+//
+// These two maps are used similarly as ConsumerForwardingInfo. See
+// its comments as well.
+struct ProducerForwardingInfo {
+ public:
+  // Map IterDomain* axes that can safely be forwarded to their output.
+  std::unordered_map<IterDomain*, IterDomain*> forwarding_map;
+
+  // Given a forward id map id_input -> id_forwarded
+  // Track the other inputs in the expr that id_input is an input to. These will
+  // be used to adjust the replay's leaf tracking. Don't need to track one to
+  // many as currently transformations on IterDomains can only have maximum 2
+  // inputs, but maybe in the future we'll have more.
+  std::unordered_map<IterDomain*, std::vector<IterDomain*>> compliment_map;
+
+  ProducerForwardingInfo(const TensorView* producer) {
+    std::vector<Expr*> producer_history = StmtSort::getExprs(
+        FusionGuard::getCurFusion(),
+        std::vector<Val*>(
+            producer->domain()->domain().begin(),
+            producer->domain()->domain().end()));
+
+    for (auto merge : ir_utils::filterByType<Merge>(producer_history)) {
+      auto inner = merge->inner();
+      auto outer = merge->outer();
+      if ((inner->isTrivialReduction() && !outer->isReduction()) ||
+          (outer->isTrivialReduction() && !inner->isReduction())) {
+        auto compliment_id = inner->isTrivialReduction() ? inner : outer;
+        auto forwarded_id = inner->isTrivialReduction() ? outer : inner;
+        forwarding_map.emplace(std::make_pair(forwarded_id, merge->out()));
+        compliment_map.emplace(std::make_pair(
+            forwarded_id, std::vector<IterDomain*>{compliment_id}));
+      }
+    }
+  }
+};
+
+// Trace chain of swizzles until reaching
+//  an IterDomain that's either a leaf or
+//  not a producer of any swizzle.
+IterDomain* getSwizzleFinalOutput(
+    IterDomain* id,
+    const std::unordered_map<IterDomain*, Expr*>& id2expr) {
+  bool is_swizzle_input = true;
+
+  // Note: currently not supporting swizzling consumer of another
+  //  swizzle id, so this should terminate in 1 iter, but eventually
+  //  will try to support stacked swizzles so keeping this pass
+  //  generic.
+  while (is_swizzle_input) {
+    auto expr_it = id2expr.find(id);
+
+    // This means id is a leaf that doesn't
+    //  have any consumers. Stop iteration in this case.
+    if (expr_it == id2expr.end()) {
+      is_swizzle_input = false;
+      break;
+    }
+
+    if (expr_it->second->etype() == ExprType::Swizzle2D) {
+      // In the case of 2D swizzle ops, just forward
+      //  inX to outX and inY to outY.
+      auto expr = expr_it->second->as<Swizzle2D>();
+      if (id == expr->inX()) {
+        id = expr->outX();
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            id == expr->inY(),
+            "unknown input to swizzle op",
+            id->toString(),
+            expr->toString());
+        id = expr->outY();
+      }
+    } else {
+      // Probably unreachable but if the expression
+      //  is unknown type assume it is not a swizzle op.
+      is_swizzle_input = false;
+    }
+  }
+
+  return id;
+}
+
+bool isSwizzleInput(
+    IterDomain* input_id,
+    const std::unordered_map<IterDomain*, Expr*>& id2expr) {
+  auto user_expr_it = id2expr.find(input_id);
+
+  if (user_expr_it == id2expr.end()) {
+    return false;
+  }
+
+  return user_expr_it->second->etype() == ExprType::Swizzle2D;
+}
+
 } // namespace
+
+void BestEffortReplay::addComplimentLeafIDs(
+    const std::unordered_map<IterDomain*, IterDomain*>& forwarding_map,
+    const std::unordered_map<IterDomain*, std::vector<IterDomain*>>&
+        compliment_map) {
+  // ID's could go through more than one forward iteration in the map before it
+  // terminates. Grab every id between the forwarded id, and what it was
+  // forwarded to
+  std::function<void(IterDomain*, std::vector<IterDomain*>&)>
+      collectForwardedIds =
+          [&forwarding_map, &collectForwardedIds](
+              IterDomain* forward_id,
+              std::vector<IterDomain*>& forwarded_ids) -> void {
+    if (forwarding_map.find(forward_id) != forwarding_map.end()) {
+      forwarded_ids.emplace_back(forward_id);
+      collectForwardedIds(forwarding_map.at(forward_id), forwarded_ids);
+    }
+  };
+
+  std::vector<IterDomain*> expanded_forwarded_ids;
+  for (auto forwarded_id : forwarded_ids_) {
+    collectForwardedIds(forwarded_id, expanded_forwarded_ids);
+  }
+
+  // Grab all compliments of forwarded ids.
+  std::vector<IterDomain*> compliments;
+  for (auto forwarded_id : expanded_forwarded_ids) {
+    auto compliment_map_it = compliment_map.find(forwarded_id);
+    TORCH_INTERNAL_ASSERT(
+        compliment_map_it != compliment_map.end(),
+        "Issue tracking forwarded broadcast merges in best effort replay.");
+    compliments.insert(
+        compliments.end(),
+        compliment_map_it->second.begin(),
+        compliment_map_it->second.end());
+  }
+
+  // Grab all exprs used to make the forwarded compliments
+  auto compliment_exprs = StmtSort::getExprs(
+      FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
+
+  // Figure out if there are any leaves in compliment_exprs that aren't
+  // the forwarded id
+  std::unordered_map<IterDomain*, size_t> leaf_ids;
+
+  for (auto expr : compliment_exprs) {
+    for (auto inp : ir_utils::filterByType<IterDomain>(expr->inputs())) {
+      leaf_ids.erase(inp);
+    }
+    for (auto out : ir_utils::filterByType<IterDomain>(expr->outputs())) {
+      // If we used the comliment for forwarded don't add to leaf nodes.
+      if (std::find(compliments.begin(), compliments.end(), out) ==
+          compliments.end()) {
+        leaf_ids.emplace(std::make_pair(out, counter++));
+      }
+    }
+  }
+
+  leaf_ids_.insert(leaf_ids.begin(), leaf_ids.end());
+}
 
 BestEffortReplay BestEffortReplay::replayCasP(
     const TensorView* consumer,
@@ -633,72 +934,18 @@ BestEffortReplay BestEffortReplay::replayCasP(
   // See FusionAdvancedComputeAt7 for an example of the forwarding logic
   ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
 
+  ProducerForwardingInfo producer_forwarding_info(producer);
+
   auto consumer_replay = BestEffortReplay(
       consumer->domain()->domain(),
       producer_CA_ids,
       p2c_root_map,
-      consumer_forwarding_info.forwarding_map);
+      consumer_forwarding_info.forwarding_map,
+      producer_forwarding_info.forwarding_map);
 
-  // Need to adjust leaf map based on forwarding before returning.
-
-  // ID's could go through more than one forward iteration in the map before it
-  // terminates. Grab every id between the forwarded id, and what it was
-  // forwarded to
-  std::function<void(IterDomain*, std::vector<IterDomain*>&)>
-      collectForwardedIds =
-          [&consumer_forwarding_info, &collectForwardedIds](
-              IterDomain* forward_id,
-              std::vector<IterDomain*>& forwarded_ids) -> void {
-    if (consumer_forwarding_info.forwarding_map.find(forward_id) !=
-        consumer_forwarding_info.forwarding_map.end()) {
-      forwarded_ids.emplace_back(forward_id);
-      collectForwardedIds(
-          consumer_forwarding_info.forwarding_map.at(forward_id),
-          forwarded_ids);
-    }
-  };
-
-  std::vector<IterDomain*> expanded_forwarded_ids;
-  for (auto forwarded_id : consumer_replay.forwarded_ids_) {
-    collectForwardedIds(forwarded_id, expanded_forwarded_ids);
-  }
-
-  // Grab all compliments of forwarded ids.
-  std::vector<IterDomain*> compliments;
-  for (auto forwarded_id : expanded_forwarded_ids) {
-    auto compliment_map_it =
-        consumer_forwarding_info.compliment_map.find(forwarded_id);
-    TORCH_INTERNAL_ASSERT(
-        compliment_map_it != consumer_forwarding_info.compliment_map.end(),
-        "Issue tracking forwarded broadcast merges in best effort replay consumer as producer.");
-    compliments.insert(
-        compliments.end(),
-        compliment_map_it->second.begin(),
-        compliment_map_it->second.end());
-  }
-
-  // Grab all exprs used to make the forwarded compliments
-  auto compliment_exprs = ExprSort::getExprs(
-      FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
-
-  // Figure out if there are any leaves in compliment_exprs that aren't
-  // the forwarded id
-  std::unordered_map<IterDomain*, size_t> leaf_ids;
-
-  for (auto expr : compliment_exprs) {
-    for (auto inp : ir_utils::filterByType<IterDomain>(expr->inputs())) {
-      leaf_ids.erase(inp);
-    }
-    for (auto out : ir_utils::filterByType<IterDomain>(expr->outputs())) {
-      // If we used the comliment for forwarded don't add to leaf nodes.
-      if (std::find(compliments.begin(), compliments.end(), out) ==
-          compliments.end()) {
-        leaf_ids.emplace(std::make_pair(out, consumer_replay.counter++));
-      }
-    }
-  }
-
-  consumer_replay.leaf_ids_.insert(leaf_ids.begin(), leaf_ids.end());
+  consumer_replay.addComplimentLeafIDs(
+      consumer_forwarding_info.forwarding_map,
+      consumer_forwarding_info.compliment_map);
 
   return consumer_replay;
 }
@@ -738,14 +985,70 @@ BestEffortReplay BestEffortReplay::replayPasC(
 
   ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
 
+  ProducerForwardingInfo producer_forwarding_info(producer);
+
   // Instead of replaying from the root, lets try to play forward the history
   // of producer if they match ops on consumer. Enforce if we modify an
   // rfactor axis that those ops must match.
-  return BestEffortReplay(
+  auto producer_replay = BestEffortReplay(
       producer->domain()->domain(),
       consumer_CA_ids,
       c2p_root_map,
+      producer_forwarding_info.forwarding_map,
       consumer_forwarding_info.forwarding_map);
+
+  producer_replay.addComplimentLeafIDs(
+      producer_forwarding_info.forwarding_map,
+      producer_forwarding_info.compliment_map);
+
+  return producer_replay;
+}
+
+void BestEffortReplay::skipSwizzles(
+    const std::unordered_map<IterDomain*, Expr*>& target_id2expr,
+    const std::unordered_map<IterDomain*, Expr*>& replay_id2expr) {
+  // Update target2replay map
+  bool updated = true;
+
+  while (updated) {
+    updated = false;
+    for (auto it : target2replay_id_map_) {
+      if (isSwizzleInput(it.first, target_id2expr) ||
+          isSwizzleInput(it.second, replay_id2expr)) {
+        updated = true;
+        auto new_target = getSwizzleFinalOutput(it.first, target_id2expr);
+        auto new_replay = getSwizzleFinalOutput(it.second, replay_id2expr);
+
+        // new_target and new_replay will now be the final output
+        //  skipping all swizzles in between. We'd need to
+        //  update the mapping and leaf ids to the final outputs.
+        target2replay_id_map_.erase(it.first);
+        TORCH_INTERNAL_ASSERT(
+            target2replay_id_map_.insert(std::make_pair(new_target, new_replay))
+                .second,
+            "Unexpected replay leaf");
+        // Progress the leaf ids if the replay is updated
+        if (it.second != new_replay &&
+            leaf_ids_.find(it.second) != leaf_ids_.end()) {
+          leaf_ids_.erase(it.second);
+          leaf_ids_[new_replay] = counter++;
+        }
+        break;
+      }
+    }
+  }
+}
+
+DisjointSets<IterDomain*> BestEffortReplay::getDisjointSets() {
+  DisjointSets<IterDomain*> result;
+  const std::unordered_map<IterDomain*, IterDomain*>* maps[3] = {
+      &target2replay_id_map_, &replay_forward_id_map_, &target_forward_id_map_};
+  for (auto map : maps) {
+    for (auto entry : *map) {
+      result.mapEntries(entry.first, entry.second);
+    }
+  }
+  return result;
 }
 
 } // namespace cuda

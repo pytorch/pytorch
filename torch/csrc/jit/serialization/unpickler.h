@@ -3,7 +3,8 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {
@@ -22,7 +23,9 @@ class DeserializationStorageContext;
 // deleted at some point, the Pickler doesn't produce it and it's only around to
 // support models saved before 1.1
 class TORCH_API Unpickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+
+  using TypeParserT = c10::TypePtr (*)(const std::string&);
 
  public:
   // tensors inside the pickle are references to the tensor_table.
@@ -34,11 +37,13 @@ class TORCH_API Unpickler {
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
-      c10::ArrayRef<at::Tensor> tensor_table)
+      c10::ArrayRef<at::Tensor> tensor_table,
+      TypeParserT type_parser = defaultTypeParser)
       : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
         use_storage_device_(false),
+        type_parser_(type_parser),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
@@ -51,6 +56,7 @@ class TORCH_API Unpickler {
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
       bool use_storage_device = false,
+      TypeParserT type_parser = defaultTypeParser,
       std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
         tensor_table_(),
@@ -60,6 +66,7 @@ class TORCH_API Unpickler {
         // NOLINTNEXTLINE(performance-move-const-arg)
         device_(std::move(device)),
         use_storage_device_(use_storage_device),
+        type_parser_(type_parser),
         storage_context_(std::move(storage_context)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
@@ -81,6 +88,11 @@ class TORCH_API Unpickler {
   // the version manually.
   void set_version(uint64_t version_number) {
     version_ = version_number;
+  }
+
+  static c10::TypePtr defaultTypeParser(const std::string& str) {
+    ScriptTypeParser parser;
+    return parser.parseType(str);
   }
 
  private:
@@ -108,6 +120,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
@@ -156,12 +169,17 @@ class TORCH_API Unpickler {
   // value of this flag is false.
   const bool use_storage_device_;
 
+  TypeParserT type_parser_{defaultTypeParser};
+
   // Used for torch.package to enable sharing of storages across
   // ScriptModules and eager modules
   std::shared_ptr<DeserializationStorageContext> storage_context_;
 
   // See [type tag serialization]
   uint64_t version_;
+
+  // See [NOTE] skip_next_read_global
+  uint8_t skip_next_read_global = 0;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);

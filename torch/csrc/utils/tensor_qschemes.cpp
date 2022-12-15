@@ -1,13 +1,13 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 
+#include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/QScheme.h>
-#include <c10/core/QScheme.h>
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
-
 
 namespace torch {
 namespace utils {
@@ -21,7 +21,7 @@ void initializeQSchemes() {
     throw python_error();
   }
 
-  for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+  for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
     auto qscheme = static_cast<at::QScheme>(i);
     PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));
     thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;

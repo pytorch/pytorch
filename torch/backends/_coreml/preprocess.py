@@ -1,12 +1,12 @@
 import hashlib
 import json
-from dataclasses import dataclass, astuple, field
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple
 
 import coremltools as ct  # type: ignore[import]
 import torch
 from coremltools.converters.mil.input_types import TensorType  # type: ignore[import]
 from coremltools.converters.mil.mil import types  # type: ignore[import]
+from coremltools.models.neural_network import quantization_utils  # type: ignore[import]
 
 CT_METADATA_VERSION = "com.github.apple.coremltools.version"
 CT_METADATA_SOURCE = "com.github.apple.coremltools.source"
@@ -34,87 +34,78 @@ class CoreMLComputeUnit:
     CPUAndGPU = "cpuAndGPU"
     ALL = "all"
 
-
-@dataclass
-class _TensorSpec:
-    shape: List[int] = field(default_factory=List[int])
-    dtype: int = ScalarType.Float
-
-
-def TensorSpec(*args, **kwargs):
-    """
-    TensorSpec specifies the tensor information. The default dtype is float32
-    Example:
-    ts = TensorSpec(
-        shape = [1, 3, 224, 224],
-        dtype = ScalarType.Float
-    )
-    """
-    return astuple(_TensorSpec(*args, **kwargs))
+class CoreMLQuantizationMode:
+    LINEAR = "linear"
+    LINEAR_SYMMETRIC = "linear_symmetric"
+    NONE = "none"
 
 
-@dataclass
-class _CompileSpec:
-    inputs: Tuple[_TensorSpec] = ()  # type: ignore[assignment]
-    outputs: Tuple[_TensorSpec] = ()  # type: ignore[assignment]
-    backend: str = CoreMLComputeUnit.CPU
-    allow_low_precision: bool = True
+
+def TensorSpec(shape, dtype=ScalarType.Float):
+    return (shape, dtype)
 
 
-def CompileSpec(*args, **kwargs):
-    """
-    CompileSpec specifies the model information.
-    Example:
-    cs = CompileSpec(
-            inputs=(
-                TensorSpec(
-                    shape=[1, 3, 224, 224],
-                ),
-            ),
-            outputs=(
-                TensorSpec(
-                    shape=[1, 1000],
-                ),
-            ),
-            backend=CoreMLComputeUnit.CPU,
-            allow_low_precision=True,
-    ),
-    """
-    return astuple(_CompileSpec(*args, **kwargs))
+def CompileSpec(inputs,
+                outputs,
+                backend=CoreMLComputeUnit.CPU,
+                allow_low_precision=True,
+                quantization_mode=CoreMLQuantizationMode.NONE,
+                mlmodel_export_path=None):
+    return (inputs, outputs, backend, allow_low_precision, quantization_mode, mlmodel_export_path)
 
 
-def _convert_to_mil_type(spec: _TensorSpec, name: str):
-    ml_type = TensorType(shape=spec.shape, dtype=torch_to_mil_types[spec.dtype])
+def _check_enumerated_shape(shape):
+    for s in shape:
+        if not isinstance(s, (list, tuple)):
+            return False
+    return True
+
+
+def _convert_to_mil_type(shape, dtype, name: str):
+    mil_shape = shape
+    if _check_enumerated_shape(shape):
+        mil_shape = ct.EnumeratedShapes(shape)
+    ml_type = TensorType(shape=mil_shape, dtype=torch_to_mil_types[dtype])
     ml_type.name = name
     return ml_type
 
 
 def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tuple]):
     spec = compile_spec["forward"]
-    forward_spec = _CompileSpec(*spec)
+    input_specs, output_specs, backend, allow_low_precision, quantization_mode, mlmodel_export_path = spec
     mil_inputs = []
     inputs = []
-    for index, input_spec in enumerate(forward_spec.inputs):
-        input_spec = _TensorSpec(*input_spec)  # type: ignore[misc]
+    for index, input in enumerate(input_specs):
+        shape, dtype = input
         name = "input_" + str(index)
-        inputs.append([name, str(input_spec.dtype), str(input_spec.shape)])
-        ml_type = _convert_to_mil_type(input_spec, name)
+        inputs.append([name, str(dtype), str(shape)])
+        ml_type = _convert_to_mil_type(shape, dtype, name)
         mil_inputs.append(ml_type)
     model = torch.jit.RecursiveScriptModule._construct(script_module, lambda x: None)
     mlmodel = ct.convert(model, inputs=mil_inputs)
+
+    if(quantization_mode != CoreMLQuantizationMode.NONE):
+        quant_model_spec = quantization_utils.quantize_weights(mlmodel, nbits=8, quantization_mode=quantization_mode)
+        mlmodel = ct.models.MLModel(quant_model_spec)
+
     spec = mlmodel.get_spec()
-    output_specs = forward_spec.outputs
     assert len(spec.description.output) == len(output_specs)  # type: ignore[attr-defined]
     outputs = []
-    for index, output_spec in enumerate(output_specs):
-        output_spec = _TensorSpec(*output_spec)  # type: ignore[misc]
+    for index, output in enumerate(output_specs):
+        shape, dtype = output
         name = spec.description.output[index].name  # type: ignore[attr-defined]
-        outputs.append([name, str(output_spec.dtype), str(output_spec.shape)])
+        outputs.append([name, str(dtype), str(shape)])
     mlmodel = ct.models.model.MLModel(spec)
+    print(mlmodel)
+
+    if mlmodel_export_path is not None:
+        print(f"Saving CoreML .mlmodel file to {mlmodel_export_path}")
+        mlmodel.save(mlmodel_export_path)
+
     config = {
         "spec_ver": str(spec.specificationVersion),  # type: ignore[attr-defined]
-        "backend": forward_spec.backend,
-        "allow_low_precision": str(forward_spec.allow_low_precision),
+        "backend": backend,
+        "allow_low_precision": str(allow_low_precision),
     }
     metadata = {
         "coremltool_ver": mlmodel.user_defined_metadata[CT_METADATA_VERSION],

@@ -3,10 +3,10 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_NUMBA, IS_WINDOWS, TEST_WITH_ROCM
 import inspect
 import contextlib
-from setuptools import distutils
+from distutils.version import LooseVersion
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -16,7 +16,7 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 
-CUDA11OrLater = torch.version.cuda and distutils.version.LooseVersion(torch.version.cuda) >= "11.0"
+CUDA11OrLater = torch.version.cuda and LooseVersion(torch.version.cuda) >= "11.0"
 CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
 SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
@@ -76,7 +76,7 @@ def tf32_off():
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_precison = self.precision
+    old_precision = self.precision
     try:
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
@@ -84,7 +84,7 @@ def tf32_on(self, tf32_precision=1e-5):
             yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precison
+        self.precision = old_precision
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -160,12 +160,25 @@ def with_tf32_off(f):
 
     return wrapped
 
+def _get_magma_version():
+    if 'Magma' not in torch.__config__.show():
+        return (0, 0)
+    position = torch.__config__.show().find('Magma ')
+    version_str = torch.__config__.show()[position + len('Magma '):].split('\n')[0]
+    return tuple(int(x) for x in version_str.split("."))
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:
         return (0, 0)
     cuda_version = str(torch.version.cuda)
     return tuple(int(x) for x in cuda_version.split("."))
+
+def _get_torch_rocm_version():
+    if not TEST_WITH_ROCM:
+        return (0, 0)
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    return tuple(int(x) for x in rocm_version.split("."))
 
 def _check_cusparse_generic_available():
     version = _get_torch_cuda_version()
@@ -174,4 +187,15 @@ def _check_cusparse_generic_available():
         min_supported_version = (11, 0)
     return version >= min_supported_version
 
+def _check_hipsparse_generic_available():
+    if not TEST_WITH_ROCM:
+        return False
+
+    rocm_version = str(torch.version.hip)
+    rocm_version = rocm_version.split("-")[0]    # ignore git sha
+    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+
+
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
+TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()

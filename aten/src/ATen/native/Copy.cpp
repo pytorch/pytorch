@@ -1,18 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
-#include <torch/library.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_copy_from.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/expand_copy.h>
+#endif
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -29,6 +40,8 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
       self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
       self.numel() >= MIN_SZ;
 }
 
@@ -49,7 +62,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   // The code below is implemented with the assumption that sizes are equal
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kHalf, kBool, kBFloat16, kComplexHalf, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -65,16 +78,16 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         int nc = std::min(NC - C, BLOCK_SZ);
 
         // 1. copy columns from src to buf
-        for (int c = 0; c < nc; c++) {
+        for (const auto c : c10::irange(nc)) {
           memcpy(bp + c * BLOCK_SZ, spo + c * NR, nr * sizeof(scalar_t));
         }
 
         // 2. transpose buf in place
         int rc_max = std::max(nr, nc);
         int rc_min = std::min(nr, nc);
-        for (int r = 0; r < rc_max; r++) {
+        for (const auto r : c10::irange(rc_max)) {
           int end = std::min(r, rc_min);
-          for (int c = 0; c < end; c++) {
+          for (const auto c : c10::irange(end)) {
             scalar_t tmp = bp[r + BLOCK_SZ * c];
             bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
             bp[r * BLOCK_SZ + c] = tmp;
@@ -82,7 +95,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
         }
 
         // 3. copy rows from buf to dst
-        for (int r = 0; r < nr; r++) {
+        for (const auto r : c10::irange(nr)) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
       }
@@ -94,7 +107,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS;
 }
 
 } // namespace
@@ -111,12 +124,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // 1. Memory Format for source and destination tensors is contiguous.
   // 2. Device for both the source and destination tensor is CPU.
   // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+  // This checks that self.sizes() == src.sizes() because this code path doesn't
+  // support broadcasting. This also guards against out of bounds memory access
+  // when copying, see fbgemm::Float16ToFloat_ref.
+  // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
          (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
         ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+         (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
+        (self.sizes() == src.sizes())) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -181,7 +199,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (self.is_quantized() && !src.is_quantized()) {
-    return quantized_copy_from_float_cpu_(self, src);
+    return quantized_copy_from_float_(self, src);
   }
 
   if (self.is_quantized() && src.is_quantized()) {
@@ -207,6 +225,19 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::metal::metal_copy_(self, src);
   }
 
+  // Exit early if self and src are views of the same data
+  const bool is_same_data = (
+      self.is_alias_of(src) &&
+      self.storage_offset() == src.storage_offset() &&
+      self.strides().equals(src.strides()) &&
+      self.sizes().equals(src.sizes()) &&
+      self.scalar_type() == src.scalar_type()
+    );
+  if (is_same_data) {
+    return self;
+  }
+
+
   auto iter = TensorIteratorConfig()
     .add_output(self)
     .add_input(src)
@@ -224,6 +255,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kCUDA;
   } else if (iter.device_type(1) == kHIP) {
     device_type = kHIP;
+  } else if (iter.device_type(1) == kMPS) {
+    device_type = kMPS;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor
@@ -232,6 +265,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+#ifdef USE_MPS
+  if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
+    return at::native::mps::mps_copy_(self, src, non_blocking);
+  }
+#endif
+
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
@@ -239,17 +278,58 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   return self;
 }
 
+// NB: cribbed from https://github.com/pytorch/pytorch/pull/88198
+at::Tensor clone_preserve_strides(const at::Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.has_storage());
+  // In cases where the input tensor has internal memory overlap, we cannot actually
+  // preserve the strides/storage_offset of the input tensor, because
+  // *_scatter ops will try to copy_() into the cloned tensor.
+  // However, this should **never** show up in functionalized user code;
+  // most aten ops that try to mutate a tensor with internal memory overlap would error anyway.
+  //
+  // The one place that this does come up is in autograd - if there's a select_scatter
+  // in the forward, then autograd will generate one for the backward.
+  // If the input to the select_scatter is grad_output, then this could be an expanded tensor
+  // with internal overlap.
+  //if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
+  //  return self.clone();
+  //}
+  auto dtype_size = self.dtype().itemsize();
+  auto nbytes = self.storage().sym_nbytes();
+  TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
+  auto numel = nbytes / dtype_size;
+  auto self_full_size = self.as_strided_symint({numel}, {1}, 0);
+  auto clone = self_full_size.clone();
+  auto out = clone.as_strided_symint(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
+  return out;
+}
+
+Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
+  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
+  // (1) It isn't exposed to the frontend (no python bindings)
+  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+  auto r = clone_preserve_strides(self);
+  r.copy_(src, non_blocking);
+  return r;
+}
+
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
+    if (self._is_zerotensor()) {
+     TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
+    }
+    if (src._is_zerotensor()) {
+      return self.zero_();
+    }
     copy_impl(self, src, non_blocking);
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
-void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   // Called when we are copying into an overlapping index `dst`, but we don't
   // care which writer wins. Hacky but it works. This is only used by
   // CUDA_tensor_apply2 in case that there are write overlaps.

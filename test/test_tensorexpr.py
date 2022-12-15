@@ -1,41 +1,28 @@
+# Owner(s): ["NNC"]
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 import unittest
+import itertools
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
+LLVM_ENABLED = torch._C._llvm_enabled()
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
-
+        super(BaseTestClass, self).setUp()
+        self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        self.dtypes = [torch.float32, torch.bfloat16] if LLVM_ENABLED else [torch.float32]
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        self.tensorexpr_options.restore()
+        super(BaseTestClass, self).tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -669,34 +656,61 @@ class TestTensorExprFuser(BaseTestClass):
         def test_type_as(x, y):
             return x.type_as(torch.add(x, y))
 
-        fns = {
-            test_atan2,
+        cmp_fns = {
             test_gt,
             test_ge,
             test_lt,
             test_le,
+            test_ne,
+            test_eq
+        }
+
+        non_cmp_fns = {
+            test_atan2,
             test_lerp,
             test_mul,
-            test_ne,
             test_div,
-            test_eq,
             test_fmod,
             test_sub,
             test_remainder,
             test_pow,
             test_type_as,
         }
-        for torch_fn in fns:
-            for dev in self.devices:
-                rand_a = torch.rand(1024, device=dev)
-                rand_b = torch.rand(1024, device=dev)
-                in1 = 20 * torch.rand(1024, device=dev)
-                in2 = 20 * torch.rand(1024, device=dev)
-                traced = torch.jit.trace(torch_fn, (in1, in2))
-                x = warmup_and_run_forward(traced, rand_a, rand_b)
-                self.assertLastGraphAllFused()
+
+        all_test_fns = cmp_fns.union(non_cmp_fns)
+        fn_dev_dtype = itertools.product(all_test_fns, self.devices, self.dtypes)
+        for torch_fn, dev, data_type in fn_dev_dtype:
+            if torch_fn is test_lerp and data_type is torch.bfloat16:
+                continue
+            rand_a = torch.rand(1024, dtype=data_type, device=dev)
+            rand_b = torch.rand(1024, dtype=data_type, device=dev)
+            in1 = 20 * torch.rand(1024, dtype=data_type, device=dev)
+            in2 = 20 * torch.rand(1024, dtype=data_type, device=dev)
+            traced = torch.jit.trace(torch_fn, (in1, in2))
+            x = warmup_and_run_forward(traced, rand_a, rand_b)
+            self.assertLastGraphAllFused()
+
+            _atol = 2e-3
+            _rtol = 1e-5
+            if data_type is torch.bfloat16:
+                # Compared to aten logic, NNC coudl save addtional BF16/Fp32 conversion.
+                # Take d = a + b - c as an example, the aten logic is as follows at
+                # operator level:
+                #    tmp = to_bf16(to_fp32(a) + to_fp32(b))
+                #    d = to_bf16(to_fp32(tmp) + to_fp32(c))
+                # But NNC could fuse the compression and remove the redudant conversions.
+                # The final statement is as follows
+                #    d = to_bf16(to_fp32(a) + to_fp32(b) + to_fp32(c))
+                # Hence, we simulate NNC computation by feeding fp32 tensors and converting
+                # the result tensor back to bf16. The simulation could avoid the numeric
+                # deviation to simplify the result comprasion
+                y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
+                if torch_fn not in cmp_fns:
+                    y = y.bfloat16()
+                _atol = 2e-2
+            else:
                 y = torch_fn(rand_a, rand_b)
-                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=2e-3)
+            self.assertEqual(x.cpu(), y.cpu(), atol=_atol, rtol=_rtol)
 
     def test_unary_ops(self):
         def test_cast_float(x, y):
@@ -835,6 +849,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = F.threshold(torch.add(x, y), 0.5, 10)
             return c
 
+        gpu_only_fns = {
+            test_erf,
+            test_erfc
+        }
         fns = {
             test_round,
             test_sin,
@@ -857,8 +875,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_rsqrt,
             test_exp,
             test_expm1,
-            test_erf,
-            test_erfc,
             test_frac,
             test_lgamma,
             test_reciprocal,
@@ -869,33 +885,45 @@ class TestTensorExprFuser(BaseTestClass):
             test_hardtanh,
             test_sigmoid,
         }
+        fn_dev_dtype = itertools.product(gpu_only_fns.union(fns), self.devices, self.dtypes)
 
-        for torch_fn in fns:
-            for dev in self.devices:
-                # print(torch_fn, dev)
-                rand_a = torch.rand(1024, device=dev)
-                rand_b = torch.rand(1024, device=dev)
-                ins = 20 * torch.rand(1024, device=dev)
-                cc = np.empty([1024], dtype=np.float32)
-                cc.fill(np.nan)
-                nans = torch.from_numpy(cc).to(dev)
-                traced = torch.jit.trace(torch_fn, (ins, ins))
-                x = warmup_and_run_forward(traced, rand_a, rand_b)
-                self.assertLastGraphAllFused()
+        torch.manual_seed(0)
+        for torch_fn, dev, data_type in fn_dev_dtype:
+            if torch_fn == test_lgamma and dev == "cuda":
+                # lgamma_cuda does not support BF16
+                continue
+            rand_a = torch.rand(1024, dtype=data_type, device=dev)
+            rand_b = torch.rand(1024, dtype=data_type, device=dev)
+
+            ins = 20 * torch.rand(1024, dtype=data_type, device=dev)
+            cc = np.empty([1024], dtype=np.float32)
+            cc.fill(np.nan)
+            nans = torch.from_numpy(cc).to(dev)
+            traced = torch.jit.trace(torch_fn, (ins, ins))
+            x = warmup_and_run_forward(traced, rand_a, rand_b)
+            self.assertLastGraphAllFused()
+
+            _atol = 5e-3 if data_type is torch.bfloat16 else 2e-3
+            _rtol = 1e-5
+            if data_type is torch.bfloat16 and torch_fn not in gpu_only_fns:
+                y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
+                y = y.bfloat16()
+            else:
                 y = torch_fn(rand_a, rand_b)
-                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=2e-3)
-                # nans
-                # TODO: reenable. Currently all of the tests fail
-                # traced = torch.jit.trace(torch_fn, (ins, ins))
-                # x = warmup_and_run_forward(traced, rand_a, rand_b)
-                # y = torch_fn(nans, rand_b)
-                # try:
-                #     np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
-                #     print("Succeeded on dev=", dev, "function=", torch_fn)
-                # except AssertionError:
-                #     # Print extra info before exiting:
-                #     print("Failed on dev=", dev, "function=", torch_fn)
-                #     # np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
+
+            self.assertEqual(x.cpu(), y.cpu(), atol=_atol, rtol=_rtol)
+            # nans
+            # TODO: reenable. Currently all of the tests fail
+            # traced = torch.jit.trace(torch_fn, (ins, ins))
+            # x = warmup_and_run_forward(traced, rand_a, rand_b)
+            # y = torch_fn(nans, rand_b)
+            # try:
+            #     np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
+            #     print("Succeeded on dev=", dev, "function=", torch_fn)
+            # except AssertionError:
+            #     # Print extra info before exiting:
+            #     print("Failed on dev=", dev, "function=", torch_fn)
+            #     # np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
     def test_rand_like(self):
         N = 1 << 16
@@ -906,8 +934,12 @@ class TestTensorExprFuser(BaseTestClass):
         for device in self.devices:
             x = torch.rand(N, device=device)
             traced = torch.jit.trace(run_rand_like, (x, x), check_trace=False)
-            x_v = warmup_and_run_forward(traced, x, x)
-            self.assertLastGraphAllFused()
+
+            for data_type in self.dtypes:
+                _x = x.to(dtype=data_type)
+                x_v = warmup_and_run_forward(traced, _x, _x)
+                self.assertLastGraphAllFused()
+
             x_np = x.cpu().numpy()
             x1_mean = np.mean(x_np)
             x2_mean = np.mean(x_np ** 2)
@@ -926,14 +958,15 @@ class TestTensorExprFuser(BaseTestClass):
         tmax = torch.jit.trace(test_max, (torch.rand(1), torch.rand(1)))
         tmin = torch.jit.trace(test_min, (torch.rand(1), torch.rand(1)))
 
-        x = torch.tensor([np.nan])
-        y = torch.tensor([1.0])
+        for data_type in self.dtypes:
+            x = torch.tensor([np.nan]).to(dtype=data_type)
+            y = torch.tensor([1.0]).to(dtype=data_type)
 
-        assert np.isnan(warmup_and_run_forward(tmin, x, y).item())
-        assert np.isnan(warmup_and_run_forward(tmin, y, x).item())
+        assert np.isnan(warmup_and_run_forward(tmin, x, y).float().item())
+        assert np.isnan(warmup_and_run_forward(tmin, y, x).float().item())
         self.assertLastGraphAllFused()
-        assert np.isnan(warmup_and_run_forward(tmax, x, y).item())
-        assert np.isnan(warmup_and_run_forward(tmax, y, x).item())
+        assert np.isnan(warmup_and_run_forward(tmax, x, y).float().item())
+        assert np.isnan(warmup_and_run_forward(tmax, y, x).float().item())
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
@@ -951,33 +984,40 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.remainder(torch.add(x, y), x)
             return c
 
-        a = torch.rand(1024, dtype=float)
-        b = torch.rand(1024, dtype=float)
-        zeros = torch.zeros(1024, dtype=float)
-        cc = np.array(1024, dtype=float)
-        cc.fill(np.nan)
-        nans = torch.from_numpy(cc)
+        for data_type in self.dtypes:
+            a = torch.rand(1024, dtype=data_type)
+            b = torch.rand(1024, dtype=data_type)
+            zeros = torch.zeros(1024, dtype=data_type)
+            cc = np.array(1024, dtype=float)
+            cc.fill(np.nan)
+            nans = torch.from_numpy(cc).to(dtype=data_type)
 
-        # random floats
-        traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = warmup_and_run_forward(traced, a, b)
-        self.assertLastGraphAllFused()
-        y = run_remainder(a, b)
-        np.testing.assert_allclose(x.numpy(), y.numpy())
+            # random floats
+            zeros1 = torch.zeros(1024, dtype=data_type)
+            zeros2 = torch.zeros(1024, dtype=data_type)
 
-        # div by 0
-        traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = warmup_and_run_forward(traced, zeros, a)
-        self.assertLastGraphAllFused()
-        y = run_remainder(zeros, a)
-        np.testing.assert_allclose(x.numpy(), y.numpy())
+            traced = torch.jit.trace(run_remainder, (zeros1, zeros2))
+            x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+            y = run_remainder(a, b)
+            if data_type is torch.bfloat16:
+                self.assertEqual(x, y, atol=4e-3, rtol=2e-3)
+            else:
+                self.assertEqual(x, y)
 
-        # numerators and denominatos are nan
-        traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = warmup_and_run_forward(traced, nans, a)
-        self.assertLastGraphAllFused()
-        y = run_remainder(nans, a)
-        np.testing.assert_allclose(x.numpy(), y.numpy())
+            # div by 0
+            traced = torch.jit.trace(run_remainder, (zeros1, zeros2))
+            x = warmup_and_run_forward(traced, zeros, a)
+            self.assertLastGraphAllFused()
+            y = run_remainder(zeros, a)
+            self.assertEqual(x, y)
+
+            # numerators and denominatos are nan
+            traced = torch.jit.trace(run_remainder, (zeros1, zeros2))
+            x = warmup_and_run_forward(traced, nans, a)
+            self.assertLastGraphAllFused()
+            y = run_remainder(nans, a)
+            self.assertEqual(x, y)
 
     def test_multioutput(self):
         def easy(x):
@@ -1001,32 +1041,48 @@ class TestTensorExprFuser(BaseTestClass):
             aaa, bbb = torch.chunk(y, 2)
             return aaa + bbb
 
-        traced = torch.jit.trace(easy, (torch.zeros(1024, 1024)))
+        for data_type in self.dtypes:
+            trace_input = torch.zeros(1024, 1024, dtype=data_type)
+            traced = torch.jit.trace(easy, (trace_input))
 
-        a = torch.zeros(32, 32)
-        x = warmup_and_run_forward(traced, a)
-        self.assertLastGraphAllFused()
-        npr = a.numpy()
-        npr2 = npr + 1
-        npr_a, npr_b = np.array_split(npr2, 2)
-        np.testing.assert_allclose(npr_a + npr_b, x.numpy())
+            a = torch.zeros(32, 32, dtype=data_type)
+            x = warmup_and_run_forward(traced, a)
+            self.assertLastGraphAllFused()
+            npr = a.float().numpy()
+            npr2 = npr + 1
+            npr_a, npr_b = np.array_split(npr2, 2)
+            np.testing.assert_allclose(npr_a + npr_b, x.float().numpy())
 
     def test_cat(self):
         for device in self.devices:
+            _dim = 1
+
             def foo(*args):
                 args_2 = [v + i for i, v in enumerate(args)]
-                v = torch.cat(args_2, dim=1)
+                v = torch.cat(args_2, dim=_dim)
                 return v * v
 
-            M = 16
-            Ns = [128, 16, 1]
-            values = [torch.zeros(M, N, device=device) for N in Ns]
-            traced = torch.jit.trace(foo, values)
+            for data_type in self.dtypes:
+                M = 16
+                Ns = [128, 16, 1]
+                values = [torch.zeros(M, N, dtype=data_type, device=device) for N in Ns]
+                traced = torch.jit.trace(foo, values)
 
-            x = warmup_and_run_forward(traced, *values)
-            self.assertLastGraphAllFused()
-            ref = foo(*values)
-            np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+                x = warmup_and_run_forward(traced, *values)
+                self.assertLastGraphAllFused()
+                ref = foo(*values)
+                np.testing.assert_allclose(ref.cpu().float().numpy(), x.cpu().float().numpy())
+
+            # Test channels-last
+            for _cur_dim in range(4):
+                _dim = _cur_dim
+                values = [torch.randn((2, 3, 4, 5), device=device).to(memory_format=torch.channels_last) for _ in range(10)]
+                traced = torch.jit.trace(foo, values)
+
+                x = warmup_and_run_forward(traced, *values)
+                self.assertLastGraphAllFused()
+                ref = foo(*values)
+                self.assertEqual(ref, x)
 
     # This test checks that we correctly handle fusion group with just aten::cat in it.
     # Note that the test only makes sense with min_fusion_group=1, otherwise no
@@ -1134,12 +1190,12 @@ class TestTensorExprFuser(BaseTestClass):
             return torch.add(torch.add(x, y, alpha=a), z, alpha=b)
 
         for test in (test_float, test_int):
-            x, y, z = [torch.rand(4) for i in range(3)]
-            a, b = 1, 2
-            test(x, y, z, a, b)
-            r = test(x, y, z, a, b)
-            xn, yn, zn = [t.numpy() for t in (x, y, z)]
-            np.testing.assert_allclose(r.numpy(), xn + yn * a + zn * b)
+            for data_type in self.dtypes:
+                x, y, z = [torch.rand(4, dtype=data_type) for i in range(3)]
+                a, b = 1, 2
+                test(x, y, z, a, b)
+                r = test(x, y, z, a, b)
+                self.assertEqual(r, x + y * a + z * b)
 
     def test_loop(self):
         @torch.jit.script
@@ -1205,14 +1261,16 @@ class TestTensorExprFuser(BaseTestClass):
             return a + b + c + d
 
         for test in (test_softmax, test_log_softmax, test_softmax_neg_index):
-            old = torch._C._jit_set_texpr_reductions_enabled(True)
-            traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
-            inp = torch.randn(2, 3, device=device)
-            res = traced(inp, inp)
-            # Use eager mode as reference.
-            ref = test(inp, inp)
-            np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
-            torch._C._jit_set_texpr_reductions_enabled(old)
+            for data_type in self.dtypes:
+                old = torch._C._jit_set_texpr_reductions_enabled(True)
+                traced_input = torch.randn(2, 3, dtype=data_type, device=device)
+                traced = torch.jit.trace(test, (traced_input, traced_input))
+                inp = torch.randn(2, 3, dtype=data_type, device=device)
+                res = traced(inp, inp)
+                # Use eager mode as reference.
+                ref = test(inp, inp)
+                np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
+                torch._C._jit_set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
         self._test_softmax('cpu')
@@ -1266,6 +1324,17 @@ class TestTensorExprFuser(BaseTestClass):
             traced = torch.jit.trace(do_exp, (x, y, z))
             x = warmup_and_run_forward(traced, x, y, z)
             self.assertLastGraphAllFused()
+
+    def test_sin_pow(self):
+        def test(x):
+            return torch.sin(torch.pow(x, 0))
+
+        for data_type, shape in itertools.product(self.dtypes, [[3], [5], [10]]):
+            x = torch.rand(shape, dtype=data_type)
+            scripted = torch.jit.script(test)
+            out = warmup_and_run_forward(scripted, x)
+            self.assertLastGraphAllFused()
+            self.assertEqual(out, test(x))
 
     def test_transpose(self):
         @torch.jit.script
@@ -1369,35 +1438,44 @@ class TestTensorExprFuser(BaseTestClass):
         def run_where(x, y):
             return torch.where(torch.gt(x, y), x, y)
 
-        a = torch.rand(1024, dtype=float)
-        b = torch.rand(1024, dtype=float)
-        traced = torch.jit.trace(run_where, (torch.zeros(1024), torch.zeros(1024)))
-        x = warmup_and_run_forward(traced, a, b)
-        self.assertLastGraphAllFused()
-        y = run_where(a, b)
-        np.testing.assert_allclose(x.numpy(), y.numpy())
+        for data_type in self.dtypes:
+            a = torch.rand(1024, dtype=data_type)
+            b = torch.rand(1024, dtype=data_type)
+            zeros = torch.zeros(1024, dtype=data_type)
+            traced = torch.jit.trace(run_where, (zeros, zeros))
+            x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+            y = run_where(a, b)
+            np.testing.assert_allclose(x.float().numpy(), y.float().numpy())
 
     def test_multi_rand(self):
         for device in self.devices:
             def test(x):
                 y = torch.rand_like(x)
                 return (x + y) - (y - x)
-            a = torch.rand(4, device=device)
-            scripted = torch.jit.script(test)
-            out = warmup_and_run_forward(scripted, a)
-            self.assertLastGraphAllFused()
-            assert torch.allclose(out, 2 * a)
+
+            _atol = 2e-3
+            _rtol = 1e-5
+            for data_type in self.dtypes:
+                if data_type is torch.bfloat16:
+                    _atol = 2e-2
+                a = torch.rand(4, dtype=data_type, device=device)
+                scripted = torch.jit.script(test)
+                out = warmup_and_run_forward(scripted, a)
+                self.assertLastGraphAllFused()
+                assert torch.allclose(out, 2 * a, atol=_atol, rtol=_rtol)
 
     def test_mask(self):
         def test(x):
             return x.unsqueeze(1) == 0
 
         for d in self.devices:
-            x = torch.rand(4, device=d) > 0.5
-            scripted = torch.jit.script(test)
-            out = warmup_and_run_forward(scripted, x)
-            self.assertLastGraphAllFused()
-            assert torch.equal(out, test(x))
+            for data_type in self.dtypes:
+                x = torch.rand(4, dtype=data_type, device=d) > 0.5
+                scripted = torch.jit.script(test)
+                out = warmup_and_run_forward(scripted, x)
+                self.assertLastGraphAllFused()
+                assert torch.equal(out, test(x))
 
     def test_simple_add(self):
         val = torch._C._jit_get_te_generate_block_code()
@@ -1567,14 +1645,62 @@ class TestTensorExprFuser(BaseTestClass):
                 t7 = a * t6
                 return (t7, t5, t_next)
 
-            a = torch.rand(20, 20, dtype=torch.float32, device=device)
-            b = torch.rand(20 * 29, dtype=torch.float32, device=device).as_strided([20], [29])
-            c = torch.ones(20, dtype=torch.int64, device=device)
-            traced = torch.jit.trace(foo, (a, b, c))
+            for data_type in self.dtypes:
+                a = torch.rand(20, 20, dtype=data_type, device=device)
+                b = torch.rand(20 * 29, dtype=data_type, device=device).as_strided([20], [29])
+                c = torch.ones(20, dtype=torch.int64, device=device)
+                traced = torch.jit.trace(foo, (a, b, c))
+                ref = foo(a, b, c)
+                exp = traced(a, b, c)
+                exp = traced(a, b, c)
+                self.assertEqual(ref, exp)
+
+    def test_propagated_mem_layout(self):
+        def foo(a, b, c):
+            t_next = c + 1
+            t5 = t_next * b
+            t7 = a * t5
+            return t7
+
+        def foo_multi_outputs(a, b, c):
+            t_next = c + 1
+            t5 = b * t_next
+            t7 = a * t5
+            return (t7, t5, t_next)
+
+        def foo_multi_outputs_i_nhwc_o_nchw(a, b, c):
+            t_next = c + 1
+            t5 = b * t_next
+            t7 = a * t5
+            t8 = t7.to(memory_format=torch.contiguous_format)
+            return (t8, t7, t5, t_next)
+
+        def run_foo_case(foo, a, b, c):
+            traced_contiguous = torch.jit.trace(foo, (a, b, c))
             ref = foo(a, b, c)
-            exp = traced(a, b, c)
-            exp = traced(a, b, c)
+            exp = traced_contiguous(a, b, c)
+            exp = traced_contiguous(a, b, c)
             self.assertEqual(ref, exp)
+
+        mem_layouts = list(itertools.product([torch.contiguous_format, torch.channels_last], repeat=3))
+        shapes = [(2, 3, 4, 5), (2, 1, 1, 5), (1, 1, 1, 1)]
+        permutes = [(0, 3, 2, 1), (0, 3, 1, 2)]
+        funcs = [foo, foo_multi_outputs, foo_multi_outputs_i_nhwc_o_nchw]
+        configs = itertools.product(funcs, shapes, mem_layouts, permutes)
+        for strategy in ["STATIC", "DYNAMIC"]:
+            old_strategy = torch.jit.set_fusion_strategy([(strategy, 10)])
+            for _func, _shape, _mem_layouts, _permute in configs:
+                a = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[0])
+                b = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[1])
+                c = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[2])
+                run_foo_case(_func, a, b, c)
+
+                a = a.permute(dims=_permute)
+                b = b.permute(dims=_permute)
+                c = c.permute(dims=_permute)
+                run_foo_case(_func, a, b, c)
+
+            torch.jit.set_fusion_strategy(old_strategy)
 
 if __name__ == '__main__':
     run_tests()

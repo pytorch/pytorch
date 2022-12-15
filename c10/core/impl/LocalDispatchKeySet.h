@@ -52,7 +52,7 @@ struct C10_API PODLocalDispatchKeySet {
   }
 };
 static_assert(
-    std::is_pod<PODLocalDispatchKeySet>::value,
+    std::is_trivial<PODLocalDispatchKeySet>::value,
     "PODLocalDispatchKeySet must be a POD type.");
 
 struct C10_API LocalDispatchKeySet {
@@ -115,6 +115,20 @@ class C10_API ExcludeDispatchKeyGuard {
   // on destruction
   PODLocalDispatchKeySet* tls_;
   DispatchKeySet exclude_;
+};
+
+struct C10_API ForceDispatchKeyGuard {
+ public:
+  ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    c10::impl::_force_tls_local_dispatch_key_set(key_set);
+  }
+  ~ForceDispatchKeyGuard() {
+    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
+  }
+
+ private:
+  c10::impl::LocalDispatchKeySet saved_keyset_;
 };
 
 // Non-RAII API for manipulating the thread-local dispatch state.

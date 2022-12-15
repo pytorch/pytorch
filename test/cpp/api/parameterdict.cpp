@@ -62,8 +62,7 @@ TEST_F(ParameterDictTest, InsertAndPop) {
   ParameterDict dict;
   dict->insert("A", torch::tensor({1.0}));
   ASSERT_EQ(dict->size(), 1);
-  ASSERT_THROWS_WITH(
-      dict->pop("B"), "Parameter 'B' is not defined");
+  ASSERT_THROWS_WITH(dict->pop("B"), "Parameter 'B' is not defined");
   torch::Tensor p = dict->pop("A");
   ASSERT_EQ(dict->size(), 0);
   ASSERT_TRUE(torch::eq(p, torch::tensor({1.0})).item<bool>());
@@ -105,7 +104,7 @@ TEST_F(ParameterDictTest, Values) {
   auto dict = torch::nn::ParameterDict(params);
   std::vector<torch::Tensor> values = dict->values();
   std::vector<torch::Tensor> true_values{ta, tb, tc};
-  for (auto i = 0; i < values.size(); i += 1) {
+  for (auto i = 0U; i < values.size(); i += 1) {
     ASSERT_TRUE(torch::all(torch::eq(values[i], true_values[i])).item<bool>());
   }
 }

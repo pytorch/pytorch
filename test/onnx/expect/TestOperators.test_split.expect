@@ -3,26 +3,34 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    output: "onnx::Split_1"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 3
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "tensor"
-    output: "1"
+    input: "onnx::Split_1"
     output: "2"
     output: "3"
-    name: "Split_0"
+    output: "4"
+    name: "Split_1"
     op_type: "Split"
     attribute {
       name: "axis"
       i: 1
       type: INT
     }
-    attribute {
-      name: "split"
-      ints: 2
-      ints: 2
-      ints: 2
-      type: INTS
-    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "tensor"
     type {
@@ -34,22 +42,6 @@ graph {
           }
           dim {
             dim_value: 6
-          }
-        }
-      }
-    }
-  }
-  output {
-    name: "1"
-    type {
-      tensor_type {
-        elem_type: 1
-        shape {
-          dim {
-            dim_value: 2
-          }
-          dim {
-            dim_value: 2
           }
         }
       }
@@ -87,7 +79,23 @@ graph {
       }
     }
   }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
 }
 opset_import {
-  version: 9
+  version: 14
 }

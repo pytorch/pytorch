@@ -3,6 +3,7 @@
 #include <string>
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
@@ -130,7 +131,7 @@ private:
   void assignListStartingAt(
       size_t offset,
       const std::vector<at::Tensor>& tensors) {
-    for (size_t i = 0; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(tensors.size())) {
       assignTo(Output(offset + i), tensors[i]);
     }
   }
@@ -176,10 +177,11 @@ private:
     std::stringstream descriptor;
     descriptor << op;
     std::vector<std::string> attrs;
-    for(size_t i = 0; i < operator_def.arg_size(); i++) {
+    for (const auto i : c10::irange(operator_def.arg_size())) {
       auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" )
+      if (attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name") {
         continue;
+      }
       attrs.push_back(attr.name());
     }
     std::sort(attrs.begin(), attrs.end());
@@ -223,7 +225,7 @@ private:
     std::vector<int64_t> ints =
         OperatorBase::GetRepeatedArgument<int64_t>(name, {});
     std::array<bool, N> result;
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result[i] = ints.at(i);
     }
     return result;

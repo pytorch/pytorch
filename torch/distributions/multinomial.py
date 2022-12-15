@@ -1,10 +1,12 @@
 import torch
 from torch._six import inf
+from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Multinomial']
 
 class Multinomial(Distribution):
     r"""
@@ -30,6 +32,7 @@ class Multinomial(Distribution):
 
     Example::
 
+        >>> # xdoctest: +SKIP("FIXME: found invalid values")
         >>> m = Multinomial(100, torch.tensor([ 1., 1., 1., 1.]))
         >>> x = m.sample()  # equal probability of 0, 1, 2, 3
         tensor([ 21.,  24.,  30.,  25.])
@@ -59,6 +62,7 @@ class Multinomial(Distribution):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
+        self._binomial = Binomial(total_count=total_count, probs=self.probs)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -102,6 +106,19 @@ class Multinomial(Distribution):
         counts = samples.new(self._extended_shape(sample_shape)).zero_()
         counts.scatter_add_(-1, samples, torch.ones_like(samples))
         return counts.type_as(self.probs)
+
+    def entropy(self):
+        n = torch.tensor(self.total_count)
+
+        cat_entropy = self._categorical.entropy()
+        term1 = n * cat_entropy - torch.lgamma(n + 1)
+
+        support = self._binomial.enumerate_support(expand=False)[1:]
+        binomial_probs = torch.exp(self._binomial.log_prob(support))
+        weights = torch.lgamma(support + 1)
+        term2 = (binomial_probs * weights).sum([0, -1])
+
+        return term1 + term2
 
     def log_prob(self, value):
         if self._validate_args:

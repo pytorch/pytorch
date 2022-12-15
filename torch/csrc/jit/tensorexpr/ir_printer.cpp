@@ -247,6 +247,40 @@ void IRPrinter::visit(VarPtr v) {
   os() << name_manager_.get_unique_name(v);
 }
 
+void IRPrinter::visit(BufPtr v) {
+  auto dtype = v->dtype();
+  os() << *v->base_handle();
+  os() << "(dtype=" << dtypeToCppString(dtype);
+  if (v->qscale()) {
+    os() << ", qscale=";
+    v->qscale()->accept(this);
+  }
+  if (v->qscale()) {
+    os() << ", qzero=";
+    v->qzero()->accept(this);
+  }
+  os() << ", sizes=[";
+  size_t i = 0;
+  for (const ExprPtr& s : v->dims()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+  os() << ", strides=[";
+  i = 0;
+  for (const ExprPtr& s : v->strides()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+
+  os() << ")";
+}
+
 void IRPrinter::visit(RampPtr v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
        << ")";
@@ -259,7 +293,7 @@ void IRPrinter::visit(LoadPtr v) {
   } else {
     os() << *v->base_handle() << "[";
     size_t i = 0;
-    for (ExprPtr ind : v->indices()) {
+    for (const ExprPtr& ind : v->indices()) {
       if (i++) {
         os() << ", ";
       }
@@ -295,7 +329,7 @@ void IRPrinter::visit(IntrinsicsPtr v) {
 void IRPrinter::visit(TermPtr v) {
   os() << "Term(";
   v->scalar()->accept(this);
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     os() << ",";
     t->accept(this);
   }
@@ -305,7 +339,7 @@ void IRPrinter::visit(TermPtr v) {
 void IRPrinter::visit(PolynomialPtr v) {
   bool first = true;
   os() << "Polynomial(";
-  for (auto t : v->variables()) {
+  for (const auto& t : v->variables()) {
     if (!first) {
       os() << " + ";
     }
@@ -364,11 +398,11 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
   bool first = true;
   os() << "reduce_args={";
-  for (auto d : v->reduce_args()) {
+  for (const auto& d : v->reduce_args()) {
     if (!first) {
       os() << ", ";
     }
-    os() << d->name_hint();
+    os() << *d;
     first = false;
   }
   os() << "})";
@@ -389,7 +423,7 @@ void IRPrinter::visit(StorePtr v) {
 
   os() << *v->base_handle() << "[";
   size_t i = 0;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -422,7 +456,7 @@ void IRPrinter::visit(BlockPtr v) {
   os() << "{\n";
   indent_++;
 
-  for (StmtPtr s : *v) {
+  for (const StmtPtr& s : *v) {
     emitIndent();
     os() << *s << "\n";
   }
@@ -449,10 +483,27 @@ void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
+void IRPrinter::visit(FreeExtPtr v) {
+  os() << "FreeExt(bufs={";
+  int i = 0;
+  for (const auto& buf : v->bufs()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf;
+  }
+
+  os() << "});";
+}
+
+void IRPrinter::visit(PlacementAllocatePtr v) {
+  os() << "Alias(" << *v->buf()->base_handle() << ","
+       << *v->buf_to_reuse()->base_handle() << ");";
+}
+
 void IRPrinter::visit(LetPtr v) {
   os() << dtypeToCppString(v->var()->dtype()) << " " << *v->var();
-  os() << " = " << *v->value();
-  os() << ";" << std::endl;
+  os() << " = " << *v->value() << ";";
 }
 
 void IRPrinter::visit(CondPtr v) {
@@ -475,7 +526,7 @@ void IRPrinter::visit(CondPtr v) {
 void IRPrinter::visit(AtomicAddPtr v) {
   os() << "atomicAdd(&" << *v->base_handle() << "[";
   size_t i = 0;
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     if (i++) {
       os() << ", ";
     }
@@ -496,7 +547,7 @@ void IRPrinter::visit(ExternalCallPtr v) {
 
   os() << "buf_args={";
   int i = 0;
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const BufPtr& buf_arg : v->buf_args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -505,7 +556,38 @@ void IRPrinter::visit(ExternalCallPtr v) {
 
   os() << "}, args={";
   i = 0;
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *arg;
+  }
+  os() << "})";
+}
+
+void IRPrinter::visit(ExternalCallWithAllocPtr v) {
+  int i = 0;
+  for (const auto& buf_out_arg : v->buf_out_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_out_arg;
+  }
+
+  os() << " := " << v->func_name() << "(";
+
+  os() << "buf_args={";
+  i = 0;
+  for (const auto& buf_arg : v->buf_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_arg;
+  }
+
+  os() << "}, args={";
+  i = 0;
+  for (const auto& arg : v->args()) {
     if (i++ > 0) {
       os() << ", ";
     }

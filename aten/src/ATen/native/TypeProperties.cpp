@@ -1,8 +1,26 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/TypeProperties.h>
-#include <type_traits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_has_compatible_shallow_copy_type_native.h>
+#include <ATen/ops/_is_zerotensor_native.h>
+#include <ATen/ops/can_cast_native.h>
+#include <ATen/ops/is_complex_native.h>
+#include <ATen/ops/is_conj_native.h>
+#include <ATen/ops/is_distributed_native.h>
+#include <ATen/ops/is_floating_point_native.h>
+#include <ATen/ops/is_inference_native.h>
+#include <ATen/ops/is_neg_native.h>
+#include <ATen/ops/is_signed_native.h>
+#include <ATen/ops/promote_types_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
+#include <ATen/ops/type_as_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -28,6 +46,10 @@ bool is_inference(const Tensor& self) {
 
 bool is_signed(const Tensor &self) {
   return self.is_signed();
+}
+
+bool _is_zerotensor(const Tensor& self) {
+  return self._is_zerotensor();
 }
 
 bool is_conj(const Tensor& self) {
@@ -76,15 +98,22 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if(isComplexType(higher)) {
     return higher;
-  }
-  else if(!isComplexType(lower) && isFloatingType(higher)) {
+  } else if (isComplexType(lower)) {
+    // preserve value type of higher if it is floating type.
+    if (isFloatingType(higher)) {
+      return toComplexType(higher);
+    }
+    // in case of integral input
+    // lower complex takes precedence.
+    return lower;
+  } else if (isFloatingType(higher)) {
     return higher;
   }
-  if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
+  if (higher == ScalarType::Bool || isFloatingType(lower)) {
     return promote_skip_undefined(higher, lower);
   }
   if (higher != ScalarType::Undefined) {
-      return higher;
+    return higher;
   }
   return lower;
 }
@@ -129,7 +158,7 @@ ScalarType result_type(const ResultTypeState& in_state) {
   return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
 
-ScalarType result_type(TensorList tensors) {
+ScalarType result_type(ITensorListRef tensors) {
   ResultTypeState state = {};
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);

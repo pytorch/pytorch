@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
 
@@ -19,13 +20,20 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+const Function* CompilationUnit::find_function(
+    const c10::QualifiedName& qn) const {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();
     }
   }
   return nullptr;
+}
+
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+  // NOLINTNEXTLINE
+  return const_cast<Function*>(
+      static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
 
 Method Module::get_method(const std::string& name) const {
@@ -35,8 +43,52 @@ Method Module::get_method(const std::string& name) const {
   AT_ERROR("Method '", name, "' is not defined.");
 }
 
+bool Module::compareMethodSchemas(
+    const std::string& name_1,
+    const std::string& name_2) {
+  c10::optional<c10::FunctionSchema> schema_1, schema_2;
+  for (const auto& fn : cu_->methods()) {
+    if (fn->name() == name_1) {
+      schema_1 = fn->getSchema();
+    }
+    if (fn->name() == name_2) {
+      schema_2 = fn->getSchema();
+    }
+  }
+  if (schema_1.has_value() && schema_2.has_value()) {
+    return (schema_1 == schema_2);
+  }
+  return false;
+}
+
+void Module::unsafeRemoveMethod(const std::string& basename) {
+  int64_t i = 0;
+  for (; i < cu_->methods().size(); ++i) {
+    if ((cu_->methods()[i])->name() == basename) {
+      break;
+    }
+  }
+  object_->type()->unsafeRemoveMethod(basename);
+  cu_->unsafeRemoveFunction(i);
+}
+
+void Module::unsafeCopyMethod(
+    const std::string& new_method_name,
+    const Function& to_be_copied) {
+  TORCH_CHECK(
+      !find_method(new_method_name).has_value(),
+      "Trying to replace existing method.");
+  const c10::QualifiedName& tobe_copied_name = to_be_copied.qualname();
+  c10::QualifiedName qualified_method_name(
+      tobe_copied_name.prefix(), new_method_name);
+  std::unique_ptr<Function> new_fn = std::make_unique<Function>(
+      qualified_method_name, to_be_copied.get_code(), to_be_copied.getSchema());
+  object_->type()->addMethod(new_fn.get());
+  cu_->register_function(std::move(new_fn));
+}
+
 c10::optional<Method> Module::find_method(const std::string& basename) const {
-  for (auto& fn : cu_->methods()) {
+  for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
       return c10::make_optional<Method>(Method(this, fn.get()));
     }
@@ -45,16 +97,25 @@ c10::optional<Method> Module::find_method(const std::string& basename) const {
 }
 
 namespace {
+// For JIT, there is a private function to get all modules by iteration in
+// struct slot_iterator_impl (jit/api/module.h). The following function use
+// recursion to mimic the logic without allocating extra memory to get module
+// list and set training attribute directly.
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isObject()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
       set_train_recurse(slot.toObject(), on);
     }
   }
@@ -96,6 +157,7 @@ void slot_named_params_recurse(
   }
 }
 
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
 std::string getTopModuleTypeName(const Module& m) {
   std::string name;
   if (m._ivalue()->type() && m._ivalue()->type()->name()) {
@@ -103,6 +165,8 @@ std::string getTopModuleTypeName(const Module& m) {
   }
   return name;
 }
+#endif
+
 } // namespace
 
 const std::vector<at::Tensor> Module::parameters() const {
@@ -204,7 +268,7 @@ void Method::run(Stack& stack) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     if (error_message.empty()) {
       error_message = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+          function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     }
 #endif
 
@@ -226,7 +290,9 @@ void Method::run(Stack& stack) const {
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    for (auto handle : function_->getExceptionDebugHandles()) {
+      e.pushDebugHandle(handle);
+    }
     // symbolicate all handles
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         e.getDebugHandles(), getTopModuleTypeName(*owner_));
@@ -237,7 +303,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
-        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+        function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
     error_message = error.what();
@@ -249,6 +315,40 @@ c10::IValue Method::operator()(std::vector<c10::IValue> stack) const {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
+}
+
+c10::optional<std::string> print_type(const c10::Type& t) {
+  auto namedType = t.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return namedType->name().value().qualifiedName();
+  }
+  if (auto dyn = t.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str();
+  }
+  return c10::nullopt;
+}
+
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
+  ModuleInfo minfo;
+  minfo.operator_version = module.min_operator_version();
+  minfo.bytecode_version = module.bytecode_version();
+  std::vector<std::string> type_name_list;
+  for (const auto& func_ptr : module.compilation_unit().methods()) {
+    const auto& function = *func_ptr;
+    for (int i = 0; i < function.get_code().op_names_.size(); i++) {
+      const auto& op = function.get_code().op_names_[i];
+      minfo.opname_to_num_args[mobile::operator_str(op)] =
+          function.get_code().operator_input_sizes_[i];
+    }
+    for (const c10::TypePtr& tp : function.get_code().types_) {
+      type_name_list.push_back(tp->annotation_str(print_type));
+    }
+    minfo.function_names.insert(function.qualname().qualifiedName());
+  }
+  c10::TypeParser parser(type_name_list);
+  parser.parseList();
+  minfo.type_names = parser.getContainedTypes();
+  return minfo;
 }
 
 } // namespace mobile

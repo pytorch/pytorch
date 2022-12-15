@@ -6,6 +6,7 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/script.h>
@@ -157,14 +158,16 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    const bool requires_backend_transfers =
+        module_.attr("requires_backend_transfers", at::IValue(true)).toBool();
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
+      if (at::kVulkan == deviceType_ && requires_backend_transfers) {
         inputs.push_back(
             atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
                                 : std::move(atIValue));
       } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
+        TORCH_CHECK(at::kCPU == deviceType_ || !requires_backend_transfers);
         inputs.push_back(std::move(atIValue));
       }
     }
@@ -186,14 +189,16 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    for (size_t i = 0; i < n; i++) {
+    const bool requires_backend_transfers =
+        module_.attr("requires_backend_transfers", at::IValue(true)).toBool();
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_) {
+      if (at::kVulkan == deviceType_ && requires_backend_transfers) {
         inputs.push_back(
             atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
                                 : std::move(atIValue));
       } else {
-        TORCH_CHECK(at::kCPU == deviceType_);
+        TORCH_CHECK(at::kCPU == deviceType_ || !requires_backend_transfers);
         inputs.push_back(std::move(atIValue));
       }
     }

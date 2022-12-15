@@ -2,11 +2,11 @@ import sys
 import torch
 import functools
 import inspect
+import warnings
 from typing import Any, Callable, TypeVar, cast
 
-
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode']
+           'inference_mode', 'set_multithreading_enabled']
 
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
@@ -19,12 +19,18 @@ class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
     def __call__(self, func: F) -> F:
+        if inspect.isclass(func):
+            warnings.warn("Decorating classes is deprecated and will be disabled in "
+                          "future versions. You should only decorate functions or methods. "
+                          "To preserve the current behavior of class decoration, you can "
+                          "directly decorate the `__init__` method and nothing else.")
+
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
         @functools.wraps(func)
         def decorate_context(*args, **kwargs):
-            with self.__class__():
+            with self.clone():
                 return func(*args, **kwargs)
         return cast(F, decorate_context)
 
@@ -38,10 +44,9 @@ class _DecoratorContextManager:
             # make sure the grad mode is properly set every time the execution
             # flow returns into the wrapped generator and restored when it
             # returns through our `yield` to our caller (see PR #49017).
-            cls = type(self)
             try:
                 # Issuing `None` to a generator fires it up
-                with cls():
+                with self.clone():
                     response = gen.send(None)
 
                 while True:
@@ -51,18 +56,18 @@ class _DecoratorContextManager:
 
                     except GeneratorExit:
                         # Inform the still active generator about its imminent closure
-                        with cls():
+                        with self.clone():
                             gen.close()
                         raise
 
                     except BaseException:
                         # Propagate the exception thrown at us by the caller
-                        with cls():
+                        with self.clone():
                             response = gen.throw(*sys.exc_info())
 
                     else:
                         # Pass the last request to the generator and get its response
-                        with cls():
+                        with self.clone():
                             response = gen.send(request)
 
             # We let the exceptions raised above by the generator's `.throw` or
@@ -80,6 +85,10 @@ class _DecoratorContextManager:
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         raise NotImplementedError
+
+    def clone(self):
+        # override this method if your children class takes __init__ parameters
+        return self.__class__()
 
 
 class no_grad(_DecoratorContextManager):
@@ -102,9 +111,14 @@ class no_grad(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
-    Example::
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        If you want to disable forward AD for a computation, you can unpack
+        your dual tensors.
 
-        >>> x = torch.tensor([1], requires_grad=True)
+    Example::
+        >>> # xdoctest: +SKIP
+        >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
@@ -116,12 +130,12 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
-    def __init__(self):
+    def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         self.prev = False
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
@@ -145,8 +159,11 @@ class enable_grad(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
-    Example::
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
+    Example::
+        >>> # xdoctest: +SKIP
         >>> x = torch.tensor([1.], requires_grad=True)
         >>> with torch.no_grad():
         ...   with torch.enable_grad():
@@ -155,6 +172,7 @@ class enable_grad(_DecoratorContextManager):
         True
         >>> y.backward()
         >>> x.grad
+        tensor([2.])
         >>> @torch.enable_grad()
         ... def doubler(x):
         ...     return x * 2
@@ -172,8 +190,8 @@ class enable_grad(_DecoratorContextManager):
         torch._C._set_grad_enabled(self.prev)
 
 
-class set_grad_enabled(object):
-    r"""Context-manager that sets gradient calculation to on or off.
+class set_grad_enabled(_DecoratorContextManager):
+    r"""Context-manager that sets gradient calculation on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
@@ -191,19 +209,22 @@ class set_grad_enabled(object):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
-    Example::
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
-        >>> x = torch.tensor([1], requires_grad=True)
+    Example::
+        >>> # xdoctest: +SKIP
+        >>> x = torch.tensor([1.], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
         ...   y = x * 2
         >>> y.requires_grad
         False
-        >>> torch.set_grad_enabled(True)
+        >>> _ = torch.set_grad_enabled(True)
         >>> y = x * 2
         >>> y.requires_grad
         True
-        >>> torch.set_grad_enabled(False)
+        >>> _ = torch.set_grad_enabled(False)
         >>> y = x * 2
         >>> y.requires_grad
         False
@@ -213,12 +234,16 @@ class set_grad_enabled(object):
     def __init__(self, mode: bool) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(mode)
+        self.mode = mode
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
+
+    def clone(self):
+        return self.__class__(self.mode)
 
 
 class inference_mode(_DecoratorContextManager):
@@ -227,7 +252,9 @@ class inference_mode(_DecoratorContextManager):
     InferenceMode is a new context manager analogous to :class:`~no_grad`
     to be used when you are certain your operations will have no interactions
     with autograd (e.g., model training). Code run under this mode gets better
-    performance by disabling view tracking and version counter bumps.
+    performance by disabling view tracking and version counter bumps. Note that
+    unlike some other mechanisms that locally enable or disable grad,
+    entering inference_mode also disables to :ref:`forward-mode AD <forward-mode-ad>`.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -249,6 +276,7 @@ class inference_mode(_DecoratorContextManager):
         ...   y = x * x
         >>> y.requires_grad
         False
+        >>> # xdoctest: +SKIP("want string isnt quite right")
         >>> y._version
         Traceback (most recent call last):
         File "<stdin>", line 1, in <module>
@@ -274,3 +302,38 @@ class inference_mode(_DecoratorContextManager):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard
+
+    def clone(self):
+        return self.__class__(self.mode)
+
+
+class set_multithreading_enabled(_DecoratorContextManager):
+    r"""Context-manager that sets multithreaded backwards on or off.
+
+    ``set_multithreading_enabled`` will enable or disable multithreaded backwards based on its argument :attr:`mode`.
+    It can be used as a context-manager or as a function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    Args:
+        mode (bool): Flag whether to enable multithreaded backwards (``True``), or disable
+                     (``False``).
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    """
+
+    def __init__(self, mode: bool) -> None:
+        self.mode = mode
+        self.multithreadeding_enabled_guard = torch._C._MultithreadingEnabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        del self.multithreadeding_enabled_guard
+
+    def clone(self):
+        return self.__class__(self.mode)

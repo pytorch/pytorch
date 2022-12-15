@@ -1,16 +1,16 @@
-ir_version: 7
+ir_version: 6
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::Round_0"
     output: "1"
     name: "Round_0"
     op_type: "Round"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Round_0"
     type {
       tensor_type {
         elem_type: 1

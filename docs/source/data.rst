@@ -65,7 +65,7 @@ in real time.
 
 See :class:`~torch.utils.data.IterableDataset` for more details.
 
-.. note:: When using an :class:`~torch.utils.data.IterableDataset` with
+.. note:: When using a :class:`~torch.utils.data.IterableDataset` with
           `multi-process data loading <Multi-process data loading_>`_. The same
           dataset object is replicated on each worker process, and thus the
           replicas must be configured differently to avoid duplicated data. See
@@ -111,7 +111,8 @@ Loading Batched and Non-Batched Data
 
 :class:`~torch.utils.data.DataLoader` supports automatically collating
 individual fetched data samples into batches via arguments
-:attr:`batch_size`, :attr:`drop_last`, and :attr:`batch_sampler`.
+:attr:`batch_size`, :attr:`drop_last`, :attr:`batch_sampler`, and
+:attr:`collate_fn` (which has a default function).
 
 
 Automatic batching (default)
@@ -209,7 +210,8 @@ arrays in PyTorch tensors.
 **When automatic batching is enabled**, :attr:`collate_fn` is called with a list
 of data samples at each time. It is expected to collate the input samples into
 a batch for yielding from the data loader iterator. The rest of this section
-describes behavior of the default :attr:`collate_fn` in this case.
+describes the behavior of the default :attr:`collate_fn`
+(:func:`~torch.utils.data.default_collate`).
 
 For instance, if each data sample consists of a 3-channel image and an integral
 class label, i.e., each element of the dataset returns a tuple
@@ -231,6 +233,10 @@ properties:
 Users may use customized :attr:`collate_fn` to achieve custom batching, e.g.,
 collating along a dimension other than the first, padding sequences of
 various lengths, or adding support for custom data types.
+
+If you run into a situation where the outputs of :class:`~torch.utils.data.DataLoader`
+have dimensions or type that is different from your expectation, you may
+want to check your :attr:`collate_fn`.
 
 Single- and Multi-process Data Loading
 --------------------------------------
@@ -421,6 +427,9 @@ Example::
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
+.. autofunction:: torch.utils.data._utils.collate.collate
+.. autofunction:: torch.utils.data.default_collate
+.. autofunction:: torch.utils.data.default_convert
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
 .. autoclass:: torch.utils.data.Sampler
@@ -430,3 +439,12 @@ Example::
 .. autoclass:: torch.utils.data.WeightedRandomSampler
 .. autoclass:: torch.utils.data.BatchSampler
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
+
+
+.. These modules are documented as part of torch/data listing them here for
+.. now until we have a clearer fix
+.. py:module:: torch.utils.data.datapipes
+.. py:module:: torch.utils.data.datapipes.dataframe
+.. py:module:: torch.utils.data.datapipes.iter
+.. py:module:: torch.utils.data.datapipes.map
+.. py:module:: torch.utils.data.datapipes.utils

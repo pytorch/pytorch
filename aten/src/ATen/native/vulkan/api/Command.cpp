@@ -1,500 +1,429 @@
-#include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Utils.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-namespace {
 
-VkCommandPool create_command_pool(
-    const VkDevice device,
-    const uint32_t queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
+//
+// CommandBuffer
+//
 
-  const VkCommandPoolCreateInfo command_pool_create_info{
-    VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-    nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-    queue_family_index,
-  };
+CommandBuffer::CommandBuffer(
+    const VkCommandBuffer handle,
+    const VkCommandBufferUsageFlags flags)
+    : handle_(handle),
+      flags_(flags),
+      state_(CommandBuffer::State::NEW),
+      bound_{} {}
 
-  VkCommandPool command_pool{};
-  VK_CHECK(vkCreateCommandPool(
-      device,
-      &command_pool_create_info,
-      nullptr,
-      &command_pool));
-
-  TORCH_CHECK(
-      command_pool,
-      "Invalid Vulkan command pool!");
-
-  return command_pool;
+CommandBuffer::CommandBuffer(CommandBuffer&& other) noexcept
+    : handle_(other.handle_),
+      flags_(other.flags_),
+      state_(other.state_),
+      bound_(other.bound_) {
+  other.handle_ = VK_NULL_HANDLE;
+  other.bound_.reset();
+  state_ = CommandBuffer::State::INVALID;
 }
 
-void allocate_command_buffers(
-    const VkDevice device,
-    const VkCommandPool command_pool,
-    VkCommandBuffer* const command_buffers,
-    const uint32_t count) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
+CommandBuffer& CommandBuffer::operator=(CommandBuffer&& other) noexcept {
+  handle_ = other.handle_;
+  flags_ = other.flags_;
+  state_ = other.state_;
+  bound_ = other.bound_;
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_pool,
-      "Invalid Vulkan command pool!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffers && (count > 0u),
-      "Invalid usage!");
-
-  const VkCommandBufferAllocateInfo command_buffer_allocate_info{
-    VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-    nullptr,
-    command_pool,
-    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    count,
-  };
-
-  VK_CHECK(vkAllocateCommandBuffers(
-      device,
-      &command_buffer_allocate_info,
-      command_buffers));
-}
-
-} // namespace
-
-Command::Buffer::Buffer(const VkCommandBuffer command_buffer)
-  : command_buffer_(command_buffer) {
-}
-
-Command::Buffer::Buffer(Buffer&& buffer)
-  : command_buffer_(std::move(buffer.command_buffer_)),
-    bound_(std::move(buffer.bound_)),
-    barriers_(std::move(buffer.barriers_)) {
-  buffer.invalidate();
-}
-
-Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
-  if (&buffer != this) {
-    command_buffer_ = std::move(buffer.command_buffer_);
-    bound_ = std::move(buffer.bound_);
-    barriers_ = std::move(buffer.barriers_);
-
-    buffer.invalidate();
-  };
+  other.handle_ = VK_NULL_HANDLE;
+  other.bound_.reset();
+  other.state_ = CommandBuffer::State::INVALID;
 
   return *this;
 }
 
-void Command::Buffer::Buffer::begin() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
+void CommandBuffer::begin() {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::NEW,
+      "Vulkan CommandBuffer: called begin() on a command buffer whose state "
+      "is not NEW.");
 
-  const VkCommandBufferBeginInfo command_buffer_begin_info{
-    VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-    nullptr,
-    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    nullptr,
+  const VkCommandBufferBeginInfo begin_info{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      nullptr,
+      flags_,
+      nullptr,
   };
 
-  VK_CHECK(vkBeginCommandBuffer(
-      command_buffer_,
-      &command_buffer_begin_info));
-
-  // Reset
-  bound_.reset();
-  barriers_.reset();
+  VK_CHECK(vkBeginCommandBuffer(handle_, &begin_info));
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-void Command::Buffer::Buffer::end() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
+void CommandBuffer::end() {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called end() on a command buffer whose state "
+      "is not RECORDING.");
 
-  VK_CHECK(vkEndCommandBuffer(command_buffer_));
+  VK_CHECK(vkEndCommandBuffer(handle_));
+  state_ = CommandBuffer::State::READY;
 }
 
-void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
+void CommandBuffer::bind_pipeline(
+    const VkPipeline pipeline,
+    const VkPipelineLayout pipeline_layout,
+    const utils::uvec3 local_workgroup_size) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called bind_pipeline() on a command buffer whose state "
+      "is not RECORDING.");
 
-  barriers_.stage.src |= barrier.stage.src;
-  barriers_.stage.dst |= barrier.stage.dst;
-
-  barriers_.buffers.insert(
-      barriers_.buffers.end(),
-      barrier.buffers.begin(),
-      barrier.buffers.end());
-
-  barriers_.images.insert(
-      barriers_.images.end(),
-      barrier.images.begin(),
-      barrier.images.end());
-}
-
-void Command::Buffer::bind(const Pipeline::Object& pipeline) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pipeline,
-      "Invalid Vulkan pipeline!");
-
-  if (pipeline.handle != bound_.pipeline.handle) {
-    vkCmdBindPipeline(
-        command_buffer_,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline.handle);
+  if (pipeline != bound_.pipeline) {
+    vkCmdBindPipeline(handle_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 
     bound_.pipeline = pipeline;
   }
+
+  bound_.pipeline_layout = pipeline_layout;
+  bound_.local_workgroup_size = local_workgroup_size;
+
+  state_ = CommandBuffer::State::PIPELINE_BOUND;
 }
 
-void Command::Buffer::bind(const Descriptor::Set& set) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
+void CommandBuffer::bind_descriptors(const VkDescriptorSet descriptors) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::PIPELINE_BOUND,
+      "Vulkan CommandBuffer: called bind_descriptors() on a command buffer whose state "
+      "is not PIPELINE_BOUND.");
 
-  const VkDescriptorSet descriptor_set = set.handle();
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_set,
-      "Invalid Vulkan descriptor set!");
-
-  if (descriptor_set != bound_.descriptor_set) {
+  if (descriptors != bound_.descriptors) {
     vkCmdBindDescriptorSets(
-        command_buffer_,
-        VK_PIPELINE_BIND_POINT_COMPUTE,
-        bound_.pipeline.layout,
-        0u,
-        1u,
-        &descriptor_set,
-        0u,
-        nullptr);
-
-    bound_.descriptor_set = descriptor_set;
+        handle_, // commandBuffer
+        VK_PIPELINE_BIND_POINT_COMPUTE, // pipelineBindPoint
+        bound_.pipeline_layout, // layout
+        0u, // firstSet
+        1u, // descriptorSetCount
+        &descriptors, // pDescriptorSets
+        0u, // dynamicOffsetCount
+        nullptr); // pDynamicOffsets
   }
+
+  bound_.descriptors = descriptors;
+
+  state_ = CommandBuffer::State::DESCRIPTORS_BOUND;
 }
 
-void Command::Buffer::copy(
-    const Resource::Buffer::Object source,
-    const Resource::Buffer::Object destination) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
+void CommandBuffer::insert_barrier(const PipelineBarrier& pipeline_barrier) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::DESCRIPTORS_BOUND ||
+          state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called insert_barrier() on a command buffer whose state "
+      "is not DESCRIPTORS_BOUND or RECORDING.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      source,
-      "Invalid Vulkan source buffer!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      destination,
-      "Invalid Vulkan destination buffer!");
-
-  barrier();
-
-  const VkBufferCopy buffer_copy{
-    0u,
-    0u,
-    std::min(source.range, destination.range),
-  };
-
-  vkCmdCopyBuffer(
-      command_buffer_,
-      source.handle,
-      destination.handle,
-      1u,
-      &buffer_copy);
-}
-
-void Command::Buffer::dispatch(
-    const Shader::WorkGroup& global_work_group) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
-
-  barrier();
-
-  vkCmdDispatch(
-      command_buffer_,
-      utils::div_up(
-          global_work_group.data[0u],
-          bound_.pipeline.local_work_group.data[0u]),
-      utils::div_up(
-          global_work_group.data[1u],
-          bound_.pipeline.local_work_group.data[1u]),
-      utils::div_up(
-          global_work_group.data[2u],
-          bound_.pipeline.local_work_group.data[2u]));
-}
-
-void Command::Buffer::barrier() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "This command buffer is in an invalid state! "
-      "Potential reason: This command buffer is moved from.");
-
-  if (barriers_.stage) {
+  if (pipeline_barrier) {
     c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
-
-    for (const Resource::Buffer::Barrier& barrier : barriers_.buffers) {
-      buffer_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            barrier.object.offset,
-            barrier.object.range,
-          });
+    for (const api::BufferMemoryBarrier& memory_barrier :
+         pipeline_barrier.buffers) {
+      buffer_memory_barriers.push_back(memory_barrier.handle);
     }
 
     c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
-
-    for (const Resource::Image::Barrier& barrier : barriers_.images) {
-      image_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            barrier.layout.src,
-            barrier.layout.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            {
-              VK_IMAGE_ASPECT_COLOR_BIT,
-              0u,
-              VK_REMAINING_MIP_LEVELS,
-              0u,
-              VK_REMAINING_ARRAY_LAYERS,
-            },
-          });
+    for (const api::ImageMemoryBarrier& memory_barrier :
+         pipeline_barrier.images) {
+      image_memory_barriers.push_back(memory_barrier.handle);
     }
 
     vkCmdPipelineBarrier(
-        command_buffer_,
-        barriers_.stage.src,
-        barriers_.stage.dst,
-        0u,
-        0u,
-        nullptr,
-        buffer_memory_barriers.size(),
-        buffer_memory_barriers.data(),
-        image_memory_barriers.size(),
-        image_memory_barriers.data());
+        handle_, // commandBuffer
+        pipeline_barrier.stage.src, // srcStageMask
+        pipeline_barrier.stage.dst, // dstStageMask
+        0u, // dependencyFlags
+        0u, // memoryBarrierCount
+        nullptr, // pMemoryBarriers
+        buffer_memory_barriers.size(), // bufferMemoryBarrierCount
+        buffer_memory_barriers.data(), // pMemoryBarriers
+        image_memory_barriers.size(), // imageMemoryBarrierCount
+        image_memory_barriers.data()); // pImageMemoryBarriers
   }
 
-  // Reset
-  barriers_.reset();
+  state_ = CommandBuffer::State::BARRIERS_INSERTED;
 }
 
-void Command::Buffer::invalidate() {
-  command_buffer_ = VK_NULL_HANDLE;
+void CommandBuffer::dispatch(const utils::uvec3& global_workgroup_size) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called dispatch() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  vkCmdDispatch(
+      handle_,
+      utils::div_up(
+          global_workgroup_size.data[0u], bound_.local_workgroup_size.data[0u]),
+      utils::div_up(
+          global_workgroup_size.data[1u], bound_.local_workgroup_size.data[1u]),
+      utils::div_up(
+          global_workgroup_size.data[2u],
+          bound_.local_workgroup_size.data[2u]));
+
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-inline void Command::Buffer::Bound::reset() {
-  pipeline = {};
-  descriptor_set = VK_NULL_HANDLE;
-}
+void CommandBuffer::copy_buffer_to_buffer(
+    const api::VulkanBuffer& source,
+    const api::VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_buffer_to_buffer() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
 
-inline Command::Buffer::Barrier::Stage::operator bool() const {
-  return (0u != src) || (0u != dst);
-}
-
-inline void Command::Buffer::Barrier::reset() {
-  stage = {};
-  buffers.clear();
-  images.clear();
-}
-
-Command::Pool::Pool(const GPU& gpu)
-  : device_(gpu.device),
-    command_pool_(
-        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index),
-        VK_DELETER(CommandPool)(device_)),
-    buffer_{} {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_pool_,
-      "Invalid Vulkan command pool!");
-
-  buffer_.pool.reserve(Configuration::kReserve);
-}
-
-Command::Pool::Pool(Pool&& pool)
-  : device_(std::move(pool.device_)),
-    command_pool_(std::move(pool.command_pool_)),
-    buffer_(std::move(pool.buffer_)),
-    stream_(std::move(pool.stream_)) {
-  pool.invalidate();
-}
-
-Command::Pool& Command::Pool::operator=(Pool&& pool) {
-  if (&pool != this) {
-    device_ = std::move(pool.device_);
-    command_pool_ = std::move(pool.command_pool_);
-    buffer_ = std::move(pool.buffer_);
-    stream_ = std::move(pool.stream_);
-
-    pool.invalidate();
+  const VkBufferCopy copy_details{
+      src_offset.data[0u], // srcOffset
+      dst_offset.data[0u], // dstOffset
+      copy_range.data[0u], // size
   };
 
-  return *this;
+  vkCmdCopyBuffer(
+      handle_, source.handle(), destination.handle(), 1u, &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-Command::Pool::~Pool() {
-  try {
-    if (device_ && command_pool_) {
-      purge();
-    }
-  }
-  catch (const std::exception& e) {
-    TORCH_WARN(
-        "Vulkan: Command pool destructor raised an exception! Error: ",
-        e.what());
-  }
-  catch (...) {
-    TORCH_WARN(
-        "Vulkan: Command pool destructor raised an exception! "
-        "Error: Unknown");
-  }
+void CommandBuffer::copy_texture_to_texture(
+    const api::VulkanImage& source,
+    const api::VulkanImage& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  const VkImageSubresourceLayers src_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
+
+  const VkImageSubresourceLayers dst_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
+
+  const VkImageCopy copy_details{
+      src_subresource_layers, // srcSubresource
+      create_offset3d(src_offset), // srcOffset
+      dst_subresource_layers, // dstSubresource
+      create_offset3d(dst_offset), // dstOffset
+      create_extent3d(copy_range), // extent
+  };
+
+  vkCmdCopyImage(
+      handle_,
+      source.handle(),
+      source.layout(),
+      destination.handle(),
+      destination.layout(),
+      1u,
+      &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-Command::Buffer Command::Pool::allocate() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && command_pool_,
-      "This command pool is in an invalid state! "
-      "Potential reason: This command pool is moved from.");
+void CommandBuffer::copy_texture_to_buffer(
+    const api::VulkanImage& source,
+    const api::VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_texture_to_buffer() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
 
-  if (buffer_.pool.size() == buffer_.in_use) {
-    buffer_.pool.resize(
-        buffer_.pool.size() +
-        Configuration::kQuantum);
+  const VkImageSubresourceLayers src_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
 
-    allocate_command_buffers(
-        device_,
-        command_pool_.get(),
-        buffer_.pool.data() + buffer_.in_use,
-        Configuration::kQuantum);
-  }
+  const VkBufferImageCopy copy_details{
+      dst_offset.data[0u], // bufferOffset
+      dst_offset.data[1u], // bufferRowLength
+      dst_offset.data[2u], // bufferImageHeight
+      src_subresource_layers, // imageSubresource
+      create_offset3d(src_offset), // imageOffset
+      create_extent3d(copy_range), // imageExtent
+  };
 
-  return Buffer(buffer_.pool[buffer_.in_use++]);
+  vkCmdCopyImageToBuffer(
+      handle_,
+      source.handle(),
+      source.layout(),
+      destination.handle(),
+      1u,
+      &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-Command::Buffer& Command::Pool::stream() {
-  if (!stream_.buffer) {
-    stream_.buffer = allocate();
-    stream_.buffer.begin();
-    stream_.counter = 0u;
-  }
+void CommandBuffer::copy_buffer_to_texture(
+    const api::VulkanBuffer& source,
+    const api::VulkanImage& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_buffer_to_texture() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
 
-  return stream_.buffer;
+  const VkImageSubresourceLayers dst_subresource_layers{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // mipLevel
+      0u, // baseArrayLayer
+      1u, // layerCount
+  };
+
+  const VkBufferImageCopy copy_details{
+      src_offset.data[0u], // bufferOffset
+      src_offset.data[1u], // bufferRowLength
+      src_offset.data[2u], // bufferImageHeight
+      dst_subresource_layers, // imageSubresource
+      create_offset3d(dst_offset), // imageOffset
+      create_extent3d(copy_range), // imageExtent
+  };
+
+  vkCmdCopyBufferToImage(
+      handle_,
+      source.handle(),
+      destination.handle(),
+      destination.layout(),
+      1u,
+      &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
 }
 
-void Command::Pool::purge() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && command_pool_,
-      "This command pool is in an invalid state! "
-      "Potential reason: This command pool is moved from.");
+void CommandBuffer::write_timestamp(
+    const VkQueryPool querypool,
+    const uint32_t idx) const {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "
+      "is not RECORDING.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !stream_.buffer,
-      "Pending command buffer detected.  Make sure all command buffers are "
-      "submitted to the queue for execution prior to reclaiming pool memory.");
-
-  buffer_.in_use = 0u;
-  VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
+  vkCmdWriteTimestamp(
+      handle_, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, querypool, idx);
 }
 
-void Command::Pool::submit(
-    const VkQueue queue,
-    const c10::ArrayRef<const Buffer> buffers,
-    const Resource::Fence fence) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && command_pool_,
-      "This command pool is in an invalid state! "
-      "Potential reason: This command pool is moved from.");
+void CommandBuffer::reset_querypool(
+    const VkQueryPool querypool,
+    const uint32_t first_idx,
+    const uint32_t count) const {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called reset_querypool() on a command buffer whose state "
+      "is not RECORDING.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      queue,
-      "Invalid Vulkan queue!");
+  vkCmdResetQueryPool(handle_, querypool, first_idx, count);
+}
 
-  c10::SmallVector<VkCommandBuffer, Configuration::kReserve> command_buffers;
-  command_buffers.reserve(buffers.size());
+VkCommandBuffer CommandBuffer::get_submit_handle() {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::READY,
+      "Vulkan CommandBuffer: called begin() on a command buffer whose state "
+      "is not READY.");
 
-  for (const Buffer& buffer : buffers) {
-    VkCommandBuffer command_buffer = buffer.handle();
+  const VkCommandBuffer handle = handle_;
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        command_buffer,
-        "Invalid Vulkan command buffer!");
+  handle_ = VK_NULL_HANDLE;
+  bound_.reset();
+  state_ = CommandBuffer::State::SUBMITTED;
 
-    // Are we submitting our one and only command stream, or a regular command
-    // buffer whose scope is manually maintained by the user?  Automatically
-    // maintain state and submission rate if the former.
+  return handle;
+}
 
-    if (stream_.buffer.handle() == command_buffer) {
-      // Hand the stream off to the driver if:
-      // - The user has implictly signaled interest in the results via a fence.
-      // - We are over the submission cutoff.  We don't want to starve the GPU.
+//
+// CommandPool
+//
 
-      if (fence || (stream_.counter++ > Configuration::kSubmit)) {
-        stream_.buffer.end();
-        stream_.buffer.invalidate();
-      }
-      // Skip - Accumulate more calls prior to submission.
-      else {
-        command_buffer = VK_NULL_HANDLE;
-      }
-    }
-
-    if (command_buffer) {
-      command_buffers.push_back(command_buffer);
-    }
-  }
-
-  if (!command_buffers.empty()) {
-    const VkSubmitInfo submit_info{
-      VK_STRUCTURE_TYPE_SUBMIT_INFO,
+CommandPool::CommandPool(
+    const VkDevice device,
+    const uint32_t queue_family_idx,
+    const CommandPoolConfig& config)
+    : device_(device),
+      queue_family_idx_(queue_family_idx),
+      pool_(VK_NULL_HANDLE),
+      config_(config),
+      mutex_{},
+      buffers_{},
+      in_use_(0u) {
+  const VkCommandPoolCreateInfo create_info{
+      VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
       nullptr,
-      0u,
-      nullptr,
-      nullptr,
-      utils::safe_downcast<uint32_t>(command_buffers.size()),
-      command_buffers.data(),
-      0u,
-      nullptr,
-    };
+      VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+      queue_family_idx_,
+  };
 
-    VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
-  }
+  VK_CHECK(vkCreateCommandPool(device_, &create_info, nullptr, &pool_));
+
+  // Pre-allocate some command buffers
+  allocate_new_batch(config_.cmdPoolInitialSize);
 }
 
-void Command::Pool::invalidate() {
-  device_ = VK_NULL_HANDLE;
-  command_pool_.reset();
+CommandPool::~CommandPool() {
+  if (VK_NULL_HANDLE == pool_) {
+    return;
+  }
+  vkDestroyCommandPool(device_, pool_, nullptr);
+}
+
+CommandBuffer CommandPool::get_new_cmd() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  // No-ops if there are command buffers available
+  allocate_new_batch(config_.cmdPoolBatchSize);
+
+  const VkCommandBuffer handle = buffers_[in_use_];
+
+  in_use_++;
+  return CommandBuffer(handle);
+}
+
+void CommandPool::flush() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  VK_CHECK(vkResetCommandPool(device_, pool_, 0u));
+  in_use_ = 0u;
+}
+
+void CommandPool::allocate_new_batch(const uint32_t count) {
+  // No-ops if there are still command buffers availble
+  if (in_use_ < buffers_.size()) {
+    return;
+  }
+
+  buffers_.resize(buffers_.size() + count);
+
+  const VkCommandBufferAllocateInfo allocate_info{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, // sType
+      nullptr, // pNext
+      pool_, // commandPool
+      VK_COMMAND_BUFFER_LEVEL_PRIMARY, // level
+      count, // commandBufferCount
+  };
+
+  VK_CHECK(vkAllocateCommandBuffers(
+      device_, &allocate_info, buffers_.data() + in_use_));
 }
 
 } // namespace api

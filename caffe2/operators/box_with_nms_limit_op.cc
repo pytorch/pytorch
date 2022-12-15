@@ -104,7 +104,7 @@ const auto& tscores = Input(0);
             -1, /* topN */
             legacy_plus_one_);
       } else {
-        std::sort(
+        std::stable_sort(
             inds.data(),
             inds.data() + inds.size(),
             [&cur_scores](int lhs, int rhs) {
@@ -148,7 +148,7 @@ const auto& tscores = Input(0);
           }
         }
 
-        std::sort(
+        std::stable_sort(
             ret.data(),
             ret.data() + ret.size(),
             [this, &scores](const KeepIndex& lhs, const KeepIndex& rhs) {
@@ -161,14 +161,14 @@ const auto& tscores = Input(0);
 
       // Pick the first `detections_per_im_` boxes with highest scores
       auto all_scores_sorted = get_all_scores_sorted();
-      DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
+      TORCH_DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
 
       // Reconstruct keeps from `all_scores_sorted`
       for (auto& cur_keep : keeps) {
         cur_keep.clear();
       }
       for (int i = 0; i < detections_per_im_; i++) {
-        DCHECK_GT(all_scores_sorted.size(), i);
+        TORCH_DCHECK_GT(all_scores_sorted.size(), i);
         auto& cur = all_scores_sorted[i];
         keeps[cur.first].push_back(cur.second);
       }

@@ -98,7 +98,7 @@ class ConstraintRegistry(object):
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
                 A subclass of :class:`~torch.distributions.constraints.Constraint`, or
                 a singleton object of the desired class.
-            factory (callable): A callable that inputs a constraint object and returns
+            factory (Callable): A callable that inputs a constraint object and returns
                 a  :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.
@@ -227,6 +227,12 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@transform_to.register(constraints.positive_definite)
+@transform_to.register(constraints.positive_semidefinite)
+def _transform_to_positive_definite(constraint):
+    return transforms.PositiveDefiniteTransform()
 
 
 @biject_to.register(constraints.corr_cholesky)

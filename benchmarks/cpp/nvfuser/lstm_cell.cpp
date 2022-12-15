@@ -9,7 +9,7 @@
 
 #include <cuda_runtime.h>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -170,11 +170,11 @@ static void LstmCell_RunFusion(
   FusionExecutor executor;
   executor.compileFusion(&fusion);
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 
@@ -207,14 +207,10 @@ static void LstmCell_RunFusion_GpuOnly(
   executor.setMeasureKernelTimeFlag(true);
   executor.compileFusion(&fusion);
 
-  cudaDeviceSynchronize();
-
   for (auto _ : benchmark_state) {
+    clearL2Cache();
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs), lparams);
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
-    cudaDeviceSynchronize();
-    clearL2Cache();
-    cudaDeviceSynchronize();
   }
 }
 

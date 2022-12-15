@@ -1,4 +1,5 @@
 import ast
+import dis
 import enum
 import inspect
 import re
@@ -12,7 +13,7 @@ from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
-    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
 
 
 from textwrap import dedent
@@ -23,6 +24,7 @@ if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
 
+from torch._ops import OpOverloadPacket
 
 class Module(object):
     def __init__(self, name, members):
@@ -62,7 +64,10 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    signature = try_real_annotations(fn, loc)
+    if isinstance(fn, OpOverloadPacket):
+        signature = try_real_annotations(fn.op, loc)
+    else:
+        signature = try_real_annotations(fn, loc)
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -106,6 +111,9 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
+    if isinstance(fn, OpOverloadPacket):
+        fn = fn.op
+
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
@@ -137,6 +145,15 @@ def check_fn(fn, loc):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
 
 
+def _eval_no_call(stmt, glob, loc):
+    """Evaluate statement as long as it does not contain any method/function calls"""
+    bytecode = compile(stmt, "", mode="eval")
+    for insn in dis.get_instructions(bytecode):
+        if "CALL" in insn.opname:
+            raise RuntimeError(f"Type annotation should not contain calls, but '{stmt}' does")
+    return eval(bytecode, glob, loc)  # type: ignore[arg-type] # noqa: P204
+
+
 def parse_type_line(type_line, rcb, loc):
     """Parses a type annotation specified as a comment.
 
@@ -147,7 +164,7 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
+        arg_ann = _eval_no_call(arg_ann_str, {}, EvalEnv(rcb))
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
@@ -155,7 +172,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
+        ret_ann = _eval_no_call(ret_ann_str, {}, EvalEnv(rcb))
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
@@ -277,7 +294,10 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # Even though Python supports this case, we chose to not implement it to
     # avoid overcomplicate logic here for a rare use case. Please report a
     # feature request if you find it necessary.
-    return torch._C.unify_type_list(ir_types)
+    res = torch._C.unify_type_list(ir_types)
+    if not res:
+        return AnyType.get()
+    return res
 
 def is_tensor(ann):
     if issubclass(ann, torch.Tensor):
@@ -330,6 +350,9 @@ def try_ann_to_type(ann, loc):
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
     if is_union(ann):
+        # TODO: this is hack to recognize NumberType
+        if set(ann.__args__) == set([int, float, complex]):
+            return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid
         # values will return `None`

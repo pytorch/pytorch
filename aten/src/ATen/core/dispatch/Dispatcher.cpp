@@ -1,8 +1,21 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <chrono>
 #include <list>
 #include <sstream>
+#include <utility>
 
 namespace c10 {
+
+bool show_dispatch_trace() {
+    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
+    return temp != nullptr;
+}
+
+static thread_local int64_t dispatch_trace_nesting_value_;
+
+void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
+void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
+int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
 
 namespace detail {
 
@@ -39,7 +52,9 @@ Dispatcher::Dispatcher()
 , operatorLookupTable_()
 , backendFallbackKernels_()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
-, mutex_() {}
+, mutex_()
+, cond_var_()
+{}
 
 Dispatcher::~Dispatcher() = default;
 
@@ -56,6 +71,41 @@ c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_na
     }
     return found->second;
   });
+}
+
+// NB: If you add more waitFor* implementations, you also have to add
+// appropriate notify_all() calls to the relevant register calls
+
+void Dispatcher::waitForDef(const FunctionSchema& schema) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(mutex_);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    return findOp(schema.operator_name()) != c10::nullopt;
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to define ", schema.operator_name(),
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
+}
+
+void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(mutex_);
+  auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
+  auto op = findOrRegisterName_(op_name);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    // NB: this is slightly unsound for overrides, but overrides are
+    // funny business anyway
+    return op.hasKernelForDispatchKey(dk);
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to implement ", dk, " for ", op_name,
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
@@ -114,6 +164,14 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   return handle;
 }
 
+
+// Adding explicit destructor definition in the cpp to over linker error in Windows builds.
+// Windows build doesn't produce the destructor symbol in PyTorch libs
+// causing a linker failure in downstream projects.
+// x-ref https://github.com/pytorch/pytorch/issues/70032
+// NOLINTNEXTLINE(performance-trivially-destructible)
+OperatorHandle::~OperatorHandle() = default;
+
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto found = libraries_.find(ns);
@@ -140,7 +198,7 @@ void Dispatcher::deregisterLibrary_(const std::string& ns) {
   libraries_.erase(ns);
 }
 
-RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug) {
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, std::vector<at::Tag> tags) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -150,12 +208,14 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
                                                     " Each overload's schema should only be registered with a single call to def().",
                                                     " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
-  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug));
+  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug), std::move(tags));
   listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking
   ++op.operatorDef_->def_count;
   ++op.operatorDef_->def_and_impl_count;
+
+  cond_var_.notify_all();
 
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
@@ -209,6 +269,8 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   ++op.operatorDef_->def_and_impl_count;
 
+  cond_var_.notify_all();
+
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
@@ -231,6 +293,7 @@ RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto op = findOrRegisterName_(op_name);
   ++op.operatorDef_->def_and_impl_count;
+
   return RegistrationHandleRAII(
       [this, op, op_name] { deregisterName_(op, op_name); });
 }
@@ -260,14 +323,16 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
   TORCH_CHECK(
-    !backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].kernel.isValid(),
+    !backendFallbackKernels_[idx].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].debug, ", new registration ", debug
+    backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unobxed
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
+  backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -281,7 +346,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = {};
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  backendFallbackKernels_[idx] = {};
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -346,18 +412,14 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
   return seq_num;
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
-  guard.before(op, stack, sequenceNumberForRunningRecordFunction(dispatchKey));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args) {
+  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
-  guard.before(op, std::move(stack), sequenceNumberForRunningRecordFunction(dispatchKey));
-}
-
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey) {
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the coresponding Autograd's node
-  guard.before(op, sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 }

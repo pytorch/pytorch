@@ -1,7 +1,29 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/align_as_native.h>
+#include <ATen/ops/align_tensors_native.h>
+#include <ATen/ops/align_to_native.h>
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_native.h>
+#include <ATen/ops/index_fill.h>
+#include <ATen/ops/index_fill_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/refine_names_native.h>
+#include <ATen/ops/rename_native.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -100,7 +122,7 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
       self_names.size(), " and ", names.size(), " respectively).");
   check_names_valid_for(self, names);
 
-  for (size_t idx = 0; idx < self_names.size(); idx++) {
+  for (const auto idx : c10::irange(self_names.size())) {
     const auto& self_name = self_names[idx];
     const auto& out_name = names[idx];
     if (self_name == out_name || self_name.isWildcard()) {
@@ -221,7 +243,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   };
 
   // Fill in the non-ellipsis dimensions
-  for (auto order_idx = 0U; order_idx < order.size(); ++order_idx) {
+  for (const auto order_idx : c10::irange(static_cast<int64_t>(order.size()))) {
     auto out_idx = order_idx;
     if (order_idx >= ellipsis_idx) {
       out_idx = order_idx + num_ellipsis_names;
@@ -318,6 +340,9 @@ Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Ten
   reportNYIDimnameOverload("index_add");
 }
 Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor& index_add_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha, Tensor& result) {
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {

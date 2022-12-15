@@ -12,7 +12,12 @@
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/jiterator_macros.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -62,6 +67,83 @@ Output was modified to be inf or -inf when input is 1 or -1. */
     USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
+
+namespace {
+/*
+ * This function is derived from the implementation of the i0e function in the
+ * Cephes Math Library. See note [3-Clause BSD License for the Cephes Math
+ * Library].
+ *
+ * Computes an approximation of the exponentially scaled zeroth order modified
+ * Bessel function of the first kind. The approximation is actually two
+ * (sub)approximations, both using a Chebyshev polynomial expansion. One
+ * approximates the function over [0, 8], and the other over (8, infinity). This
+ * function takes the absolute value of all inputs to convert them into the
+ * domain of the approximation.
+ */
+jiterator_also_stringify_as(jiterator_code(
+  template <typename T>
+  JITERATOR_HOST_DEVICE T chbevl(T x, const T array[], const int len) {
+    T b0, b1, b2;
+
+    b0 = array[0];
+    b1 = 0;
+
+    for (int i = 1; i < len; ++i) {
+      b2 = b1;
+      b1 = b0;
+      b0 = x * b1 - b2 + array[i];
+    }
+
+    return T{0.5} * (b0 - b2);
+  }
+
+  template <typename T>
+  JITERATOR_HOST_DEVICE T calc_i0e(T _x) {
+    T x = fabs(_x);
+
+    if (x <= T{8.0}) {
+      static const T coefficients[] = {
+          -4.41534164647933937950E-18, 3.33079451882223809783E-17,
+          -2.43127984654795469359E-16, 1.71539128555513303061E-15,
+          -1.16853328779934516808E-14, 7.67618549860493561688E-14,
+          -4.85644678311192946090E-13, 2.95505266312963983461E-12,
+          -1.72682629144155570723E-11, 9.67580903537323691224E-11,
+          -5.18979560163526290666E-10, 2.65982372468238665035E-9,
+          -1.30002500998624804212E-8,  6.04699502254191894932E-8,
+          -2.67079385394061173391E-7,  1.11738753912010371815E-6,
+          -4.41673835845875056359E-6,  1.64484480707288970893E-5,
+          -5.75419501008210370398E-5,  1.88502885095841655729E-4,
+          -5.76375574538582365885E-4,  1.63947561694133579842E-3,
+          -4.32430999505057594430E-3,  1.05464603945949983183E-2,
+          -2.37374148058994688156E-2,  4.93052842396707084878E-2,
+          -9.49010970480476444210E-2,  1.71620901522208775349E-1,
+          -3.04682672343198398683E-1,  6.76795274409476084995E-1};
+
+      T y = (x / T{2.0}) - T{2.0};
+      return chbevl(y, coefficients, int{30});
+    }
+
+    // x > 8
+    static const T coefficients[] = {
+        -7.23318048787475395456E-18, -4.83050448594418207126E-18,
+        4.46562142029675999901E-17,  3.46122286769746109310E-17,
+        -2.82762398051658348494E-16, -3.42548561967721913462E-16,
+        1.77256013305652638360E-15,  3.81168066935262242075E-15,
+        -9.55484669882830764870E-15, -4.15056934728722208663E-14,
+        1.54008621752140982691E-14,  3.85277838274214270114E-13,
+        7.18012445138366623367E-13,  -1.79417853150680611778E-12,
+        -1.32158118404477131188E-11, -3.14991652796324136454E-11,
+        1.18891471078464383424E-11,  4.94060238822496958910E-10,
+        3.39623202570838634515E-9,   2.26666899049817806459E-8,
+        2.04891858946906374183E-7,   2.89137052083475648297E-6,
+        6.88975834691682398426E-5,   3.36911647825569408990E-3,
+        8.04490411014108831608E-1};
+
+    return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / sqrt(x);
+  }),
+  i0e_string); // i0e_string
+}
 
 #define CENTRAL_RANGE 0.7
 
@@ -405,10 +487,11 @@ static inline float calc_digamma(float x) {
 }
 
 template <typename scalar_t, bool is_cuda=false>
-static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) *
-      ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
+  const auto one = scalar_t{1};
+  return ((n % 2) ? one : -one) *
+      ::exp(::lgamma(static_cast<scalar_t>(n) + one)) *
       zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
@@ -1381,37 +1464,6 @@ calc_i0(T _x) {
 static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
 
 /*
- * This function is derived from the implementation of the i0e function in the Cephes Math Library.
- * See note [3-Clause BSD License for the Cephes Math Library].
- *
- * Computes an approximation of the exponentially scaled zeroth order modified Bessel function of the first kind.
- * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
- * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
- * of all inputs to convert them into the domain of the approximation.
- */
-template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-calc_i0e(T _x) {
-  T x = std::abs(_x);
-
-  if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
-    T y = (x / T{2.0}) - T{2.0};
-    return chbevl(y, A, len);
-  }
-
-  auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
-  return chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
-}
-
-// Upcast bfloat16 input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
-
-/*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  *
@@ -2107,3 +2159,1718 @@ calc_erfcx(T x)
     }
   }
 }
+
+/*
+ * Logarithm of Gaussian cumulative distribution function.
+
+ * This implementation of log_ndtr and its helper functions
+ * follow SciPy's implementation
+ * See NOTICE for the licenses.
+ */
+template <typename T>
+static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
+  T t = x * M_SQRT1_2;
+  if (x < T{-1.0}) {
+    return std::log(calc_erfcx(-t) / 2) - t * t;
+  } else {
+    return std::log1p(-std::erfc(t) / 2);
+  }
+}
+
+template<typename T>
+static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
+    static const T AN[] = {
+            +3.46538101525629032477e-01,
+            +1.20075952739645805542e+01,
+            +7.62796053615234516538e+01,
+            +1.68089224934630576269e+02,
+            +1.59756391350164413639e+02,
+            +7.05360906840444183113e+01,
+            +1.40264691163389668864e+01,
+            +9.99999999999999995305e-01,
+    };
+
+    static const T AD[] = {
+            +5.67594532638770212846e-01,
+            +1.47562562584847203173e+01,
+            +8.45138970141474626562e+01,
+            +1.77318088145400459522e+02,
+            +1.64234692871529701831e+02,
+            +7.14778400825575695274e+01,
+            +1.40959135607834029598e+01,
+            +1.00000000000000000470e+00,
+    };
+
+    static const T AFN[] = {
+            -1.31696323418331795333e-01,
+            -6.26456544431912369773e-01,
+            -6.93158036036933542233e-01,
+            -2.79779981545119124951e-01,
+            -4.91900132609500318020e-02,
+            -4.06265923594885404393e-03,
+            -1.59276496239262096340e-04,
+            -2.77649108155232920844e-06,
+            -1.67787698489114633780e-08,
+    };
+
+    static const T AFD[] = {
+            +1.33560420706553243746e+01,
+            +3.26825032795224613948e+01,
+            +2.67367040941499554804e+01,
+            +9.18707402907259625840e+00,
+            +1.47529146771666414581e+00,
+            +1.15687173795188044134e-01,
+            +4.40291641615211203805e-03,
+            +7.54720348287414296618e-05,
+            +4.51850092970580378464e-07,
+    };
+
+    static const T AGN[] = {
+            +1.97339932091685679179e-02,
+            +3.91103029615688277255e-01,
+            +1.06579897599595591108e+00,
+            +9.39169229816650230044e-01,
+            +3.51465656105547619242e-01,
+            +6.33888919628925490927e-02,
+            +5.85804113048388458567e-03,
+            +2.82851600836737019778e-04,
+            +6.98793669997260967291e-06,
+            +8.11789239554389293311e-08,
+            +3.41551784765923618484e-10,
+    };
+
+    static const T AGD[] = {
+            +9.30892908077441974853e+00,
+            +1.98352928718312140417e+01,
+            +1.55646628932864612953e+01,
+            +5.47686069422975497931e+00,
+            +9.54293611618961883998e-01,
+            +8.64580826352392193095e-02,
+            +4.12656523824222607191e-03,
+            +1.01259085116509135510e-04,
+            +1.17166733214413521882e-06,
+            +4.91834570062930015649e-09,
+    };
+
+    int domain_flag = 0;
+
+    T ai;
+
+    if (std::isinf(x)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    if (x > T(103.892)) {
+        return T(0.0);
+    }
+
+    T f;
+    T g;
+    T k;
+
+    if (x < T(-2.09)) {
+        T z = T(1.0) / (T(-2.0) * x * std::sqrt(-x) / T(3.0));
+
+        T afn = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            afn = afn * (z * z) + AFN[index];
+        }
+
+        T afd = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) {
+            afd = afd * (z * z) + AFD[index];
+        }
+
+        T agn = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            agn = agn * (z * z) + AGN[index];
+        }
+
+        T agd = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            agd = agd * (z * z) + AGD[index];
+        }
+
+        T t = T(-2.0) * x * std::sqrt(-x) / T(3.0) + T(0.25) * M_PI;
+
+        return T(5.64189583547756286948e-01) / std::sqrt(std::sqrt(-x)) * (std::sin(t) * (T(1.0) + z * z * afn / afd) - std::cos(t) * (z * agn / agd));
+    }
+
+    if (x >= T(2.09)) {
+        domain_flag = 5;
+
+        T zeta = T(2.0) * x * std::sqrt(x) / T(3.0);
+
+        T an = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            an = an * (T(1.0) / zeta) + AN[index];
+        }
+
+        T ad = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            ad = ad * (T(1.0) / zeta) + AD[index];
+        }
+
+        ai = T(5.64189583547756286948e-01) * (an / ad) / (T(2.0) * std::sqrt(std::sqrt(x)) * std::exp(zeta));
+
+        if (x > T(8.3203353)) {
+            return ai;
+        }
+    }
+
+    f = 1.0;
+    g = x;
+    k = 1.0;
+
+    T m = 1.0;
+    T n = x;
+    T t = 1.0;
+    T z = x * x * x;
+
+    while (t > std::numeric_limits<T>::epsilon()) {
+        m *= z;
+        k += T(1.0);
+        m /= k;
+        n *= z;
+        k += T(1.0);
+        n /= k;
+        m /= k;
+        f += m;
+        k += T(1.0);
+        n /= k;
+        g += n;
+
+        t = std::abs(m / f);
+    }
+
+    if ((domain_flag & 1) == 0) {
+        return T(0.355028053887817239260) * f - T(0.258819403792806798405) * g;
+    }
+
+    return ai;
+} // T airy_ai(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
+    static const T PP[] = {
+            +7.96936729297347051624e-04,
+            +8.28352392107440799803e-02,
+            +1.23953371646414299388e+00,
+            +5.44725003058768775090e+00,
+            +8.74716500199817011941e+00,
+            +5.30324038235394892183e+00,
+            +9.99999999999999997821e-01,
+    };
+
+    static const T PQ[] = {
+            +9.24408810558863637013e-04,
+            +8.56288474354474431428e-02,
+            +1.25352743901058953537e+00,
+            +5.47097740330417105182e+00,
+            +8.76190883237069594232e+00,
+            +5.30605288235394617618e+00,
+            +1.00000000000000000218e+00,
+    };
+
+    static const T QP[] = {
+            -1.13663838898469149931e-02,
+            -1.28252718670509318512e+00,
+            -1.95539544257735972385e+01,
+            -9.32060152123768231369e+01,
+            -1.77681167980488050595e+02,
+            -1.47077505154951170175e+02,
+            -5.14105326766599330220e+01,
+            -6.05014350600728481186e+00,
+    };
+
+    static const T QQ[] = {
+            +6.43178256118178023184e+01,
+            +8.56430025976980587198e+02,
+            +3.88240183605401609683e+03,
+            +7.24046774195652478189e+03,
+            +5.93072701187316984827e+03,
+            +2.06209331660327847417e+03,
+            +2.42005740240291393179e+02,
+    };
+
+    static const T RP[] = {
+            -4.79443220978201773821e+09,
+            +1.95617491946556577543e+12,
+            -2.49248344360967716204e+14,
+            +9.70862251047306323952e+15,
+    };
+
+    static const T RQ[] = {
+            +4.99563147152651017219e+02,
+            +1.73785401676374683123e+05,
+            +4.84409658339962045305e+07,
+            +1.11855537045356834862e+10,
+            +2.11277520115489217587e+12,
+            +3.10518229857422583814e+14,
+            +3.18121955943204943306e+16,
+            +1.71086294081043136091e+18,
+    };
+
+    if (x < T(0)) {
+        x = -x;
+    }
+
+    if (x <= T(5.0)) {
+        if (x < T(0.00001)) {
+            return T(1.0) - x * x / T(4.0);
+        }
+
+        T rp = 0.0;
+
+        for (uint8_t index = 0; index <= 3; index++) {
+            rp = rp * (x * x) + RP[index];
+        }
+
+        T rq = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            rq = rq * (x * x) + RQ[index];
+        }
+
+        return (x * x - T(5.78318596294678452118e+00)) * (x * x - T(3.04712623436620863991e+01)) * rp / rq;
+    }
+
+    T pp = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pp = pp * (T(25.0) / (x * x)) + PP[index];
+    }
+
+    T pq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pq = pq * (T(25.0) / (x * x)) + PQ[index];
+    }
+
+    T qp = 0.0;
+
+    for (uint8_t index = 0; index <= 7; index++) {
+        qp = qp * (T(25.0) / (x * x)) + QP[index];
+    }
+
+    T qq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        qq = qq * (T(25.0) / (x * x)) + QQ[index];
+    }
+
+    return (pp / pq * std::cos(x - T(0.785398163397448309615660845819875721)) - T(5.0) / x * (qp / qq) * std::sin(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
+} // bessel_j0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
+    static const T PP[] = {
+            +7.62125616208173112003e-04,
+            +7.31397056940917570436e-02,
+            +1.12719608129684925192e+00,
+            +5.11207951146807644818e+00,
+            +8.42404590141772420927e+00,
+            +5.21451598682361504063e+00,
+            +1.00000000000000000254e+00,
+    };
+
+    static const T PQ[] = {
+            +5.71323128072548699714e-04,
+            +6.88455908754495404082e-02,
+            +1.10514232634061696926e+00,
+            +5.07386386128601488557e+00,
+            +8.39985554327604159757e+00,
+            +5.20982848682361821619e+00,
+            +9.99999999999999997461e-01,
+    };
+
+    static const T QP[] = {
+            +5.10862594750176621635e-02,
+            +4.98213872951233449420e+00,
+            +7.58238284132545283818e+01,
+            +3.66779609360150777800e+02,
+            +7.10856304998926107277e+02,
+            +5.97489612400613639965e+02,
+            +2.11688757100572135698e+02,
+            +2.52070205858023719784e+01,
+    };
+
+    static const T QQ[] = {
+            +7.42373277035675149943e+01,
+            +1.05644886038262816351e+03,
+            +4.98641058337653607651e+03,
+            +9.56231892404756170795e+03,
+            +7.99704160447350683650e+03,
+            +2.82619278517639096600e+03,
+            +3.36093607810698293419e+02,
+    };
+
+    static const T RP[] = {
+            -8.99971225705559398224e+08,
+            +4.52228297998194034323e+11,
+            -7.27494245221818276015e+13,
+            +3.68295732863852883286e+15,
+    };
+
+    static const T RQ[] = {
+            +6.20836478118054335476e+02,
+            +2.56987256757748830383e+05,
+            +8.35146791431949253037e+07,
+            +2.21511595479792499675e+10,
+            +4.74914122079991414898e+12,
+            +7.84369607876235854894e+14,
+            +8.95222336184627338078e+16,
+            +5.32278620332680085395e+18,
+    };
+
+    if (x < T(0.0)) {
+        return -bessel_j1_forward(-x);
+    }
+
+    if (x <= T(5.0)) {
+        T rp = 0.0;
+
+        for (uint8_t index = 0; index <= 3; index++) {
+            rp = rp * (x * x) + RP[index];
+        }
+
+        T rq = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            rq = rq * (x * x) + RQ[index];
+        }
+
+        return rp / rq * x * (x * x - T(1.46819706421238932572e+01)) * (x * x - T(4.92184563216946036703e+01));
+    }
+
+    T pp = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pp = pp * (T(5.0) / x * (T(5.0) / x)) + PP[index];
+    }
+
+    T pq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pq = pq * (T(5.0) / x * (T(5.0) / x)) + PQ[index];
+    }
+
+    T qp = 0.0;
+
+    for (uint8_t index = 0; index <= 7; index++) {
+        qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
+    }
+
+    T qq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];
+    }
+
+    return (pp / pq * std::cos(x - T(2.356194490192344928846982537459627163)) - T(5.0) / x * (qp / qq) * std::sin(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
+} // bessel_j1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
+    static const T PP[] = {
+            +7.96936729297347051624e-04,
+            +8.28352392107440799803e-02,
+            +1.23953371646414299388e+00,
+            +5.44725003058768775090e+00,
+            +8.74716500199817011941e+00,
+            +5.30324038235394892183e+00,
+            +9.99999999999999997821e-01,
+    };
+
+    static const T PQ[] = {
+            +9.24408810558863637013e-04,
+            +8.56288474354474431428e-02,
+            +1.25352743901058953537e+00,
+            +5.47097740330417105182e+00,
+            +8.76190883237069594232e+00,
+            +5.30605288235394617618e+00,
+            +1.00000000000000000218e+00,
+    };
+
+    static const T QP[] = {
+            -1.13663838898469149931e-02,
+            -1.28252718670509318512e+00,
+            -1.95539544257735972385e+01,
+            -9.32060152123768231369e+01,
+            -1.77681167980488050595e+02,
+            -1.47077505154951170175e+02,
+            -5.14105326766599330220e+01,
+            -6.05014350600728481186e+00,
+    };
+
+    static const T QQ[] = {
+            +6.43178256118178023184e+01,
+            +8.56430025976980587198e+02,
+            +3.88240183605401609683e+03,
+            +7.24046774195652478189e+03,
+            +5.93072701187316984827e+03,
+            +2.06209331660327847417e+03,
+            +2.42005740240291393179e+02,
+    };
+
+    static const T YP[] = {
+            +1.55924367855235737965e+04,
+            -1.46639295903971606143e+07,
+            +5.43526477051876500413e+09,
+            -9.82136065717911466409e+11,
+            +8.75906394395366999549e+13,
+            -3.46628303384729719441e+15,
+            +4.42733268572569800351e+16,
+            -1.84950800436986690637e+16,
+    };
+
+    static const T YQ[] = {
+            +1.04128353664259848412e+03,
+            +6.26107330137134956842e+05,
+            +2.68919633393814121987e+08,
+            +8.64002487103935000337e+10,
+            +2.02979612750105546709e+13,
+            +3.17157752842975028269e+15,
+            +2.50596256172653059228e+17,
+    };
+
+    if (x <= T(5.0)) {
+        if (x == T(0.0)) {
+            return -std::numeric_limits<T>::infinity();
+        }
+
+        if (x < T(0.0)) {
+            return std::numeric_limits<T>::quiet_NaN();
+        }
+
+        T yp = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            yp = yp * (x * x) + YP[index];
+        }
+
+        T yq = 0.0;
+
+        for (uint8_t index = 0; index <= 6; index++) {
+            yq = yq * (x * x) + YQ[index];
+        }
+
+        return yp / yq + (T(0.636619772367581343075535053490057448) * std::log(x) * bessel_j0_forward(x));
+    }
+
+    T pp = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pp = pp * (T(25.0) / (x * x)) + PP[index];
+    }
+
+    T pq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pq = pq * (T(25.0) / (x * x)) + PQ[index];
+    }
+
+    T qp = 0.0;
+
+    for (uint8_t index = 0; index <= 7; index++) {
+        qp = qp * (T(25.0) / (x * x)) + QP[index];
+    }
+
+    T qq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        qq = qq * (T(25.0) / (x * x)) + QQ[index];
+    }
+
+    return (pp / pq * std::sin(x - T(0.785398163397448309615660845819875721)) + T(5.0) / x * (qp / qq) * std::cos(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
+} // bessel_y0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
+    static const T PP[] = {
+            +7.62125616208173112003e-04,
+            +7.31397056940917570436e-02,
+            +1.12719608129684925192e+00,
+            +5.11207951146807644818e+00,
+            +8.42404590141772420927e+00,
+            +5.21451598682361504063e+00,
+            +1.00000000000000000254e+00,
+    };
+
+    static const T PQ[] = {
+            +5.71323128072548699714e-04,
+            +6.88455908754495404082e-02,
+            +1.10514232634061696926e+00,
+            +5.07386386128601488557e+00,
+            +8.39985554327604159757e+00,
+            +5.20982848682361821619e+00,
+            +9.99999999999999997461e-01,
+    };
+
+    static const T QP[] = {
+            +5.10862594750176621635e-02,
+            +4.98213872951233449420e+00,
+            +7.58238284132545283818e+01,
+            +3.66779609360150777800e+02,
+            +7.10856304998926107277e+02,
+            +5.97489612400613639965e+02,
+            +2.11688757100572135698e+02,
+            +2.52070205858023719784e+01,
+    };
+
+    static const T QQ[] = {
+            +7.42373277035675149943e+01,
+            +1.05644886038262816351e+03,
+            +4.98641058337653607651e+03,
+            +9.56231892404756170795e+03,
+            +7.99704160447350683650e+03,
+            +2.82619278517639096600e+03,
+            +3.36093607810698293419e+02,
+    };
+
+    static const T YP[] = {
+            +1.26320474790178026440e+09,
+            -6.47355876379160291031e+11,
+            +1.14509511541823727583e+14,
+            -8.12770255501325109621e+15,
+            +2.02439475713594898196e+17,
+            -7.78877196265950026825e+17,
+    };
+
+    static const T YQ[] = {
+            +5.94301592346128195359e+02,
+            +2.35564092943068577943e+05,
+            +7.34811944459721705660e+07,
+            +1.87601316108706159478e+10,
+            +3.88231277496238566008e+12,
+            +6.20557727146953693363e+14,
+            +6.87141087355300489866e+16,
+            +3.97270608116560655612e+18,
+    };
+
+    if (x <= T(5.0)) {
+        if (x == T(0.0)) {
+            return -std::numeric_limits<T>::infinity();
+        }
+
+        if (x <= T(0.0)) {
+            return std::numeric_limits<T>::quiet_NaN();
+        }
+
+        T yp = 0.0;
+
+        for (uint8_t index = 0; index <= 5; index++) {
+            yp = yp * (x * x) + YP[index];
+        }
+
+        T yq = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            yq = yq * (x * x) + YQ[index];
+        }
+
+        return x * (yp / yq) + (T(0.636619772367581343075535053490057448) * (bessel_j1_forward(x) * std::log(x) - T(1.0) / x));
+    }
+
+    T pp = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pp = pp * (T(5.0) / x * (T(5.0) / x)) + PP[index];
+    }
+
+    T pq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        pq = pq * (T(5.0) / x * (T(5.0) / x)) + PQ[index];
+    }
+
+    T qp = 0.0;
+
+    for (uint8_t index = 0; index <= 7; index++) {
+        qp = qp * (T(5.0) / x * (T(5.0) / x)) + QP[index];
+    }
+
+    T qq = 0.0;
+
+    for (uint8_t index = 0; index <= 6; index++) {
+        qq = qq * (T(5.0) / x * (T(5.0) / x)) + QQ[index];
+    }
+
+    return (pp / pq * std::sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * std::cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
+} // bessel_y1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 6) && (std::abs(x) < T(1.0))) {
+        return std::cos(n * std::acos(x));
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x;
+    }
+
+    T p = T(1.0);
+    T q = x;
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_t_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
+    return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_t_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return n + 1;
+        }
+
+        return -(n + 1);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::sin(std::acos(x)) != T(0.0)) {
+            return std::sin((n + 1) * std::acos(x)) / std::sin(std::acos(x));
+        }
+
+        return (n + 1) * std::cos((n + 1) * std::acos(x)) / x;
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x;
+    }
+
+    T p = T(1.0);
+    T q = x + x;
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_u_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
+    return chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_u_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0)) {
+            return T(1.0);
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::sin(std::acos(x) / T(2.0)) != T(1.0)) {
+            return std::cos((n + T(0.5)) * std::acos(x)) / std::cos(std::acos(x) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, T n) {
+    return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_v_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0)) {
+            return n + n + 1;
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 8) && (std::abs(x) < T(1.0))) {
+        if (std::cos(std::acos(x) / T(2.0)) != T(1.0)) {
+            return std::sin((n + T(0.5)) * std::acos(x)) / std::sin(std::acos(x) / T(2.0));
+        }
+
+        if (x > T(0.0)) {
+            return n + n + 1;
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x + T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x + T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
+    return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+} // chebyshev_polynomial_w_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x;
+    }
+
+    T p = T(1.0);
+    T q = x + x;
+    T r;
+
+    for (int64_t k = 2; k < n + n; k += 2) {
+        r = (x + x) * q - k * p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // hermite_polynomial_h_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+    return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
+} // hermite_polynomial_h_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x;
+    }
+
+    T p = T(1.0);
+    T q = x;
+    T r;
+
+    for (int64_t k = 1; k < n; k++) {
+        r = x * q - k * p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // hermite_polynomial_he_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
+    return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
+} // hermite_polynomial_he_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(0.0)) {
+        return T(1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return T(1.0) - x;
+    }
+
+    T p = T(1.0);
+    T q = T(1.0) - x;
+    T r;
+
+    for (int64_t k = 1; k < n; k++) {
+        r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // laguerre_polynomial_l_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
+    return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
+} // laguerre_polynomial_l_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) == T(1.0)) {
+        if (x > T(0.0) || n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x;
+    }
+
+    T p = T(1.0);
+    T q = x;
+    T r;
+
+    for (int64_t k = 1; k < n; k++) {
+        r = ((k + k + 1) * x * q - k * p) / (k + 1);
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // legendre_polynomial_p_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
+    return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+} // legendre_polynomial_p_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
+    static const T A[] = {
+            -4.41534164647933937950e-18,
+            +3.33079451882223809783e-17,
+            -2.43127984654795469359e-16,
+            +1.71539128555513303061e-15,
+            -1.16853328779934516808e-14,
+            +7.67618549860493561688e-14,
+            -4.85644678311192946090e-13,
+            +2.95505266312963983461e-12,
+            -1.72682629144155570723e-11,
+            +9.67580903537323691224e-11,
+            -5.18979560163526290666e-10,
+            +2.65982372468238665035e-09,
+            -1.30002500998624804212e-08,
+            +6.04699502254191894932e-08,
+            -2.67079385394061173391e-07,
+            +1.11738753912010371815e-06,
+            -4.41673835845875056359e-06,
+            +1.64484480707288970893e-05,
+            -5.75419501008210370398e-05,
+            +1.88502885095841655729e-04,
+            -5.76375574538582365885e-04,
+            +1.63947561694133579842e-03,
+            -4.32430999505057594430e-03,
+            +1.05464603945949983183e-02,
+            -2.37374148058994688156e-02,
+            +4.93052842396707084878e-02,
+            -9.49010970480476444210e-02,
+            +1.71620901522208775349e-01,
+            -3.04682672343198398683e-01,
+            +6.76795274409476084995e-01,
+    };
+
+    static const T B[] = {
+            -7.23318048787475395456e-18,
+            -4.83050448594418207126e-18,
+            +4.46562142029675999901e-17,
+            +3.46122286769746109310e-17,
+            -2.82762398051658348494e-16,
+            -3.42548561967721913462e-16,
+            +1.77256013305652638360e-15,
+            +3.81168066935262242075e-15,
+            -9.55484669882830764870e-15,
+            -4.15056934728722208663e-14,
+            +1.54008621752140982691e-14,
+            +3.85277838274214270114e-13,
+            +7.18012445138366623367e-13,
+            -1.79417853150680611778e-12,
+            -1.32158118404477131188e-11,
+            -3.14991652796324136454e-11,
+            +1.18891471078464383424e-11,
+            +4.94060238822496958910e-10,
+            +3.39623202570838634515e-09,
+            +2.26666899049817806459e-08,
+            +2.04891858946906374183e-07,
+            +2.89137052083475648297e-06,
+            +6.88975834691682398426e-05,
+            +3.36911647825569408990e-03,
+            +8.04490411014108831608e-01,
+    };
+
+    T p;
+    T q = 0.0;
+
+    if (std::abs(x) <= T(8.0)) {
+        T a = A[0];
+
+        for (uint8_t index = 1; index < 30; index++) {
+            p = q;
+            q = a;
+            a = ((std::abs(x) / T(2.0)) - T(2.0)) * q - p + A[index];
+        }
+
+        return std::exp(std::abs(x)) * (T(0.5) * (a - p));
+    }
+
+    T b = B[0];
+
+    for (uint8_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(32.0) / std::abs(x) - T(2.0)) * q - p + B[index];
+    }
+
+    return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
+} // modified_bessel_i0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
+    static const T A[] = {
+            +2.77791411276104639959e-18,
+            -2.11142121435816608115e-17,
+            +1.55363195773620046921e-16,
+            -1.10559694773538630805e-15,
+            +7.60068429473540693410e-15,
+            -5.04218550472791168711e-14,
+            +3.22379336594557470981e-13,
+            -1.98397439776494371520e-12,
+            +1.17361862988909016308e-11,
+            -6.66348972350202774223e-11,
+            +3.62559028155211703701e-10,
+            -1.88724975172282928790e-09,
+            +9.38153738649577178388e-09,
+            -4.44505912879632808065e-08,
+            +2.00329475355213526229e-07,
+            -8.56872026469545474066e-07,
+            +3.47025130813767847674e-06,
+            -1.32731636560394358279e-05,
+            +4.78156510755005422638e-05,
+            -1.61760815825896745588e-04,
+            +5.12285956168575772895e-04,
+            -1.51357245063125314899e-03,
+            +4.15642294431288815669e-03,
+            -1.05640848946261981558e-02,
+            +2.47264490306265168283e-02,
+            -5.29459812080949914269e-02,
+            +1.02643658689847095384e-01,
+            -1.76416518357834055153e-01,
+            +2.52587186443633654823e-01,
+    };
+
+    static const T B[] = {
+            +7.51729631084210481353e-18,
+            +4.41434832307170791151e-18,
+            -4.65030536848935832153e-17,
+            -3.20952592199342395980e-17,
+            +2.96262899764595013876e-16,
+            +3.30820231092092828324e-16,
+            -1.88035477551078244854e-15,
+            -3.81440307243700780478e-15,
+            +1.04202769841288027642e-14,
+            +4.27244001671195135429e-14,
+            -2.10154184277266431302e-14,
+            -4.08355111109219731823e-13,
+            -7.19855177624590851209e-13,
+            +2.03562854414708950722e-12,
+            +1.41258074366137813316e-11,
+            +3.25260358301548823856e-11,
+            -1.89749581235054123450e-11,
+            -5.58974346219658380687e-10,
+            -3.83538038596423702205e-09,
+            -2.63146884688951950684e-08,
+            -2.51223623787020892529e-07,
+            -3.88256480887769039346e-06,
+            -1.10588938762623716291e-04,
+            -9.76109749136146840777e-03,
+            +7.78576235018280120474e-01,
+    };
+
+    T p;
+    T q = 0.0;
+
+    if (std::abs(x) <= T(8.0)) {
+        T a = A[0];
+
+        for (uint8_t index = 1; index < 29; index++) {
+            p = q;
+            q = a;
+            a = ((std::abs(x) / T(2.0)) - T(2.0)) * q - p + A[index];
+        }
+
+        if (x < T(0.0)) {
+            return -(T(0.5) * (a - p) * std::abs(x) * std::exp(std::abs(x)));
+        }
+
+        return T(0.5) * (a - p) * std::abs(x) * std::exp(std::abs(x));
+    }
+
+    T b = B[0];
+
+    for (uint8_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(32.0) / std::abs(x) - T(2.0)) * q - p + B[index];
+    }
+
+    if (x < T(0.0)) {
+        return -(std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x)));
+    }
+
+    return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
+} // modified_bessel_i1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
+    static const T A[] = {
+            +1.37446543561352307156e-16,
+            +4.25981614279661018399e-14,
+            +1.03496952576338420167e-11,
+            +1.90451637722020886025e-09,
+            +2.53479107902614945675e-07,
+            +2.28621210311945178607e-05,
+            +1.26461541144692592338e-03,
+            +3.59799365153615016266e-02,
+            +3.44289899924628486886e-01,
+            -5.35327393233902768720e-01,
+    };
+
+    static const T B[] = {
+            +5.30043377268626276149e-18,
+            -1.64758043015242134646e-17,
+            +5.21039150503902756861e-17,
+            -1.67823109680541210385e-16,
+            +5.51205597852431940784e-16,
+            -1.84859337734377901440e-15,
+            +6.34007647740507060557e-15,
+            -2.22751332699166985548e-14,
+            +8.03289077536357521100e-14,
+            -2.98009692317273043925e-13,
+            +1.14034058820847496303e-12,
+            -4.51459788337394416547e-12,
+            +1.85594911495471785253e-11,
+            -7.95748924447710747776e-11,
+            +3.57739728140030116597e-10,
+            -1.69753450938905987466e-09,
+            +8.57403401741422608519e-09,
+            -4.66048989768794782956e-08,
+            +2.76681363944501510342e-07,
+            -1.83175552271911948767e-06,
+            +1.39498137188764993662e-05,
+            -1.28495495816278026384e-04,
+            +1.56988388573005337491e-03,
+            -3.14481013119645005427e-02,
+            +2.44030308206595545468e+00,
+    };
+
+    if (x == T(0.0)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    if (x < T(0.0)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    T p;
+    T q = 0.0;
+
+    if (x <= T(2.0)) {
+        T a = A[0];
+
+        for (uint8_t index = 1; index < 10; index++) {
+            p = q;
+            q = a;
+            a = (x * x - T(2.0)) * q - p + A[index];
+        }
+
+        return T(0.5) * (a - p) - std::log(0.5 * x) * modified_bessel_i0_forward(x);
+    }
+
+    T b = B[0];
+
+    for (uint8_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+    }
+
+    return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
+} // modified_bessel_k0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
+    static const T A[] = {
+            -7.02386347938628759343e-18,
+            -2.42744985051936593393e-15,
+            -6.66690169419932900609e-13,
+            -1.41148839263352776110e-10,
+            -2.21338763073472585583e-08,
+            -2.43340614156596823496e-06,
+            -1.73028895751305206302e-04,
+            -6.97572385963986435018e-03,
+            -1.22611180822657148235e-01,
+            -3.53155960776544875667e-01,
+            +1.52530022733894777053e+00,
+    };
+
+    static const T B[] = {
+            -5.75674448366501715755e-18,
+            +1.79405087314755922667e-17,
+            -5.68946255844285935196e-17,
+            +1.83809354436663880070e-16,
+            -6.05704724837331885336e-16,
+            +2.03870316562433424052e-15,
+            -7.01983709041831346144e-15,
+            +2.47715442448130437068e-14,
+            -8.97670518232499435011e-14,
+            +3.34841966607842919884e-13,
+            -1.28917396095102890680e-12,
+            +5.13963967348173025100e-12,
+            -2.12996783842756842877e-11,
+            +9.21831518760500529508e-11,
+            -4.19035475934189648750e-10,
+            +2.01504975519703286596e-09,
+            -1.03457624656780970260e-08,
+            +5.74108412545004946722e-08,
+            -3.50196060308781257119e-07,
+            +2.40648494783721712015e-06,
+            -1.93619797416608296024e-05,
+            +1.95215518471351631108e-04,
+            -2.85781685962277938680e-03,
+            +1.03923736576817238437e-01,
+            +2.72062619048444266945e+00,
+    };
+
+    if (x == T(0.0)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    if (x < T(0.0)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    T p;
+    T q = 0.0;
+
+    if (x <= T(2.0)) {
+        T a = A[0];
+
+        for (uint8_t index = 1; index < 11; index++) {
+            p = q;
+            q = a;
+            a = (x * x - T(2.0)) * q - p + A[index];
+        }
+
+        return std::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x;
+    }
+
+    T b = B[0];
+
+    for (uint8_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+    }
+
+    return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
+} // modified_bessel_k1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
+    static const T A[] = {
+            +1.37446543561352307156e-16,
+            +4.25981614279661018399e-14,
+            +1.03496952576338420167e-11,
+            +1.90451637722020886025e-09,
+            +2.53479107902614945675e-07,
+            +2.28621210311945178607e-05,
+            +1.26461541144692592338e-03,
+            +3.59799365153615016266e-02,
+            +3.44289899924628486886e-01,
+            -5.35327393233902768720e-01,
+    };
+
+    static const T B[] = {
+            +5.30043377268626276149e-18,
+            -1.64758043015242134646e-17,
+            +5.21039150503902756861e-17,
+            -1.67823109680541210385e-16,
+            +5.51205597852431940784e-16,
+            -1.84859337734377901440e-15,
+            +6.34007647740507060557e-15,
+            -2.22751332699166985548e-14,
+            +8.03289077536357521100e-14,
+            -2.98009692317273043925e-13,
+            +1.14034058820847496303e-12,
+            -4.51459788337394416547e-12,
+            +1.85594911495471785253e-11,
+            -7.95748924447710747776e-11,
+            +3.57739728140030116597e-10,
+            -1.69753450938905987466e-09,
+            +8.57403401741422608519e-09,
+            -4.66048989768794782956e-08,
+            +2.76681363944501510342e-07,
+            -1.83175552271911948767e-06,
+            +1.39498137188764993662e-05,
+            -1.28495495816278026384e-04,
+            +1.56988388573005337491e-03,
+            -3.14481013119645005427e-02,
+            +2.44030308206595545468e+00,
+    };
+
+    if (x == T(0.0)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    if (x < T(0.0)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    T p;
+    T q = 0.0;
+
+    if (x <= T(2.0)) {
+        T a = A[0];
+
+        for (uint64_t index = 1; index < 10; index++) {
+            p = q;
+            q = a;
+            a = (x * x - T(2.0)) * q - p + A[index];
+        }
+
+        return (T(0.5) * (a - p) - std::log(T(0.5) * x) * modified_bessel_i0_forward(x)) * std::exp(x);
+    }
+
+    T b = B[0];
+
+    for (uint64_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+    }
+
+    return T(0.5) * (b - p) / std::sqrt(x);
+} // T scaled_modified_bessel_k0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
+    static const T A[] = {
+            -7.02386347938628759343e-18,
+            -2.42744985051936593393e-15,
+            -6.66690169419932900609e-13,
+            -1.41148839263352776110e-10,
+            -2.21338763073472585583e-08,
+            -2.43340614156596823496e-06,
+            -1.73028895751305206302e-04,
+            -6.97572385963986435018e-03,
+            -1.22611180822657148235e-01,
+            -3.53155960776544875667e-01,
+            +1.52530022733894777053e+00,
+    };
+
+    static const T B[] = {
+            -5.75674448366501715755e-18,
+            +1.79405087314755922667e-17,
+            -5.68946255844285935196e-17,
+            +1.83809354436663880070e-16,
+            -6.05704724837331885336e-16,
+            +2.03870316562433424052e-15,
+            -7.01983709041831346144e-15,
+            +2.47715442448130437068e-14,
+            -8.97670518232499435011e-14,
+            +3.34841966607842919884e-13,
+            -1.28917396095102890680e-12,
+            +5.13963967348173025100e-12,
+            -2.12996783842756842877e-11,
+            +9.21831518760500529508e-11,
+            -4.19035475934189648750e-10,
+            +2.01504975519703286596e-09,
+            -1.03457624656780970260e-08,
+            +5.74108412545004946722e-08,
+            -3.50196060308781257119e-07,
+            +2.40648494783721712015e-06,
+            -1.93619797416608296024e-05,
+            +1.95215518471351631108e-04,
+            -2.85781685962277938680e-03,
+            +1.03923736576817238437e-01,
+            +2.72062619048444266945e+00,
+    };
+
+    if (x == T(0.0)) {
+        return std::numeric_limits<T>::infinity();
+    }
+
+    if (x < T(0.0)) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
+    T p;
+    T q = 0.0;
+
+    if (x <= T(2.0)) {
+        T a = A[0];
+
+        for (uint64_t index = 1; index < 11; index++) {
+            p = q;
+            q = a;
+            a = (x * x - T(2.0)) * q - p + A[index];
+        }
+
+        return (std::log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x) * std::exp(x);
+    }
+
+    T b = B[0];
+
+    for (uint64_t index = 1; index < 25; index++) {
+        p = q;
+        q = b;
+        b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+    }
+
+    return (T(0.5) * (b - p) / std::sqrt(x));
+} // T scaled_modified_bessel_k1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return T(1.0);
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        return std::cos(n * std::acos(x + x - T(1.0)));
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_t_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return n + 1;
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return n + 1;
+        }
+
+        return -(n + 1);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::sin(std::acos(x + x - T(1.0))) != T(0.0)) {
+            return std::sin((n + 1) * std::acos(x + x - T(1.0))) / std::sin(std::acos(x + x - T(1.0)));
+        }
+
+        return (n + 1) * std::cos((n + 1) * std::acos(x + x - T(1.0))) / (x + x - T(1.0));
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0));
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0));
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_u_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return T(1.0);
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return (n + n + 1);
+        }
+
+        return -(n + n + 1);
+    }
+
+    if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::sin(std::acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+            return std::cos(((n) + T(0.5)) * std::acos(x + x - T(1.0))) / std::cos(std::acos(x + x - T(1.0)) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return n + n + 1;
+        }
+
+        return -(n + n + 1);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_v_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+    if (n < 0) {
+        return T(0.0);
+    }
+
+    if (x == T(1.0)) {
+        return n + n + 1;
+    }
+
+    if (x == T(0.0)) {
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if ((n > 4) && (std::abs(x + x - T(1.0)) < T(1.0))) {
+        if (std::cos(std::acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
+            return std::sin((n + T(0.5)) * std::acos(x + x - T(1.0))) / std::sin(std::acos(x + x - T(1.0)) / T(2.0));
+        }
+
+        if (n % 2 == 0) {
+            return T(1.0);
+        }
+
+        return T(-1.0);
+    }
+
+    if (n == 0) {
+        return T(1.0);
+    }
+
+    if (n == 1) {
+        return x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+    }
+
+    T p = T(1.0);
+    T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
+    T r;
+
+    for (int64_t k = 2; k <= n; k++) {
+        r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
+        p = q;
+        q = r;
+    }
+
+    return r;
+} // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template<typename T, bool is_cuda=false>
+static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, T n) {
+    return shifted_chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
+} // shifted_chebyshev_polynomial_w_forward(T x, T n)
+
+template<typename T>
+static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
+    if (std::isinf(x)) {
+        return T(0.0);
+    }
+
+    if (std::abs(x) < T(0.5)) {
+        return T(1.0) + x * x * (T(-1.0) / T(6.0) + x * x * (T(1.0) / T(120.0) + x * x * (T(-1.0) / T(5040.0) + x * x * (T(1.0) / T(362880.0) + x * x * (T(-1.0) / T(39916800.0) + x * x * (T(1.0) / T(6227020800.0)))))));
+    }
+
+    return std::sin(x) / x;
+} // T spherical_bessel_j0_forward(T x)
+
+C10_CLANG_DIAGNOSTIC_POP()

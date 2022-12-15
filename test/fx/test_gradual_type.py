@@ -1,3 +1,5 @@
+# Owner(s): ["module: fx"]
+
 import unittest
 import torch
 from torch.fx import symbolic_trace
@@ -9,6 +11,8 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.testing._internal.common_utils import TestCase
+
 
 try:
     import sympy
@@ -31,7 +35,7 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                            padding=dilation, groups=groups, bias=False, dilation=dilation)
 
-class AnnotationsTest(unittest.TestCase):
+class AnnotationsTest(TestCase):
 
     def test_annotations(self):
         """
@@ -40,13 +44,16 @@ class AnnotationsTest(unittest.TestCase):
         where n is the corresoinding node in the resulting graph.
         """
         class M(torch.nn.Module):
-            def forward(self, x: TensorType((1, 2, 3, Dyn)), y: Dyn):
-                return torch.add(x, y)
+            def forward(self,
+                        x: TensorType((1, 2, 3, Dyn)),
+                        y: Dyn,
+                        z: TensorType[Dyn, 3, Dyn]):
+                return torch.add(x, y) + z
 
         module = M()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
 
-        expected_ph_types = [TensorType((1, 2, 3, Dyn)), Dyn]
+        expected_ph_types = [TensorType((1, 2, 3, Dyn)), Dyn, TensorType((Dyn, 3, Dyn))]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
@@ -109,7 +116,7 @@ class AnnotationsTest(unittest.TestCase):
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
 
-class TypeCheckerTest(unittest.TestCase):
+class TypeCheckerTest(TestCase):
 
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):
@@ -604,6 +611,7 @@ class TypeCheckerTest(unittest.TestCase):
                              TensorType((4, 16, 6, 7)), TensorType((4, 672)), TensorType((4, 672))]
 
         expected_iter = iter(expected_ph_types)
+        traced.graph.eliminate_dead_code()
 
         for n in traced.graph.nodes:
             assert n.type == next(expected_iter)
@@ -821,6 +829,8 @@ class TypeCheckerTest(unittest.TestCase):
 
         g = GraphTypeChecker({}, gm_static)
         g.type_check()
+        gm_static.graph.eliminate_dead_code()
+        gm_run.graph.eliminate_dead_code()
         # here we are checking for consistency with fully dynamic nodes
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
             assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
@@ -844,6 +854,7 @@ class TypeCheckerTest(unittest.TestCase):
 
 
         batch_sizes = set()
+        gm_static.graph.eliminate_dead_code()
         for n in gm_static.graph.nodes:
             assert isinstance(n.type, TensorType)
             batch_sizes.add(n.type.__args__[0])

@@ -11,6 +11,11 @@
 #include <string>
 #include <vector>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -119,7 +124,8 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
 
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
-size_t C10_API ReplaceAll(std::string& s, const char* from, const char* to);
+size_t C10_API
+ReplaceAll(std::string& s, c10::string_view from, c10::string_view to);
 
 /// Represents a location in source code (for debugging).
 struct C10_API SourceLocation {
@@ -190,5 +196,7 @@ inline void printQuotedString(std::ostream& stmt, const string_view str) {
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_STRINGUTIL_H_

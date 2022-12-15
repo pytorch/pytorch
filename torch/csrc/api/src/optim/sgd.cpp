@@ -18,11 +18,10 @@ namespace optim {
 SGDOptions::SGDOptions(double lr) : lr_(lr) {}
 
 bool operator==(const SGDOptions& lhs, const SGDOptions& rhs) {
-  return (lhs.lr() == rhs.lr()) &&
-          (lhs.momentum() == rhs.momentum()) &&
-          (lhs.dampening() == rhs.dampening()) &&
-          (lhs.weight_decay() == rhs.weight_decay()) &&
-          (lhs.nesterov() == rhs.nesterov());
+  return (lhs.lr() == rhs.lr()) && (lhs.momentum() == rhs.momentum()) &&
+      (lhs.dampening() == rhs.dampening()) &&
+      (lhs.weight_decay() == rhs.weight_decay()) &&
+      (lhs.nesterov() == rhs.nesterov());
 }
 
 void SGDOptions::serialize(torch::serialize::OutputArchive& archive) const {
@@ -61,7 +60,7 @@ void SGDParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, momentum_buffer);
 }
 
-Tensor SGD::step(LossClosure closure)  {
+Tensor SGD::step(LossClosure closure) {
   NoGradGuard no_grad;
   Tensor loss = {};
   if (closure != nullptr) {
@@ -85,14 +84,17 @@ Tensor SGD::step(LossClosure closure)  {
       }
       if (momentum != 0) {
         Tensor buf;
-        auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
-        if(param_state == state_.end()) {
+        auto param_state =
+            state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+        if (param_state == state_.end()) {
           buf = torch::clone(d_p).detach();
           auto state = std::make_unique<SGDParamState>();
           state->momentum_buffer(buf);
-          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
+          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
+              std::move(state);
         } else {
-          buf = static_cast<SGDParamState&>(*param_state->second).momentum_buffer();
+          buf = static_cast<SGDParamState&>(*param_state->second)
+                    .momentum_buffer();
           buf.mul_(momentum).add_(d_p, 1 - dampening);
         }
         if (nesterov) {
@@ -115,19 +117,21 @@ void SGD::load(serialize::InputArchive& archive) {
   IValue pytorch_version;
   if (archive.try_read("pytorch_version", pytorch_version)) {
     serialize(*this, archive);
-  }
-  else { // deserializing archives saved in old format (prior to version 1.5.0)
+  } else { // deserializing archives saved in old format (prior to
+           // version 1.5.0)
     TORCH_WARN(
-      "Your serialized SGD optimizer is still using the old serialization format. "
-      "You should re-save your SGD optimizer to use the new serialization format.");
+        "Your serialized SGD optimizer is still using the old serialization format. "
+        "You should re-save your SGD optimizer to use the new serialization format.");
     std::vector<Tensor> momentum_buffers;
     torch::optim::serialize(archive, "momentum_buffers", momentum_buffers);
-    // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
+    // since there were no param_groups prior to version 1.5.0, assuming all
+    // tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for(const auto idx : c10::irange(momentum_buffers.size())) {
+    for (const auto idx : c10::irange(momentum_buffers.size())) {
       auto state = std::make_unique<SGDParamState>();
       state->momentum_buffer(momentum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
+          std::move(state);
     }
   }
 }

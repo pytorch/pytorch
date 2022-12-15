@@ -41,15 +41,15 @@ Tensor TensorMaker::make_tensor() {
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());
 
-   if (sizes_.size() != 1 || sizes_[0] != 0) {
-     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
-
-     if (strides_) {
-       tensor_impl->set_sizes_and_strides(sizes_, *strides_);
-     } else {
-       tensor_impl->set_sizes_contiguous(sizes_);
-     }
-   }
+  TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  if (strides_) {
+    tensor_impl->set_sizes_and_strides(sizes_, *strides_);
+  } else {
+    tensor_impl->set_sizes_contiguous(sizes_);
+  }
+  if (storage_offset_) {
+    tensor_impl->set_storage_offset(*storage_offset_);
+  }
 
    return tensor;
  }
@@ -58,14 +58,22 @@ Tensor TensorMaker::make_tensor() {
    std::size_t itemsize = opts_.dtype().itemsize();
 
    if (strides_) {
-     return detail::computeStorageNbytes(sizes_, *strides_, itemsize);
+     auto storage_size = detail::computeStorageNbytes(sizes_, *strides_, itemsize);
+     if (storage_offset_) {
+       storage_size += storage_offset_.value();
+     }
+     return storage_size;
    }
 
    std::size_t size = 1;
    for (std::int64_t s : sizes_) {
      size *= static_cast<std::size_t>(s);
    }
-   return size * itemsize;
+   auto storage_size = size * itemsize;
+   if (storage_offset_) {
+     storage_size += storage_offset_.value();
+   }
+   return storage_size;
  }
 
  inline DataPtr TensorMaker::makeDataPtrFromDeleter() const {

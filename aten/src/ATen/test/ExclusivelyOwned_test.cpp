@@ -1,19 +1,15 @@
 #include <gtest/gtest.h>
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
+#include <caffe2/core/tensor.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <string>
 
 namespace {
-
-using at::Tensor;
-
-struct MyString : public c10::intrusive_ptr_target, public std::string {
-  using std::string::string;
-};
 
 template <typename T>
 class ExclusivelyOwnedTest : public ::testing::Test {
@@ -32,35 +28,30 @@ template <typename T>
 T getSampleValue();
 
 template <>
-c10::intrusive_ptr<MyString> getSampleValue() {
-  return c10::make_intrusive<MyString>("hello");
+at::Tensor getSampleValue() {
+  return at::zeros({2, 2}).to(at::kCPU);
 }
 
 template <>
-Tensor getSampleValue() {
-  return at::native::zeros({2, 2}).to(at::kCPU);
+caffe2::Tensor getSampleValue() {
+  return caffe2::Tensor(getSampleValue<at::Tensor>());
 }
 
 template <typename T>
 void assertIsSampleObject(const T& eo);
 
 template <>
-void assertIsSampleObject<MyString>(const MyString& s) {
-  EXPECT_STREQ(s.c_str(), "hello");
-}
-
-template <>
-void assertIsSampleObject<c10::intrusive_ptr<MyString>>(const c10::intrusive_ptr<MyString>& s) {
-  assertIsSampleObject(*s);
-}
-
-template <>
-void assertIsSampleObject<Tensor>(const Tensor& t) {
+void assertIsSampleObject<at::Tensor>(const at::Tensor& t) {
   EXPECT_EQ(t.sizes(), (c10::IntArrayRef{2, 2}));
   EXPECT_EQ(t.strides(), (c10::IntArrayRef{2, 1}));
   ASSERT_EQ(t.scalar_type(), at::ScalarType::Float);
   static const float zeros[4] = {0};
   EXPECT_EQ(memcmp(zeros, t.data_ptr(), 4 * sizeof(float)), 0);
+}
+
+template <>
+void assertIsSampleObject<caffe2::Tensor>(const caffe2::Tensor& t) {
+  assertIsSampleObject<at::Tensor>(at::Tensor(t));
 }
 
 
@@ -71,8 +62,8 @@ void ExclusivelyOwnedTest<T>::SetUp() {
 }
 
 using ExclusivelyOwnedTypes = ::testing::Types<
-  c10::intrusive_ptr<MyString>,
-  Tensor
+  at::Tensor,
+  caffe2::Tensor
   >;
 
 TYPED_TEST_CASE(ExclusivelyOwnedTest, ExclusivelyOwnedTypes);
@@ -114,18 +105,5 @@ extern "C" void inspectTensor() {
 }
 
 extern "C" void inspectExclusivelyOwnedTensor() {
-  c10::ExclusivelyOwned<Tensor> t(getSampleValue<at::Tensor>());
-}
-
-
-extern "C" void inspectIntrusivePtr() {
-  auto p = getSampleValue<c10::intrusive_ptr<MyString>>();
-}
-
-extern "C" void inspectExclusivelyOwnedIntrusivePtr() {
-  c10::ExclusivelyOwned<c10::intrusive_ptr<MyString>> p(getSampleValue<c10::intrusive_ptr<MyString>>());
-}
-
-extern "C" void inspectUniquePtr() {
-  std::unique_ptr<MyString> p(getSampleValue<c10::intrusive_ptr<MyString>>().release());
+  c10::ExclusivelyOwned<at::Tensor> t(getSampleValue<at::Tensor>());
 }

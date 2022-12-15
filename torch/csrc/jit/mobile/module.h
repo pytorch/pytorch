@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/mobile/debug_info.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 
 namespace torch {
 namespace jit {
@@ -36,7 +37,15 @@ class CompilationUnit {
   std::vector<std::unique_ptr<Function>>& methods() {
     return methods_;
   }
+  const std::vector<std::unique_ptr<Function>>& methods() const {
+    return methods_;
+  }
   Function* find_function(const c10::QualifiedName& qn);
+  const Function* find_function(const c10::QualifiedName& qn) const;
+
+  void unsafeRemoveFunction(const int64_t index) {
+    methods_.erase(methods_.begin() + index);
+  }
 
  private:
   std::vector<std::unique_ptr<Function>> methods_;
@@ -67,6 +76,7 @@ class TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
+
   const std::string name() const {
     return object_->name();
   }
@@ -123,13 +133,64 @@ class TORCH_API Module {
     return has_debug_handles_;
   }
 
+  const CompilationUnit& compilation_unit() const {
+    return *cu_.get();
+  }
+
+  void set_delete_memory(std::shared_ptr<char> delete_mem) {
+    mem_to_delete_ = delete_mem;
+  }
+
+  void set_min_operator_version(int64_t version) {
+    min_operator_version_ = version;
+  }
+
+  int64_t min_operator_version() const {
+    return min_operator_version_;
+  }
+
+  void set_bytecode_version(int64_t version) {
+    bytecode_version_ = version;
+  }
+
+  int64_t bytecode_version() const {
+    return bytecode_version_;
+  }
+
  private:
+  friend class quantization::PTQQuanizationHelper;
+
+  bool compareMethodSchemas(
+      const std::string& name_1,
+      const std::string& name_2);
+
+  void unsafeRemoveMethod(const std::string& basename);
+
+  void unsafeCopyMethod(
+      const std::string& new_method_name,
+      const Function& to_be_copied);
+
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
-  bool has_debug_handles_;
+  bool has_debug_handles_ = false;
+  int64_t min_operator_version_ = 4;
+  int64_t bytecode_version_ = 4;
+
+  // Extra handle for the module to delete when itself is deleted
+  std::shared_ptr<char> mem_to_delete_;
 };
+
+struct TORCH_API ModuleInfo {
+  uint64_t bytecode_version;
+  uint64_t operator_version;
+  std::unordered_map<std::string, int> opname_to_num_args;
+  std::unordered_set<std::string> function_names;
+  std::unordered_set<std::string> type_names;
+};
+TORCH_API ModuleInfo get_module_info(const mobile::Module& module);
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

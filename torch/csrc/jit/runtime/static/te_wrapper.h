@@ -13,7 +13,16 @@ class TEWrapper {
  public:
   TEWrapper() = default;
   void call(const std::vector<void*>& args);
-  bool supports(const at::Tensor& t);
+
+  template <typename ExpectedType>
+  bool checkInput(const at::Tensor& t) {
+#ifdef TORCH_ENABLE_LLVM
+    return t.is_contiguous() && t.dtype().Match<ExpectedType>();
+#else
+    return false;
+#endif
+  }
+
 #ifdef TORCH_ENABLE_LLVM
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_);
 #endif
@@ -24,11 +33,14 @@ class TEWrapper {
 #endif
 };
 
+std::shared_ptr<TEWrapper> createDiv();
 std::shared_ptr<TEWrapper> createLogit();
 std::shared_ptr<TEWrapper> createRelu();
 std::shared_ptr<TEWrapper> createTanh();
 std::shared_ptr<TEWrapper> createSigmoid();
 std::shared_ptr<TEWrapper> createSignedLog1p();
+std::shared_ptr<TEWrapper> createClamp();
+std::shared_ptr<TEWrapper> createClampNanToNum();
 
 } // namespace jit
 } // namespace torch

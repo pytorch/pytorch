@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <ATen/detail/FunctionTraits.h>
@@ -6,18 +5,12 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/OpMathType.h>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
-#define NUM_THREADS (C10_WARP_SIZE * 2)
-#define THREAD_WORK_SIZE 4
-#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
-
-constexpr int num_threads = NUM_THREADS;
-constexpr int thread_work_size = THREAD_WORK_SIZE;
-constexpr int block_work_size = BLOCK_WORK_SIZE;
-
 #include <ATen/native/cuda/MemoryAccess.cuh>
+
 
 namespace at { namespace native {
 
@@ -55,15 +48,15 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
   int idx = blockIdx.x;
 
-  return_t results[thread_work_size];
-  args_t args[thread_work_size];
+  return_t results[thread_work_size()];
+  args_t args[thread_work_size()];
 
   // load
   policy.load(args, idx);
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (policy.check_inbounds(i)) {
       results[i] = c10::guts::apply(f, args[i]);
     }
@@ -82,9 +75,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 // memory access introduce regression on ROCm.
 
 #if !defined(USE_ROCM)
-#include <ATen/native/cuda/CUDALoops.cuh>
+  #include <ATen/native/cuda/CUDALoops.cuh>
 #else
-#include <ATen/native/cuda/ROCmLoops.cuh>
+  #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {
@@ -176,7 +169,7 @@ void opmath_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
     // works around incorrect device guard generation for pre-structured
     // kernels device guards, but structured kernels do it right and
     // we can assume the device is already set correctly
-    const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
+    const OptionalDeviceGuard device_guard(iter.device(1));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
     BUnaryFunctor<arg1_t, arg2_t, return_t, func_t> bf(f, iter.scalar_value<opmath_arg2_t>(2));
@@ -184,6 +177,46 @@ void opmath_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
     gpu_kernel(iter, bf);
   } else {
     gpu_kernel(iter, BinaryFunctor<arg1_t, arg2_t, return_t, func_t>(f));
+  }
+}
+
+template <typename scalar_t, typename return_t = scalar_t, typename func_t>
+void opmath_symmetric_gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
+  // Use symmetric property of the functor to reduce number of kernels,
+  // requires f(a, b) == f(b, a)
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
+
+  using traits = function_traits<func_t>;
+  using opmath_arg_t = typename traits::template arg<0>::type;
+  static_assert(
+      traits::arity == 2,
+      "gpu_kernel_with_scalars only supports two input arguments");
+  static_assert(std::is_same<opmath_arg_t, typename traits::template arg<1>::type>::value,
+                "f is not symmetric");
+
+  OptionalDeviceGuard device_guard;
+  opmath_arg_t scalar_val{};
+
+  if (iter.is_cpu_scalar(1)) {
+    scalar_val = iter.scalar_value<opmath_arg_t>(1);
+    iter.remove_operand(1);
+
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
+    device_guard.reset_device(iter.device(1));
+  } else if (iter.is_cpu_scalar(2)) {
+    scalar_val = iter.scalar_value<opmath_arg_t>(2);
+    iter.remove_operand(2);
+  }
+
+  if (iter.ninputs() == 2) {
+    gpu_kernel(iter, BinaryFunctor<scalar_t, scalar_t, return_t, func_t>(f));
+  } else {
+    AUnaryFunctor<scalar_t, scalar_t, return_t, func_t> unary_f(f, scalar_val);
+    gpu_kernel(iter, unary_f);
   }
 }
 
@@ -209,18 +242,18 @@ template <typename T> struct is_tuple: std::false_type {};
 template <typename ...T> struct is_tuple<thrust::tuple<T...>>: std::true_type {};
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void unrolled_elementwise_kernel_for_multi_outputs(int N, func_t f, array_t data, inp_calc_t ic, out_calc_t oc) {
-  int remaining = N - block_work_size * blockIdx.x;
+  int remaining = N - block_work_size() * blockIdx.x;
   elementwise_kernel_helper(f, memory::policies::multi_outputs_unroll<array_t, inp_calc_t, out_calc_t, num_outputs>(data, remaining, ic, oc));
 }
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
 static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const func_t& f, array_t data, inp_calc_t ic, out_calc_t oc) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
+  unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

@@ -3,21 +3,44 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
-    output: "1"
-    output: "2"
-    name: "Dropout_0"
-    op_type: "Dropout"
+    output: "onnx::Dropout_1"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "ratio"
-      f: 0.5
-      type: FLOAT
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000?"
+      }
+      type: TENSOR
     }
   }
   node {
-    input: "1"
-    output: "3"
-    name: "ReduceMax_1"
+    output: "onnx::Dropout_2"
+    name: "Constant_1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 9
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "x"
+    input: "onnx::Dropout_1"
+    input: "onnx::Dropout_2"
+    output: "onnx::ReduceMax_3"
+    output: "4"
+    name: "Dropout_2"
+    op_type: "Dropout"
+  }
+  node {
+    input: "onnx::ReduceMax_3"
+    output: "5"
+    name: "ReduceMax_3"
     op_type: "ReduceMax"
     attribute {
       name: "keepdims"
@@ -25,7 +48,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {
@@ -43,7 +66,7 @@ graph {
     }
   }
   output {
-    name: "3"
+    name: "5"
     type {
       tensor_type {
         elem_type: 1
@@ -54,5 +77,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 14
 }

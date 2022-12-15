@@ -1,12 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -22,8 +32,8 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+    const scalar_t* const bottom_data, const int64_t channels,
+    const int64_t height, const int64_t width, const int64_t pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const top_data, const int divisor_override,
@@ -71,8 +81,8 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+    const scalar_t* const bottom_data, const int64_t channels,
+    const int64_t height, const int64_t width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const top_data, const int divisor_override,
@@ -120,8 +130,8 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const int64_t channels, const int64_t height,
+    const int64_t width, const int64_t pooled_height, const int64_t pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
@@ -177,8 +187,8 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const top_diff,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const int64_t channels, const int64_t height,
+    const int64_t width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
@@ -258,7 +268,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
   const int padW = safe_downcast<int, int64_t>(padW_);
 
   /* sizes */
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
   const int64_t nInputPlane = input_.size(-3);
   const int64_t inputHeight = input_.size(-2);
   const int64_t inputWidth = input_.size(-1);
@@ -295,7 +304,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch,
                     nInputPlane,
                     inputHeight,
                     inputWidth,
@@ -322,7 +330,6 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch,
                     nInputPlane,
                     inputHeight,
                     inputWidth,
@@ -380,7 +387,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   const Tensor input = input_.contiguous(memory_format);
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
@@ -415,7 +421,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
             <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count,
               gradOutput_data,
-              nbatch,
               nInputPlane,
               inputHeight, inputWidth,
               outputHeight, outputWidth,
@@ -433,7 +438,6 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
             <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count,
               gradOutput_data,
-              nbatch,
               nInputPlane,
               inputHeight, inputWidth,
               outputHeight, outputWidth,

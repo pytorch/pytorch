@@ -341,8 +341,8 @@ TEST(Int8, SumRelu) {
 }
 
 void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.numel());
-  for (auto i = 0; i < vs.size(); ++i) {
+  TORCH_CHECK_EQ(vs.size(), static_cast<size_t>(dst->t.numel()));
+  for (auto i = 0U; i < vs.size(); ++i) {
     uint8_t vq = std::max(
         std::numeric_limits<uint8_t>::min(),
         std::min(
@@ -354,8 +354,8 @@ void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
 }
 
 void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.numel());
-  for (auto i = 0; i < vs.size(); ++i) {
+  TORCH_CHECK_EQ(vs.size(), static_cast<size_t>(dst->t.numel()));
+  for (auto i = 0U; i < vs.size(); ++i) {
     int32_t vq = std::max(
         std::numeric_limits<int32_t>::min(),
         std::min(

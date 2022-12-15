@@ -37,6 +37,12 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
     break;
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QUInt8:
+      e = cast<c10::quint8>(e);
+      break;
+    case ScalarType::QInt8:
+      e = cast<c10::qint8>(e);
+      break;
     default:
       throw unsupported_dtype();
   }
@@ -258,6 +264,13 @@ ExprHandle tensorOrConstant(
   return constant(v);
 }
 
+ExprHandle scalarOrConstant(const ArgValue& v) {
+  if (auto vh = c10::get_if<VarHandle>(&v)) {
+    return *vh;
+  }
+  return constant(v);
+}
+
 ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
@@ -307,11 +320,12 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
 Tensor computeChunk(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   return Compute(
       "prim_constantchunk",
-      c10::fmap<DimArg>(outputShape),
+      outputShape,
       [inputs](const std::vector<VarHandle>& axes) {
         const auto& b = c10::get<BufHandle>(inputs[0]);
         int64_t chunkIdx = c10::get<int64_t>(inputs[1]);
@@ -340,15 +354,14 @@ Tensor computeChunk(
 Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
-  if (A.ndim() < 1) {
+  if (A.ndim() <= 1) {
     return Compute(
-        "aten_transpose",
-        c10::fmap<DimArg>(outputShape),
-        [&](std::vector<VarHandle> axes) {
+        "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
           TORCH_INTERNAL_ASSERT(
               axes.size() <= 1,
               buildErrorMessage("Invalid axes size in transpose"));
@@ -359,9 +372,7 @@ Tensor computeTranspose(
   auto start_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
   auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
   return Compute(
-      "aten_transpose",
-      c10::fmap<DimArg>(outputShape),
-      [&](std::vector<VarHandle> axes) {
+      "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
         std::swap(axes[start_dim], axes[to_dim]);
         return A.load(axes);
       });
@@ -370,40 +381,35 @@ Tensor computeTranspose(
 Tensor computeExpand(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   return Compute(
-      "aten_expand",
-      c10::fmap<DimArg>(outputShape),
-      [&](const std::vector<VarHandle>& axes) {
+      "aten_expand", outputShape, [&](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         return broadcast(A, indices);
       });
 }
 
-static Tensor computeReshapeHelper(
+Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
-    at::Device device,
-    const IntList& view_dims) {
+    at::Device device) {
   auto A = c10::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
     return Compute(
-        "aten_view",
-        c10::fmap<DimArg>(outputShape),
-        [&](const std::vector<VarHandle>& axes) {
+        "aten_view", outputShape, [&](const std::vector<VarHandle>& axes) {
           std::vector<ExprHandle> empty_indices;
           return A.load(empty_indices);
         });
   }
   return Compute(
-      "aten_reshape",
-      c10::fmap<DimArg>(outputShape),
-      [&](const std::vector<VarHandle>& axes) {
+      "aten_reshape", outputShape, [&](const std::vector<VarHandle>& axes) {
         std::vector<VarHandle> new_axes;
-        assert(view_dims.size() == axes.size());
+        assert(outputShape.size() == axes.size());
         /*
         Example for the index transformation. Assume we have a tensor A and
         its view B:
@@ -419,14 +425,20 @@ static Tensor computeReshapeHelper(
                     idx = i5 + i4*2 + i3*2 + i2*18 + i1*18
                     B[i1,i2,i3,i4,i5] = A[idx/(3*2), (idx/3)%2, idx%3]
         */
-        // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-        ExprHandle cur_stride = 1;
         std::vector<ExprPtr> dims, indices;
-        for (size_t idx = 0; idx < view_dims.size(); idx++) {
-          dims.push_back(alloc<LongImm>(view_dims[idx]));
+        for (size_t idx = 0; idx < outputShape.size(); idx++) {
+          dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
-        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+
+        auto ndim = dims.size();
+        std::vector<ExprPtr> strides(ndim);
+        strides[ndim - 1] = immLike(dims[ndim - 1], 1);
+        for (size_t i = 1; i < ndim; i++) {
+          strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
+        }
+
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices, strides));
         std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
         ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
         for (size_t idx = 0; idx < A.ndim(); idx++) {
@@ -451,24 +463,18 @@ static Tensor computeReshapeHelper(
 Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  std::vector<int64_t> view_dims;
+  std::vector<int64_t> outputShapeVec;
   for (const auto dim : c10::irange(outputShape.size())) {
-    view_dims.push_back(outputShape[dim].AsNode<LongImm>()->value());
+    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
   }
-  return computeReshapeHelper(
-      inputs, outputShape, outputType, device, view_dims);
-}
-
-Tensor computeReshape(
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device device) {
-  const auto& view_dims = c10::get<IntList>(inputs[1]);
-  return computeReshapeHelper(
-      inputs, outputShape, outputType, device, view_dims);
+  std::vector<ArgValue> reshapeInputs;
+  reshapeInputs.push_back(inputs[0]);
+  reshapeInputs.emplace_back(outputShapeVec);
+  return computeReshape(
+      reshapeInputs, outputShape, outputStrides, outputType, device);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
@@ -482,11 +488,17 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     bufInputs.push_back(buf);
     TORCH_INTERNAL_ASSERT(
         buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
-    if (buf.node()->dims().size() == 1 &&
-        immediateAs<int>(buf.node()->dim(0)) == 0) {
-      continue;
+    // Ignore buffers that are 0-sized on any dimension.
+    bool hasEmptyDims = false;
+    for (const auto& dim : buf.dims()) {
+      if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
+        hasEmptyDims = true;
+        break;
+      }
     }
-    nonEmptyInputs.push_back(buf);
+    if (!hasEmptyDims) {
+      nonEmptyInputs.push_back(buf);
+    }
   }
   ScalarType highType = bufInputs[0].dtype().scalar_type();
   for (const auto& input : bufInputs) {
@@ -498,7 +510,8 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
 
 Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape) {
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto input_list = c10::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
@@ -522,8 +535,13 @@ Tensor computeCatWoConditionals(
   //       output[i,j+l2,k] = inp3[i,j,k]
 
   auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
-  auto output_buf =
-      alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
+  auto output_strides_expr = ExprHandleVectorToExprVector(outputStrides);
+  auto output_buf = alloc<Buf>(
+      "aten_cat",
+      output_sizes_expr,
+      ToDtype(high_type),
+      nullptr,
+      output_strides_expr);
   if (non_empty_inputs.size() == 0) {
     return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
@@ -531,6 +549,23 @@ Tensor computeCatWoConditionals(
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
   auto norm_concat_dim = normalizeAndCheckIndex(concat_dim, outputShape.size());
+
+  auto loop_order_fn = [&](const BufPtr& buf_) {
+    std::vector<int32_t> loop_order;
+    if (buf_->is_contiguous()) {
+      for (int32_t i = buf_->ndim() - 1; i >= 0; i--) {
+        loop_order.push_back(i);
+      }
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+      loop_order = {1, 3, 2, 0};
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
+      loop_order = {1, 4, 3, 2, 0};
+    } else {
+      loop_order = {1, 2, 0};
+    }
+
+    return loop_order;
+  };
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
@@ -554,10 +589,16 @@ Tensor computeCatWoConditionals(
     auto load_expr = alloc<Load>(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
     StmtPtr st = alloc<Store>(output_buf, store_indices, load_promoted.node());
-    for (size_t i = dims.size(); i > 0; --i) {
+
+    auto loop_order = loop_order_fn(inp.node());
+    for (auto dim_index : loop_order) {
       st = alloc<For>(
-          for_vars[i - 1], immLike(dims[i - 1], 0), dims[i - 1].node(), st);
+          for_vars[dim_index],
+          immLike(dims[dim_index], 0),
+          dims[dim_index].node(),
+          st);
     }
+
     return st;
   };
 
@@ -580,10 +621,11 @@ Tensor computeCatWoConditionals(
 Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
-    return computeCatWoConditionals(inputs, outputShape);
+    return computeCatWoConditionals(inputs, outputShape, outputStrides);
   }
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto inputList = c10::get<BufList>(inputs[0]);
@@ -593,7 +635,8 @@ Tensor computeCat(
   std::vector<BufHandle> nonEmptyInputs = catInfo.second;
   return Compute(
       "aten_cat",
-      c10::fmap<DimArg>(outputShape),
+      outputShape,
+      outputStrides,
       [&](const std::vector<VarHandle>& axes) {
         if (nonEmptyInputs.size() == 0) {
           return ExprHandle(0);
@@ -620,8 +663,8 @@ Tensor computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        auto offset = *intValue(nonEmptyInputs[0].node()->dim(dim));
-        newAxes[dim] = newAxes[dim] - ExprHandle(immLike(newAxes[dim], offset));
+        auto offset = ExprHandle(nonEmptyInputs[0].node()->dim(dim));
+        newAxes[dim] = newAxes[dim] - offset;
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
           auto input = nonEmptyInputs[ii];
@@ -630,12 +673,32 @@ Tensor computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += *intValue(input.node()->dim(dim));
-          newAxes[dim] = axes[dim] - ExprHandle(immLike(axes[dim], offset));
+          offset = offset + ExprHandle(input.node()->dim(dim));
+          newAxes[dim] = axes[dim] - offset;
         }
 
         return load;
       });
+}
+
+Tensor computeEmbedding(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("emb", outputShape, dtype);
+  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = c10::get<BufHandle>(inputs[1]);
+
+  StmtPtr s =
+      ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

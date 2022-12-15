@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/nn/options/activation.h>
-#include <torch/nn/options/linear.h>
-#include <torch/nn/options/dropout.h>
-#include <torch/types.h>
-#include <torch/nn/functional/linear.h>
-#include <torch/nn/functional/dropout.h>
-#include <limits>
 #include <ATen/Dispatch.h>
+#include <torch/nn/functional/dropout.h>
+#include <torch/nn/functional/linear.h>
+#include <torch/nn/options/activation.h>
+#include <torch/nn/options/dropout.h>
+#include <torch/nn/options/linear.h>
+#include <torch/types.h>
+#include <limits>
 
 namespace torch {
 namespace nn {
@@ -25,11 +25,12 @@ inline Tensor elu(Tensor input, double alpha, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.elu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.elu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ELUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::ELUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -54,11 +55,12 @@ inline Tensor selu(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.selu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.selu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::SELUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::SELUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -73,26 +75,27 @@ inline Tensor selu(Tensor input, const SELUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor hardshrink(const Tensor& input,
-                         double lambda) {
+inline Tensor hardshrink(const Tensor& input, double lambda) {
   return torch::hardshrink(input, lambda);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardshrink
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardshrink
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::HardshrinkFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::HardshrinkFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
 /// F::hardshrink(x, F::HardshrinkFuncOptions().lambda(0.42));
 /// ```
-inline Tensor hardshrink(const Tensor& input,
-                         const HardshrinkFuncOptions& options = {}) {
+inline Tensor hardshrink(
+    const Tensor& input,
+    const HardshrinkFuncOptions& options = {}) {
   return detail::hardshrink(input, options.lambda());
 }
 
@@ -100,10 +103,11 @@ inline Tensor hardshrink(const Tensor& input,
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor hardtanh(Tensor input,
-                       double min_val,
-                       double max_val,
-                       bool inplace) {
+inline Tensor hardtanh(
+    Tensor input,
+    double min_val,
+    double max_val,
+    bool inplace) {
   if (inplace) {
     return torch::hardtanh_(input, min_val, max_val);
   } else {
@@ -113,28 +117,29 @@ inline Tensor hardtanh(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardtanh
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardtanh
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::HardtanhFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::HardtanhFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::hardtanh(x, F::HardtanhFuncOptions().min_val(-1.0).max_val(1.0).inplace(true));
+/// F::hardtanh(x,
+/// F::HardtanhFuncOptions().min_val(-1.0).max_val(1.0).inplace(true));
 /// ```
 inline Tensor hardtanh(Tensor input, const HardtanhFuncOptions& options = {}) {
-  return detail::hardtanh(input, options.min_val(), options.max_val(), options.inplace());
+  return detail::hardtanh(
+      input, options.min_val(), options.max_val(), options.inplace());
 }
 
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor leaky_relu(Tensor input,
-                         double negative_slope,
-                         bool inplace) {
+inline Tensor leaky_relu(Tensor input, double negative_slope, bool inplace) {
   if (inplace) {
     return torch::leaky_relu_(input, negative_slope);
   } else {
@@ -144,18 +149,22 @@ inline Tensor leaky_relu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::LeakyReLUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::LeakyReLUFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::leaky_relu(x, F::LeakyReLUFuncOptions().negative_slope(0.42).inplace(true));
+/// F::leaky_relu(x,
+/// F::LeakyReLUFuncOptions().negative_slope(0.42).inplace(true));
 /// ```
-inline Tensor leaky_relu(Tensor input, const LeakyReLUFuncOptions& options = {}) {
+inline Tensor leaky_relu(
+    Tensor input,
+    const LeakyReLUFuncOptions& options = {}) {
   return detail::leaky_relu(input, options.negative_slope(), options.inplace());
 }
 
@@ -169,12 +178,14 @@ inline Tensor logsigmoid(const Tensor& input) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gumbel_softmax(const Tensor& logits,
-                             double tau,
-                             bool hard,
-                             int dim) {
-  auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
-  gumbels = (logits + gumbels) / tau;  // ~Gumbel(logits, tau)
+inline Tensor gumbel_softmax(
+    const Tensor& logits,
+    double tau,
+    bool hard,
+    int dim) {
+  auto gumbels =
+      -torch::empty_like(logits).exponential_().log(); // ~Gumbel(0,1)
+  gumbels = (logits + gumbels) / tau; // ~Gumbel(logits, tau)
   auto y_soft = gumbels.softmax(dim);
 
   torch::Tensor ret;
@@ -191,27 +202,33 @@ inline Tensor gumbel_softmax(const Tensor& logits,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.gumbel_softmax
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.gumbel_softmax
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::GumbelSoftmaxFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::GumbelSoftmaxFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
 /// F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true).dim(-1));
 /// ```
-inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOptions& options = {}) {
-  return detail::gumbel_softmax(logits, options.tau(), options.hard(), options.dim());
+inline Tensor gumbel_softmax(
+    const Tensor& logits,
+    const GumbelSoftmaxFuncOptions& options = {}) {
+  return detail::gumbel_softmax(
+      logits, options.tau(), options.hard(), options.dim());
 }
 
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor softmax(const Tensor& input, int64_t dim,
-                      c10::optional<torch::Dtype> dtype) {
+inline Tensor softmax(
+    const Tensor& input,
+    int64_t dim,
+    c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -225,11 +242,12 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmax
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmax
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::SoftmaxFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::SoftmaxFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -244,8 +262,10 @@ inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor softmin(const Tensor& input, int64_t dim,
-                      c10::optional<torch::Dtype> dtype) {
+inline Tensor softmin(
+    const Tensor& input,
+    int64_t dim,
+    c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -259,11 +279,12 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmin
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmin
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::SoftminFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::SoftminFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -278,8 +299,10 @@ inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor log_softmax(const Tensor& input, int64_t dim,
-                          c10::optional<torch::Dtype> dtype) {
+inline Tensor log_softmax(
+    const Tensor& input,
+    int64_t dim,
+    c10::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -293,18 +316,21 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.log_softmax
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.log_softmax
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::LogSoftmaxFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::LogSoftmaxFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
 /// F::log_softmax(input, LogSoftmaxFuncOptions(1));
 /// ```
-inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options) {
+inline Tensor log_softmax(
+    const Tensor& input,
+    const LogSoftmaxFuncOptions& options) {
   return detail::log_softmax(input, options.dim(), options.dtype());
 }
 
@@ -313,17 +339,20 @@ inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& opti
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor glu(const Tensor& input, int64_t dim) {
-  TORCH_CHECK(input.dim() != 0, "glu does not suppport scalars because halving size must be even");
+  TORCH_CHECK(
+      input.dim() != 0,
+      "glu does not suppport scalars because halving size must be even");
   return torch::glu(input, dim);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.glu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.glu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::GLUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::GLUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -336,8 +365,16 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 // ============================================================================
 
-inline Tensor gelu(const Tensor& input) {
-  return torch::gelu(input);
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
+inline Tensor gelu(const Tensor& input, string approximate) {
+  return torch::gelu(input, approximate);
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+inline Tensor gelu(const Tensor& input, const GELUFuncOptions& options = {}) {
+  return detail::gelu(input, options.approximate());
 }
 
 // ============================================================================
@@ -372,11 +409,12 @@ inline Tensor relu(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ReLUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::ReLUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -401,11 +439,12 @@ inline Tensor relu6(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu6
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu6
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ReLU6FuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::ReLU6FuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -420,11 +459,12 @@ inline Tensor relu6(Tensor input, const ReLU6FuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor rrelu(Tensor input,
-                    double lower,
-                    double upper,
-                    bool training,
-                    bool inplace) {
+inline Tensor rrelu(
+    Tensor input,
+    double lower,
+    double upper,
+    bool training,
+    bool inplace) {
   if (inplace) {
     return torch::rrelu_(input, lower, upper, training);
   } else {
@@ -434,11 +474,12 @@ inline Tensor rrelu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.rrelu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.rrelu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::RReLUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::RReLUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -446,16 +487,19 @@ inline Tensor rrelu(Tensor input,
 /// F::rrelu(x, F::RReLUFuncOptions().lower(0.1).upper(0.4).inplace(true));
 /// ```
 inline Tensor rrelu(Tensor input, const RReLUFuncOptions& options = {}) {
-  return detail::rrelu(input, options.lower(), options.upper(), options.training(), options.inplace());
+  return detail::rrelu(
+      input,
+      options.lower(),
+      options.upper(),
+      options.training(),
+      options.inplace());
 }
 
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor celu(Tensor input,
-                   double alpha,
-                   bool inplace) {
+inline Tensor celu(Tensor input, double alpha, bool inplace) {
   if (inplace) {
     return torch::celu_(input, alpha);
   } else {
@@ -465,11 +509,12 @@ inline Tensor celu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.celu
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.celu
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::CELUFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::CELUFuncOptions` class to
+/// learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -484,55 +529,55 @@ inline Tensor celu(Tensor input, const CELUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor softplus(const Tensor& input,
-                       double beta,
-                       double threshold) {
+inline Tensor softplus(const Tensor& input, double beta, double threshold) {
   return torch::softplus(input, beta, threshold);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softplus
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softplus
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::SoftplusFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::SoftplusFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
 /// F::softplus(x, F::SoftplusFuncOptions().beta(0.5).threshold(3.0));
 /// ```
-inline Tensor softplus(const Tensor& input,
-                       const SoftplusFuncOptions& options = {}) {
+inline Tensor softplus(
+    const Tensor& input,
+    const SoftplusFuncOptions& options = {}) {
   return detail::softplus(input, options.beta(), options.threshold());
 }
-
 
 // ============================================================================
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor softshrink(const Tensor& input,
-                         double lambda) {
+inline Tensor softshrink(const Tensor& input, double lambda) {
   return torch::softshrink(input, lambda);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softshrink
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softshrink
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::SoftshrinkFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::SoftshrinkFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
 /// F::softshrink(x, F::SoftshrinkFuncOptions(0.42));
 /// ```
-inline Tensor softshrink(const Tensor& input,
-                         const SoftshrinkFuncOptions& options = {}) {
+inline Tensor softshrink(
+    const Tensor& input,
+    const SoftshrinkFuncOptions& options = {}) {
   return detail::softshrink(input, options.lambda());
 }
 
@@ -552,10 +597,11 @@ inline Tensor tanhshrink(const Tensor& input) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor threshold(Tensor input,
-                        double threshold,
-                        double value,
-                        bool inplace) {
+inline Tensor threshold(
+    Tensor input,
+    double threshold,
+    double value,
+    bool inplace) {
   if (inplace) {
     return torch::threshold_(input, threshold, value);
   } else {
@@ -565,11 +611,12 @@ inline Tensor threshold(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.threshold
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.threshold
 /// about the exact behavior of this functional.
 ///
-/// See the documentation for `torch::nn::functional::ThresholdFuncOptions` class to learn what
-/// optional arguments are supported for this functional.
+/// See the documentation for `torch::nn::functional::ThresholdFuncOptions`
+/// class to learn what optional arguments are supported for this functional.
 ///
 /// Example:
 /// ```
@@ -577,7 +624,8 @@ inline Tensor threshold(Tensor input,
 /// F::threshold(x, F::ThresholdFuncOptions(0.5, 0.5).inplace(true));
 /// ```
 inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
-  return detail::threshold(input, options.threshold(), options.value(), options.inplace());
+  return detail::threshold(
+      input, options.threshold(), options.value(), options.inplace());
 }
 
 // ============================================================================
@@ -585,29 +633,30 @@ inline Tensor threshold(Tensor input, const ThresholdFuncOptions& options) {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
-  const Tensor& query,
-  const Tensor& key,
-  const Tensor& value,
-  int64_t embed_dim_to_check,
-  int64_t num_heads,
-  const Tensor& in_proj_weight,
-  const Tensor& in_proj_bias,
-  const Tensor& bias_k,
-  const Tensor& bias_v,
-  bool add_zero_attn,
-  double dropout_p,
-  const Tensor& out_proj_weight,
-  const Tensor& out_proj_bias,
-  bool training = true,
-  const Tensor& key_padding_mask = {},
-  bool need_weights = true,
-  const Tensor& attn_mask = {},
-  bool use_separate_proj_weight = false,
-  const Tensor& q_proj_weight = {},
-  const Tensor& k_proj_weight = {},
-  const Tensor& v_proj_weight = {},
-  const Tensor& static_k = {},
-  const Tensor& static_v = {}) {
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    int64_t embed_dim_to_check,
+    int64_t num_heads,
+    const Tensor& in_proj_weight,
+    const Tensor& in_proj_bias,
+    const Tensor& bias_k,
+    const Tensor& bias_v,
+    bool add_zero_attn,
+    double dropout_p,
+    const Tensor& out_proj_weight,
+    const Tensor& out_proj_bias,
+    bool training = true,
+    const Tensor& key_padding_mask = {},
+    bool need_weights = true,
+    const Tensor& attn_mask = {},
+    bool use_separate_proj_weight = false,
+    const Tensor& q_proj_weight = {},
+    const Tensor& k_proj_weight = {},
+    const Tensor& v_proj_weight = {},
+    const Tensor& static_k = {},
+    const Tensor& static_v = {},
+    bool average_attn_weights = true) {
   namespace F = torch::nn::functional;
 
   const auto query_sizes = query.sizes();
@@ -618,8 +667,9 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
   const auto head_dim = embed_dim / num_heads;
-  TORCH_CHECK(head_dim * num_heads == embed_dim,
-              "embed_dim must be divisible by num_heads");
+  TORCH_CHECK(
+      head_dim * num_heads == embed_dim,
+      "embed_dim must be divisible by num_heads");
   const auto scaling = 1 / std::sqrt(head_dim);
 
   Tensor q, k, v;
@@ -627,7 +677,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     if (torch::equal(query, key) && torch::equal(key, value)) {
       // self-attention
       const auto chunks =
-        F::linear(query, in_proj_weight, in_proj_bias).chunk(3, /*dim=*/-1);
+          F::linear(query, in_proj_weight, in_proj_bias).chunk(3, /*dim=*/-1);
       q = chunks[0];
       k = chunks[1];
       v = chunks[2];
@@ -715,9 +765,18 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     }
 
     if (in_proj_bias.defined()) {
-      q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, 0, embed_dim));
-      k = F::linear(key, k_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, embed_dim, (embed_dim * 2)));
-      v = F::linear(value, v_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, (embed_dim * 2)));
+      q = F::linear(
+          query,
+          q_proj_weight_non_opt,
+          in_proj_bias.slice(/*dim=*/0, 0, embed_dim));
+      k = F::linear(
+          key,
+          k_proj_weight_non_opt,
+          in_proj_bias.slice(/*dim=*/0, embed_dim, (embed_dim * 2)));
+      v = F::linear(
+          value,
+          v_proj_weight_non_opt,
+          in_proj_bias.slice(/*dim=*/0, (embed_dim * 2)));
     } else {
       q = F::linear(query, q_proj_weight_non_opt, in_proj_bias);
       k = F::linear(key, k_proj_weight_non_opt, in_proj_bias);
@@ -732,23 +791,22 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       k = torch::cat({k, bias_k.repeat({1, bsz, 1})});
       v = torch::cat({v, bias_v.repeat({1, bsz, 1})});
       if (attn_mask_.defined()) {
-        attn_mask_ = torch::cat({
-          attn_mask_,
-          torch::zeros(
-            {attn_mask_.size(0), 1},
-            at::TensorOptions(attn_mask_.dtype())
-              .device(attn_mask_.device())
-          )}, /*dim=*/1
-        );
+        attn_mask_ = torch::cat(
+            {attn_mask_,
+             torch::zeros(
+                 {attn_mask_.size(0), 1},
+                 at::TensorOptions(attn_mask_.dtype())
+                     .device(attn_mask_.device()))},
+            /*dim=*/1);
       }
       if (key_padding_mask_.defined()) {
-        key_padding_mask_ = torch::cat({
-          key_padding_mask_,
-          torch::zeros(
-            {key_padding_mask_.size(0), 1},
-            at::TensorOptions(key_padding_mask_.dtype())
-              .device(key_padding_mask_.device())
-          )}, /*dim=*/1);
+        key_padding_mask_ = torch::cat(
+            {key_padding_mask_,
+             torch::zeros(
+                 {key_padding_mask_.size(0), 1},
+                 at::TensorOptions(key_padding_mask_.dtype())
+                     .device(key_padding_mask_.device()))},
+            /*dim=*/1);
       }
     } else {
       TORCH_CHECK(!static_k.defined(), "bias cannot be added to static key.");
@@ -785,69 +843,77 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     auto k_sizes = k.sizes().vec();
     k_sizes[1] = 1;
     k = torch::cat(
-      {
-        k,
-        torch::zeros(k_sizes, at::TensorOptions(k.dtype()).device(k.device()))
-      }, /*dim=*/1);
+        {k,
+         torch::zeros(
+             k_sizes, at::TensorOptions(k.dtype()).device(k.device()))},
+        /*dim=*/1);
     auto v_sizes = v.sizes().vec();
     v_sizes[1] = 1;
     v = torch::cat(
-      {
-        v,
-        torch::zeros(v_sizes, at::TensorOptions(v.dtype()).device(v.device()))
-      }, /*dim=*/1);
+        {v,
+         torch::zeros(
+             v_sizes, at::TensorOptions(v.dtype()).device(v.device()))},
+        /*dim=*/1);
     if (attn_mask_.defined()) {
       attn_mask_ = torch::cat(
-        {
-          attn_mask_,
-          torch::zeros(
-            {attn_mask_.size(0), 1},
-            at::TensorOptions(attn_mask_.dtype())
-              .device(attn_mask_.device()))
-        }, /*dim=*/1);
+          {attn_mask_,
+           torch::zeros(
+               {attn_mask_.size(0), 1},
+               at::TensorOptions(attn_mask_.dtype())
+                   .device(attn_mask_.device()))},
+          /*dim=*/1);
     }
     if (key_padding_mask_.defined()) {
       key_padding_mask_ = torch::cat(
-        {
-          key_padding_mask_,
-          torch::zeros(
-            {key_padding_mask_.size(0), 1},
-            at::TensorOptions(key_padding_mask_.dtype())
-              .device(key_padding_mask_.device()))
-        }, /*dim=*/1);
+          {key_padding_mask_,
+           torch::zeros(
+               {key_padding_mask_.size(0), 1},
+               at::TensorOptions(key_padding_mask_.dtype())
+                   .device(key_padding_mask_.device()))},
+          /*dim=*/1);
     }
   }
   auto attn_output_weights = torch::bmm(q, k.transpose(1, 2));
-  TORCH_CHECK(attn_output_weights.sizes() == IntArrayRef({bsz * num_heads, tgt_len, src_len}));
+  TORCH_CHECK(
+      attn_output_weights.sizes() ==
+      IntArrayRef({bsz * num_heads, tgt_len, src_len}));
   if (attn_mask_.defined()) {
     attn_mask_ = attn_mask_.unsqueeze(0);
     attn_output_weights += attn_mask_;
   }
   if (key_padding_mask_.defined()) {
-    attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
+    attn_output_weights =
+        attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
     attn_output_weights = AT_DISPATCH_FLOATING_TYPES(
-      attn_output_weights.scalar_type(),
-      "attn_output_weights.masked_fill",
-      [&]() {
-        return attn_output_weights.masked_fill(
-          key_padding_mask_.unsqueeze(1).unsqueeze(2),
-          -std::numeric_limits<scalar_t>::infinity()
-        );
-      }
-    );
-    attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
+        attn_output_weights.scalar_type(),
+        "attn_output_weights.masked_fill",
+        [&]() {
+          return attn_output_weights.masked_fill(
+              key_padding_mask_.unsqueeze(1).unsqueeze(2),
+              -std::numeric_limits<scalar_t>::infinity());
+        });
+    attn_output_weights =
+        attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
   // NOLINTNEXTLINE(bugprone-argument-comment)
   attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
-  attn_output_weights = F::dropout(attn_output_weights, F::DropoutFuncOptions().p(dropout_p).training(training));
+  attn_output_weights = F::dropout(
+      attn_output_weights,
+      F::DropoutFuncOptions().p(dropout_p).training(training));
   auto attn_output = torch::bmm(attn_output_weights, v);
-  TORCH_CHECK(attn_output.sizes() == IntArrayRef({bsz * num_heads, tgt_len, head_dim}));
-  attn_output = attn_output.transpose(0, 1).contiguous().view({tgt_len, bsz, embed_dim});
+  TORCH_CHECK(
+      attn_output.sizes() == IntArrayRef({bsz * num_heads, tgt_len, head_dim}));
+  attn_output =
+      attn_output.transpose(0, 1).contiguous().view({tgt_len, bsz, embed_dim});
   attn_output = F::linear(attn_output, out_proj_weight, out_proj_bias);
   if (need_weights) {
-    // average attention weights over heads
-    attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
-    return std::make_tuple(attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads);
+    attn_output_weights =
+        attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
+    if (average_attn_weights) {
+      // average attention weights over heads
+      attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
+    }
+    return std::make_tuple(attn_output, attn_output_weights);
   } else {
     return std::make_tuple(attn_output, Tensor());
   }
@@ -856,33 +922,35 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
-  const Tensor& query, const Tensor& key, const Tensor& value,
-  const MultiheadAttentionForwardFuncOptions& options) {
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const MultiheadAttentionForwardFuncOptions& options) {
   return detail::multi_head_attention_forward(
-    query,
-    key,
-    value,
-    options.embed_dim_to_check(),
-    options.num_heads(),
-    options.in_proj_weight(),
-    options.in_proj_bias(),
-    options.bias_k(),
-    options.bias_v(),
-    options.add_zero_attn(),
-    options.dropout_p(),
-    options.out_proj_weight(),
-    options.out_proj_bias(),
-    options.training(),
-    options.key_padding_mask(),
-    options.need_weights(),
-    options.attn_mask(),
-    options.use_separate_proj_weight(),
-    options.q_proj_weight(),
-    options.k_proj_weight(),
-    options.v_proj_weight(),
-    options.static_k(),
-    options.static_v()
-  );
+      query,
+      key,
+      value,
+      options.embed_dim_to_check(),
+      options.num_heads(),
+      options.in_proj_weight(),
+      options.in_proj_bias(),
+      options.bias_k(),
+      options.bias_v(),
+      options.add_zero_attn(),
+      options.dropout_p(),
+      options.out_proj_weight(),
+      options.out_proj_bias(),
+      options.training(),
+      options.key_padding_mask(),
+      options.need_weights(),
+      options.attn_mask(),
+      options.use_separate_proj_weight(),
+      options.q_proj_weight(),
+      options.k_proj_weight(),
+      options.v_proj_weight(),
+      options.static_k(),
+      options.static_v(),
+      options.average_attn_weights());
 }
 
 } // namespace functional

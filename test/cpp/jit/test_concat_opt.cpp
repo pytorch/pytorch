@@ -654,5 +654,92 @@ TEST(
       ->run(*graph);
 }
 
+TEST(ConcatOpt, CombineConcatsSimpleCase) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %input.1 : Tensor[] = prim::ListConstruct(%0, %0)
+          %concat.1 : Tensor = aten::cat(%input.1, %dim)
+          %input.2 : Tensor[] = prim::ListConstruct(%concat.1, %0)
+          %concat.2 : Tensor = aten::cat(%input.2, %dim)
+          return (%concat.2)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1})};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(CombineConcats(graph));
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+
+  // After performing CombineConcats:
+  //  graph(%0 : Tensor):
+  //    %dim : int = prim::Constant[value=0]()
+  //    %input : Tensor[] = prim::ListConstruct(%0, %0, %0)
+  //    %concat : Tensor = aten::cat(%input, %dim)
+  //    return (%concat)
+  testing::FileCheck()
+      .check_count("prim::ListConstruct", 1, /*exactly*/ true)
+      ->check_count("aten::cat", 1, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(ConcatOpt, CombineConcatsLongChain) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor, %1 : Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %input.1 : Tensor[] = prim::ListConstruct(%0, %0)
+          %concat.1 : Tensor = aten::cat(%input.1, %dim)
+          %input.2 : Tensor[] = prim::ListConstruct(%1, %concat.1, %1)
+          %concat.2 : Tensor = aten::cat(%input.2, %dim)
+          %input.3 : Tensor[] = prim::ListConstruct(%0, %concat.2, %0)
+          %concat.3 : Tensor = aten::cat(%input.3, %dim)
+          return (%concat.3)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1}), at::randn({1})};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(CombineConcats(graph));
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+  ASSERT_TRUE(exactlyEqual(orig_outputs, opt_outputs));
+
+  // After performing CombineConcats:
+  //  graph(%0 : Tensor):
+  //    %dim : int = prim::Constant[value=0]()
+  //    %input : Tensor[] = prim::ListConstruct(%0, %1, %0, %0, %1, %0)
+  //    %concat : Tensor = aten::cat(%input, %dim)
+  //    return (%concat)
+  testing::FileCheck()
+      .check_count("prim::ListConstruct", 1, /*exactly*/ true)
+      ->check_count("aten::cat", 1, /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(ConcatOpt, CombineConcatsMutation) {
+  auto graph = std::make_shared<Graph>();
+  const std::string input =
+      R"IR(
+        graph(%0: Tensor, %1 : Tensor):
+          %dim : int = prim::Constant[value=0]()
+          %input.1 : Tensor[] = prim::ListConstruct(%0, %0)
+          %concat.1 : Tensor = aten::cat(%input.1, %dim)
+          %input.2 : Tensor[] = prim::ListConstruct(%1, %concat.1, %1)
+          %input.3 : Tensor[] = aten::append(%input.2, %0)
+          %concat.2 : Tensor = aten::cat(%input.2, %dim)
+          return (%concat.2)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {at::rand({1}), at::randn({1})};
+  // No modifications due to aten::append
+  ASSERT_FALSE(CombineConcats(graph));
+}
+
 } // namespace jit
 } // namespace torch

@@ -4,12 +4,13 @@
 #include <torch/nn/functional/pixelshuffle.h>
 #include <torch/nn/options/pixelshuffle.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelShuffle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelShuffle
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
 /// to a tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an
@@ -25,7 +26,8 @@ namespace nn {
 /// PixelShuffle model(PixelShuffleOptions(5));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
-struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl> {
+struct TORCH_API PixelShuffleImpl
+    : public torch::nn::Cloneable<PixelShuffleImpl> {
   explicit PixelShuffleImpl(const PixelShuffleOptions& options_);
 
   /// Pretty prints the `PixelShuffle` module into the given `stream`.
@@ -41,9 +43,9 @@ struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl
 
 /// A `ModuleHolder` subclass for `PixelShuffleImpl`.
 /// See the documentation for `PixelShuffleImpl` class to learn what methods it
-/// provides, and examples of how to use `PixelShuffle` with `torch::nn::PixelShuffleOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `PixelShuffle` with
+/// `torch::nn::PixelShuffleOptions`. See the documentation for `ModuleHolder`
+/// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(PixelShuffle);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelUnshuffle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

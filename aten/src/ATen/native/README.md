@@ -47,10 +47,9 @@ signature.
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s).
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
-  In general annotations can be defined via the following four situations:
-  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
-  - `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
-  - `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  In general annotations can be defined via the following situations:
+  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data. The set could have a size of one.
+  - `Tensor(a!)` - members of `a` may be written to thus mutating the underlying data.
   - `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
@@ -61,8 +60,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`.  It is translated into a C++ argument of type `std::string`
-  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
+- `str`.  It is translated into a C++ argument of non-owning type `c10::string_view`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`;
@@ -188,6 +186,18 @@ overload names, at most one overload is allowed to have an empty overload name.
 
 The declarations also support the following attributes.
 
+**Namespaces.** User can register operators in different namespaces than `aten`, by simply putting custom namespaces before the function name. Currently nested namespace is not supported for function name. If not specified, all the functions will be registered in `aten` namespace.
+
+For example, suppose we are registering `my_op` into `custom` namespace, we can have:
+```
+- func: custom::my_op(Tensor(a) self, ...) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CPU: my_op_cpu
+    CUDA: my_op_cuda
+```
+
+Note that we have a one-off `TORCH_LIBRARY` APIs to achieve the same goal of registering an operator in a custom namespace. Comparing with that API, having custom namespace in `native_functions.yaml` is useful in cases where the function does not really belong to ATen but is also widely used and it is preferred to have a shared place to register it.
 
 ### `variants`
 
@@ -250,6 +260,13 @@ There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
+When a Tensor views are contained in a Tensor list, we need to represent that the output list
+contains Tensors that alias the input.
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
+We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
+relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
  If this causes a lot of confusion please add @cpuhrsch to your PR.
@@ -264,7 +281,14 @@ dispatch:
 
 This specifies the actual name of the function you want to dispatch to, so you
 can dispatch to different functions depending on which backend the passed tensors
-belong to.  If the dispatch table is omitted, we assume a default dispatch
+belong to.  Notice that custom namespaces is supported on these names, it's useful when the native function listed lives in a namespace other than the default `at::native`. Currently we support nested namespace with maximum level of 2. For example:
+```
+dispatch:
+    CPU: custom::ns::func_cpu
+```
+The example above hinted the native function can be found under `custom::ns::native` namespace (the trailing `::native` is added automatically).
+
+If the dispatch table is omitted, we assume a default dispatch
 table:
 
 ```
@@ -285,8 +309,8 @@ If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
-[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
-There are also two special "generic" backends:
+[codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
+There are also three special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
     implementations of kernels that work for all backends, but require an
@@ -298,6 +322,18 @@ There are also two special "generic" backends:
     kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
     DispatchStub should NOT be registered as CompositeExplicitAutograd, as
     DispatchStub only works for `CPU, CUDA`)
+
+  - `CompositeExplicitAutogradNonFunctional`:
+    Similar to CompositeExplicitAutograd, but this key should be used if:
+    (1) Your kernel is written for a non-aliasing operator.
+    (2) *and* it calls internally into an aliasing operator.
+    An example of this is select_backward, which is non-aliasing, but decomposes into select.
+    We would like to distinguish between "ordinary" CompositeExplicitAutograd kernels
+    and these kernels, because some backends would not like
+    to decompose an non-aliasing op into an aliasing op.
+    LazyTensor + XLA are the two current examples of this - since they operate on a functional IR,
+    they would prefer to directly implement a non-aliasing operator with their own kernel,
+    instead of using a decomposition that results in more aliasing operators.
 
   - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
     kernels that work for all backends, and also can implicitly support autograd,
@@ -346,6 +382,39 @@ added if applicable), so that it's still available for other backends to use.
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
 
+### Composite Compliance
+
+Definition: a "composite function" is an Operator registered as
+CompositeImplicitAutograd or a (Python or C++) function that consists of PyTorch
+operations. Examples of the latter include backward formulas and forward-mode AD formulas.
+
+Composite functions defined in the PyTorch library MUST work for most, if not
+all, backends/subclasses. This means that we impose a set of constraints that make it more
+difficult to write composite functions inside PyTorch library code than users
+writing PyTorch code.
+
+If you wish to do something that is banned (you may wish to do this for perf
+reasons), please write a backwards formula for your function so it is no longer
+hide parts of the function in a new aten operator that is not CompositeImplicitAutograd.
+
+Composite functions may not:
+- call `resize_` or moral equivalents. These are tricky to handle for
+many backends, like vmap and meta.
+- call `out=` operations. These are impossible to handle for vmap and can cause
+dispatch-to-python objects to lose their subclassing.
+- Change the metadata of a Tensor without performing dispatches. Examples of these
+operations are directly accessing the TensorImpl API to modify the
+sizes/strides/metadata of a Tensor.
+- In the same vein as the last point, `data_ptr` access or `item` access are not
+allowed. These operations do not go through the dispatcher.
+- `copy_` is a marginal case. If you're able to rewrite your operation without
+`copy_` you should definitely do so; this should be trivial if you're not copy-ing
+into a view. Otherwise, it is fine to leave the code as-is.
+
+We have CompositeImplicitAutograd compliance tests in `test/test_ops.py`. These
+tests aren't perfect (it's pretty difficult to check for all of the above) so if
+something looks wrong please shout.
+
 ### `device_guard`
 
 ```
@@ -375,9 +444,9 @@ By default, ATen code generation will generate device check,
 which will ensure all the tensor parameters passed to kernel are
 on the same device.
 
-However, in some cases, checking the device is unncessary, becuase,
+However, in some cases, checking the device is unnecessary, because,
 e.g., you call a function allows to work on multiple devices.
-In that case, code generation of the device check can e disabled by adding
+In that case, code generation of the device check can be disabled by adding
 `device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
@@ -405,6 +474,28 @@ With this flag set, we will generate arguments for Tensors whose underlying data
 as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
 was not necessary to allow the underlying data to change. (This was like using `T * const` when we
 wanted `const T*`.)
+
+### `autogen`
+
+```
+- func: my_op_(Tensor(a!) self) -> Tensor(a!)
+...
+  autogen: my_op, my_op.out
+```
+
+`autogen` keyword is being used to specify which native function the codegen system should generate
+implementations for.
+* For an in-place variant of a native function (op name ends with an `_`), we will generate a functional
+variant and an out= variant.
+* If a functional variant is given, we generate an out= variant.
+* We don't support `autogen` for view ops, ops that bypass the dispatcher as well as composite ops.
+
+We also generate kernels for generated ops, which merely copy and return the result from the base ops.
+These generated kernels can be found in `<gen-out>/aten/src/ATen/CompositeViewCopyKernels.cpp`.
+
+Also notice that for new operators being added to `native_functions.yaml`, if they satisfy the requirements
+mentioned above, they should include `autogen` keyword, since functionalization depends on it. We will
+enforce this in codegen.
 
 
 ## Writing an implementation in C++
@@ -464,7 +555,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: to support training, you're required to write a formula in
       derivatives.yaml since your backend implementations don't support autograd.
 
-    - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
+    - Yes: you're likely calling other `at::` ops in the implementation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
     - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
@@ -480,7 +571,7 @@ Here're steps to follow to decide the right dispatch keyword:
 
       You're done. This op will be called in inference for all backends.
 
-      Note: to support training you're required to add a autograd formula,
+      Note: to support training you're required to add an autograd formula,
       or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
 
     - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
@@ -506,7 +597,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```
@@ -518,7 +609,7 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 4. TODO: AutogradCPUOrCUDA
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
-  - direct registration to backend always has higher precendence than alias
+  - direct registration to backend always has higher precedence than alias
   - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
     e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
@@ -535,7 +626,9 @@ The generated bindings are either exposed as methods on python_variable or funct
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
-or torch._C._special (marked with `python_module: special`) objects.
+torch._C._sparse (marked with `python_module: sparse`) objects,
+torch._C._special (marked with `python_module: special`) objects,
+or torch._C._nested (marked with `python_module: nested`) objects.
 
 ### Undefined tensor conventions
 

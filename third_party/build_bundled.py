@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 
 
@@ -36,23 +37,35 @@ def collect_license(current):
     return collected
 
 
-def create_bundled(d, outstream):
+def create_bundled(d, outstream, include_files=False):
     """Write the information to an open outstream"""
     collected = collect_license(d)
     sorted_keys = sorted(collected.keys())
     outstream.write('The Pytorch repository and source distributions bundle '
                     'several libraries that are \n')
-    outstream.write('compatibly licensed.  We list these here.\n\n')
+    outstream.write('compatibly licensed.  We list these here.')
+    files_to_include = []
     for k in sorted_keys:
         c = collected[k]
         files = ',\n     '.join(c['Files'])
         license_file = ',\n     '.join(c['License_file'])
+        outstream.write('\n\n')
         outstream.write(f"Name: {c['Name']}\n")
         outstream.write(f"License: {c['License']}\n")
         outstream.write(f"Files: {files}\n")
-        outstream.write('  For details, see ')
+        outstream.write('  For details, see')
+        if include_files:
+            outstream.write(' the files concatenated below: ')
+            files_to_include += c['License_file']
+        else:
+            outstream.write(': ')
         outstream.write(license_file)
-        outstream.write('\n\n') 
+    for fname in files_to_include:
+        outstream.write('\n\n')
+        outstream.write(fname)
+        outstream.write('\n' + '-' * len(fname) + '\n')
+        with open(fname, 'r') as fid:
+            outstream.write(fid.read())
 
 
 def identify_license(f, exception=''):
@@ -89,6 +102,8 @@ def identify_license(f, exception=''):
         elif 'BoostSoftwareLicense-Version1.0' in txt:
             # Hmm, do we need to check the text?
             return 'BSL-1.0'
+        elif squeeze("Clarified Artistic License") in txt:
+            return 'Clarified Artistic License'
         elif all([squeeze(m) in txt.lower() for m in bsd3_txt]):
             return 'BSD-3-Clause'
         elif all([squeeze(m) in txt.lower() for m in bsd3_v1_txt]):
@@ -97,30 +112,30 @@ def identify_license(f, exception=''):
             return 'BSD-2-Clause'
         elif all([squeeze(m) in txt.lower() for m in bsd3_src_txt]):
             return 'BSD-Source-Code'
-        elif all([squeeze(m) in txt.lower() for m in mit_txt]):
+        elif any([squeeze(m) in txt.lower() for m in mit_txt]):
             return 'MIT'
         else:
             raise ValueError('unknown license')
 
-mit_txt = ['permission is hereby granted, free of charge, to any person '
-           'obtaining a copy of this software and associated documentation '
-           'files (the "software"), to deal in the software without '
-           'restriction, including without limitation the rights to use, copy, '
-           'modify, merge, publish, distribute, sublicense, and/or sell copies '
-           'of the software, and to permit persons to whom the software is '
+mit_txt = ['permission is hereby granted, free of charge, to any person ',
+           'obtaining a copy of this software and associated documentation ',
+           'files (the "software"), to deal in the software without ',
+           'restriction, including without limitation the rights to use, copy, ',
+           'modify, merge, publish, distribute, sublicense, and/or sell copies ',
+           'of the software, and to permit persons to whom the software is ',
            'furnished to do so, subject to the following conditions:',
 
-           'the above copyright notice and this permission notice shall be '
+           'the above copyright notice and this permission notice shall be ',
            'included in all copies or substantial portions of the software.',
 
-           'the software is provided "as is", without warranty of any kind, '
-           'express or implied, including but not limited to the warranties of '
-           'merchantability, fitness for a particular purpose and '
-           'noninfringement. in no event shall the authors or copyright holders '
-           'be liable for any claim, damages or other liability, whether in an '
-           'action of contract, tort or otherwise, arising from, out of or in '
-           'connection with the software or the use or other dealings in the '
-           'software.'
+           'the software is provided "as is", without warranty of any kind, ',
+           'express or implied, including but not limited to the warranties of ',
+           'merchantability, fitness for a particular purpose and ',
+           'noninfringement. in no event shall the authors or copyright holders ',
+           'be liable for any claim, damages or other liability, whether in an ',
+           'action of contract, tort or otherwise, arising from, out of or in ',
+           'connection with the software or the use or other dealings in the ',
+           'software.',
            ]
 
 bsd3_txt = ['redistribution and use in source and binary forms, with or without '
@@ -153,7 +168,27 @@ bsd3_src_txt = bsd3_txt[:2] + bsd3_txt[4:]
 
 
 if __name__ == '__main__':
-    third_party = os.path.join(mydir)
-    fname = os.path.join(third_party, 'LICENSES_BUNDLED.txt')
+    third_party = os.path.relpath(mydir)
+    parser = argparse.ArgumentParser(
+        description="Generate bundled licenses file",
+    )
+    parser.add_argument(
+        "--out-file",
+        type=str,
+        default=os.environ.get(
+            "PYTORCH_THIRD_PARTY_BUNDLED_LICENSE_FILE",
+            str(os.path.join(third_party, 'LICENSES_BUNDLED.txt'))
+        ),
+        help="location to output new bundled licenses file",
+    )
+    parser.add_argument(
+        "--include-files",
+        action="store_true",
+        default=False,
+        help="include actual license terms to the output",
+    )
+    args = parser.parse_args()
+    fname = args.out_file
+    print(f"+ Writing bundled licenses to {args.out_file}")
     with open(fname, 'w') as fid:
-        create_bundled(third_party, fid)
+        create_bundled(third_party, fid, args.include_files)

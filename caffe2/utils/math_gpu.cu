@@ -7,8 +7,9 @@
 #include <numeric>
 #include <vector>
 
-#include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
+#include <cub/block/block_reduce.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
@@ -2684,12 +2685,12 @@ CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
     float* dst,
     CUDAContext* context) {
   if (src != dst && N > 0) {
-    cudaMemcpyAsync(
+    C10_CUDA_CHECK(cudaMemcpyAsync(
         dst,
         src,
         sizeof(float) * N,
         cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
+        context->cuda_stream()));
   }
 }
 
@@ -2700,12 +2701,12 @@ CAFFE2_CUDA_EXPORT void CopyVector<int, CUDAContext>(
     int* dst,
     CUDAContext* context) {
   if (src != dst && N > 0) {
-    cudaMemcpyAsync(
+    C10_CUDA_CHECK(cudaMemcpyAsync(
         dst,
         src,
         sizeof(int) * N,
         cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
+        context->cuda_stream()));
   }
 }
 

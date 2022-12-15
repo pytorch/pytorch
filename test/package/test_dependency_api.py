@@ -1,8 +1,12 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import importlib
 from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
+
+import torch.nn
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
@@ -180,16 +184,24 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
+        with self.assertRaises(PackagingError):
+            with PackageExporter(buffer) as he:
+                he.mock(include="package_a.subpackage")
+                he.intern("**")
+                he.save_pickle("obj", "obj.pkl", obj2)
+
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_pickle_mocked_all(self):
+        import package_a.subpackage
+
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        buffer = BytesIO()
         with PackageExporter(buffer) as he:
-            he.mock(include="package_a.subpackage")
-            he.intern("**")
+            he.intern(include="package_a.**")
+            he.mock("**")
             he.save_pickle("obj", "obj.pkl", obj2)
-
-        buffer.seek(0)
-
-        hi = PackageImporter(buffer)
-        with self.assertRaises(NotImplementedError):
-            hi.load_pickle("obj", "obj.pkl")
 
     def test_allow_empty_with_error(self):
         """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
@@ -336,6 +348,29 @@ class TestDependencyAPI(PackageTestCase):
         # "package_a" should still be mocked out.
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
+
+    def test_externing_c_extension(self):
+        """Externing c extensions modules should allow us to still access them especially those found in torch._C."""
+
+        buffer = BytesIO()
+        # The C extension module in question is F.gelu which comes from torch._C._nn
+        model = torch.nn.TransformerEncoderLayer(
+            d_model=64,
+            nhead=2,
+            dim_feedforward=64,
+            dropout=1.0,
+            batch_first=True,
+            activation="gelu",
+            norm_first=True,
+        )
+        with PackageExporter(buffer) as e:
+            e.extern("torch.**")
+            e.intern("**")
+
+            e.save_pickle("model", "model.pkl", model)
+        buffer.seek(0)
+        imp = PackageImporter(buffer)
+        imp.load_pickle("model", "model.pkl")
 
 
 if __name__ == "__main__":
