@@ -2030,18 +2030,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(2)
         self.assertEqual(f(x, y), opt_f(x, y))
 
-    def test_output_aliases_intermediate(self):
-        def f(x):
-            intermediate = x.mul(2)
-            return intermediate.view(-1)
-
-        opt_f = torch._dynamo.optimize("aot_eager")(f)
-
-        for b in [True, False]:
-            x = torch.randn(4, requires_grad=b)
-            self.assertEqual(f(x), opt_f(x))
-            self.assertEqual(f(x), opt_f(x))
-
     def test_while_loop_graph_break(self):
         # Repro of tacotron2 cache_size_recompilation
         def inner(x):
