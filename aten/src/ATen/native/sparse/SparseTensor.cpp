@@ -396,7 +396,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (!at::globalContext().checkSparseTensorInvariants()) {
     at::native::_validate_sparse_coo_tensor_args(indices, values, size);
   }  // otherwise arguments are validated in _sparse_coo_tensor_unsafe
   return at::native::_sparse_coo_tensor_unsafe(
