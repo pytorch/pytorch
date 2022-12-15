@@ -22,8 +22,7 @@ from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 import functorch
-from functorch import vmap, grad_and_value
-from torch.nn.utils.stateless import functional_call
+from functorch import vmap, grad_and_value, functional_call
 
 # disable warning spam
 torch._C._functorch._set_vmap_fallback_warning_enabled(False)

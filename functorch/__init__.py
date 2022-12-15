@@ -29,4 +29,6 @@ from torch._functorch.make_functional import (
     FunctionalModuleWithBuffers,
 )
 
+from torch._functorch.functional_call import functional_call, params_and_buffers_no_grad_tracking
+
 __version__ = torch.__version__
