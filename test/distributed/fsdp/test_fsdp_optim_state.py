@@ -782,7 +782,7 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def _test_use_orig_params(self) -> None:
+    def test_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
         self._test_load_optim_state(
             _ModelClass.NESTED,
