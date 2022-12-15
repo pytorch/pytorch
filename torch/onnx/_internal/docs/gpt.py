@@ -92,10 +92,11 @@ def test_gpt2_one_shot(model_name):
         model, **inputs, use_binary_format=True
     )
 
+    ref_outputs, _ = tree_flatten(model(**inputs, return_dict=False))
     pth_outputs = run_ort(
-        onnx_model, onnx_model_text, (input_ids, attention_mask), flat_outputs
+        onnx_model, onnx_model_text, (input_ids, attention_mask), ref_outputs
     )
-    for _1, _2 in zip(flat_outputs, pth_outputs):
+    for _1, _2 in zip(ref_outputs, pth_outputs):
         print(_1 - _2)
         assert torch.allclose(_1, _2)
 

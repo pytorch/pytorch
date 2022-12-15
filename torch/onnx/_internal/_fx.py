@@ -237,7 +237,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
                 # Assign type and shape obtained from FakeTensorProp.
-                # _fill_tensor_types(v, node.meta["val"])
+                #_fill_tensor_types(v, node.meta["val"])
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -460,6 +460,15 @@ def export_without_kwargs(
     # kwargs are not handled.
     assert not bound.kwargs
 
+    class Wrapper(torch.nn.Module):
+        def __init__(self, fn):
+            super().__init__()
+            self.fn = fn
+
+        def forward(self, *args):
+            result, _ = tree_flatten(self.fn(*args))
+            return result
+
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(bound.args)
     # Translate callable to FX graph.
@@ -467,7 +476,7 @@ def export_without_kwargs(
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
-    graph_module = make_fx(fn, decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(
+    graph_module = make_fx(Wrapper(fn), decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE)(
         *args
     )
     # Export FX graph to ONNX ModelProto.
