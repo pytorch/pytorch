@@ -139,6 +139,9 @@ def _getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
+# TODO remove when BC no longer needed for PyPer
+getattr_from_fqn = _getattr_from_fqn
+
 def _to_underlying_dtype(qdtype):
     DTYPE_MAPPING = {
         torch.quint8: torch.uint8,
@@ -627,11 +630,9 @@ def _get_lstm_with_individually_observed_parts(
                     cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
                 cell.hidden_state_dtype = obs.dtype
 
-    # need to do this here to avoid circular dependency
-    from torch.ao.quantization.quantize import _add_observer_
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
-    _add_observer_(  # type: ignore[attr-defined]
+    torch.ao.quantization.add_observer_(
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
     )

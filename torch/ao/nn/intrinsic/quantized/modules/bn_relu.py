@@ -4,10 +4,6 @@ import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat
 import torch.ao.nn.quantized as nnq
 
-__all__ = [
-    "BNReLU2d",
-    "BNReLU3d"
-]
 
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
