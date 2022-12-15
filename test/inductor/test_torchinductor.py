@@ -1501,8 +1501,6 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_bn_fuse(self):
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -1557,8 +1555,6 @@ class CommonTemplate:
                         (v,),
                     )
 
-    # For gpu path, there has a accurcy issue,
-    @unittest.skipIf(HAS_CUDA, "only support cpu conv bn test")
     def test_conv_functional_bn_fuse(self):
         # Define a BatchNorm using functional BN.
         class BatchNorm(torch.nn.BatchNorm2d):

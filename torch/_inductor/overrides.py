@@ -72,8 +72,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
 
-    if not is_cpu:
-        return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
