@@ -158,7 +158,7 @@ function setup_torchdeploy_deps(){
 
 function checkout_install_torchdeploy() {
   local commit
-  commit=$(get_pinned_commit text)
+  commit=$(get_pinned_commit multipy)
   setup_torchdeploy_deps
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
