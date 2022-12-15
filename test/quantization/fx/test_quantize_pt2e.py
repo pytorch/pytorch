@@ -41,8 +41,6 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 tracing_mode="real",
             )
 
-            print("after program capture:", m)
-
             backend_config = get_qnnpack_pt2e_backend_config()
             # TODO: define qconfig_mapping specifically for executorch
             qconfig = get_default_qconfig("qnnpack")
@@ -67,9 +65,10 @@ class TestQuantizePT2EModels(QuantizationTestCase):
 
             after_quant_result_fx = m_fx(*example_inputs)
 
-            print("after prepare:")
-            print("v.s. fx diff:", torch.max(after_prepare_result - after_prepare_result_fx))
-            print("v.s. fx sqnr:", compute_sqnr(after_prepare_result, after_prepare_result_fx))
-            print("after convert:")
-            print("v.s. fx diff:", torch.max(after_quant_result - after_quant_result_fx))
-            print("v.s. fx sqnr:", compute_sqnr(after_quant_result, after_quant_result_fx))
+            # the result matches exactly after prepare
+            self.assertEqual(after_prepare_result, after_prepare_result_fx)
+            self.assertEqual(compute_sqnr(after_prepare_result, after_prepare_result_fx), torch.tensor(float("inf")))
+            # there are slight differences after convert due to different implementations
+            # of quant/dequant
+            self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
+            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
