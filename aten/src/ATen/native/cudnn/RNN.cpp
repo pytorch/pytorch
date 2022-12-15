@@ -1528,14 +1528,21 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 
   std::unique_lock<std::mutex> lock {state_cache_mut};
   auto& state = dropout_state_cache.at(device);
-  if (train && dropout_p > 0 && !state.buffer.defined()) {
-    std::unique_lock<std::mutex> lock {state.mutex};
-    int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
-    state.buffer = at::_cudnn_init_dropout_state(
-      dropout_p, train, seed, options.dtype(at::kByte));
-    // NB: CUDA binds the event to a device at creation time, so we can initialize it
-    // only now, when we know we're on the correct device.
-    state.event.emplace();
+  if (train && dropout_p > 0) {
+    const auto &gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
+    bool reset_rnn_state = gen_impl->reset_rnn_state();
+    if (!state.buffer.defined() || reset_rnn_state) {
+      std::unique_lock<std::mutex> lock {state.mutex};
+      int64_t seed = at::empty({}, options.dtype(at::kLong)).random_(gen).item<int64_t>();
+      state.buffer = at::_cudnn_init_dropout_state(
+          dropout_p, train, seed, options.dtype(at::kByte));
+      // NB: CUDA binds the event to a device at creation time, so we can initialize it
+      // only now, when we know we're on the correct device.
+      if (!state.event.has_value()) {
+        state.event.emplace();
+      }
+    }
   }
   return state;
 }

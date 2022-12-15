@@ -4,6 +4,7 @@
 #include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
 #include <ATen/Context.h>
 #include <limits>
+#include <atomic>
 
 namespace at {
 /**
@@ -104,6 +105,10 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t capture_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
 
+  bool reset_rnn_state() {
+    return !no_reset_rnn_state_.test_and_set();
+  }
+
   // Temporarily accommodates call sites that use philox_engine_inputs.
   // Allows incremental refactor of call sites to use philox_cuda_state.
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
@@ -118,6 +123,7 @@ private:
   int64_t* offset_extragraph_{};
   uint32_t offset_intragraph_ = 0;
   bool graph_expects_this_gen_ = false;
+  std::atomic_flag no_reset_rnn_state_;
 };
 
 namespace cuda {
