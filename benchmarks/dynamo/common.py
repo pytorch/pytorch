@@ -1138,7 +1138,10 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            for i in range(self.args.retries + 1):
+            # Sometime CI fails with random triton compilation failure which disappears after retry
+            # TODO: revisit this after switching to new Triton runtime
+            retries = 2 if self.args.ci else 0
+            for i in range(retries + 1):
                 reset_rng_state()
                 torch._dynamo.reset()
                 try:
@@ -1152,12 +1155,18 @@ class BenchmarkRunner:
                         "TorchDynamo optimized model failed to run because of following error"
                     )
                     log.exception(e)
-                    if i == self.args.retries:
-                        accuracy_status = "fail_to_run"
-                        return record_status(accuracy_status)
-                    else:
+                    if i < retries and (
+                        (
+                            isinstance(e, RuntimeError)
+                            and str(e).startswith("Internal Triton PTX codegen error")
+                        )
+                        or (isinstance(e, KeyError) and str(e) == "'cubin'")
+                    ):
                         time.sleep((i + 1) * 30)
                         print("Retrying...")
+                    else:
+                        accuracy_status = "fail_to_run"
+                        return record_status(accuracy_status)
 
             if not same(
                 correct_result,
@@ -1419,12 +1428,6 @@ def parse_args(args=None):
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
-        "--retries",
-        type=int,
-        default=0,
-        help="how many times to retry after fail",
-    )
-    parser.add_argument(
         "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
@@ -1684,9 +1687,6 @@ def run(runner, args, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
-        # Occasionally CI runs may fail with some PTX toolchain error which often
-        # goes away after retry
-        args.retries = 2
         if args.backend == "aot_eager":
             args.exclude = (
                 CI_SKIP_AOT_EAGER_TRAINING
