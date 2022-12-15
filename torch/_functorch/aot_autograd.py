@@ -589,12 +589,11 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
-            if isinstance(arg, Tensor):
+            if not isinstance(arg, Tensor):
+                new_arg = arg
+            else:
                 torch._sync(f_arg)
                 new_arg = torch._from_functional_tensor(f_arg)
-            else:
-                new_arg = arg
-
             if arg is not new_arg:
                 if StorageWeakRef(arg.storage()) == StorageWeakRef(new_arg.storage()):
                     mutation_type = MutationType.metadata_only
