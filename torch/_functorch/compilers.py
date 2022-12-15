@@ -146,7 +146,8 @@ class DebugInterpreter(fx.Interpreter):
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert subst_symint_tuple(nv.size()) == rv.size(), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            assert subst_symint_tuple(nv.size()) == rv.size(), \
+                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
             same_strides = check_significant_strides(nv, rv)
             assert same_strides, f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
 
