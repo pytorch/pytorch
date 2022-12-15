@@ -16,6 +16,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _is_fsdp_flattened,
 )
+from torch.testing._internal.common_fsdp import _zero_model
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
@@ -452,7 +453,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_root_fully_shard(self):
+    def test_state_dict_save_load_root_fully_shard(self):
         """
         Tests that the full state dict saved from a module with ``fully_shard``
         applied to the global root matches that of an equivalent local module.
@@ -463,6 +464,16 @@ class TestFSDPModelCheckpointing(FSDPTest):
         local_sd = local_model.state_dict()
         composable_sd = composable_module.state_dict()
         self._check_state_dict_parity(local_sd, composable_sd)
+
+        # Validate load
+        load_composable = fully_shard(
+            copy.deepcopy(local_model),
+            policy=ModuleWrapPolicy({UnitModule})
+        )
+        _zero_model(load_composable)
+        sd = {k: v.clone() for k, v in composable_sd.items()}
+        load_composable.load_state_dict(sd)
+        self._check_model_parity(load_composable, composable_module)
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_submodule_fully_shard(self):
@@ -490,6 +501,16 @@ class TestFSDPModelCheckpointing(FSDPTest):
         for (k1, v1), (k2, v2) in zip(composable_sd.items(), local_sd.items()):
             self.assertEqual(k1, k2)
             self.assertEqual(v1, v2)
+
+    def _check_model_parity(self, m1: nn.Module, m2: nn.Module):
+        """
+        Checks that m1 and m2 have equivalent named_parameters.
+        """
+        for (n1, p1), (n2, p2) in zip(
+            m1.named_parameters(), m2.named_parameters()
+        ):
+            self.assertEqual(n1, n2)
+            self.assertEqul(p1, p2)
 
 
 if __name__ == "__main__":
