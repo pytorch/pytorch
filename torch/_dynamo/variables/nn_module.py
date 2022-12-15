@@ -132,7 +132,9 @@ class NNModuleVariable(VariableTracker):
         else:
             if istype(subobj, property):
                 return variables.UserFunctionVariable(
-                    subobj.fget, guards=guards
+                    subobj.fget,
+                    guards=guards,
+                    source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
@@ -212,7 +214,10 @@ class NNModuleVariable(VariableTracker):
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
-                assert self.source, "Must provide a valid source in order to inline"
+                assert self.source, (
+                    "Must provide a valid source in order to inline, "
+                    "since inlined function may have default args which must be guarded."
+                )
                 class_source = AttrSource(self.source, "__class__")
                 if is_lazy:
                     fn = mod.__class__.__call__
@@ -220,7 +225,6 @@ class NNModuleVariable(VariableTracker):
                 else:
                     fn = mod.__class__.forward
                     fn_source = AttrSource(class_source, "forward")
-                assert fn_source, "Must provide a valid source in order to inline"
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),

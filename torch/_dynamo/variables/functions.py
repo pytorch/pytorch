@@ -87,7 +87,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, is_constant=False, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
-        assert self.source, "No source!"
+        assert self.source, (
+            "UserFunctionVariables must have a valid source "
+            "in case they have Default args which must be guarded on regardless of inlining."
+        )
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
