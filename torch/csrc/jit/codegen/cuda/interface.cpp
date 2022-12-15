@@ -26,31 +26,33 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-#ifdef USE_CUDA
 class LoadingNvfuserLibrary {
  public:
+#ifdef USE_CUDA
   LoadingNvfuserLibrary() {
-    static c10::once_flag load_nvfuser_lib_flag;
-    c10::call_once(load_nvfuser_lib_flag, [&] {
-      std::string library_name;
-      if (const char* path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
-        library_name = path;
-      }
-      library_name += "libnvfuser_codegen.so";
-      try {
-        nvfuserLib_ =
-            std::make_shared<at::DynamicLibrary>(library_name.c_str());
-      } catch (const c10::DynamicLibraryError& e) {
-        TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
-      }
-    });
+    std::string library_name;
+    if (const char* path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
+      library_name = path;
+    }
+#if defined(_WIN32)
+    library_name += "libnvfuser_codegen.dll";
+#elif defined(__APPLE__)
+    library_name += "libnvfuser_codegen.dylib";
+#else
+    library_name += "libnvfuser_codegen.so";
+#endif
+    try {
+      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
+    } catch (const c10::DynamicLibraryError& e) {
+      TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
+    }
   }
 
+#endif // USE_CUDA
   std::shared_ptr<at::DynamicLibrary> nvfuserLib_;
 };
 
 static LoadingNvfuserLibrary loading_nvfuser_library_;
-#endif // USE_CUDA
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
@@ -68,12 +70,13 @@ class NVFuserEnabler {
   std::mutex mutex_;
 
  public:
-  static bool nvfuserCanBeEnabled() {
-    return at::globalContext().hasCUDA() && getExecutorMode();
+  bool nvfuserCanBeEnabled() {
+    return at::globalContext().hasCUDA() && getExecutorMode() &&
+        loading_nvfuser_library_.nvfuserLib_ != nullptr;
   }
 
  private:
-  static void assertFuserCanBeEnabled(bool is_enabled) {
+  void assertFuserCanBeEnabled(bool is_enabled) {
     if (!is_enabled) {
       return;
     }

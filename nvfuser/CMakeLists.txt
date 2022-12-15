@@ -1,9 +1,9 @@
 if(NOT BUILD_NVFUSER)
   return()
-else()
-  cmake_minimum_required(VERSION 3.0)
-  project(nvfuser)
 endif()
+
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+project(nvfuser)
 
 if(NOT USE_ROCM)
   set(TORCHLIB_FLAVOR torch_cuda)
