@@ -66,16 +66,10 @@ c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int
   return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, life_handle);
 }
 
-Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable) {
-  auto life_handle = getLifeHandleForLevel(level);
-  return makeTensorWrapper(
-      tensor,
-      level,
-      is_immutable,
-      getLifeHandleForLevel(level));
-}
-
-Tensor makeTensorWrapper(
+// use makeTensorWrapper instead to avoid potential footguns:
+// unsafeMakeTensorWrapper doesn't check that level and life_handle
+// refer to the same interpreter
+static Tensor unsafeMakeTensorWrapper(
     const Tensor& tensor,
     int64_t level,
     bool is_immutable,
@@ -94,6 +88,24 @@ Tensor makeTensorWrapper(
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
   return result;
 }
+
+Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable) {
+  auto life_handle = getLifeHandleForLevel(level);
+  return unsafeMakeTensorWrapper(
+      tensor,
+      level,
+      is_immutable,
+      getLifeHandleForLevel(level));
+}
+
+Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& interpreter, bool is_immutable) {
+  return unsafeMakeTensorWrapper(
+      tensor,
+      interpreter.level(),
+      is_immutable,
+      interpreter.is_alive_ptr());
+}
+
 
 bool TensorWrapper::is_alive() const {
   return *is_alive_;
