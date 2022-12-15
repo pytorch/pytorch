@@ -347,7 +347,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return UserDefinedObjectVariable(subobj, source=source, **options)
 
         if isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
+            return variables.UserFunctionVariable(
+                subobj.__get__(self.value), source=source, **options
+            )
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, **options)
 
