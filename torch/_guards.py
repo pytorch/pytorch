@@ -2,7 +2,6 @@ import dataclasses
 import enum
 import logging
 import weakref
-import sympy
 from abc import ABC
 from contextlib import contextmanager
 from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
@@ -279,6 +278,7 @@ class TracingContext:
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
     will return NoNe.
     """
+
     @staticmethod
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
@@ -293,6 +293,8 @@ This function installs the passed in tracing context as a dynamic scoped global 
 
 Calls to TracingContext.get() while not under a `with tracing()` context will return None.
 """
+
+
 @contextmanager
 def tracing(context: TracingContext):
     global _CURRENT_TRACING_CONTEXT
