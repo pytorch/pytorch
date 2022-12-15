@@ -165,7 +165,7 @@ def _unpack(
     return storage[holder]
 
 
-@contract
+@contract()
 def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
     r"""
     This is a composable activation checkpointing API. Unlike functional
