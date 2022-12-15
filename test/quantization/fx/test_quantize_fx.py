@@ -5660,7 +5660,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
-    def _test_activation_fusion_lowering_helper(
+    def _test_linear_activation_fusion_lowering_helper(
             self, module, example_inputs, qconfig_mapping,
             backend_config, fused_module, root_module, activation_module):
         node_occurrence = {
@@ -5696,7 +5696,7 @@ class TestQuantizeFx(QuantizationTestCase):
         with override_quantized_engine('onednn'):
             for with_bn in [True, False]:
                 m = LinearBnLeakyReluModel(with_bn)
-                self._test_activation_fusion_lowering_helper(
+                self._test_linear_activation_fusion_lowering_helper(
                     m,
                     m.get_example_inputs(),
                     qconfig_mapping,
@@ -5714,7 +5714,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = get_default_qconfig_mapping('onednn')
         with override_quantized_engine('onednn'):
             m = LinearTanhModel()
-            self._test_activation_fusion_lowering_helper(
+            self._test_linear_activation_fusion_lowering_helper(
                 m,
                 m.get_example_inputs(),
                 qconfig_mapping,
