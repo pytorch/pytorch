@@ -15,8 +15,8 @@ from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
-from torch.ao.quantization.observer import is_activation_post_process
 from torch.ao.quantization.utils import _getattr_from_fqn
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
