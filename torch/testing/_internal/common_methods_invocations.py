@@ -8653,17 +8653,10 @@ op_db: List[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('bmm',
-<<<<<<< HEAD
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64,
-                                                       torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if SM53OrLater else []),
-=======
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfCUDA=floating_and_complex_types_and(torch.int32, torch.int64, torch.float16,
                                                        *[torch.bfloat16]
                                                        if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
->>>>>>> 0ac0af02d548cf1ad4fcb63dd2dbef5dcb58d2ff
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
