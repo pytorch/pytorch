@@ -6,6 +6,8 @@ from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
 from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
 
+import operator
+
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook, module_contains_param
 from .match_utils import apply_match, MatchAllNode
@@ -85,7 +87,7 @@ def _get_supported_activation_modules():
 
 
 def _get_default_structured_pruning_patterns() -> Dict[
-    Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str], ...],
+    Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str, MatchAllNode], ...],
     Callable[..., None],
 ]:
     """
@@ -101,7 +103,8 @@ def _get_default_structured_pruning_patterns() -> Dict[
         # conv2d -> conv2d
         (nn.Conv2d, "output"): prune_conv2d,
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
-        (nn.LSTM, MatchAllNode, nn.Linear): prune_lstm_linear,
+        # lstm -> getitem -> linear
+        (nn.LSTM, operator.getitem, nn.Linear): prune_lstm_linear,
     }
 
     for activation in chain(

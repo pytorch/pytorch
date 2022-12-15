@@ -1,25 +1,5 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
-
-import os
-import random
-import warnings
-
-import torch
-from torch.ao.pruning._experimental.pruner import BaseStructuredSparsifier
-from torch.ao.pruning._experimental.pruner.base_structured_sparsifier import _get_default_structured_pruning_patterns
-from torch.ao.pruning._experimental.pruner.parametrization import FakeStructuredSparsity, PruningParametrization
-from torch.ao.pruning._experimental.pruner.match_utils import MatchAllNode
-from torch.nn.utils import parametrize
-
-import time
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.fx import symbolic_trace
-
-
 import copy
 import logging
 import random
@@ -44,9 +24,9 @@ from torch.testing._internal.common_pruning import (
     Conv2dPool,
     Conv2dPoolFlatten,
     Conv2dPoolFlattenFunctional,
+    LSTMLinearModel,
 )
 
-torch.manual_seed(88)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -71,28 +51,6 @@ class ImplementedPruner(BaseStructuredSparsifier):
         module.parametrizations[tensor_name][0].mask[prune] = False
 
 
-class LSTMLinearModel(nn.Module):
-    """Container module with an encoder, a recurrent module, and a linear."""
-
-    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5):
-        super().__init__()
-        self.rnn = nn.LSTM(ninp, nhid, nlayers)
-        self.linear= nn.Linear(nhid, ntoken)
-
-        self.init_weights()
-
-        self.nhid = nhid
-        self.nlayers = nlayers
-
-    def init_weights(self):
-        initrange = 0.1
-        self.linear.bias.data.zero_()
-        self.linear.weight.data = torch.ones(self.linear.weight.size()) #= torch.randint(low=0, high=5, size=self.linear.weight.size()).float()
-
-    def forward(self, input):
-        output, hidden = self.rnn(input)
-        decoded = self.linear(output)
-        return decoded, output
 
 class BottomHalfPruner(BaseStructuredSparsifier):
     """

@@ -6,28 +6,10 @@ from torch.nn.utils.parametrize import is_parametrized
 def module_contains_param(module, parametrization):
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
-        return any([any(isinstance(param, parametrization) for param in param_list)
-                for key, param_list in module.parametrizations.items()])
+        return any([any(isinstance(param, parametrization) for param in param_list) 
+                    for key, param_list in module.parametrizations.items()])
     return False
 
-
-class PruningParametrization(nn.Module):
-    r"""
-    TODO
-    """
-
-    def __init__(self, mask):
-        super().__init__()
-        self.register_buffer("mask", mask)
-
-    def forward(self, x):
-        assert isinstance(self.mask, torch.Tensor)
-        assert self.mask.shape[0] == x.shape[0]
-        return x[self.mask]
-
-    def state_dict(self, *args, **kwargs):
-        # avoid double saving masks
-        return {}
 
 # Structured Pruning Parameterizations
 class FakeStructuredSparsity(nn.Module):

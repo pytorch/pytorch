@@ -309,3 +309,27 @@ class Conv2dPoolFlatten(nn.Module):
         x = self.flatten(x)
         x = self.fc(x)
         return x
+
+
+class LSTMLinearModel(nn.Module):
+    """Container module with an encoder, a recurrent module, and a linear."""
+
+    def __init__(self, ntoken, ninp, nhid, nlayers, dropout=0.5):
+        super().__init__()
+        self.rnn = nn.LSTM(ninp, nhid, nlayers)
+        self.linear= nn.Linear(nhid, ntoken)
+
+        self.init_weights()
+
+        self.nhid = nhid
+        self.nlayers = nlayers
+
+    def init_weights(self):
+        initrange = 0.1
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, input):
+        output, hidden = self.rnn(input)
+        decoded = self.linear(output)
+        return decoded, output

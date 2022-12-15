@@ -10,7 +10,7 @@ from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
 from .parametrization import FakeStructuredSparsity, BiasHook
 
-
+# BIAS PROPOGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
         bias_hooks = []
