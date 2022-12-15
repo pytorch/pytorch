@@ -2628,17 +2628,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(transpose.device, torch.device(device))
             compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[transpose.layout]
             compressed_indices, plain_indices = compressed_indices_mth(transpose), plain_indices_mth(transpose)
-            # note: invariant check for bsr/bsc values is too strict wrt to value contiguity (invariant 3.7)
-            if transpose.layout in (torch.sparse_bsr, torch.sparse_bsc):
-                n_batch = compressed_indices.dim() - 1
-                n_dense = transpose.dim() - 2 - n_batch
-                self.assertTrue(transpose.values().is_contiguous()
-                                or transpose.values().transpose(-2 - n_dense, -1 - n_dense).is_contiguous())
-                torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values().contiguous(),
-                                                              transpose.shape, transpose.layout)
-            else:
-                torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values(),
-                                                              transpose.shape, transpose.layout)
+            torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values(),
+                                                          transpose.shape, transpose.layout)
 
         def check_good_transpose(subject, subject_dense, dim0, dim1, expected_layout):
             transpose = subject.transpose(dim0, dim1)
