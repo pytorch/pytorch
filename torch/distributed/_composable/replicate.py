@@ -41,7 +41,7 @@ class _ReplicateState:
         for module in modules:
             assert _composable(
                 module
-            ), f"Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+            ), "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
             self.modules.append(module)
             replicate.state(module)._distributed_state = self
             replicate.state(module)._params_collected = False
