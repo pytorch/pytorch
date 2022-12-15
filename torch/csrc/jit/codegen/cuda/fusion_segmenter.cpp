@@ -240,10 +240,8 @@ std::string toString(const SegmentedGroup* group) {
 }
 
 std::ostream& operator<<(std::ostream& os, const SegmentedEdge* edge) {
-  os << "e{ " << edge->from << " -> " << edge->to << "(";
-  IrPrinter irp(os);
-  irp.handle(edge->val);
-  os << ") }\n";
+  os << "e{ " << edge->from << " -> " << edge->to << "("
+     << edge->val->toString() << ") }\n";
   return os;
 }
 
@@ -656,7 +654,7 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
   auto expr_to_print = groupExprPrintSorting(group->exprs());
 
   for (const auto i : c10::irange(expr_to_print.size())) {
-    irp.handle(expr_to_print[i]);
+    os << expr_to_print[i]->toString();
   }
   os << "}\n\n";
 }

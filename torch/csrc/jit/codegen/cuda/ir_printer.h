@@ -32,10 +32,6 @@ class TORCH_CUDA_CU_API IrMathPrinter : public IrPrinter {
 
   using IrPrinter::handle;
 
-  void handle(const Split* const) override {}
-  void handle(const Merge* const) override {}
-  void handle(const Swizzle2D* const) override {}
-
   void handle(Fusion* f) override {
     IrPrinter::handle(f);
   }

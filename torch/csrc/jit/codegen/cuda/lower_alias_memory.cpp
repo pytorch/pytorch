@@ -270,7 +270,7 @@ class BufferReuseDebugPrinter {
       handle(ite);
     } else {
       indent();
-      ir_printer_.handle(node);
+      os_ << node->toString();
     }
     if (auto alloc = dynamic_cast<const kir::Allocate*>(node)) {
       printAllocInfo(alloc);
@@ -279,11 +279,8 @@ class BufferReuseDebugPrinter {
 
   void handle(const kir::ForLoop* node) {
     indent();
-    os_ << "FOR ";
-    ir_printer_.handle(node->index());
-    os_ << " in ";
-    ir_printer_.handle(node->iter_domain());
-    os_ << ":\n";
+    os_ << "FOR " << node->index()->toString() << " in "
+        << node->iter_domain()->toString() << ":\n";
   }
 
   void handle(const kir::IfThenElse* node) {

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_simplifier.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -15,6 +16,14 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 namespace kir {
+
+namespace {
+
+inline const char* boolLiteral(bool value) {
+  return value ? "true" : "false";
+}
+
+} // namespace
 
 Predicate::Predicate(
     IrBuilderPasskey passkey,
@@ -182,6 +191,26 @@ Allocate::Allocate(
       "IR type only valid for Kernel container.");
 }
 
+std::string Allocate::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << buffer()->toString();
+  ss << " = ALLOCATE("
+     << "buffer=" << buffer()->toString() << ", "
+     << "mem_type=" << memoryType() << ", "
+     << "size=" << size()->toInlineString();
+  ss << ", "
+     << "zero_init=" << boolLiteral(zeroInit()) << ")\n";
+  if (alias() != nullptr) {
+    indent(ss, indent_size) << kTab << ".alias=";
+    ss << alias()->buffer()->toString() << "\n";
+  }
+  return ss.str();
+}
+
+std::string Allocate::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(Allocate)
 
 BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync) : Expr(passkey) {
@@ -190,6 +219,17 @@ BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync) : Expr(passkey) {
       "IR type only valid for Kernel container.");
   addAttribute(
       IrBuilder::create<Attribute<bool>>(passkey.ir_container_, war_sync));
+}
+
+std::string BlockSync::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "BLOCKSYNC(war_hazard="
+                          << boolLiteral(isWarHazardSync()) << ")\n";
+  return ss.str();
+}
+
+std::string BlockSync::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(BlockSync)
@@ -204,6 +244,17 @@ GridSync::GridSync(
   addAttribute(sync_buffer);
 }
 
+std::string GridSync::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "GRIDSYNC(" << syncDims().toString() << ", "
+                          << syncBuffer()->toString() << ")\n";
+  return ss.str();
+}
+
+std::string GridSync::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(GridSync)
 
 CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
@@ -215,12 +266,32 @@ CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
       passkey.ir_container_, keep_stages));
 }
 
+std::string CpAsyncWait::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "CPASYNC_WAIT(" << keepStages() << ")\n";
+  return ss.str();
+}
+
+std::string CpAsyncWait::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(CpAsyncWait)
 
 CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey) : Expr(passkey) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+std::string CpAsyncCommit::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "CPASYNC_WAIT()\n";
+  return ss.str();
+}
+
+std::string CpAsyncCommit::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(CpAsyncCommit)
@@ -231,6 +302,16 @@ InitMagicZero::InitMagicZero(IrBuilderPasskey passkey) : Expr(passkey) {
       "IR type only valid for Kernel container.");
 }
 
+std::string InitMagicZero::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "NVFUSER_DEFINE_MAGIC_ZERO\n";
+  return ss.str();
+}
+
+std::string InitMagicZero::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(InitMagicZero)
 
 UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey) : Expr(passkey) {
@@ -239,7 +320,25 @@ UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey) : Expr(passkey) {
       "IR type only valid for Kernel container.");
 }
 
+std::string UpdateMagicZero::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "NVFUSER_UPDATE_MAGIC_ZERO\n";
+  return ss.str();
+}
+
+std::string UpdateMagicZero::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(UpdateMagicZero)
+
+std::string Scope::toString(int indent_size) const {
+  std::stringstream ss;
+  for (auto expr : exprs()) {
+    ss << expr->toString(indent_size);
+  }
+  return ss.str();
+}
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
   exprs_.insert(pos, expr);
@@ -380,7 +479,17 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
       "IR type only valid for Kernel container.");
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(ForLoop)
+std::string ForLoop::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "FOR " << index()->toString() << " in "
+                          << iter_domain()->toString() << ":\n"
+                          << body().toString(indent_size + 1);
+  return ss.str();
+}
+
+std::string ForLoop::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 bool ForLoop::isUnrollable() const {
   // Start and stop must be constant, must not be a broadcast
@@ -549,6 +658,8 @@ bool ForLoop::isGroup() const {
       {typeid(kir::GroupedGridReduction), typeid(kir::GroupedGridWelford)});
 }
 
+NVFUSER_DEFINE_CLONE_AND_CREATE(ForLoop)
+
 IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
     : Expr(passkey) {
   setPredicate(cond);
@@ -559,6 +670,21 @@ IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
       IrBuilder::create<Attribute<Scope>>(passkey.ir_container_, this));
   addAttribute(
       IrBuilder::create<Attribute<Scope>>(passkey.ir_container_, this));
+}
+
+std::string IfThenElse::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "IF " << predicate()->toString() << ":\n"
+                          << thenBody().toString(indent_size + 1);
+  if (hasElse()) {
+    indent(ss, indent_size) << "ELSE:\n"
+                            << elseBody().toString(indent_size + 1);
+  }
+  return ss.str();
+}
+
+std::string IfThenElse::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(IfThenElse)
@@ -588,6 +714,43 @@ GridReduction::GridReduction(
   addAttribute(entrances);
   addAttribute(
       IrBuilder::create<Attribute<ParallelTypeBitmap>>(passkey.ir_container_));
+}
+
+std::string GridReduction::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = reduction( "
+                          << in()->toString()
+                          << ", op = " << getReductionOpType()
+                          << ", initial value = " << init()->toString()
+                          << ",\n";
+  ++indent_size;
+  indent(ss, indent_size) << "reduction buffer = "
+                          << reduction_buffer()->buffer()->toString() << ",\n";
+  indent(ss, indent_size) << "sync buffer = "
+                          << sync_buffer()->buffer()->toString() << ",\n";
+  indent(ss, indent_size) << "read predicate = ";
+  if (predicate() != nullptr) {
+    ss << predicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "write predicate = ";
+  if (writePredicate() != nullptr) {
+    ss << writePredicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "thread predicate = "
+                          << threadPredicate().toString() << ",\n";
+  indent(ss, indent_size) << "allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  return ss.str();
+}
+
+std::string GridReduction::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GridReduction)
@@ -629,6 +792,46 @@ GroupedGridReduction::GroupedGridReduction(
   }
 }
 
+std::string GroupedGridReduction::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "GroupedGridReduction(\n";
+  ++indent_size;
+  for (const auto i : c10::irange(numHorizontallyGroupedExprs())) {
+    indent(ss, indent_size)
+        << output(i)->toString() << " = reduction( " << input(i)->toString()
+        << ", op = " << getReductionOpType(i)
+        << ", initial value = " << initVal(i)->toString()
+        << ", reduction buffer = "
+        << reduction_buffers().at(i)->buffer()->toString() << " )\n";
+  }
+  indent(ss, indent_size) << "sync buffer = "
+                          << sync_buffer()->buffer()->toString() << ",\n";
+  indent(ss, indent_size) << "read predicate = ";
+  if (predicate() != nullptr) {
+    ss << predicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "write predicate = ";
+  if (writePredicate() != nullptr) {
+    ss << writePredicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "thread predicate = "
+                          << threadPredicate().toString() << ",\n";
+  indent(ss, indent_size) << "allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  --indent_size;
+  return ss.str();
+}
+
+std::string GroupedGridReduction::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedGridReduction)
 
 GridBroadcast::GridBroadcast(
@@ -643,6 +846,23 @@ GridBroadcast::GridBroadcast(
   addAttribute(broadcast_op);
   addAttribute(broadcast_buffer);
   addAttribute(sync_buffer);
+}
+
+std::string GridBroadcast::toString(int indent_size) const {
+  std::stringstream ss;
+  const auto* broadcast_op = this->broadcast_op();
+  indent(ss, indent_size) << broadcast_op->out()->toString() << " = "
+                          << "GRID_BROADCAST(in="
+                          << broadcast_op->in()->toString() << ")\n";
+  indent(ss, indent_size) << kTab << ".broadcast_buffer="
+                          << broadcast_buffer()->buffer()->toString() << "\n";
+  indent(ss, indent_size) << kTab << ".sync_buffer="
+                          << sync_buffer()->buffer()->toString() << "\n";
+  return ss.str();
+}
+
+std::string GridBroadcast::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GridBroadcast)
@@ -669,6 +889,71 @@ GridWelford::GridWelford(
   addAttribute(entrances);
   addAttribute(
       IrBuilder::create<Attribute<ParallelTypeBitmap>>(passkey.ir_container_));
+}
+
+std::string GridWelford::toString(int indent_size) const {
+  std::stringstream ss;
+  const auto* welford_op = this->welford_op();
+  indent(ss, indent_size) << welford_op->outAvg()->toString() << " (Avg),\n";
+  indent(ss, indent_size) << welford_op->outVar()->toString() << " (Var),\n";
+  indent(ss, indent_size) << welford_op->outN()->toString() << " (Count)\n";
+  indent(ss, indent_size) << " = Welford (\n";
+  ++indent_size;
+  indent(ss, indent_size) << welford_op->inAvg()->toString() << " (Avg),\n";
+  indent(ss, indent_size) << welford_op->inVar()->toString() << " (Var),\n";
+  indent(ss, indent_size) << welford_op->inN()->toString() << " (Count)\n";
+  indent(ss, indent_size) << "initial value =\n";
+  ++indent_size;
+  indent(ss, indent_size) << welford_op->initAvg()->toString() << " (Avg),\n";
+  indent(ss, indent_size) << welford_op->initVar()->toString() << " (Var),\n";
+  indent(ss, indent_size) << welford_op->initN()->toString() << " (Count),\n";
+  --indent_size;
+  indent(ss, indent_size) << "reduction buffer =\n";
+  ++indent_size;
+  indent(ss, indent_size) << avg_buffer()->buffer()->toString() << " (Avg),\n";
+  indent(ss, indent_size) << var_buffer()->buffer()->toString() << " (Var),\n";
+  indent(ss, indent_size) << N_buffer()->buffer()->toString() << " (Count),\n";
+  --indent_size;
+  indent(ss, indent_size) << "sync buffer = "
+                          << sync_buffer()->buffer()->toString() << ",\n";
+  indent(ss, indent_size) << "read predicate = ";
+  if (welford_op->predicate() != nullptr) {
+    ss << welford_op->predicate();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "write predicate = ";
+  if (welford_op->writePredicate() != nullptr) {
+    ss << welford_op->writePredicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "grid read predicate = ";
+  if (predicate() != nullptr) {
+    ss << predicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "grid write predicate = ";
+  if (writePredicate() != nullptr) {
+    ss << writePredicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "thread predicate = "
+                          << threadPredicate().toString() << ",\n";
+  indent(ss, indent_size) << "allreduce = "
+                          << (welford_op->isAllreduce() ? "true" : "false")
+                          << " )\n";
+  return ss.str();
+}
+
+std::string GridWelford::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GridWelford)
@@ -758,6 +1043,62 @@ int GroupedGridWelford::getSmemBufferSize(int bdimx, int bdimy, int bdimz)
   return buf_size_for_avg_var * 2 + buf_size_for_N;
 }
 
+std::string GroupedGridWelford::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "GroupedGridWelford(\n";
+  ++indent_size;
+  for (const auto i : c10::irange(numHorizontallyGroupedExprs())) {
+    indent(ss, indent_size) << outAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << outVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << outN(i)->toString() << " (Count)\n";
+    indent(ss, indent_size) << " = Welford (\n";
+    ++indent_size;
+    indent(ss, indent_size) << inAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << inVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << inN(i)->toString() << " (Count)\n";
+    indent(ss, indent_size) << "initial value =\n";
+    ++indent_size;
+    indent(ss, indent_size) << initAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << initVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << initN(i)->toString() << " (Count),\n";
+    --indent_size;
+    indent(ss, indent_size) << "reduction buffer =\n";
+    ++indent_size;
+    indent(ss, indent_size)
+        << reduction_buffers()[0].at(i)->buffer()->toString() << " (Avg),\n";
+    indent(ss, indent_size)
+        << reduction_buffers()[1].at(i)->buffer()->toString() << " (Var),\n";
+    indent(ss, indent_size)
+        << reduction_buffers()[2].at(i)->buffer()->toString() << " (Count) )\n";
+    indent_size -= 2;
+  }
+  indent(ss, indent_size) << "sync buffer = "
+                          << sync_buffer()->buffer()->toString() << ",\n";
+  indent(ss, indent_size) << "read predicate = ";
+  if (predicate() != nullptr) {
+    ss << predicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "write predicate = ";
+  if (writePredicate() != nullptr) {
+    ss << writePredicate()->toString();
+  } else {
+    ss << "nullptr";
+  }
+  ss << ",\n";
+  indent(ss, indent_size) << "thread predicate = "
+                          << threadPredicate().toString() << ",\n";
+  indent(ss, indent_size) << "allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  return ss.str();
+}
+
+std::string GroupedGridWelford::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedGridWelford)
 
 VectorizedWelfordOp::VectorizedWelfordOp(
@@ -786,7 +1127,16 @@ AllocateFusedReduction::AllocateFusedReduction(
   addAttribute(grid_expr);
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(AllocateFusedReduction)
+std::string AllocateFusedReduction::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "AllocateFusedReduction(reduction buffer="
+                          << out()->toString() << ")\n";
+  return ss.str();
+}
+
+std::string AllocateFusedReduction::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 TensorIndex* AllocateFusedReduction::out() const {
   TORCH_INTERNAL_ASSERT(gridExpr() != nullptr);
@@ -824,6 +1174,8 @@ const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
         false, "Invalid grid expression: ", gridExpr()->toString());
   }
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(AllocateFusedReduction)
 
 } // namespace kir
 } // namespace cuda

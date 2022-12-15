@@ -185,12 +185,12 @@ std::string TensorView::toString(int indent_size) const {
   if (getMaxProducerPosition() > 0) {
     ss << " produce_pos( ";
     ss << getMaxProducerPosition();
-    ss << ")";
+    ss << " )";
   }
   if (getMaybeMaxProducerPosition() > getMaxProducerPosition()) {
     ss << " maybe_produce_pos( ";
     ss << getMaybeMaxProducerPosition();
-    ss << ")";
+    ss << " )";
   }
   return ss.str();
 }

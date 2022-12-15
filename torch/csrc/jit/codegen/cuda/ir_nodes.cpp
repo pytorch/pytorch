@@ -90,6 +90,28 @@ FullOp::FullOp(IrBuilderPasskey passkey, Val* out, Val* fill_value)
   addOutput(out);
 }
 
+std::string FullOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = full({";
+  for (auto i : c10::irange(inputs().size())) {
+    if (i == inputs().size() - 1) {
+      ss << "}";
+    }
+    if (i > 0) {
+      ss << ", ";
+    }
+    ss << input(i)->toInlineString(indent_size);
+  }
+  ss << ");\n";
+  return ss.str();
+}
+
+std::string FullOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(FullOp)
 
 SelectOp::SelectOp(
@@ -104,6 +126,20 @@ SelectOp::SelectOp(
   addOutput(out);
   addAttribute(select_id);
   addAttribute(index);
+}
+
+std::string SelectOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = select( " << input(0)->toString()
+                          << ", axis = " << getSelectAxis()
+                          << ", index = " << input(1)->toString() << " )\n";
+  return ss.str();
+}
+
+std::string SelectOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(SelectOp)
@@ -121,6 +157,24 @@ IndexSelectOp::IndexSelectOp(
   addOutput(out);
   addAttribute(select_id);
   addAttribute(IrBuilder::create<Attribute<int>>(passkey.ir_container_, dim));
+}
+
+std::string IndexSelectOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = index_select( ";
+  if (input(0)->isA<kir::TensorIndex>()) {
+    ss << input(0)->as<kir::TensorIndex>()->view()->toString();
+  } else {
+    ss << input(0)->toString();
+  }
+  ss << ", dim = " << dim() << ", " << input(1)->toString() << " )\n";
+  return ss.str();
+}
+
+std::string IndexSelectOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(IndexSelectOp)
@@ -141,6 +195,21 @@ ARangeOp::ARangeOp(
       IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
 }
 
+std::string ARangeOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString();
+  ss << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = arange(" << start()->toString() << ", "
+                          << end()->toString() << ", " << step()->toString()
+                          << ", " << dtype() << ");\n";
+  return ss.str();
+}
+
+std::string ARangeOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(ARangeOp)
 
 EyeOp::EyeOp(IrBuilderPasskey passkey, Val* out, DataType dtype)
@@ -157,6 +226,19 @@ EyeOp::EyeOp(IrBuilderPasskey passkey, Val* out, DataType dtype)
       IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
 }
 
+std::string EyeOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " = eye(" << input(0)->toString() << ", "
+                          << dtype() << ");\n";
+  return ss.str();
+}
+
+std::string EyeOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(EyeOp)
 
 UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
@@ -165,6 +247,55 @@ UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
   addInput(in);
   addAttribute(
       IrBuilder::create<Attribute<UnaryOpType>>(passkey.ir_container_, type));
+}
+
+void UnaryOp::printHelper(std::stringstream& ss, std::string input) const {
+  auto op_type = getUnaryOpType();
+
+  if (auto inline_uop = inline_op_str(op_type)) {
+    ss << inline_uop.value() << input;
+  } else {
+    if (op_type == UnaryOpType::Cast) {
+      c10::optional<std::string> cast_str = cast_func_str(std::make_pair(
+          in()->getDataType().value(), out()->getDataType().value()));
+      TORCH_INTERNAL_ASSERT(cast_str != c10::nullopt, "Unsupported Cast");
+      ss << cast_str.value();
+    } else {
+      if (alsoBooleanOperator(op_type) &&
+          out()->getDataType().value() == DataType::Bool) {
+        ss << stringifyBooleanOp(op_type);
+      } else {
+        ss << op_type;
+      }
+      if (out()->getDataType().value() == DataType::Float &&
+          needFloatSuffix(op_type)) {
+        ss << "f";
+      }
+    }
+    ss << "(" << input << ")";
+  }
+}
+
+std::string UnaryOp::toString(int indent_size) const {
+  std::stringstream ss;
+  bool istvop = ir_utils::isTvOp(this);
+  indent(ss, indent_size) << out()->toString();
+  if (istvop) {
+    ss << "\n";
+    indent_size++;
+    indent(ss, indent_size);
+  }
+  ss << " = ";
+  printHelper(ss, in()->toString());
+  ss << ";\n";
+  return ss.str();
+}
+
+std::string UnaryOp::toInlineString(int indent_size) const {
+  checkInlineable(this);
+  std::stringstream ss;
+  printHelper(ss, in()->toInlineString());
+  return ss.str();
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(UnaryOp)
@@ -183,6 +314,67 @@ BinaryOp::BinaryOp(
       IrBuilder::create<Attribute<BinaryOpType>>(passkey.ir_container_, type));
 }
 
+void BinaryOp::printHelper(
+    std::stringstream& ss,
+    int indent_size,
+    std::string lhs,
+    std::string rhs) const {
+  bool istvop = ir_utils::isTvOp(this);
+  auto op_type = getBinaryOpType();
+  if (auto inline_bop = inline_op_str(op_type)) {
+    ss << lhs;
+    if (istvop) {
+      ss << "\n";
+      indent(ss, indent_size);
+    }
+    ss << " " << inline_bop.value() << " ";
+    ss << rhs;
+  } else {
+    if (alsoBooleanOperator(op_type) &&
+        out()->getDataType().value() == DataType::Bool) {
+      ss << stringifyBooleanOp(op_type);
+    } else {
+      ss << op_type;
+    }
+    if (out()->getDataType().value() == DataType::Float &&
+        needFloatSuffix(op_type)) {
+      ss << "f";
+    }
+    ss << "(" << lhs;
+    if (istvop) {
+      ss << "\n";
+      indent(ss, indent_size);
+    }
+    ss << ", " << rhs << ")";
+  }
+}
+
+std::string BinaryOp::toString(int indent_size) const {
+  std::stringstream ss;
+  bool istvop = ir_utils::isTvOp(this);
+  indent(ss, indent_size) << out();
+
+  // tensor operations tend to be long, break them up into multiple lines
+  if (istvop) {
+    ss << "\n";
+    indent_size++;
+    indent(ss, indent_size);
+  }
+
+  ss << " = ";
+  printHelper(ss, indent_size, lhs()->toString(), rhs()->toString());
+  ss << ";\n";
+  return ss.str();
+}
+
+std::string BinaryOp::toInlineString(int indent_size) const {
+  checkInlineable(this);
+  std::stringstream ss;
+  printHelper(
+      ss, indent_size, lhs()->toInlineString(), rhs()->toInlineString());
+  return ss.str();
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(BinaryOp)
 
 TernaryOp::TernaryOp(
@@ -199,6 +391,58 @@ TernaryOp::TernaryOp(
   addInput(in3);
   addAttribute(
       IrBuilder::create<Attribute<TernaryOpType>>(passkey.ir_container_, type));
+}
+
+void TernaryOp::printHelper(
+    std::stringstream& ss,
+    int indent_size,
+    std::string in1,
+    std::string in2,
+    std::string in3) const {
+  bool istvop = ir_utils::isTvOp(this);
+  ss << getTernaryOpType() << "(" << in1;
+  if (istvop) {
+    ss << "\n";
+    indent(ss, indent_size);
+  }
+  ss << ", " << in2;
+  if (istvop) {
+    ss << "\n";
+    indent(ss, indent_size);
+  }
+  ss << ", " << in3 << ")";
+}
+
+std::string TernaryOp::toString(int indent_size) const {
+  std::stringstream ss;
+  bool istvop = ir_utils::isTvOp(this);
+  indent(ss, indent_size);
+  ss << out()->toString();
+
+  // tensor operations tend to be long, break them up into multiple lines
+  if (istvop) {
+    ss << "\n";
+    indent_size++;
+    indent(ss, indent_size);
+  }
+
+  ss << " = ";
+  printHelper(
+      ss, indent_size, in1()->toString(), in2()->toString(), in3()->toString());
+  ss << ";\n";
+  return ss.str();
+}
+
+std::string TernaryOp::toInlineString(int indent_size) const {
+  checkInlineable(this);
+  std::stringstream ss;
+  printHelper(
+      ss,
+      indent_size,
+      in1()->toInlineString(),
+      in2()->toInlineString(),
+      in3()->toInlineString());
+  return ss.str();
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(TernaryOp)
@@ -228,7 +472,35 @@ RNGOp::RNGOp(
   addAttribute(philox_index);
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(RNGOp)
+std::string RNGOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size);
+  ss << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size);
+  ss << " = ";
+
+  ss << getRNGOpType() << "({";
+  bool first = true;
+  for (auto i : getShape()) {
+    if (!first) {
+      ss << ", ";
+    }
+    ss << i->toString();
+    first = false;
+  }
+  ss << "}";
+  for (auto i : getParameters()) {
+    ss << ", ";
+    ss << i->toString();
+  }
+  ss << ", " << dtype() << ");\n";
+  return ss.str();
+}
+
+std::string RNGOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 size_t RNGOp::getOutputDims() const {
   size_t ndims = 0;
@@ -237,6 +509,8 @@ size_t RNGOp::getOutputDims() const {
   }
   return ndims;
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(RNGOp)
 
 BroadcastOp::BroadcastOp(
     IrBuilderPasskey passkey,
@@ -294,6 +568,17 @@ BroadcastOp::BroadcastOp(
   TORCH_INTERNAL_ASSERT(
       out_size == in_dom.size() + num_new_broadcasts,
       "The dimensions of output tensor and does not match with is_broadcast_dims and input tensor");
+}
+
+std::string BroadcastOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << "\n";
+  indent(ss, indent_size) << "   = broadcast( " << in()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string BroadcastOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(BroadcastOp)
@@ -354,6 +639,17 @@ SqueezeOp::SqueezeOp(
       "The dimensions of output tensor and does not match with is_squeeze_dims and input tensor");
 }
 
+std::string SqueezeOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << "\n";
+  indent(ss, indent_size) << "   = squeeze( " << in()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string SqueezeOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(SqueezeOp)
 
 ReductionOp::ReductionOp(
@@ -395,6 +691,21 @@ ReductionOp::ReductionOp(
       IrBuilder::create<Attribute<bool>>(passkey.ir_container_, is_allreduce));
 }
 
+std::string ReductionOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out() << "\n";
+  indent(ss, indent_size) << "   = reduction( " << in()->toString()
+                          << ", op = " << getReductionOpType()
+                          << ", initial value = " << init()->toString()
+                          << ", allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  return ss.str();
+}
+
+std::string ReductionOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(ReductionOp)
 
 GroupedReductionOp::GroupedReductionOp(
@@ -423,7 +734,24 @@ GroupedReductionOp::GroupedReductionOp(
   }
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedReductionOp)
+std::string GroupedReductionOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "GroupedReductionOp(\n";
+  ++indent_size;
+  for (const auto i : c10::irange(numHorizontallyGroupedExprs())) {
+    indent(ss, indent_size)
+        << output(i)->toString() << " = reduction( " << input(i)->toString()
+        << ", op = " << getReductionOpType(i)
+        << ", initial value = " << initVal(i)->toString() << " )\n";
+  }
+  indent(ss, indent_size) << "allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  return ss.str();
+}
+
+std::string GroupedReductionOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 int GroupedReductionOp::getExprIndexOfOutput(Val* output_val) const {
   auto it = std::find(outputs().begin(), outputs().end(), output_val);
@@ -434,6 +762,8 @@ int GroupedReductionOp::getExprIndexOfOutput(Val* output_val) const {
   TORCH_INTERNAL_ASSERT(
       false, "Not an output, ", output_val->toString(), ", of ", toString());
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedReductionOp)
 
 c10::optional<WelfordTriplet::ValName> WelfordTriplet::getNameOf(
     Val* val) const {
@@ -572,8 +902,6 @@ WelfordOp::WelfordOp(
           WelfordTriplet(init_avg, init_var, init_N),
           is_fused) {}
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(WelfordOp)
-
 Val* WelfordOp::getInitValOfOutput(Val* output_val) const {
   auto val_name = outputTriplet().getNameOf(output_val);
 
@@ -591,6 +919,33 @@ std::vector<Val*> WelfordOp::getInitVals() const {
   std::vector<Val*> init_vals({initAvg(), initVar(), initN()});
   return init_vals;
 }
+
+std::string WelfordOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << outAvg()->toString() << "(Avg),\n"
+                          << outVar()->toString() << "(Var),\n"
+                          << outN()->toString() << "(Count)"
+                          << "\n = Welford ( ";
+  if (singleValue()) {
+    ss << inAvg()->toString() << "(Avg), ";
+  } else {
+    ss << inAvg()->toString() << "(Avg)\n  " << inVar()->toString()
+       << "(Var)\n  " << inN()->toString() << "(Count)";
+  }
+  if (hasInit()) {
+    ss << "\n  initial value = " << initAvg()->toString() << "(Avg)\n  "
+       << initVar()->toString() << "(Var)\n  " << initN()->toString() << "(N)";
+  }
+  ss << "\n  allreduce = " << (isAllreduce() ? "true" : "false");
+  ss << " )\n";
+  return ss.str();
+}
+
+std::string WelfordOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(WelfordOp)
 
 GroupedWelfordOp::GroupedWelfordOp(
     IrBuilderPasskey passkey,
@@ -704,7 +1059,34 @@ GroupedWelfordOp::GroupedWelfordOp(
   }
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedWelfordOp)
+std::string GroupedWelfordOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << "GroupedWelford(\n";
+  ++indent_size;
+  for (const auto i : c10::irange(numHorizontallyGroupedExprs())) {
+    indent(ss, indent_size) << outAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << outVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << outN(i)->toString() << " (Count)\n";
+    indent(ss, indent_size) << " = Welford ( ";
+    ++indent_size;
+    indent(ss, indent_size) << inAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << inVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << inN(i)->toString() << " (Count)\n";
+    indent(ss, indent_size) << "initial value =\n";
+    ++indent_size;
+    indent(ss, indent_size) << initAvg(i)->toString() << " (Avg),\n";
+    indent(ss, indent_size) << initVar(i)->toString() << " (Var),\n";
+    indent(ss, indent_size) << initN(i)->toString() << " (Count) )\n";
+    indent_size -= 2;
+  }
+  indent(ss, indent_size) << "allreduce = "
+                          << (isAllreduce() ? "true" : "false") << " )\n";
+  return ss.str();
+}
+
+std::string GroupedWelfordOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 int GroupedWelfordOp::getExprIndexOfOutput(Val* output_val) const {
   for (const auto expr_idx : c10::irange(numHorizontallyGroupedExprs())) {
@@ -724,6 +1106,8 @@ Val* GroupedWelfordOp::getInitValOfOutput(Val* output_val) const {
 
   return initVals().at(expr_index).get(val_name);
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedWelfordOp)
 
 MmaOp::MmaOp(
     IrBuilderPasskey passkey,
@@ -766,7 +1150,17 @@ MmaOp::MmaOp(
   attribute(1)->as<Attribute<OptionsInMma>>()->value = options;
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(MmaOp)
+std::string MmaOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = mma(" << inA()->toString()
+                          << "," << inB()->toString();
+  ss << ")\n";
+  return ss.str();
+}
+
+std::string MmaOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 void MmaOp::configureOptions(MmaOptions options) {
   OptionsInMma& opt = attribute(1)->as<Attribute<OptionsInMma>>()->value;
@@ -779,6 +1173,8 @@ void MmaOp::configureOptions(MmaOptions options) {
   opt.macro = options.macro;
   opt.operand_layout = options.operand_layout;
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(MmaOp)
 
 TransposeOp::TransposeOp(
     IrBuilderPasskey passkey,
@@ -817,7 +1213,16 @@ TransposeOp::TransposeOp(
       passkey.ir_container_, std::move(new2old)));
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(TransposeOp)
+std::string TransposeOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = transpose( "
+                          << in()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string TransposeOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 std::vector<int64_t> TransposeOp::old2new() const {
   std::vector<int64_t> old2new(new2old().size());
@@ -827,6 +1232,8 @@ std::vector<int64_t> TransposeOp::old2new() const {
   }
   return old2new;
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(TransposeOp)
 
 ExpandOp::ExpandOp(
     IrBuilderPasskey passkey,
@@ -843,6 +1250,24 @@ ExpandOp::ExpandOp(
         "Expanded extents must be of Int type.");
     addInput(expanded_extent);
   }
+}
+
+std::string ExpandOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = expand( " << in()
+                          << ", {";
+  for (auto expanded_extent : expanded_extents()) {
+    if (ss.tellp()) {
+      ss << ", ";
+    }
+    ss << expanded_extent;
+  }
+  ss << "} )\n";
+  return ss.str();
+}
+
+std::string ExpandOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(ExpandOp)
@@ -885,6 +1310,18 @@ ShiftOp::ShiftOp(
       passkey.ir_container_, std::move(offsets)));
   addAttribute(IrBuilder::create<Attribute<std::vector<int>>>(
       passkey.ir_container_, std::move(pad_width)));
+}
+
+std::string ShiftOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = shift( "
+                          << in()->toString() << ", {" << offsets() << "}, {"
+                          << padWidth() << "} )\n";
+  return ss.str();
+}
+
+std::string ShiftOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(ShiftOp)
@@ -930,7 +1367,34 @@ GatherOp::GatherOp(
       passkey.ir_container_, std::move(pad_width)));
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(GatherOp)
+std::string GatherOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = gather( "
+                          << in()->toString() << ", {";
+  bool no_comma = true;
+  for (const auto& s : windowShape()) {
+    if (!no_comma) {
+      ss << ", ";
+    }
+    ss << s;
+    no_comma = false;
+  }
+  ss << "}, {";
+  no_comma = true;
+  for (const auto& pad : padWidth()) {
+    if (!no_comma) {
+      ss << ", ";
+    }
+    ss << "{" << pad[0] << ", " << pad[1] << "}";
+    no_comma = false;
+  }
+  ss << "} )\n";
+  return ss.str();
+}
+
+std::string GatherOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
 
 int GatherOp::gatherAxis(int axis) const {
   if (axis < 0) {
@@ -940,6 +1404,8 @@ int GatherOp::gatherAxis(int axis) const {
       axis >= 0 && axis < (int)windowShape().size(), "Invalid axis: ", axis);
   return int(windowShape().size()) + axis;
 }
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(GatherOp)
 
 ViewAsScalar::ViewAsScalar(
     IrBuilderPasskey passkey,
@@ -954,11 +1420,34 @@ ViewAsScalar::ViewAsScalar(
   addAttribute(index);
 }
 
+std::string ViewAsScalar::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = view_as_scalar( "
+                          << in()->toString() << ", " << vector_id()->toString()
+                          << " )\n";
+  return ss.str();
+}
+
+std::string ViewAsScalar::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
+}
+
 NVFUSER_DEFINE_CLONE_AND_CREATE(ViewAsScalar)
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, Val* out, Val* in) : Expr(passkey) {
   addOutput(out);
   addInput(in);
+}
+
+std::string ViewOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = view( "
+                          << in()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string ViewOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(ViewOp)
@@ -973,6 +1462,17 @@ LoadStoreOp::LoadStoreOp(
   addInput(in);
   addAttribute(IrBuilder::create<Attribute<LoadStoreOpType>>(
       passkey.ir_container_, op_type));
+}
+
+std::string LoadStoreOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << out()->toString() << " = " << opType() << "( "
+                          << in()->toString() << " )\n";
+  return ss.str();
+}
+
+std::string LoadStoreOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(LoadStoreOp)
@@ -2128,7 +2628,29 @@ Split::Split(
   addAttribute(stop_offset);
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(Split)
+std::string Split::toString(int indent_size) const {
+  std::stringstream ss;
+  ss << (innerSplit() ? "Split: " : "Outer split: ");
+  ss << in()->toString();
+  ss << " by factor " << factor()->toString() << " -> ";
+  ss << outer()->toString();
+  ss << ", ";
+  ss << inner()->toString();
+  if (startOffset()) {
+    ss << ", start offset: ";
+    ss << startOffset()->toString();
+  }
+  if (stopOffset()) {
+    ss << ", stop offset: ";
+    ss << stopOffset()->toString();
+  }
+  ss << "\n";
+  return ss.str();
+}
+
+std::string Split::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Split can not be printed inline");
+}
 
 Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
   TORCH_INTERNAL_ASSERT(in_extent != nullptr);
@@ -2144,6 +2666,8 @@ Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
   return in_extent;
 }
 
+NVFUSER_DEFINE_CLONE_AND_CREATE(Split)
+
 Merge::Merge(
     IrBuilderPasskey passkey,
     IterDomain* out,
@@ -2153,6 +2677,22 @@ Merge::Merge(
   addOutput(out);
   addInput(outer);
   addInput(inner);
+}
+
+std::string Merge::toString(int indent_size) const {
+  std::stringstream ss;
+  ss << "Merge: ";
+  ss << outer()->toString();
+  ss << " and ";
+  ss << inner()->toString();
+  ss << " -> ";
+  ss << out()->toString();
+  ss << "\n";
+  return ss.str();
+}
+
+std::string Merge::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(Merge)
@@ -2174,6 +2714,24 @@ Swizzle2D::Swizzle2D(
       passkey.ir_container_, swizzle_type));
   addAttribute(IrBuilder::create<Attribute<SwizzleMode>>(
       passkey.ir_container_, swizzle_mode));
+}
+
+std::string Swizzle2D::toString(int indent_size) const {
+  std::stringstream ss;
+  ss << swizzleType() << "(2D): ";
+  ss << inX()->toString();
+  ss << " , ";
+  ss << inY()->toString();
+  ss << " -> ";
+  ss << outX()->toString();
+  ss << " , ";
+  ss << outY()->toString();
+  ss << "\n";
+  return ss.str();
+}
+
+std::string Swizzle2D::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(Swizzle2D)

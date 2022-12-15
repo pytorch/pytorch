@@ -61,17 +61,16 @@ bool Statement::lessThan(const Statement* stmt1, const Statement* stmt2) {
 }
 
 std::string Statement::toString(int indent_size) const {
-  std::stringstream ss;
-  IrPrinter ir_printer(ss, indent_size);
-  ir_printer.handle(this);
-  return ss.str();
+  TORCH_INTERNAL_ASSERT(
+      false, "toString for IR node ", typeid(*this).name(), " is not defined");
 }
 
 std::string Statement::toInlineString(int indent_size) const {
-  std::stringstream ss;
-  IrPrinter ir_printer(ss, indent_size);
-  ir_printer.print_inline(this);
-  return ss.str();
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "toInlineString for IR node ",
+      typeid(*this).name(),
+      " is not defined");
 }
 
 Fusion* Statement::fusion() const {
