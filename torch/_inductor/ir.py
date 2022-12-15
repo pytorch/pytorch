@@ -25,7 +25,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -1493,9 +1492,10 @@ class ReinterpretView(BaseView):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
+        as_strided = V.graph.sizevars.as_strided
         if offset != "0":
-            return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
-        return f"as_strided({self.get_name()}, {size}, {stride})"
+            return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
+        return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
 
 class SliceView(View):
@@ -2648,6 +2648,17 @@ class ExternKernel(InputsKernel):
             kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
+    def cpp_wrapper_codegen_kwargs(self):
+        kwargs = []
+        if self.kwargs:
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                assert arg_name in self.kwargs, (
+                    "arg %s not found in self.kwargs" % arg_name
+                )
+                v = self.kwargs.get(arg_name)
+                kwargs.append(repr(v))
+        return kwargs
+
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
@@ -2710,15 +2721,22 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         args = self.codegen_args()
 
-        kwargs = self.codegen_kwargs()
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            kwargs = self.cpp_wrapper_codegen_kwargs()
+        else:
+            kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
-        if self.output_view:
-            args.append(f"out={self.output_view.codegen_reference()}")
-        else:
-            args.append(f"out={self.codegen_reference()}")
-        wrapper.writeline(f"{self.kernel}({', '.join(args)})")
+        wrapper.generate_extern_kernel_out(
+            self.output_view,
+            self.codegen_reference(),
+            args,
+            self.kernel,
+            self.cpp_kernel,
+        )
 
     def __init__(
         self,
@@ -2927,9 +2945,9 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fused_moving_avg_obs_fq_helper_functional,
         )
         context = (
-            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
-        with context():
+        with context:
             (
                 example_output,
                 tensor_args,
@@ -3038,7 +3056,7 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
@@ -3297,7 +3315,7 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
-    with torch._subclasses.FakeTensorMode():
+    with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         bias_fake = (
@@ -3531,7 +3549,7 @@ class MKLPackedLinear(ExternKernelAlloc):
     def create(cls, x, packed_w, orig_w, bias, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with torch._subclasses.FakeTensorMode():
+        with V.graph.fake_mode:
             x_fake = ir_node_to_tensor(x, guard_shape=True)
             weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
             bias_fake = (
