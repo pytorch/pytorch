@@ -26,7 +26,7 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
-class ReplicateStatDictTest(MultiProcessTestCase):
+class ReplicateStateDictTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
