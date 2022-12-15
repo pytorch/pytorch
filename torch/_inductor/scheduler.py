@@ -656,8 +656,8 @@ class Scheduler:
                     name_to_users[node1_name] = name_to_users[node2_name]
 
         def rename(n):
-            # if n in self.mutation_renames:
-            # return rename(self.mutation_renames[n])
+            if n in self.mutation_renames:
+                return rename(self.mutation_renames[n])
             return n
 
         def dep_closure(node_name):
