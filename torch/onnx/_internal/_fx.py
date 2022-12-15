@@ -190,12 +190,18 @@ def _export_fx_to_ts(fx_module_with_metadata):
         #print(f"Export {node}, {node.target}:")
         #print(g)
         if node.op == "placeholder":
-            # Input of graph.
-            v = g.addInput(node.name)
-            v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
-            assert (
-                v is not None
-            ), f"Node creates None with target={node.target} and name={node.name}"
+            if node.meta["val"] is None:
+              # This input argument is None, which is mapped
+              # to a NULL value in TorchScript type system.
+              v = g.op("prim::Constant")
+              v.setType(torch._C.OptionalType.ofTensor())
+            else:
+              # Input of graph.
+              v = g.addInput(node.name)
+              v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
+              assert (
+                  v is not None
+              ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
         elif node.op == "call_function":
             # aten ops and other statless functions.
@@ -230,11 +236,8 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 assert (
                     v is not None
                 ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
-
-                # TODO(wechi) Assign type and shape obtained from FakeTensorProp.
-                # This is commented because it will cause wrong type for seq<tensor>.
+                # Assign type and shape obtained from FakeTensorProp.
                 # _fill_tensor_types(v, node.meta["val"])
-
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -443,10 +446,22 @@ def export(
 
 
 def export_without_kwargs(
-    fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True
+    fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True, **kwargs
 ):
+    if isinstance(fn, torch.nn.Module):
+      signature = inspect.signature(fn.forward)
+    else:
+      signature = inspect.signature(fn)
+
+    # We hope the input kwargs will be mapped to bound.args after binding.
+    # If not, we will raise an error.
+    bound = signature.bind(*args, **kwargs)
+    bound.apply_defaults()
+    # kwargs are not handled.
+    assert not bound.kwargs
+
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-    args = copy.deepcopy(args)
+    args = copy.deepcopy(bound.args)
     # Translate callable to FX graph.
     #
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
@@ -456,7 +471,6 @@ def export_without_kwargs(
         *args
     )
     # Export FX graph to ONNX ModelProto.
-    #
     return _export(
         graph_module,
         *args,

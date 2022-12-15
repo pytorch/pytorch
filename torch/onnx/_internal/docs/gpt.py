@@ -85,11 +85,11 @@ def test_gpt2_one_shot(model_name):
     input_ids = inputs["input_ids"]
     attention_mask = inputs["attention_mask"]
     onnx_model_text = export_without_kwargs(
-        model, input_ids, attention_mask, use_binary_format=False
+        model, **inputs, use_binary_format=False
     )
     onnx.save(onnx_model_text, "gpt2.onnx")
     onnx_model = export_without_kwargs(
-        model, input_ids, attention_mask, use_binary_format=True
+        model, **inputs, use_binary_format=True
     )
 
     pth_outputs = run_ort(
