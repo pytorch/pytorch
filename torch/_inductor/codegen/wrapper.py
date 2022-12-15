@@ -91,6 +91,17 @@ class MemoryPlanningState:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
+@dataclasses.dataclass
+class EnterCudaDeviceContextManagerLine:
+    device_idx: int
+
+    def codegen(self, code: IndentedBuffer):
+        code.writeline(f"with torch.cuda.device({self.device_idx}):")
+
+class ExitCudaDeviceContextManagerLine:
+
+    def codegen(self, code: IndentedBuffer):
+        pass
 
 class MemoryPlanningLine:
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
@@ -428,6 +439,12 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.write_reuse_line(input_buffer, output_buffer)
 
+    def codegen_cuda_device_guard_enter(self, device_idx):
+        self.lines.append(EnterCudaDeviceContextManagerLine(device_idx))
+
+    def codegen_cuda_device_guard_exit(self):
+        self.lines.append(ExitCudaDeviceContextManagerLine())
+
     def generate_return(self, output_refs):
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
@@ -477,9 +494,15 @@ class WrapperCodeGen(CodeGen):
                 if isinstance(self.lines[i], MemoryPlanningLine):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
+            device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
+                elif isinstance(line, EnterCudaDeviceContextManagerLine):
+                    line.codegen(self.wrapper_call)
+                    device_cm_stack.enter_context(self.wrapper_call.indent())
+                elif isinstance(line, ExitCudaDeviceContextManagerLine):
+                    device_cm_stack.close()
                 else:
                     self.wrapper_call.writeline(line)
 
