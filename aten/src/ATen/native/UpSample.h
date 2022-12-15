@@ -449,10 +449,16 @@ static inline void compute_source_index_and_lambda(
     const auto real_input_index =
         area_pixel_compute_source_index<opmath_t>(
             ratio, output_index, align_corners, /*cubic=*/false);
-    input_index0 = static_cast<int64_t>(real_input_index);
+    // when `real_input_index` becomes larger than the range the floating point
+    // type can accurately represent, the type casting to `int64_t` might exceed
+    // `input_size - 1`, causing overflow. So we guard it with `std::min` below.
+    input_index0 = std::min(static_cast<int64_t>(real_input_index), input_size - 1);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = real_input_index - input_index0;
+    lambda1 = std::min(
+      std::max(real_input_index - input_index0, static_cast<opmath_t>(0)),
+      static_cast<opmath_t>(1)
+    );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
   }
 }

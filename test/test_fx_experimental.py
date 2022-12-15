@@ -7,43 +7,44 @@ import pickle
 import sys
 import tempfile
 import unittest
-from typing import Callable, Dict, Union, List, Optional
 from types import BuiltinFunctionType
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch.fx.experimental.meta_tracer
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
-from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.passes import graph_manipulation
-from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.partitioner_utils import (
-    NodeLatency,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
     Device,
+    get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping,
+    NodeLatency,
     PartitionerConfig,
     PartitionMode,
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
-import torch.fx.experimental.meta_tracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
     _torchscript_type_to_python_type,
+    create_type_hint,
     normalize_function,
     normalize_module,
     type_matches,
-    create_type_hint,
 )
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.split_module import split_module
+from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
-    ops,
-    onlyCPU,
     instantiate_device_type_tests,
+    onlyCPU,
+    ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
@@ -1079,6 +1080,37 @@ class {test_classname}(torch.nn.Module):
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
+
+    def test_annotate_getitem_node(self):
+        class CustomType:
+            pass
+
+        class CustomNamedTuple(NamedTuple):
+            x: int
+            y: float
+
+        class MyModule(torch.nn.Module):
+            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
+        my_module = MyModule()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):

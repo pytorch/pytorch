@@ -509,7 +509,7 @@ class AnalyzeViewTransformation {
             "View is complete, but there's still some elements to distribute.");
       }
 
-      if ((new_view_index == new_view_.size() ||
+      if ((new_view_index + 1 >= new_view_.size() ||
            (new_view_[new_view_index + 1] != 1)) &&
           original_view_index + 1 < original_view_.size() &&
           original_view_[original_view_index + 1] == 1 &&

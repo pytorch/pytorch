@@ -684,6 +684,36 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& self = THPVariable_Unpack(self_);
+  TORCH_CHECK(
+      THPVariable_Check(arg),
+      "_view_func expect a single argument that is a Tensor");
+  const auto& new_base = THPVariable_Unpack(arg);
+
+  // Ensure that self is indeed a backward differentiable view
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  TORCH_CHECK(
+      diff_view_meta && diff_view_meta->has_bw_view(),
+      "_view_func can only be called on "
+      "a Tensor that is a backward differentiable view.");
+  const auto& view_info = diff_view_meta->get_backward_view();
+  // Ensure that the newly provided base is similar to the original base
+  TORCH_CHECK(
+      torch::autograd::utils::has_same_meta(new_base, view_info.base_),
+      "The new base passed to _view_func must have the same metadata as the Tensors's base");
+
+  // Do the actual view replay
+  if (view_info.has_view_fn()) {
+    return THPVariable_Wrap(view_info.view_fn()(new_base));
+  } else {
+    return THPVariable_Wrap(new_base.as_strided(
+        self.sizes(), self.strides(), self.storage_offset()));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // Instantiates a subclass of self with the same data.
 static PyObject* THPVariable_as_subclass(
     PyObject* _self,
@@ -1645,6 +1675,7 @@ static PyMethodDef extra_methods[] = {
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
+    {"_view_func", THPVariable_view_func, METH_O, nullptr},
     {nullptr}};
 
 /* From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c

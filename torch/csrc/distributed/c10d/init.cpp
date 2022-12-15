@@ -608,17 +608,26 @@ This class does not support ``__members__`` property.)");
   // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
   // I define some member methods.
   reduce_op
+      // todo(crcrpar): Support `RedOpType == ReduceOp`.
       .def(
+          // This calls `operator==(const ReduceOp::RedOpType)`
           "__eq__",
           [](const ::c10d::ReduceOp& self,
              const ::c10d::ReduceOp::RedOpType& other) {
             return self == other;
           })
       .def(
+          // This calls `operator==(const ReduceOp)` for the future support of
+          // `PREMUL_SUM` comparison
           "__eq__",
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
-            return self == other.op_;
+            return self == other;
           })
+      .def(
+          // With the above custom `__eq__`'s, I have to manually support the
+          // other types.
+          "__eq__",
+          [](const ::c10d::ReduceOp& self, py::object) { return false; })
       .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
@@ -1310,7 +1319,13 @@ Arguments:
 
           .def(
               "allgather_coalesced",
-              &::c10d::ProcessGroup::allgather_coalesced,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<std::vector<at::Tensor>>& output_lists,
+                 const std::vector<at::Tensor>& input_list,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::allgather_coalesced(
+                    self, output_lists, input_list, opts);
+              },
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1411,7 +1426,13 @@ Arguments:
 
           .def(
               "_reduce_scatter_base",
-              &::c10d::ProcessGroup::_reduce_scatter_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::ReduceScatterOptions& opts) {
+                return ::c10d::ops::_reduce_scatter_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -1419,34 +1440,26 @@ Arguments:
 
           .def(
               "alltoall_base",
-              &::c10d::ProcessGroup::alltoall_base,
-              py::arg("output_tensor"),
-              py::arg("input_tensor"),
-              py::arg("output_split_sizes"),
-              py::arg("input_split_sizes"),
-              py::arg("opts") = ::c10d::AllToAllOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "alltoall_base",
-              [](::c10d::ProcessGroup& self,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  at::Tensor& output,
                  at::Tensor& input,
                  std::vector<int64_t> outputSplitSizes,
-                 std::vector<int64_t> inputSplitSizes) {
-                return self.alltoall_base(
+                 std::vector<int64_t> inputSplitSizes,
+                 const ::c10d::AllToAllOptions& opts) {
+                return ::c10d::ops::alltoall_base(
+                    self,
                     output,
                     input,
                     outputSplitSizes,
                     inputSplitSizes,
-                    ::c10d::AllToAllOptions());
+                    opts);
               },
               py::arg("output"),
               py::arg("input"),
               py::arg("output_split_sizes"),
               py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "alltoall",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1456,21 +1469,24 @@ Arguments:
                 return ::c10d::ops::alltoall(
                     self, output_tensors, input_tensors, opts);
               },
-              py::arg("output_tensor"),
-              py::arg("input_tensor"),
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "alltoall",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor>& output,
-                 std::vector<at::Tensor>& input) {
+                 const std::vector<at::Tensor>& output_tensors,
+                 const std::vector<at::Tensor>& input_tensors) {
                 return ::c10d::ops::alltoall(
-                    self, output, input, ::c10d::AllToAllOptions());
+                    self,
+                    output_tensors,
+                    input_tensors,
+                    ::c10d::AllToAllOptions());
               },
-              py::arg("output"),
-              py::arg("input"),
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1501,7 +1517,11 @@ Arguments:
 
           .def(
               "recv_anysource",
-              &::c10d::ProcessGroup::recvAnysource,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t tag) {
+                return ::c10d::ops::recv_any_source(self, tensors, tag);
+              },
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1527,7 +1547,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                return ::c10d::ops::monitored_barrier(self, opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,

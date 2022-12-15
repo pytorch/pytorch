@@ -7,11 +7,13 @@ import unittest
 import itertools
 import torch
 import contextlib
+import re
+import os
+
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
 from typing import Dict
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -149,6 +151,90 @@ class TestCommon(TestCase):
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
                 )
+
+    def test_pointwise_tag_coverage(self):
+
+        pytorch_dir = os.path.abspath(__file__ + "/../../")
+        files = [
+            "aten/src/ATen/native/UnaryOps.cpp",
+            "aten/src/ATen/native/BinaryOps.cpp",
+            "aten/src/ATen/native/PointwiseOps.cpp",
+            "aten/src/ATen/native/TensorCompare.cpp",
+        ]
+
+        allowed_functions = (
+            # reduction version of these operators
+            "aten.max.default",
+            "aten.max.dim",
+            "aten.max.dim_max",
+            "aten.max.names_dim",
+            "aten.max.names_dim_max",
+            "aten.max.unary_out",
+            "aten.min.default",
+            "aten.min.dim",
+            "aten.min.dim_min",
+            "aten.min.names_dim",
+            "aten.min.names_dim_min",
+            # not pointwise
+            "aten.isin.Tensor_Tensor",
+            "aten.isin.Tensor_Tensor_out",
+            "aten.isin.Tensor_Scalar",
+            "aten.isin.Tensor_Scalar_out",
+            "aten.isin.Scalar_Tensor",
+            "aten.isin.Scalar_Tensor_out",
+            "aten.mode.default",
+            "aten.mode.dimname",
+            "aten.mode.dimname_out",
+            "aten.mode.values",
+        )
+
+        regex = re.compile(r"DEFINE_DISPATCH\(.*_stub")
+
+        def get_opoverloadpacket_from_dispatch(kernel):
+            if hasattr(torch.ops.aten, kernel):
+                return kernel
+            if hasattr(torch.ops.aten, f"__{kernel}__"):
+                return f"__{kernel}__"
+            if hasattr(torch.ops.aten, f"special_{kernel}"):
+                return f"special_{kernel}"
+            if "_" in kernel:
+                kernel_split = kernel.split("_")
+                new_kernel = "_".join(kernel_split[:-1])
+                if hasattr(torch.ops.aten, new_kernel):
+                    return new_kernel
+
+            # could not find op from kernel dispatch string
+            self.assertTrue(False)
+
+        for file_name in files:
+            with open(os.path.join(pytorch_dir, file_name), "r") as f:
+                lines = f.read()
+                matches = regex.findall(lines)
+                for match in matches:
+                    kernel = match[len("DEFINE_DISPATCH("):-len("_stub")]
+
+                    # no op definition for it, but defined with DEFINE_DISPATCH ?
+                    if kernel == "trigamma":
+                        continue
+
+                    kernel = get_opoverloadpacket_from_dispatch(kernel)
+                    overloadpacket = getattr(torch.ops.aten, kernel)
+
+                    for overload_name in overloadpacket.overloads():
+                        overload = getattr(overloadpacket, overload_name)
+
+                        if not torch._C._dispatch_has_kernel(overload.name()):
+                            continue
+
+                        # TODO: tags are not propagated to generated overload,
+                        # and there's no way of specifying them
+                        if torch.Tag.generated in overload.tags:
+                            continue
+
+                        if str(overload) in allowed_functions:
+                            continue
+
+                        self.assertTrue(torch.Tag.pointwise in overload.tags)
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
@@ -499,11 +585,6 @@ class TestCommon(TestCase):
                 noncontig_sample.args,
                 noncontig_sample.kwargs,
             )
-
-            # Verifies sample input tensors should have no grad or history
-            sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
-            assert sample_tensor.grad is None
-            assert sample_tensor.grad_fn is None
 
             # validates forward
             expected = op(t_inp, *t_args, **t_kwargs)
@@ -1097,6 +1178,7 @@ class TestCommon(TestCase):
             # `cfloat` input -> `float` output
             self.assertEqual(actual, expected, exact_dtype=False)
 
+
     @ops(op_db, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     @skipIfTorchInductor("Inductor does not support view with dtype yet")
@@ -1579,7 +1661,7 @@ class TestMathBits(TestCase):
 def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
-    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
+    # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm(_legit).out
     # which mutate not necessarily the first input.
     if isinstance(rs, torch.Tensor) and rs is input:
         unequal_size = rs.size() != input_size
@@ -1977,6 +2059,59 @@ class TestFakeTensor(TestCase):
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
             except torch._subclasses.fake_tensor.DataDependentOutputException:
                 self.assertTrue(name in data_dependent_op_tests)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_pointwise_ops(self, device, dtype, op):
+        name = op.name
+        if op.variant_test_name:
+            name += "." + op.variant_test_name
+        if name in fake_skips or "sparse" in name or "jiterator" in name:
+            self.skipTest("Skip failing test")
+
+        test_self = self
+
+        class TestPointwiseMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+
+                out = func(*args, **kwargs)
+
+                if torch.Tag.pointwise in func.tags:
+                    shapes = []
+                    for inp in tree_flatten((args, kwargs)):
+                        if isinstance(inp, torch.Tensor):
+                            shapes.append(inp.shape)
+
+                    out_shape = torch._refs._broadcast_shapes(*shapes)
+
+                    for out_elem in tree_flatten(out):
+                        if isinstance(out_elem, torch.Tensor):
+                            test_self.assertEqual(out_elem.shape, out_shape)
+
+                return out
+
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+
+            def map_to_fake(e):
+                if isinstance(e, torch.Tensor):
+                    return mode.from_tensor(e)
+                else:
+                    return e
+
+            input = tree_map(map_to_fake, sample.input)
+            args = tree_map(map_to_fake, sample.args)
+            kwargs = tree_map(map_to_fake, sample.kwargs)
+
+            try:
+                op(input, *args, **kwargs)
+            except Exception as e:
+                continue
+
+            with TestPointwiseMode():
+                with mode:
+                    op(input, *args, **kwargs)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
