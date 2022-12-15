@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
