@@ -101,8 +101,15 @@ private:
 // this wraps map_type::iterator to make sure user code can't rely
 // on it being the type of the underlying map.
 template<class Key, class Value, class Iterator>
-class DictIterator final : public std::iterator<std::forward_iterator_tag, DictEntryRef<Key, Value, Iterator>> {
+class DictIterator final {
 public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::forward_iterator_tag;
+  using value_type = DictEntryRef<Key, Value, Iterator>;
+  using difference_type = std::ptrdiff_t;
+  using pointer = value_type*;
+  using reference = value_type&;
+
   explicit DictIterator() = default;
   ~DictIterator() = default;
 
@@ -136,7 +143,7 @@ public:
     return &entryRef_;
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, DictEntryRef<Key, Value, Iterator>>::difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
+  friend difference_type operator-(const DictIterator& lhs, const DictIterator& rhs) {
     return lhs.entryRef_.iterator_ - rhs.entryRef_.iterator_;
   }
 

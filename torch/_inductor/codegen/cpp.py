@@ -337,7 +337,7 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def where(a, b, c):
         # return a ? b : c
-        return f"decltype({b})::blendv({c}, {b}, {a} > decltype({a})(0))"
+        return f"decltype({b})::blendv({c}, {b}, ({a}) != decltype({a})(0))"
 
     @staticmethod
     def sign(x):
@@ -362,7 +362,7 @@ class CppVecOverrides(OpOverrides):
     def to_dtype(x, dtype):
         assert dtype in [
             torch.bool,
-            torch.float32,
+            torch.float,
         ], f"{__name__} does not support {dtype}"
         return f"({x})"
 
@@ -760,6 +760,7 @@ class CppVecKernel(CppKernel):
         assert codecache.pick_vec_isa()
         self.simd_nelements = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
+        self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -790,18 +791,19 @@ class CppVecKernel(CppKernel):
 
         def load_help(load_index, nelements):
             if V.graph.get_dtype(name) != torch.float:
-                g_tmp_buf = f"g_tmp_buffer_{var}"
-                if f"float {g_tmp_buf}[{nelements}] = {{0}};" not in self.loads._lines:
-                    self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                if var not in self.var_vec_buf_map:
+                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
+                    self.loads.writeline(
+                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
+                    )
+
                 self.loads.writeline(
-                    f"to_float({var} + {cexpr(load_index)}, {g_tmp_buf}, {nelements});"
+                    f"to_float({var} + {cexpr(load_index)}, {self.var_vec_buf_map[var]}, {nelements});"
                 )
                 if nelements == 1:
-                    line = (
-                        f"at::vec::Vectorized<float>({g_tmp_buf}[{cexpr(load_index)}])"
-                    )
+                    line = f"at::vec::Vectorized<float>({self.var_vec_buf_map[var]}[{cexpr(load_index)}])"
                 else:
-                    line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+                    line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
             else:
                 if nelements == 1:
                     line = f"at::vec::Vectorized<float>({var}[{cexpr(load_index)}])"
@@ -1026,7 +1028,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype):
-                if dtype not in [torch.bool, torch.float32]:
+                if dtype not in [torch.bool, torch.float]:
                     self.simd_vec = False
                 return x
 
@@ -1388,6 +1390,9 @@ class CppScheduling:
         cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+
+    def codegen_sync(self):
+        pass
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)

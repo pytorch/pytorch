@@ -57,7 +57,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     # Huggingface
-    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
 ]
 
@@ -101,6 +100,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
+    "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
@@ -121,19 +121,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
-    "dm_nfnet_f0",  # accuracy
-    "convmixer_768_32",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "sebotnet33ts_256",  # accuracy - Unable to repro on A100
-    "hrnet_w18",  # accuracy - Unable to repro on A100
-    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    "res2net101_26w_4s",  # accuracy
-    "spnasnet_100",  # accuracy
-    "resnest101e",  # accuracy
-    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -1001,8 +991,8 @@ class BenchmarkRunner:
 
         try:
             self.model_iter_fn(model, example_inputs)
-        except Exception:
-            raise NotImplementedError("Eager model failed to run")
+        except Exception as e:
+            raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
         model = copy.deepcopy(model)
@@ -1094,7 +1084,7 @@ class BenchmarkRunner:
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
-                model = FSDP(model)
+                model = FSDP(model, use_orig_params=True)
                 torch._inductor.config.triton.cudagraphs = False
                 log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
@@ -2070,14 +2060,23 @@ def run(runner, args, original_dir=None):
         for name in runner.iter_model_names(args):
             current_name = name
             placeholder_batch_size = 0
-            try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"])
-            except subprocess.SubprocessError:
-                print("ERROR")
+
+            def write_csv():
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
                     )
+
+            try:
+                subprocess.check_call(
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
+                )
+            except subprocess.TimeoutExpired:
+                print("TIMEOUT", file=sys.stderr)
+                write_csv()
+            except subprocess.SubprocessError:
+                print("ERROR", file=sys.stderr)
+                write_csv()
         print_summary(output_filename)
 
 

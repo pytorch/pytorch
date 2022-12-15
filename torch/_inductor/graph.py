@@ -13,6 +13,8 @@ from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
+from .._dynamo import config as dynamo_config
+
 from . import config, ir
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
@@ -32,6 +34,22 @@ from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+def supported_dtype_of_cpp_wrapper(dtype):
+    supported_dtype = {
+        torch.float32,
+        torch.float64,
+        torch.int64,
+        torch.int32,
+        torch.int16,
+        torch.int8,
+        torch.uint8,
+        torch.bool,
+        # torch.float16, # TODO: implement this
+        # torch.bfloat16, # TODO: implement this
+    }
+    return dtype in supported_dtype
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -67,8 +85,13 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        fake_mode=None,
     ):
         super().__init__(gm)
+        if fake_mode is None:
+            self.fake_mode = torch._subclasses.FakeTensorMode()
+        else:
+            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -150,10 +173,11 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            self.disable_cpp_wrapper("ExternKernel")
-        if isinstance(buffer, ir.ComputedBuffer):
-            if buffer.data.get_reduction_type():
-                self.disable_cpp_wrapper("Reduction")
+            if not isinstance(
+                buffer,
+                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
+            ):
+                self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         if config.cpp_wrapper:
@@ -399,13 +423,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if value.get_dtype() != torch.float32:
-                self.disable_cpp_wrapper("inputs not FP32")
-
-    def check_output_for_cpp_buffer(self):
-        for item in self.graph_outputs:
-            if isinstance(item, ir.NoneAsConstantBuffer):
-                self.disable_cpp_wrapper("NoneAsConstantBuffer")
+            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+                self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
@@ -416,7 +435,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
-        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
@@ -491,7 +509,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(logging.CODE, "Output code: %s", mod.__file__)
+        if dynamo_config.output_code:
+            log.info("Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
