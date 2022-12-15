@@ -197,7 +197,9 @@ function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout no_torchaudio
-  python install.py
+  # Occasionally the installation may fail on one model but it is ok to continue
+  # to install and test other models
+  python install.py --continue_on_fail
   popd
 }
 
