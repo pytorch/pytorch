@@ -252,12 +252,12 @@ if HAS_SYMPY:
             # Python supports more types (like float), but we don't do type
             # promotion here. And it's not clear whether we need to support more
             # types based on existing models.
-            def check_supported_type(name, x):
+            def check_supported_type(x):
                 if not isinstance(x, FloorDiv) and not x.is_integer:
-                    raise NotImplementedError(f"{name} must be an integer, but got: {type(x)}")
+                    raise NotImplementedError(f"argument must be an integer, but got: {type(x)}")
 
-            check_supported_type("base", base)
-            check_supported_type("divisor", divisor)
+            check_supported_type(base)
+            check_supported_type(divisor)
 
             if base == 0:
                 return sympy.Integer(0)
