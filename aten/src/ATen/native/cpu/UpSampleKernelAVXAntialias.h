@@ -116,7 +116,7 @@ void ImagingResampleHorizontal(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
-    std::vector<at::Tensor> horiz_indices_weights,
+    const std::vector<at::Tensor>& horiz_indices_weights,
     unsigned int horiz_weights_precision,
     int xout,
     int yout,
@@ -172,7 +172,7 @@ void ImagingResampleVertical(
     uint32_t* unpacked_output_p,
     uint32_t* unpacked_input_p,
     int ksize,
-    std::vector<at::Tensor> vert_indices_weights,
+    const std::vector<at::Tensor>& vert_indices_weights,
     unsigned int vert_weights_precision,
     int xout,
     int yout) {
