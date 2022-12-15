@@ -211,7 +211,7 @@ def define_tools_targets(
         srcs = [
             "gen_vulkan_spv.py",
         ],
-        base_module = "",
+        base_module = "tools",
         deps = [
             torchgen_deps,
         ],
@@ -219,7 +219,7 @@ def define_tools_targets(
 
     python_binary(
         name = "gen_aten_vulkan_spv_bin",
-        main_module = "gen_vulkan_spv",
+        main_module = "tools.gen_vulkan_spv",
         visibility = [
             "PUBLIC",
         ],

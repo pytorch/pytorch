@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from gen_vulkan_spv import VulkanShaderGenerator
+from tools.gen_vulkan_spv import VulkanShaderGenerator
 from yaml.constructor import ConstructorError
 
 
