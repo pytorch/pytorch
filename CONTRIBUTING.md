@@ -91,6 +91,8 @@ To develop PyTorch on your machine, here are some tips:
 
 ### Instructions
 
+_**Note**: If you get stuck at any step, check out the [tips and debugging](#tips-and-debugging) section below for common solutions_
+
 1. Uninstall all existing PyTorch installs. You may need to run `pip
 uninstall torch` multiple times. You'll know `torch` is fully
 uninstalled when you see `WARNING: Skipping torch as it is not
