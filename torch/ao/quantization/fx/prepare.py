@@ -102,8 +102,6 @@ from .custom_config import (
     StandaloneModuleConfigEntry,
 )
 
-from torch._subclasses import FakeTensor
-
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 from collections import defaultdict
 
@@ -1206,17 +1204,11 @@ def insert_observers_for_model(
             equalization_qconfig = equalization_config_map.get(node.name, None)
 
             this_node_dtype_info = node_name_to_target_dtype_info[node.name]
-            if hasattr(node, "meta") and "val" in node.meta:
-                output_is_a_tensor = (
-                    this_node_dtype_info is not None and
-                    isinstance(node.meta["val"], FakeTensor)
-                )
-            else:
-                output_is_a_tensor = this_node_dtype_info is not None
+            output_not_a_tensor = this_node_dtype_info is None
 
             skip_inserting_observers = (
                 (qconfig is None) or
-                not output_is_a_tensor
+                output_not_a_tensor
             ) and (
                 not node.op == 'output'
             )
