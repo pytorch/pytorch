@@ -12,6 +12,7 @@ from .fused import LinearReLU
 from .fused import BNReLU2d
 from .fused import BNReLU3d
 from .fused import LinearBn1d
+from .fused import LinearLeakyReLU
 
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     'BNReLU2d',
     'BNReLU3d',
     'LinearBn1d',
+    'LinearLeakyReLU',
 ]
