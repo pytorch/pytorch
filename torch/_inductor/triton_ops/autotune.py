@@ -78,6 +78,7 @@ class CachingAutotuner(KernelInterface):
             )
             return
 
+        # load binary to the correct device
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
