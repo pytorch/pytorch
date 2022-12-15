@@ -671,7 +671,7 @@ class TestBaseStructuredSparsifier(TestCase):
             ntoken=10,
             ninp=8,
             nhid=8,
-            nlayers=1,
+            nlayers=3,
         )
 
         config = [
@@ -679,6 +679,14 @@ class TestBaseStructuredSparsifier(TestCase):
             {"tensor_fqn": "rnn.weight_hh_l0"},
             {"tensor_fqn": "rnn.bias_ih_l0"},
             {"tensor_fqn": "rnn.bias_hh_l0"},
+            {"tensor_fqn": "rnn.weight_ih_l1"},
+            {"tensor_fqn": "rnn.weight_hh_l1"},
+            {"tensor_fqn": "rnn.bias_ih_l1"},
+            {"tensor_fqn": "rnn.bias_hh_l1"},
+            {"tensor_fqn": "rnn.weight_ih_l2"},
+            {"tensor_fqn": "rnn.weight_hh_l2"},
+            {"tensor_fqn": "rnn.bias_ih_l2"},
+            {"tensor_fqn": "rnn.bias_hh_l2"},
         ]
 
         rnn_input = torch.ones((1, 8))
@@ -694,10 +702,15 @@ class TestBaseStructuredSparsifier(TestCase):
         # Instead check that all unpruned elements are the same
         # and also check that final output is the same shape
         out_expected, y_expected = model(rnn_input)
+        print([(name, weight.size()) for weight, name in zip(model.rnn._flat_weights, model.rnn._flat_weights_names)])
 
         pruned_model = fx_pruner.prune()
         pruned_model.eval()
+        print([(name, weight.size()) for weight, name in zip(pruned_model.rnn._flat_weights, pruned_model.rnn._flat_weights_names)])
         out_pruned, y_pruned = pruned_model(rnn_input)
+
+        print(y_expected)
+        print(y_pruned)
 
         r, c = y_expected.size()
         assert torch.isclose(y_expected[:, :c//2], y_pruned, rtol=1e-05, atol=1e-07).all()

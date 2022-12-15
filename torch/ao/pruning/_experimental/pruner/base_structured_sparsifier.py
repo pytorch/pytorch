@@ -104,7 +104,7 @@ def _get_default_structured_pruning_patterns() -> Dict[
         (nn.Conv2d, "output"): prune_conv2d,
         (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
         # lstm -> getitem -> linear
-        (nn.LSTM, operator.getitem, nn.Linear): prune_lstm_linear,
+        (nn.LSTM, MatchAllNode, nn.Linear): prune_lstm_linear,
     }
 
     for activation in chain(
@@ -240,8 +240,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
             )
             self.state[config["tensor_fqn"]]["mask"] = mask
             parametrize.register_parametrization(
-                module, tensor_name, parametrization(mask),
-                unsafe=True
+                module, tensor_name, parametrization(mask)
             )
 
             # if linear / conv, we add in bias hooks
@@ -272,7 +271,6 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         # Right now we check for matches simply by iterating across all the patterns
         # if this is slow we can store patterns in a trie-structure and modify this code for faster lookup
-
         for node in self.traced.graph.nodes:
             for pattern, convert_fn in self.patterns.items():
                 matched = apply_match(modules, pattern, node, [])
@@ -293,6 +291,10 @@ class BaseStructuredSparsifier(BaseSparsifier):
                         elif node.op == "call_function":
                             convert_block.append(node.target)
                     convert_fn(*convert_block)
+
+        for module in self.traced.modules():
+            if module_contains_param(module, FakeStructuredSparsity):
+                raise Exception(f"Error: {module} still contains FakeStructuredSparsity parametrizations!")
 
         self.traced.graph.lint()
         self.traced.recompile()

@@ -363,26 +363,26 @@ def prune_lstm_layernorm_linear(lstm: nn.LSTM, getitem: Callable, layernorm: nn.
 
 
 def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> None:
-    breakpoint()
-    for i in lstm.num_layers:
-        if is_parametrized(getattr(lstm, f'weight_ih_l{i}')):
-            mask = getattr(lstm.parametrizations, f"weight_ih_l{i}")[0].mask
+    for i in range(lstm.num_layers):
+        # TODO for n_layers > 1, I need to resize the input layer of the upper hidden size too if I choose to prune
+        if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
+            mask = lstm.parametrizations[f"weight_ih_l{i}"][0].mask
 
             with torch.no_grad():
                 parametrize.remove_parametrizations(lstm, f"weight_ih_l{i}", leave_parametrized=True)
                 parametrize.remove_parametrizations(lstm, f"bias_ih_l{i}", leave_parametrized=True)
-                setattr(lstm, f"weight_ih_l{i}", nn.Parameter(getattr(lstm, f"weight_ih_l0")[mask]))
-                setattr(lstm, f"bias_ih_l{i}", nn.Parameter(getattr(lstm, f"bias_ih_l0")[mask]))
+                setattr(lstm, f"weight_ih_l{i}", nn.Parameter(getattr(lstm, f"weight_ih_l{i}")[mask]))
+                setattr(lstm, f"bias_ih_l{i}", nn.Parameter(getattr(lstm, f"bias_ih_l{i}")[mask]))
 
-        if is_parametrized(getattr(lstm, f'weight_hh_l{i}')):
-            mask = lstm.parametrizations.weight_hh_l0[0].mask
-            mask = getattr(lstm.parametrizations, f"weight_ih_l{i}")[0].mask
+
+        if parametrize.is_parametrized(lstm, f"weight_hh_l{i}"):
+            mask = lstm.parametrizations[f"weight_hh_l{i}"][0].mask
 
             with torch.no_grad():
                 parametrize.remove_parametrizations(lstm, f"weight_hh_l{i}", leave_parametrized=True)
                 parametrize.remove_parametrizations(lstm, f"bias_hh_l{i}", leave_parametrized=True)
                 # splitting out hidden-hidden masks
-                W_hi, W_hf, W_hg, W_ho = torch.split(getattr(lstm, f"weight_hh_l0"), lstm.hidden_size)
+                W_hi, W_hf, W_hg, W_ho = torch.split(getattr(lstm, f"weight_hh_l{i}"), lstm.hidden_size)
                 M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)
 
                 # resize each individual weight separately
@@ -391,26 +391,28 @@ def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> No
                 W_hg = W_hg[M_hg][:, M_hg]
                 W_ho = W_ho[M_ho][:, M_ho]
 
+                # TODO apply M_ho to all outputs
+
                 # concat, use this as new weight
                 new_weight = torch.cat((W_hi, W_hf, W_hg, W_ho))
-                setattr(lstm, f"weight_hh_l{i}", new_weight)
-                setattr(lstm, f"bias_hh_l{i}", nn.Parameter(getattr(lstm, f"bias_hh_l0")[mask]))
+                setattr(lstm, f"weight_hh_l{i}", nn.Parameter(new_weight))
+                setattr(lstm, f"bias_hh_l{i}", nn.Parameter(getattr(lstm, f"bias_hh_l{i}")[mask]))
 
-        # only need to do this for last layer that output is connected to
-        if i+1 == lstm.num_layers:
-            lstm.hidden_size = M_hi.sum()
+            # only need to do this for last layer that output is connected to
+            if i+1 == lstm.num_layers:
+                lstm.hidden_size = M_hi.sum()
 
-            with torch.no_grad():
-                if parametrize.is_parametrized(linear):
-                    parametrization_dict = cast(nn.ModuleDict, linear.parametrizations)
-                    weight_parameterizations = cast(
-                        ParametrizationList, parametrization_dict.weight
-                    )
+                with torch.no_grad():
+                    if parametrize.is_parametrized(linear):
+                        parametrization_dict = cast(nn.ModuleDict, linear.parametrizations)
+                        weight_parameterizations = cast(
+                            ParametrizationList, parametrization_dict.weight
+                        )
 
-                    weight_parameterizations.original = nn.Parameter(
-                        weight_parameterizations.original[:, M_ho]
-                    )
-                    linear.in_features = weight_parameterizations.original.shape[1]
-                else:
-                    linear.weight = nn.Parameter(linear.weight[:, M_ho])
-                    linear.in_features = linear.weight.shape[1]
+                        weight_parameterizations.original = nn.Parameter(
+                            weight_parameterizations.original[:, M_ho]
+                        )
+                        linear.in_features = weight_parameterizations.original.shape[1]
+                    else:
+                        linear.weight = nn.Parameter(linear.weight[:, M_ho])
+                        linear.in_features = linear.weight.shape[1]
