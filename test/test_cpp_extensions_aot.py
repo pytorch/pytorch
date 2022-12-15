@@ -8,7 +8,7 @@ from typing import Union
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA
 import torch
 import torch.backends.cudnn
@@ -295,6 +295,7 @@ class TestRNGExtension(common.TestCase):
     def setUp(self):
         super(TestRNGExtension, self).setUp()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 

@@ -919,7 +919,7 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
     else:
-        raise AssertionError(
+        unimplemented(
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
         )

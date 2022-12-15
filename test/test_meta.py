@@ -12,6 +12,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
@@ -251,6 +252,7 @@ class TestMetaConverter(TestCase):
         m = MetaConverter()(y)
         self.assertMetadataMatches(m, y)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
         m = MetaConverter()
@@ -274,6 +276,7 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_tensor_outlives_converter(self):
         m = MetaConverter()
         ref = weakref.ref(m)
