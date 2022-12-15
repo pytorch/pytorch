@@ -169,7 +169,7 @@ class FakeTensorTest(TestCase):
     def test_fake_mode_error(self):
         x = torch.rand([4, 4])
 
-        with self.assertRaisesRegex(Exception, "non-Fake Tensor inputs"):
+        with self.assertRaisesRegex(Exception, "Please convert all Tensors"):
             with FakeTensorMode():
                 y = x[0]
 
