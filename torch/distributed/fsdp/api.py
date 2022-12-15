@@ -10,7 +10,17 @@ from typing import Optional
 
 import torch
 
-__all__ = ["ShardingStrategy", "BackwardPrefetch", "MixedPrecision", "CPUOffload"]
+__all__ = [
+    "ShardingStrategy",
+    "BackwardPrefetch",
+    "MixedPrecision",
+    "CPUOffload",
+    "StateDictType",
+    "StateDictConfig",
+    "FullStateDictConfig",
+    "LocalStateDictConfig",
+    "ShardedStateDictConfig",
+]
 
 
 class ShardingStrategy(Enum):
@@ -36,12 +46,21 @@ class ShardingStrategy(Enum):
       :class:`DistributedDataParallel` API. For gradients, this strategy
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
+    - ``HYBRID_SHARD``: Apply ``FULL_SHARD`` within a node, and replicate parameters across
+        nodes. This results in reduced communication volume as expensive all-gathers and
+        reduce-scatters are only done within a node, which can be more performant for medium
+        -sized models.
+    - ``_HYBRID_SHARD_ZERO2``: Apply ``SHARD_GRAD_OP`` within a node, and replicate parameters across
+        nodes. This is like ``HYBRID_SHARD``, except this may provide even higher throughput
+        since the unsharded parameters are not freed after the forward pass, saving the
+        all-gathers in the pre-backward.
     """
 
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-    # HYBRID_SHARD = auto()
+    HYBRID_SHARD = auto()
+    _HYBRID_SHARD_ZERO2 = auto()
 
 
 class BackwardPrefetch(Enum):
@@ -84,7 +103,8 @@ class MixedPrecision:
 
     Attributes:
         param_dtype (torch.dtype): This specifies the dtype for model
-            parameters, inputs, and therefore the dtype for computation.
+            parameters, inputs (when ``cast_forward_inputs`` is set to
+            ``True``), and therefore the dtype for computation.
             However, outside the forward and backward passes, parameters are in
             full precision. Model checkpointing always happens in full
             precision.
@@ -98,6 +118,10 @@ class MixedPrecision:
             gradients back to the full parameter precision after the backward
             pass. This may be set to ``False`` to save memory if using custom
             optimizers that can perform the optimizer step in ``reduce_dtype``.
+            (Default: ``False``)
+        cast_forward_inputs (bool): Cast floating point tensors in the forward
+            arguments and keyword arguments to ``param_dtype``.
+            (Default: ``True``)
 
     .. note:: This API is experimental and subject to change.
 
@@ -133,6 +157,7 @@ class MixedPrecision:
     reduce_dtype: Optional[torch.dtype] = None
     buffer_dtype: Optional[torch.dtype] = None
     keep_low_precision_grads: bool = False
+    cast_forward_inputs: bool = True
 
 
 @dataclass
@@ -149,3 +174,87 @@ class CPUOffload:
     """
 
     offload_params: bool = False
+
+
+class StateDictType(Enum):
+    """
+    This enum indicates that which type of ``state_dict`` the FSDP module is
+    currently processing (returning or loading).
+    The default value is FULL_STATE_DICT to comply the PyTorch convention.
+    ..note::
+        FSDP currently supports three types of ``state_dict``:
+            1. ``state_dict/load_state_dict`: this pair of APIs return and load
+               the non-sharded, unflattened parameters. The semantics is the
+               same as using DDP.
+            2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
+               and load local sharded, flattened parameters. The values returned
+               by ``_local_state_dict`` can be directly used by FSDP and is only
+               meaningful to FSDP (because parameters are flattened). Note that
+               these APIs are meant for use via the :func:`state_dict_type`
+               context manager as follows:
+                   >>> # xdoctest: +SKIP("undefined variables")
+                   >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+                   ...     state = fsdp.state_dict()  # loads local state dict
+            3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
+               return and load sharded, unflattened parameters. The ``state_dict``
+               return by ``sharded_state_dict`` can be used by all other parallel
+               schemes (resharding may be required).
+    """
+
+    FULL_STATE_DICT = auto()
+    LOCAL_STATE_DICT = auto()
+    SHARDED_STATE_DICT = auto()
+
+
+@dataclass
+class StateDictConfig:
+    """
+    ``StateDictConfig`` is the base class for all state_dict configuration classes.
+    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
+    order to configure settings for the particular type of ``state_dict``
+    implementation FSDP will use.
+    """
+
+    offload_to_cpu: bool = False
+
+
+@dataclass
+class FullStateDictConfig(StateDictConfig):
+    """
+    ``FullStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
+    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
+    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
+    rank 0 only. When used, it is recommended to enable both of these flags
+    together to optimize memory savings when taking checkpoints. Note that
+    this config class is meant for user via the :func:`state_dict_type`
+    context manager as follows:
+        >>> # xdoctest: +SKIP("undefined variables")
+        >>> fsdp = FSDP(model, auto_wrap_policy=...)
+        >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>>     state = fsdp.state_dict()
+        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+        >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
+        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
+        >>> if dist.get_rank() == 0:
+        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
+        >>>     state_dict = torch.load("my_checkpoint.pt")
+        >>>     model.load_state_dict(state_dict)
+        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
+        >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
+        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
+        >>> # After this point, all ranks have FSDP model with loaded checkpoint.
+    """
+
+    rank0_only: bool = False
+
+
+@dataclass
+class LocalStateDictConfig(StateDictConfig):
+    pass
+
+
+@dataclass
+class ShardedStateDictConfig(StateDictConfig):
+    pass

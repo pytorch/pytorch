@@ -331,7 +331,7 @@ void IterDomainGraph::build(Fusion* fusion) {
             c_tv->getRootDomain().size() ==
                 first_output_tv->getRootDomain().size(),
             "Multiple outputs with mismatched dimensions is not supported. ",
-            "Only supported case is welford op where all outputs tvs have idential domains.");
+            "Only supported case is welford op where all outputs tvs have identical domains.");
         // p->f, c->c
         std::unordered_map<IterDomain*, IterDomain*> c2f_root_map;
         for (const auto i :

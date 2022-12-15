@@ -111,6 +111,9 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        # F.channel_shuffle and torch.channel_shuffle are essentially the same thing
+        # so we only need to put one of them here
+        torch.channel_shuffle,
     ]
     method_list = [
         "clamp",
@@ -131,6 +134,7 @@ def is_copy_node(node, modules):
         torch.nn.MaxPool3d,
         torch.nn.ReLU,
         torch.nn.ReLU6,
+        torch.nn.ChannelShuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -280,7 +284,7 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
 }
 
 # Mapping from a functional to a dictionary, where the key is a 2-tuple of
-# (activation_compute_dtype, weight_dtype) and the value is a 2-tuple of
+# (input_activation_dtype, weight_dtype) and the value is a 2-tuple of
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
 DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Dict[Tuple[torch.dtype, torch.dtype], Tuple[Callable, Optional[Callable]]]] = {
@@ -533,9 +537,9 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
            input_dynamic_q_node.target != torch.quantize_per_tensor_dynamic:
             continue
 
-        activation_compute_dtype = input_dynamic_q_node.args[1]
-        is_fp16 = activation_compute_dtype == torch.float16
-        is_int8 = activation_compute_dtype in [torch.quint8, torch.qint8]
+        activation_dtype = input_dynamic_q_node.args[1]
+        is_fp16 = activation_dtype == torch.float16
+        is_int8 = activation_dtype in [torch.quint8, torch.qint8]
         if not is_int8 and not is_fp16:
             continue
 
@@ -688,9 +692,9 @@ def _lower_dynamic_weighted_ref_functional(
             continue
 
         reduce_range_node = None
-        (pattern_input, activation_compute_dtype, reduce_range_node) = input_dynamic_q_node.args
-        is_fp16 = activation_compute_dtype == torch.float16
-        is_int8 = activation_compute_dtype in [torch.quint8, torch.qint8]
+        (pattern_input, activation_dtype, reduce_range_node) = input_dynamic_q_node.args
+        is_fp16 = activation_dtype == torch.float16
+        is_int8 = activation_dtype in [torch.quint8, torch.qint8]
         if not is_int8 and not is_fp16:
             continue
 
@@ -698,7 +702,7 @@ def _lower_dynamic_weighted_ref_functional(
         weight_dtype = quantized_weight.args[-1]
 
         # Step 1: Try to select reference pattern with the corresponding quantized op
-        dynamic_quant_dtype_key = (activation_compute_dtype, weight_dtype)
+        dynamic_quant_dtype_key = (activation_dtype, weight_dtype)
         if dynamic_quant_dtype_key not in DYNAMIC_LOWER_FUNCTIONAL_MAP[func_node.target]:
             print(f"Didn't find dtype combination {dynamic_quant_dtype_key} during "
                   f"dynamic quantized op lowering for {func_node.target}")
@@ -825,7 +829,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        dq_node_or_nodes = ref_node.args[0]
+        assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
+        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
         assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):

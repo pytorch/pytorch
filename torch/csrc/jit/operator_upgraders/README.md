@@ -226,7 +226,7 @@ def foo(x, y, z=100):
     return x, y, z
 ```
 
-2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch Github](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
+2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch GitHub](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
 
     - Adding new default argument:
     - Adding a new default argument not RIGHT BEFORE the out arguments which can be 0 or more.

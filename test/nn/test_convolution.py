@@ -994,8 +994,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
-    @tf32_on_and_off(0.005)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @tf32_on_and_off(0.005)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -1412,7 +1412,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:feat_dim]
 
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion

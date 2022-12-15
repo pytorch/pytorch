@@ -89,18 +89,15 @@ assert len(BATCH_SIZE_KNOWN_MODELS)
 
 
 SKIP = {
-    # Difficult to run and compare
+    # Difficult to setup accuracy test because .eval() not supported
     "Reformer",
     # Fails deepcopy
-    "BlenderbotForCausalLM",
     "BlenderbotForConditionalGeneration",
-    "GPTJForCausalLM",
-    "GPTJForQuestionAnswering",
     "GPTNeoForCausalLM",
     "GPTNeoForSequenceClassification",
     # Fails with even batch size = 1
-    "DebertaV2ForMaskedLM",
-    "DebertaV2ForQuestionAnswering",
+    "GPTJForCausalLM",
+    "GPTJForQuestionAnswering",
 }
 
 # TODO - Fails even after fake tensors
@@ -108,23 +105,61 @@ BATCH_SIZE_DIVISORS = {
     "AlbertForMaskedLM": 2,
     "AlbertForQuestionAnswering": 2,
     "AllenaiLongformerBase": 2,
+    "BartForCausalLM": 2,
     "BartForConditionalGeneration": 2,
     "BertForMaskedLM": 2,
-    "BlenderbotSmallForCausalLM": 2,
+    "BertForQuestionAnswering": 2,
+    "BlenderbotForCausalLM": 8,
+    # "BlenderbotForConditionalGeneration" : 16,
+    "BlenderbotSmallForCausalLM": 4,
     "BlenderbotSmallForConditionalGeneration": 2,
+    "CamemBert": 2,
+    "DebertaForMaskedLM": 8,
+    "DebertaForQuestionAnswering": 4,
+    "DebertaV2ForMaskedLM": 8,
+    "DebertaV2ForQuestionAnswering": 4,
+    "DistilBertForMaskedLM": 2,
+    "DistilBertForQuestionAnswering": 2,
+    "DistillGPT2": 2,
     "ElectraForCausalLM": 2,
     "ElectraForQuestionAnswering": 2,
     "GPT2ForSequenceClassification": 2,
+    # "GPTJForCausalLM" : 2,
+    # "GPTJForQuestionAnswering" : 2,
+    # "GPTNeoForCausalLM" : 32,
+    # "GPTNeoForSequenceClassification" : 2,
+    "GoogleFnet": 2,
     "LayoutLMForMaskedLM": 2,
     "LayoutLMForSequenceClassification": 2,
+    "M2M100ForConditionalGeneration": 4,
+    "MBartForCausalLM": 2,
+    "MBartForConditionalGeneration": 2,
+    "MT5ForConditionalGeneration": 2,
+    "MegatronBertForCausalLM": 4,
+    "MegatronBertForQuestionAnswering": 2,
+    "MobileBertForMaskedLM": 4,
+    "MobileBertForQuestionAnswering": 2,
+    "OPTForCausalLM": 2,
+    "PLBartForCausalLM": 2,
+    "PLBartForConditionalGeneration": 2,
+    "PegasusForCausalLM": 4,
+    "PegasusForConditionalGeneration": 2,
     "RobertaForCausalLM": 2,
+    "RobertaForQuestionAnswering": 2,
+    "Speech2Text2ForCausalLM": 4,
     "T5ForConditionalGeneration": 2,
-    # Large footprint
-    "BartForCausalLM": 4,
-    "DebertaForQuestionAnswering": 4,
-    "XLNetLMHeadModel": 4,
-    # Very large footprint
-    "DebertaForMaskedLM": 8,
+    "T5Small": 2,
+    "TrOCRForCausalLM": 2,
+    "XGLMForCausalLM": 4,
+    "XLNetLMHeadModel": 2,
+    "YituTechConvBert": 2,
+}
+
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine.
+    "DebertaV2ForMaskedLM",
+    "BlenderbotForCausalLM",
 }
 
 
@@ -139,18 +174,33 @@ def get_module_cls_by_model_name(model_cls_name):
 
 
 def get_sequence_length(model_cls, model_name):
-    if model_name.startswith(("Bert", "Roberta", "Blenderbot")):
+    if model_name.startswith(("Blenderbot",)):
         seq_length = 128
-    elif model_name.startswith(("GPT2", "Bart", "T5")):
+    elif model_name.startswith(("GPT2", "Bart", "T5", "PLBart", "MBart")):
         seq_length = 1024
     elif model_name in ("AllenaiLongformerBase", "BigBird"):
         seq_length = 1024
+    elif model_name.startswith("OPT"):
+        seq_length = 2048
     elif "Reformer" in model_name:
         seq_length = 4096
     elif model_name.startswith(
-        ("Albert", "Deberta", "Layout", "Electra", "XLNet")
+        (
+            "Albert",
+            "Deberta",
+            "Layout",
+            "Electra",
+            "XLNet",
+            "MegatronBert",
+            "Bert",
+            "Roberta",
+        )
     ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
         seq_length = 512
+    elif model_name in ("TrOCRForCausalLM"):
+        seq_length = 256
+    elif model_name.startswith("MobileBert"):
+        seq_length = 128
     else:
         log.warning(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
@@ -287,10 +337,10 @@ EXTRA_MODELS = {
         AutoConfig.from_pretrained("t5-small"),
         AutoModelForSeq2SeqLM,
     ),
-    "BigBird": (
-        BigBirdConfig(attention_type="block_sparse"),
-        AutoModelForMaskedLM,
-    ),
+    # "BigBird": (
+    #     BigBirdConfig(attention_type="block_sparse"),
+    #     AutoModelForMaskedLM,
+    # ),
     "DistillGPT2": (
         AutoConfig.from_pretrained("distilgpt2"),
         AutoModelForCausalLM,
@@ -404,6 +454,12 @@ class HuggingfaceRunner(BenchmarkRunner):
                 continue
             yield model_name
 
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard or self.args.accuracy:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
+
     def pick_grad(self, name, is_training):
         if is_training:
             return torch.enable_grad()
@@ -424,7 +480,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        self.optimizer_zero_grad()
+        self.optimizer_zero_grad(mod)
         with self.autocast():
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)
@@ -461,10 +517,10 @@ def refresh_model_names_and_batch_sizes():
         if model_cls in [
             CLIPModel,
             CLIPVisionModel,
-            SwinForImageClassification,
-            SwinForImageClassification,
-            SwinForMaskedImageModeling,
-            SwinModel,
+            # SwinForImageClassification,
+            # SwinForImageClassification,
+            # SwinForMaskedImageModeling,
+            # SwinModel,
             ViTForImageClassification,
             ViTForMaskedImageModeling,
             ViTModel,
