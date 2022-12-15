@@ -26,6 +26,8 @@ except ImportError:
 
 aten = torch.ops.aten  # type: ignore[has-type]
 
+log = logging.getLogger(__name__)
+
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
@@ -338,7 +340,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr, other_expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr}, {other_expr})")
+            log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -367,7 +369,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            logging.warning(f"failed to eval {method}({expr})")
+            log.warning(f"failed to eval {method}({expr})")
             raise
         out = sympy.expand(out)
         pytype: Type
@@ -744,7 +746,7 @@ class ShapeEnv(object):
             try:
                 exprs.append(ShapeGuardPrinter(symbol_to_source).doprint(g))
             except Exception:
-                logging.warning(f"Failing guard allocated at:\n{tb}")
+                log.warning(f"Failing guard allocated at:\n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
