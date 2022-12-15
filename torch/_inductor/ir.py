@@ -3349,30 +3349,6 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-# class InplaceBernoulliFallback(ExternKernel):
-
-#         (x,) = [t.codegen_reference() for t in self.inputs]
-#         wrapper.writeline(
-#             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
-#         )
-
-#     def should_allocate(self):
-#         return False
-
-#     def get_mutation_names(self):
-#         assert isinstance(self.layout, MutationLayout)
-#         return (self.layout.target.get_name(),)
-
-#     def __init__(self, x, *constant_args):
-#         super().__init__(
-#             None,
-#             MutationLayout(x),
-#             self.unwrap_storage([x]),
-#             constant_args,
-#         )
-#         self.name = V.graph.register_buffer(self)
-
-
 class Wait(ExternKernelAlloc):
     def __init__(
         self,
@@ -3399,7 +3375,6 @@ class AllReduce(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        # TODO should i call `self.unwrap_storage([inputs])` like Bernoulli?
         super().__init__(layout, inputs, constant_args)
         self.work = V.graph.register_work(self)
         self.name = V.graph.register_buffer(self)

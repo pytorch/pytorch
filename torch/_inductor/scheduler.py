@@ -1117,24 +1117,22 @@ class Scheduler:
                     or node.is_template()
                 ):
                     self.flush()
-                    print(f"Switching from {self.current_device} to {device}")
                     self.current_device = device
-            with torch.cuda.device(self.current_device):
-                self.buffer_names_to_free.update(node.last_usage)
+            self.buffer_names_to_free.update(node.last_usage)
 
-                if node.is_template():
-                    self.codegen_template_call(node)
-                elif node.is_extern():
-                    self.codegen_extern_call(node)
-                elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                    self.get_backend(device).codegen_nodes(node.get_nodes())
-                else:
-                    assert isinstance(node, NopKernelSchedulerNode)
-                    node.allocate()
+            if node.is_template():
+                self.codegen_template_call(node)
+            elif node.is_extern():
+                self.codegen_extern_call(node)
+            elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                self.get_backend(device).codegen_nodes(node.get_nodes())
+            else:
+                assert isinstance(node, NopKernelSchedulerNode)
+                node.allocate()
 
-                if config.triton.debug_sync_kernel:
-                    self.get_backend(device).codegen_sync()
+            if config.triton.debug_sync_kernel:
+                self.get_backend(device).codegen_sync()
 
-                self.available_buffer_names.update(node.get_names())
+            self.available_buffer_names.update(node.get_names())
 
         self.flush()
