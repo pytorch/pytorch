@@ -63,6 +63,6 @@ template <typename T>
 void to_float(const T* src, float* dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {
-    dst[i] = static_cast<float>(src[i]);;
+    dst[i] = static_cast<float>(src[i]);
   }
 }
