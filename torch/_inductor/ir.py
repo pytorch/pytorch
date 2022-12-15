@@ -2746,6 +2746,7 @@ class ExternKernelOut(ExternKernel):
         kwargs=None,
         output_view=None,
         kernel=None,
+        cpp_kernel=None,
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
@@ -2754,6 +2755,8 @@ class ExternKernelOut(ExternKernel):
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
+        if cpp_kernel is not None:
+            self.cpp_kernel = cpp_kernel
 
     def should_allocate(self):
         return True
