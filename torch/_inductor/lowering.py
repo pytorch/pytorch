@@ -968,10 +968,10 @@ def register_onednn_fusion_ops():
             weight: TensorBox,
             bias: TensorBox,
             padding,
+            output_padding,
             stride,
             dilation,
             groups,
-            output_padding,
             attr,
             scalars,
             algorithm,
@@ -982,10 +982,10 @@ def register_onednn_fusion_ops():
                     weight,
                     bias,
                     padding,
+                    output_padding,
                     stride,
                     dilation,
                     groups,
-                    output_padding,
                     attr,
                     scalars,
                     algorithm,
@@ -2658,6 +2658,40 @@ def max_pool2d_with_indices_backward(
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
+    try:
+        gO_stride = grad_output.get_stride()
+    except AttributeError:
+        # some classes don't have `get_stride`
+        # TODO will need a better way of determining if inputs are channels-last
+        gO_stride = None
+    if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):
+        data = x.data.data
+        x_buffer = ir.ComputedBuffer(
+            name=None,
+            layout=ir.FlexibleLayout(
+                device=data.get_device(),
+                dtype=data.get_dtype(),
+                size=data.get_size(),
+            ),
+            data=data,
+        )
+        x_buffer.decide_layout()
+        x_stride = x_buffer.get_stride()
+    else:
+        try:
+            x_stride = x.get_stride()
+        except AttributeError:
+            x_stride = None
+    if (
+        (x_stride is not None and x_stride[1] == 1)
+        or gO_stride is not None
+        and gO_stride[1] == 1
+    ):
+        # don't codegen channels-last, it's very slow
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
+
     indices.realize_hint()
 
     *batch, height, width = x.get_size()
