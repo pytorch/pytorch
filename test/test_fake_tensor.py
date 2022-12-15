@@ -578,6 +578,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
 
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_dead_weak_ref(self):
         x = torch.rand(2, 2, 2)
         y = x[0]

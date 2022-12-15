@@ -8330,7 +8330,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_weakref_dealloc(self):
 
         x = torch.empty(2)
@@ -8446,7 +8446,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
@@ -8475,6 +8475,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x._fix_weakref()
         del y
         x.sigmoid()
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_fix_weakref_no_leak(self):
+        import weakref
+
+        called = False
+
+        a = torch.randn(1)
+
+        def callback(w):
+            nonlocal called
+            called = True
+        wa = weakref.ref(a, callback)
+        a._fix_weakref()
+        del a
+
+        self.assertTrue(called)
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
