@@ -73,7 +73,7 @@ def _get_fsdp_root_states(module: nn.Module) -> List[_FSDPState]:
         if (
             optional_state is not None
             and optional_state not in visited_fsdp_states
-            and _is_fsdp_root(optional_state, module)
+            and _is_fsdp_root(optional_state, submodule)
         ):
             visited_fsdp_states.add(optional_state)
             fsdp_root_states.append(optional_state)
@@ -185,8 +185,6 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     has_hybrid_sharding_strategy = False
     for fsdp_state in _get_fsdp_states(root_module):
-        if root_state.rank == 0:
-            print(f"[Rank 0] {fsdp_state}")
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
                 hasattr(fsdp_state, attr_name),

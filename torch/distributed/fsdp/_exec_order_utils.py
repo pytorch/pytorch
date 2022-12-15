@@ -11,7 +11,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_fsdp_handles,
     _get_param_to_fqns,
 )
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 
 _HandlesKey = Tuple[FlatParamHandle, ...]
 
@@ -67,7 +67,7 @@ class _ExecOrderData:
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
         # Names are prefixed from the root module
-        self.param_to_fqn: Dict[FlatParameter, List[str]] = {}
+        self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
         self.current_order_index = 0
         self.warn_status = _ExecOrderWarnStatus.NONE
@@ -92,10 +92,6 @@ class _ExecOrderData:
             self.all_handles.append(handle)
             self.handle_to_handle_index[handle] = index
         self.param_to_fqn = _get_param_to_fqns(root_module)
-        if self.rank == 0:
-            print(
-                f"[Rank 0] param_to_fqn: {[(param.shape, fqn) for param, fqn in self.param_to_fqn.items()]}"
-            )
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
@@ -219,10 +215,6 @@ class _ExecOrderData:
             optional_local_indices: Tuple[
                 Optional[int], ...
             ] = self._get_handle_indices(handles_key)
-            if dist.get_rank() == 0:
-                print(
-                    f"[Rank 0] handles_key: {[h.flat_param._fqns for h in handles_key]}"
-                )
             device = handles_key[0].device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
@@ -258,8 +250,6 @@ class _ExecOrderData:
             world_indices = torch.zeros(  # type: ignore[call-overload]
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
-            if dist.get_rank() == 0:
-                print(f"[Rank 0] optional_local_indices: {optional_local_indices}")
             local_indices = torch.tensor(optional_local_indices, **tensor_kwargs)  # type: ignore[arg-type]
             dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group

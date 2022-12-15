@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import sys
+from enum import auto, Enum
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import torch
@@ -13,9 +14,9 @@ from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_fsdp_handles,
     _is_fsdp_flattened,
 )
-from torch.distributed.fsdp._common_utils import _get_fsdp_handles
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
@@ -40,6 +41,11 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class FSDPWrapMode(Enum):
+    AUTO_WRAP = auto()
+    MANUAL_WRAP = auto()
 
 
 class TestFSDPInitialization(FSDPTest):
@@ -225,15 +231,22 @@ class TestFSDPInitialization(FSDPTest):
         composable_module(inp)
 
         # Check that all modules with `fully_shard` applied share the same data
-        # structure state for the structures with the given names
+        # structure state for the structures with the given names (there is no
+        # need to check all of them to verify that the sharing worked).
         # NOTE: This check only requires that the data structure state is
         # shared. Namely, sharing the FSDP state object itself is sufficient
         # but not necessary.
         data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
         for data_structure_name in data_structure_names:
             all_structures = set()
-            for module in (composable_module.u1, composable_module.u2, composable_module):
-                all_structures.add(id(getattr(fully_shard.state(module), data_structure_name)))
+            for module in (
+                composable_module.u1,
+                composable_module.u2,
+                composable_module,
+            ):
+                all_structures.add(
+                    id(getattr(fully_shard.state(module), data_structure_name))
+                )
             self.assertEqual(len(all_structures), 1)
 
 
@@ -245,7 +258,9 @@ class TestFSDPRuntime(FSDPTest):
         return 2
 
     def _init_models_and_optims(
-        self, device: torch.device
+        self,
+        device: torch.device,
+        fsdp_wrap_mode: FSDPWrapMode,
     ) -> Tuple[nn.Module, torch.optim.Optimizer, nn.Module, torch.optim.Optimizer]:
         local_model = CompositeParamModel(device=device)
         fsdp_wrapped_model = FSDP(
@@ -254,10 +269,16 @@ class TestFSDPRuntime(FSDPTest):
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
-        fully_shard(
-            composable_module,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
+        if fsdp_wrap_mode == FSDPWrapMode.AUTO_WRAP:
+            fully_shard(
+                composable_module,
+                policy=ModuleWrapPolicy({UnitModule}),
+            )
+        elif fsdp_wrap_mode == FSDPWrapMode.MANUAL_WRAP:
+            fully_shard(composable_module.u2)
+            fully_shard(composable_module.u1)
+        else:
+            raise ValueError(f"Unknown `fsdp_wrap_mode`: {fsdp_wrap_mode}")
         LR = 1e-2
         fsdp_wrapped_optim = torch.optim.Adam(fsdp_wrapped_model.parameters(), lr=LR)
         composable_optim = torch.optim.Adam(composable_module.parameters(), lr=LR)
@@ -271,13 +292,24 @@ class TestFSDPRuntime(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_training(self):
         """Tests training (forward, backward, optimizer)."""
+        self.run_subtests(
+            {
+                "fsdp_wrap_mode": [
+                    FSDPWrapMode.AUTO_WRAP,
+                    FSDPWrapMode.MANUAL_WRAP,
+                ]
+            },
+            self._test_training,
+        )
+
+    def _test_training(self, fsdp_wrap_mode: FSDPWrapMode):
         device = torch.device("cuda")
         (
             composable_module,
             composable_optim,
             fsdp_wrapped_model,
             fsdp_wrapped_optim,
-        ) = self._init_models_and_optims(device)
+        ) = self._init_models_and_optims(device, fsdp_wrap_mode)
         for _ in range(5):
             inp = torch.randn(2, 100, device="cuda")
             losses: List[torch.Tensor] = []
@@ -460,16 +492,11 @@ class TestMixedPrecision(FSDPTest):
         model.c2 = fully_shard(model.c2, mixed_precision=float16)
         fsdp = fully_shard(model)
 
-        with self.assertRaisesRegex(
-            TypeError,
-            "cannot assign 'torch.cuda.FloatTensor' as parameter 'weight'",
-        ):
-            # FIXME: fully_shard() does not support nested wrapping yet.
-            fsdp(x).sum().backward()
+        fsdp(x).sum().backward()
 
-            self.assertEqual(forward_inputs[model].dtype, torch.float32)
-            self.assertEqual(forward_inputs[c1].dtype, torch.float32)
-            self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+        self.assertEqual(forward_inputs[model].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
+        self.assertEqual(forward_inputs[c2].dtype, torch.float16)
 
 
 class TestFSDPModelCheckpointing(FSDPTest):

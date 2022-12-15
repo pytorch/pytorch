@@ -39,6 +39,7 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
         self.rank: int = -1
 
 
