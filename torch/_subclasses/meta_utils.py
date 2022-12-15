@@ -5,6 +5,7 @@ from typing import ContextManager, Optional
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import WeakTensorRefKey
 
 
 def safe_is_leaf(t):
@@ -56,39 +57,6 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
         # TODO: test forward AD
 
     return go(m1, m2)
-
-
-# torch.Tensors cannot be used as a key in a dictionary
-# because they define a custom __eq__ function which when used
-# to resolve hash collisions will throw when comparing tensors:
-# "RuntimeError: bool value of Tensor with more than one value is ambiguous."
-# To avoid that, we use an object which will hold a Tensor and use
-# its id for both hashing and equality.
-# In order to use this as a weak key reference, we cannot
-# simply use weakref.WeakKeyDictionary because the newly constructed
-# WeakTensorRefKey only use would be a dictionary so it would have no strong
-# references.
-# To get around this issue, we can use it as a normal key, and then set
-# `weakref.finalize` to delete the key when its contained tensor dies.
-
-
-class WeakTensorRefKey(object):
-    def __init__(self, ten):
-        self.ten = weakref.ref(ten)
-        # store id since as soon as ten is deallocated
-        # the old id will no longer be recoverable, and
-        # we need to be able to remove the WeakTensorRefKey
-        # from the dictionary by hashing it to the same
-        # value it had when ten was alive
-        self.id = id(self.ten())
-
-    def __hash__(self):
-        return self.id
-
-    def __eq__(self, other):
-        if id(self) == id(other):
-            return True
-        return self.id == other.id
 
 
 # This is a class for converting multiple tensors into meta tensors which
