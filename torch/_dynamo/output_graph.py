@@ -47,7 +47,7 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy, FakeSource
+from .variables.builder import FakeSource, GraphArg, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,

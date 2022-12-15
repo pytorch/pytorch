@@ -776,7 +776,7 @@ class ShapeEnv(object):
         # it's different enough that it seemed cleanest to make
         # another copy.  This assumes the guards are already checked,
         # though if it's cheap we'll check for shenanigans
-        bindings = {}
+        bindings: Dict[sympy.Symbol, int] = {}
 
         def bind_symint(arg, val):
             if isinstance(val, SymInt):

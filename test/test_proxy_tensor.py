@@ -822,9 +822,7 @@ def forward(self, x_1, y_1):
         test_inputs.append([(6, 8)])
         gm = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
-        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))),
-            "{s0: 4, s1: 5}"
-        )
+        self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         # TODO: There should eventually be guards for contiguity, but they're
         # not currently being done yet
