@@ -456,12 +456,10 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
+        # Cast this in-place to ensure that gradients propagate to `x` in the
+        # case that it requires gradients
+        x.data = x.to(dtype)
+        return x
 
     with torch.no_grad():
         return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
@@ -621,6 +619,8 @@ def _post_backward_hook(
                         state=state._inter_node_state,
                         grad=new_sharded_grad,
                     )
+                if state.rank == 0:
+                    print(f"[Rank 0] flat_param: {flat_param.dtype} new_sharded_grad: {new_sharded_grad.dtype}")
                 _cast_grad_to_param_dtype(state, new_sharded_grad, flat_param)
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient

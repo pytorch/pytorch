@@ -718,6 +718,50 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # for syncBN
         model(inp).sum().backward()
 
+    @skip_if_lt_x_gpu(2)
+    def test_input_grads_with_param_mixed_precision(self):
+        """
+        Tests that input tensors that require gradients do get their gradients
+        even after being cast to a low precision (when parameter mixed
+        precision is enabled).
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [False, True],
+            },
+            self._test_input_grads_with_param_mixed_precision,
+        )
+
+    def _test_input_grads_with_param_mixed_precision(
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+    ):
+        model = nn.Linear(1024, 1024, bias=False)
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float32,
+            buffer_dtype=torch.float32,
+        )
+        fsdp_model = FSDP(
+            model,
+            sharding_strategy=sharding_strategy,
+            mixed_precision=mixed_precision,
+            device_id=torch.cuda.current_device(),
+            use_orig_params=use_orig_params,
+        )
+        # Use an input with dtype not equal to the mixed precision
+        # `param_dtype` so that it gets cast
+        x_float = torch.randn(32, 1024, device="cuda", dtype=torch.float32)
+        x_float.requires_grad_()
+        fsdp_model(x_float).sum().backward()
+        self.assertTrue(x_float.grad is not None)
+
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
