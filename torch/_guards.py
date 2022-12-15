@@ -20,6 +20,7 @@ An important thing to keep in mind here is the preservation of layering. There s
 and no guard installation notions here.
 """
 
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -177,6 +178,7 @@ class Guard:
         ), "Guarded object must be identical, or None"
         self.obj_weakref = obj_weakref
 
+
 T = TypeVar("T")
 
 """
@@ -185,6 +187,8 @@ A GuardEnvExpr can have any subtype.
 Note: All subtypes must be handled exhaustively in
 torch._dynamo.guards._parse_guard_env_guards to avoid a RuntimeError.
 """
+
+
 @dataclasses.dataclass
 class GuardEnvExpr:
     pass
@@ -195,6 +199,7 @@ A class representing a pair of duplicate inputs.
 input_pos_a and input_pos_b are input positions we have deduped.
 """
 
+
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
     input_pos_a: int
@@ -202,6 +207,7 @@ class DuplicateInputs(GuardEnvExpr):
 
     def __post_init__(self):
         assert self.input_pos_a != self.input_pos_b
+
 
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
@@ -214,6 +220,7 @@ does not provide any garuantees around consistency, idempotency, or safety of ca
 
 In the future, it will have a closer coupling to a generic Checkpoint management system.
 """
+
 
 class Checkpointable(ABC, Generic[T]):
     def copy_graphstate(self) -> T:
@@ -258,6 +265,7 @@ directly outside of it. For passing around internal state representations of thi
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
 
+
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
@@ -268,6 +276,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def restore_graphstate(self, state):
         assert isinstance(state, GuardsCheckpointState)
         self.dynamo_guards = state.dynamo_guards
+
 
 _CURRENT_TRACING_CONTEXT = None
 

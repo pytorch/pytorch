@@ -15,7 +15,13 @@ import sympy
 
 import torch
 
-from torch._guards import DuplicateInputs, Guard, GuardBuilderBase, GuardSource
+from torch._guards import (
+    DuplicateInputs,
+    Guard,
+    GuardBuilderBase,
+    GuardEnvExpr,
+    GuardSource,
+)
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
