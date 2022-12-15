@@ -246,8 +246,15 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           const std::string& num = L.expect(TK_NUMBER).text();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          auto stride = c10::stoll(num, &num_len);
-          strides.push_back(stride);
+          try {
+            auto stride = c10::stoll(num, &num_len);
+            strides.push_back(stride);
+          } catch (const std::invalid_argument& e) {
+            throw ErrorReport(L.cur())
+                << "The stride value cannot be converted to int";
+          } catch (const std::out_of_range& e) {
+            throw ErrorReport(L.cur()) << "The stride is too big";
+          }
         });
         return;
       }
@@ -278,7 +285,14 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    int64_t dim = c10::stoll(num, &num_len);
+    int64_t dim = 0;
+    try {
+      dim = c10::stoll(num, &num_len);
+    } catch (const std::invalid_argument& e) {
+      throw ErrorReport(L.cur()) << "The number can't be converted to int";
+    } catch (const std::out_of_range& e) {
+      throw ErrorReport(L.cur()) << "Number is too big";
+    }
     if (shape_symbol) {
       L.expect(')');
       dim = -dim;
