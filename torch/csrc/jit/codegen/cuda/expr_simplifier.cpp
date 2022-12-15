@@ -16,6 +16,107 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+namespace debug_print {
+
+// In order to print transformations from expr simplifier, use:
+//   PYTORCH_NVFUSER_DUMP="expr_simplify"
+// By default (i.e. no trigger specified), enabling the above debug dump option
+// will trigger printing when the expression is transformed by at least one
+// simplification pass (A simplification pass is a pass that is not a flatten
+// or unflatten). If you want to print even if there is no simplification pass,
+// applied, use the following:
+//   PYTORCH_NVFUSER_DUMP="expr_simplify(assoc_comm::flatten)"
+// If you want to trigger printing only on a specified set of passes, put the
+// pass names as arguments of `expr_simplify`, for example:
+//   PYTORCH_NVFUSER_DUMP="expr_simplify(eliminateTrivialComputation)"
+
+constexpr const char* kFlattenName = "assoc_comm::flatten";
+constexpr const char* kUnflattenName = "assoc_comm::flatten";
+
+struct Record {
+  const char* name;
+  Val* result;
+};
+
+class NoOpLogger {
+ public:
+  NoOpLogger(Val*) {}
+  virtual ~NoOpLogger() {}
+  virtual void record(const char*, Val*) {}
+};
+
+class Logger : public NoOpLogger {
+  bool shouldPrint() {
+    if (current_val_->sameAs(init_val_)) {
+      return false;
+    }
+    auto triggers = getDebugDumpArguments(DebugDumpOption::ExprSimplification);
+    if (triggers.empty()) {
+      for (auto r : record_) {
+        if (r.name != kFlattenName && r.name != kUnflattenName) {
+          return true;
+        }
+      }
+      return false;
+    }
+    for (auto r : record_) {
+      if (std::find(triggers.begin(), triggers.end(), r.name) !=
+          triggers.end()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ public:
+  Logger(Val* value)
+      : NoOpLogger(value), init_val_(value), current_val_(value) {}
+
+  virtual ~Logger() override {
+    if (!shouldPrint()) {
+      return;
+    }
+
+    auto str = [](Val* v) {
+      std::stringstream ss;
+      ss << ir_utils::varName(v) << " = " << v->toInlineString();
+      return ss.str();
+    };
+
+    std::string header = "Simplifying expression:\n" + str(init_val_);
+    std::cout << header << std::endl;
+    for (auto r : record_) {
+      std::cout << r.name << ":\n" << str(r.result) << std::endl;
+    }
+    std::cout << std::string(std::min<size_t>(header.size(), 80), '=')
+              << std::endl;
+  }
+
+  virtual void record(const char* name, Val* value) override {
+    if (value->sameAs(current_val_)) {
+      return;
+    } else {
+      record_.emplace_back(Record{name, value});
+      current_val_ = value;
+    }
+  }
+
+ private:
+  std::vector<Record> record_;
+  Val* init_val_;
+  Val* current_val_;
+};
+
+std::unique_ptr<debug_print::NoOpLogger> createLogger(Val* value) {
+  if (isDebugDumpEnabled(DebugDumpOption::ExprSimplification)) {
+    return std::make_unique<Logger>(value);
+  } else {
+    return std::make_unique<NoOpLogger>(value);
+  }
+}
+
+} // namespace debug_print
+
 namespace {
 
 bool hasSimilarType(DataType t1, DataType t2) {
@@ -736,88 +837,29 @@ Val* eliminateTrivialComputation(Val* value) {
 
 } // namespace rules
 
-namespace debug_print {
-
-struct Record {
-  const char* name;
-  Val* result;
-};
-
-class NoOpLogger {
- public:
-  NoOpLogger(Val*) {}
-  virtual ~NoOpLogger() {}
-  virtual void record(const char*, Val*) {}
-};
-
-class Logger : public NoOpLogger {
- public:
-  Logger(Val* value)
-      : NoOpLogger(value), init_val_(value), current_val_(value) {}
-
-  virtual ~Logger() override {
-    // if (current_val_->sameAs(init_val_)) {
-    //   return;
-    // }
-    auto str = [](Val* v) {
-      return v->toString() + " = " + v->toInlineString();
-    };
-    std::string header = "Simplifying expression: " + str(init_val_);
-    std::cout << header << std::endl;
-    for (auto r : record_) {
-      std::cout << r.name << ": " << str(r.result) << std::endl;
-    }
-    std::cout << std::string(std::min<size_t>(header.size(), 80), '=')
-              << std::endl;
-  }
-
-  virtual void record(const char* name, Val* value) override {
-    if (value->sameAs(current_val_)) {
-      return;
-    } else {
-      record_.emplace_back(Record{name, value});
-      current_val_ = value;
-    }
-  }
-
- private:
-  std::vector<Record> record_;
-  Val* init_val_;
-  Val* current_val_;
-};
-
-std::unique_ptr<debug_print::NoOpLogger> createLogger(Val* value) {
-  if (isDebugDumpEnabled(DebugDumpOption::ExprSimplification)) {
-    return std::make_unique<Logger>(value);
-  } else {
-    return std::make_unique<NoOpLogger>(value);
-  }
-}
-
-} // namespace debug_print
+#define RUN_PASS(pass_name)                               \
+  simplified = recurseDown(simplified, rules::pass_name); \
+  logger->record(#pass_name, simplified)
 
 Val* simplifyExpr(Val* value, const std::list<ValInfo>& variables) {
   FusionGuard fg(value->fusion());
   auto logger = debug_print::createLogger(value);
 
   auto simplified = assoc_comm::flatten(value);
-  logger->record("assoc_comm::flatten", simplified);
+  logger->record(debug_print::kFlattenName, simplified);
 
-  while (true) {
-    auto new_simplified = simplified;
-    new_simplified =
-        recurseDown(new_simplified, rules::eliminateTrivialComputation);
-    logger->record("eliminateTrivialComputation", new_simplified);
-    if (new_simplified == simplified) {
-      break;
-    }
-    simplified = new_simplified;
+  Val* old_simplified = nullptr;
+  while (old_simplified != simplified) {
+    old_simplified = simplified;
+    RUN_PASS(eliminateTrivialComputation);
   }
 
   auto unflattened = assoc_comm::unflatten(simplified, variables);
-  logger->record("assoc_comm::unflatten", unflattened);
+  logger->record(debug_print::kUnflattenName, unflattened);
   return unflattened;
 }
+
+#undef RUN_PASS
 
 } // namespace cuda
 } // namespace fuser
