@@ -8,7 +8,7 @@ import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from unittest.mock import patch
 
 import numpy as np
