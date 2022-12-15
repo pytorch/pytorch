@@ -1,6 +1,16 @@
 import functools
 import warnings
-from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 import torch.nn as nn
@@ -12,6 +22,7 @@ from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
     _get_fsdp_states,
+    _get_module_fsdp_state,
     _is_composable,
     TrainingState,
 )
