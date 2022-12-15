@@ -56,6 +56,70 @@ TEST_F(NVFuserTest, FusionAssociativeAndCommutativeReordering_CUDA) {
       expect->toInlineString());
 }
 
+TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto i = IrBuilder::create<NamedScalar>("i", DataType::Int);
+  auto d = IrBuilder::create<NamedScalar>("d", DataType::Double);
+  auto b = IrBuilder::create<NamedScalar>("b", DataType::Bool);
+  auto i0 = IrBuilder::create<Int>(0);
+  auto i1 = IrBuilder::create<Int>(1);
+  auto d0 = IrBuilder::create<Double>(0);
+  auto d1 = IrBuilder::create<Double>(1);
+  auto t = IrBuilder::create<Bool>(true);
+  auto f = IrBuilder::create<Bool>(false);
+
+  // 1 * a -> a
+  TORCH_CHECK(simplifyExpr(mul(i1, i))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(mul(d1, d))->sameAs(d));
+  // a * 1 -> a
+  TORCH_CHECK(simplifyExpr(mul(i, i1))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(mul(d, d1))->sameAs(d));
+  // 0 * a -> 0
+  TORCH_CHECK(simplifyExpr(mul(i0, i))->sameAs(i0));
+  TORCH_CHECK(simplifyExpr(mul(d0, d))->sameAs(d0));
+  // a * 0 -> 0
+  TORCH_CHECK(simplifyExpr(mul(i, i0))->sameAs(i0));
+  TORCH_CHECK(simplifyExpr(mul(d, d0))->sameAs(d0));
+
+  // 0 + a -> a
+  TORCH_CHECK(simplifyExpr(add(i0, i))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(add(d0, d))->sameAs(d));
+  // a + 0 -> a
+  TORCH_CHECK(simplifyExpr(add(i, i0))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(add(d, d0))->sameAs(d));
+
+  // true && a -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(t, b))->sameAs(b));
+  // a && true -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(b, t))->sameAs(b));
+  // false && a -> false
+  TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(f, b))->sameAs(f));
+  // a && false -> false
+  TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(b, f))->sameAs(f));
+
+  // true || a -> true
+  TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(t, b))->sameAs(t));
+  // a || true -> true
+  TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(b, t))->sameAs(t));
+  // false || a -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(f, b))->sameAs(b));
+  // a || false -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(b, f))->sameAs(b));
+
+  // a / 1 -> a
+  TORCH_CHECK(simplifyExpr(cpp_div(i, i1))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(cpp_div(d, d1))->sameAs(d));
+  // 0 / a -> 0
+  // TODO: reenable this when we can reliably detect divide-by-zero error.
+  // TORCH_CHECK(simplifyExpr(cpp_div(i0, i))->sameAs(i0));
+  // TORCH_CHECK(simplifyExpr(cpp_div(d0, d))->sameAs(d0));
+  // a % 1 -> 0
+  TORCH_CHECK(simplifyExpr(mod(i, i1))->sameAs(i0));
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

@@ -128,6 +128,10 @@ Val* IrBuilder::andExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::And, lhs, rhs);
 }
 
+Val* IrBuilder::orExpr(Val* lhs, Val* rhs) {
+  return newLogicExpr(BinaryOpType::Or, lhs, rhs);
+}
+
 Val* IrBuilder::eqExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::Eq, lhs, rhs);
 }

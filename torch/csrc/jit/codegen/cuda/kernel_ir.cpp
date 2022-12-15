@@ -560,7 +560,7 @@ Val* ForLoop::step() const {
 }
 
 Val* ForLoop::simplifiedStop() const {
-  return simplifyExpr(stop(), {});
+  return simplifyExpr(stop());
 }
 
 bool ForLoop::isTrivial() const {

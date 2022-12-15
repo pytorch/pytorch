@@ -555,7 +555,7 @@ struct ValInfo {
 // - Associative and commutative operator reordering
 TORCH_CUDA_CU_API Val* simplifyExpr(
     Val* value,
-    const std::list<ValInfo>& variables);
+    const std::list<ValInfo>& variables = {});
 
 } // namespace cuda
 } // namespace fuser

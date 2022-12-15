@@ -60,6 +60,7 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   // Binary operations
   static Val* andExpr(Val* lhs, Val* rhs);
+  static Val* orExpr(Val* lhs, Val* rhs);
   static Val* eqExpr(Val* lhs, Val* rhs);
   static Val* gtExpr(Val* lhs, Val* rhs);
   static Val* ltExpr(Val* lhs, Val* rhs);
@@ -79,10 +80,34 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   static Val* newScalar(DataType dtype);
 
+  template <typename T>
+  static Val* newConstant(T value, DataType dtype);
+
  private:
   static Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
   static Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 };
+
+template <typename T>
+Val* IrBuilder::newConstant(T value, DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+      return IrBuilder::create<Bool>((bool)value);
+    case DataType::Float:
+    case DataType::Double:
+      return IrBuilder::create<Double>((double)value, dtype);
+    case DataType::Int:
+    case DataType::Int32:
+    case DataType::Index:
+      return IrBuilder::create<Int>((int64_t)value, dtype);
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return IrBuilder::create<ComplexDouble>(
+          (std::complex<double>)value, dtype);
+    default:
+      TORCH_CHECK(false, "Unexpected data type: ", dtype);
+  }
+}
 
 //! A wrapper builder with static expression simplification
 //!
