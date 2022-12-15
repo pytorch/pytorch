@@ -16,7 +16,7 @@ from .qnnpack import (
     qnnpack_default_op_qint8_symmetric_dtype_config
 )
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import _reverse_sequential_wrapper2
+from ..fuser_method_mappings import _sequential_wrapper2
 
 
 __all__ = [
@@ -115,15 +115,15 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
                 ._set_input_type_to_index({"weight": 1, "bias": 2}))
         # conv module + relu module
         conv_configs.append(
-            BackendPatternConfig((torch.nn.ReLU, convs.root))
+            BackendPatternConfig((convs.root, nn.ReLU))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv module + functional relu
         conv_configs.append(
-            BackendPatternConfig((F.relu, convs.root))
+            BackendPatternConfig((convs.root, F.relu))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # fused conv relu module
         conv_configs.append(
@@ -135,12 +135,12 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
                 .set_qat_module(convs.relu_qat))
         # functional conv + relu module
         conv_configs.append(
-            BackendPatternConfig((torch.nn.ReLU, convs.func))
+            BackendPatternConfig((convs.func, nn.ReLU))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
         # functional conv + functional relu
         conv_configs.append(
-            BackendPatternConfig((F.relu, convs.func))
+            BackendPatternConfig((convs.func, F.relu))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
     return conv_configs
