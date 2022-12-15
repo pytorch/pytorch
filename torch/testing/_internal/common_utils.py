@@ -2134,9 +2134,10 @@ class TestCase(expecttest.TestCase):
             return
 
         if using_unittest:
-            failures_before = 0 if result is None else len(result.failures) # num tests marked as failed before starting
-            errors_before = 0 if result is None else len(result.errors)     # num tests marked as errored before starting
-            skipped_before = 0 if result is None else len(result.skipped)   # num tests marked as skipped before starting
+            # Keep track of the number of tests marked as failures, errors, and skipped before starting
+            failures_before = 0 if result is None else len(result.failures)
+            errors_before = 0 if result is None else len(result.errors)
+            skipped_before = 0 if result is None else len(result.skipped)
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
