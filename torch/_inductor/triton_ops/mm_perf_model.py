@@ -41,7 +41,11 @@ def estimate_matmul_time(
 
     # time to compute
     total_ops = 2 * M * N * K / (1024 * 1024 * 1024)  # GOPS
-    tput = get_tflops(backend, device, num_ctas, num_warps, dtype)
+    print("dtype: ", dtype)
+    if dtype == torch.int32:
+        tput = get_tflops(backend, device, num_ctas, num_warps, torch.float32)
+    else:
+        tput = get_tflops(backend, device, num_ctas, num_warps, dtype)
     compute_ms = total_ops / tput
 
     # time to load data

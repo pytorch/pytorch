@@ -32,7 +32,7 @@
 #include <ATen/ops/relu.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
-#include <ATen/ops/_triton_addmm_native.h>
+#include <ATen/ops/_triton_addmm.h>
 #endif
 
 namespace at { namespace native {
@@ -152,12 +152,28 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
 
+  std::cout << "self.scalar_type: " << self.scalar_type();
+  std::cout << "mat1.scalar_type: " << mat1.scalar_type();
+  std::cout << "mat2.scalar_type: " << mat2.scalar_type();
+  std::cout << "result.scalar_type: " << result.scalar_type();
+  std::cout << std::endl;
+
+  if (self.scalar_type() == at::ScalarType::Int) {
+    const auto triton_kernel = c10::Dispatcher::singleton().findOp(torch::jit::parseName("aten::_triton_addmm"));
+    TORCH_CHECK(triton_kernel->hasKernelForDispatchKey(c10::DispatchKey::CUDA), "CUDA addmm for int32 requires Triton.");
+    // TODO: Dear Reviewer, do we need a Triton specific TF32 Context manager?
+    at::_triton_addmm(self, mat1.alias(), mat2.alias(), beta, alpha, result, true);
+    return result;
+  }
+
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
+
+
 
   if (&result != &self) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
@@ -207,6 +223,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
     return result;
   }
+
 
   bool transpose_result;
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
@@ -288,6 +305,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   } else
 #endif
   {
+    std::cout << "self.scalar_type: " << self.scalar_type();
+    std::cout << "mat1.scalar_type: " << mat1.scalar_type();
+    std::cout << "mat2.scalar_type: " << mat2.scalar_type();
+    std::cout << "result.scalar_type: " << result.scalar_type();
+    std::cout << std::endl;
+
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -315,6 +338,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_ptr,
               result_ld);
         });
+
     switch (activation) {
       case Activation::RELU:
         at::relu_(const_cast<Tensor&>(*result_));
@@ -415,15 +439,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
 } // anonymous namespace
 
-TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result_) {
-  Tensor& result = const_cast<Tensor&>(result_);
-  if (result.scalar_type() == at::ScalarType::Int) {
-    const auto triton_kernel = c10::Dispatcher::singleton().findOp(torch::jit::parseName("aten::_triton_addmm"));
-    TORCH_CHECK(triton_kernel->hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA), "CUDA addmm for int32 requires Triton.");
-    at::native::_triton_addmm_out(self, mat1, mat2, beta, alpha, result);
-  } else {
-    addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha);
-  }
+TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {

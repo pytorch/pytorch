@@ -2,6 +2,7 @@ import torch
 
 from ..utils import has_triton
 
+print("000AJSKDLJS")
 if has_triton():
 
     import triton
@@ -9,8 +10,8 @@ if has_triton():
 
     from .autotune import mm_autotune, mm_heuristics
 
-    @mm_heuristics()
     @mm_autotune(get_io_bound_configs=True)
+    @mm_heuristics()
     @triton.jit
     def _kernel(
         A,
@@ -26,6 +27,7 @@ if has_triton():
         stride_cm,
         stride_cn,
         allow_tf32: tl.constexpr,
+        use_dot: tl.constexpr,
         BLOCK_M: tl.constexpr,
         BLOCK_N: tl.constexpr,
         BLOCK_K: tl.constexpr,
@@ -62,7 +64,12 @@ if has_triton():
             else:
                 a = tl.load(A, mask=rk[None, :] < k, other=0.0)
                 b = tl.load(B, mask=rk[:, None] < k, other=0.0)
-            acc += tl.dot(a, b, allow_tf32=allow_tf32)
+            if use_dot:
+                acc += tl.dot(a, b, allow_tf32=allow_tf32)
+            else:
+                for i in range(0, BLOCK_M):
+                    for j in range(0, BLOCK_N):
+                        pass
             A += BLOCK_K * SPLIT_K * stride_ak
             B += BLOCK_K * SPLIT_K * stride_bk
         acc = acc.to(C.dtype.element_ty)
@@ -77,57 +84,69 @@ if has_triton():
         else:
             tl.atomic_add(C, acc, mask=mask)
 
+    def _triton_addmm_gpu(self: torch.Tensor, a: torch.Tensor, b: torch.Tensor, beta: float, alpha: float, c: torch.Tensor, allow_tf32) -> torch.Tensor:
+        assert beta == 0
+        assert alpha == 1
+        # handle non-contiguous inputs if necessary
+        if a.stride(0) > 1 and a.stride(1) > 1:
+            a = a.contiguous()
+        if b.stride(0) > 1 and b.stride(1) > 1:
+            b = b.contiguous()
+        # checks constraints
+        assert a.shape[1] == b.shape[0], "incompatible dimensions"
+        M, K = a.shape
+        _, N = b.shape
+
+        # accumulator types
+        ACC_TYPE = (
+            tl.float32
+            if a.dtype in [torch.float16, torch.bfloat16, torch.float32]
+            else tl.int32
+        )
+
+        # launch kernel (grid defined as using def instead of lambda to pass `make lint`)
+        def grid(META):
+            return (
+                triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+                META["SPLIT_K"],
+            )
+
+        # grid = lambda META: (
+        #     triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
+        #     META["SPLIT_K"],
+        # )
+        use_dot = False
+        _kernel[grid](
+            a,
+            b,
+            c,
+            M,
+            N,
+            K,
+            a.stride(0),
+            a.stride(1),
+            b.stride(0),
+            b.stride(1),
+            c.stride(0),
+            c.stride(1),
+            allow_tf32=allow_tf32,
+            use_dot=use_dot,
+            GROUP_M=8,
+            ACC_TYPE=ACC_TYPE,
+        )
+
+        return c
+
+    print("AJSKDLJS")
+    aten_lib = torch.library.Library("aten", "IMPL")
+    aten_lib.impl("aten::_triton_addmm", _triton_addmm_gpu, "CUDA")
+
     class _matmul_out:
         kernel = _kernel
 
         @staticmethod
         def _call(a, b, out, allow_tf32=True):
-            # handle non-contiguous inputs if necessary
-            if a.stride(0) > 1 and a.stride(1) > 1:
-                a = a.contiguous()
-            if b.stride(0) > 1 and b.stride(1) > 1:
-                b = b.contiguous()
-            # checks constraints
-            assert a.shape[1] == b.shape[0], "incompatible dimensions"
-            M, K = a.shape
-            _, N = b.shape
-            # allocates output
-            c = out
-            # accumulator types
-            ACC_TYPE = (
-                tl.float32
-                if a.dtype in [torch.float16, torch.bfloat16, torch.float32]
-                else tl.int32
-            )
-
-            # launch kernel (grid defined as using def instead of lambda to pass `make lint`)
-            def grid(META):
-                return (
-                    triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-                    META["SPLIT_K"],
-                )
-
-            # grid = lambda META: (
-            #     triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),
-            #     META["SPLIT_K"],
-            # )
-            _kernel[grid](
-                a,
-                b,
-                c,
-                M,
-                N,
-                K,
-                a.stride(0),
-                a.stride(1),
-                b.stride(0),
-                b.stride(1),
-                c.stride(0),
-                c.stride(1),
-                allow_tf32=allow_tf32,
-                GROUP_M=8,
-                ACC_TYPE=ACC_TYPE,
-            )
+            _triton_addmm_gpu(out, out, a, b, 0, 1, allow_tf32);
 
         @staticmethod
         def forward(a, b, out, allow_tf32=True):

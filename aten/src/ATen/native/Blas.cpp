@@ -109,7 +109,7 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
   }
 }
 
-Tensor triton_addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+Tensor triton_addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result, bool allow_tf32) {
   TORCH_CHECK(false, "Triton variant does not run on CPU.");
   return self;
 }
