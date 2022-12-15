@@ -208,11 +208,6 @@ class TestFSDPCheckpoint(FSDPTest):
             self._test_parity,
         )
 
-    @skip_if_lt_x_gpu(2)
-    def test_replicate_in_fsdp(self):
-        # TODO: to be added
-        ...
-
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
 
