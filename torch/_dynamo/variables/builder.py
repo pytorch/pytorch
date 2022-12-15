@@ -654,7 +654,7 @@ class VariableBuilder:
                 and not is_constant_source(self.get_source())
             ):
                 # NB: we MUST register this as a GraphArg
-                shape_env = self.tx.output.tracing_context.fake_mode.shape_env
+                shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
                     shape_env.create_symbol(value, sname=self.source.name())
                 )

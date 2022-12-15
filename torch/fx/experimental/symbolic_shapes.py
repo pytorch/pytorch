@@ -765,7 +765,7 @@ class ShapeEnv(object):
         return eval(code, {}, dict(zip(arg_names, args)))
 
     def get_nontrivial_guards(self):
-        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard.expr) for guard in self.guards if self._maybe_evaluate_static(guard.expr) is None]
 
     def format_guards(self, verbose=False):
         def format_tb(tb):
