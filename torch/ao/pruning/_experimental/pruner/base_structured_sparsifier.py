@@ -87,14 +87,14 @@ def _get_supported_activation_modules():
 
 
 def _get_default_structured_pruning_patterns() -> Dict[
-    Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str, MatchAllNode], ...],
+    Tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
     Callable[..., None],
 ]:
     """
     Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
     """
     patterns: Dict[
-        Tuple[Union[Type[nn.Module], Callable[[torch.Tensor], torch.Tensor], str], ...],
+        Tuple[Union[Type[nn.Module], Callable, MatchAllNode, str], ...],
         Callable[..., None],
     ] = {
         # linear -> linear

@@ -357,7 +357,7 @@ def prune_conv2d_pool_flatten_linear(
             linear.weight = nn.Parameter(linear.weight[:, flattened_mask])
             linear.in_features = linear.weight.shape[1]
 
-def prune_lstm_linear(lstm, getitem, linear):
+def prune_lstm_linear(lstm: nn.LSTM, getitem: Callable, linear: nn.Linear) -> None:
     mask = lstm.parametrizations.weight_ih_l0[0].mask
 
     with torch.no_grad():
