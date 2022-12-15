@@ -889,7 +889,6 @@ class CppVecKernel(CppKernel):
         self.cse.store_cache[name] = tmpvar
 
 
-# V.kernel.current_node._body.root_block
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads):
         super(CppVecKernelChecker, self).__init__(args, num_threads)
