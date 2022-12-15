@@ -401,14 +401,18 @@ extern "C" void __avx_chk_kernel() {
             return False
 
 
+is_omp_enabled = is_omp_valid()
+is_arch_native_enabled = is_arch_native_valid()
+
+
 @functools.lru_cache(None)
 def optimization_flags():
     opt_flags = " -O3 -ffast-math -fno-finite-math-only"
 
-    if is_omp_valid():
+    if is_omp_enabled:
         opt_flags += " -fopenmp"
 
-    if is_arch_native_valid():
+    if is_arch_native_enabled:
         opt_flags += " -march=native"
     else:
         vec_isa = pick_vec_isa()

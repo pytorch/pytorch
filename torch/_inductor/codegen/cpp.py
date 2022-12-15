@@ -152,7 +152,7 @@ def float16_reduction_prefix(rtype):
 
 def parallel_num_threads():
     # Current platform does not support OMP
-    if codecache.is_omp_valid():
+    if codecache.is_omp_enabled:
         return 1
 
     threads = config.cpp.threads
