@@ -374,6 +374,7 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
