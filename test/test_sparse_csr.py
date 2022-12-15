@@ -1297,6 +1297,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(block_t.values().dim(), 3)
             self.assertTrue(block_t.layout == torch.sparse_bsr)
             block_st = st.tobsr(blocksize=(blocksize, blocksize))
+            block_st.sort_indices()
             self.assertEqual(block_t.values().cpu(), block_st.data)
             self.assertEqual(block_t.col_indices().cpu(), torch.tensor(block_st.indices).to(index_dtype))
             self.assertEqual(block_t.crow_indices().cpu(), torch.tensor(block_st.indptr).to(index_dtype))
