@@ -475,12 +475,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             List[FullyShardedDataParallel]: FSDP modules that are nested in
             the input ``module``.
         """
-        _fsdp_modules = _get_fsdp_states(module)
-        if not root_only:
-            return _fsdp_modules
-        return [
-            fsdp_module for fsdp_module in _fsdp_modules if fsdp_module.check_is_root()
-        ]
+        if root_only:
+            return _get_fsdp_root_states(module)
+        return _get_fsdp_states(module)
 
     @staticmethod
     def _fsdp_handles(module: nn.Module) -> List[FlatParamHandle]:
