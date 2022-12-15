@@ -15,15 +15,9 @@ from torch.ao.quantization.quantize import _remove_qconfig
 from torch.ao.quantization.quantize import _add_observer_
 from torch.ao.quantization.quantize import add_quant_dequant
 from torch.ao.quantization.quantize import convert
-<<<<<<< HEAD
 from torch.ao.quantization.quantize import _get_observer_dict
 from torch.ao.quantization.quantize import _get_unique_devices_
-from torch.ao.quantization.quantize import is_activation_post_process
-=======
-from torch.ao.quantization.quantize import get_observer_dict
-from torch.ao.quantization.quantize import get_unique_devices_
 from torch.ao.quantization.quantize import _is_activation_post_process
->>>>>>> 94b0c2ba83d ([ao] making _is_activation_post_process private with BC)
 from torch.ao.quantization.quantize import prepare
 from torch.ao.quantization.quantize import prepare_qat
 from torch.ao.quantization.quantize import propagate_qconfig_
