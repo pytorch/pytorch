@@ -9397,6 +9397,27 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_consistency(self, device, memory_format, antialias, align_corners):
+        # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than 1.0
+        input_ui8 = torch.randint(0, 256, size=(1, 3, 400, 400), dtype=torch.uint8, device=device)
+        input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+        input_f32 = input_ui8.float()
+
+        output_f32 = F.interpolate(
+            input_f32, size=(32, 32), mode="bilinear", align_corners=align_corners, antialias=antialias
+        )
+        output_ui8 = F.interpolate(
+            input_ui8, size=(32, 32), mode="bilinear", align_corners=align_corners, antialias=antialias
+        )
+        abs_diff = torch.abs(output_f32 - output_ui8.float())
+        mae = torch.mean(abs_diff)
+        max_abs_err = torch.max(abs_diff)
+        self.assertTrue(mae < 1.0, msg=f"mae={mae}")
+        self.assertTrue(max_abs_err < 1.0 + 1e-5, msg=f"max ae={max_abs_err}")
+
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     def test_upsamplingBicubic2d(self, device, antialias, align_corners):
