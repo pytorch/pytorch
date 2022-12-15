@@ -275,7 +275,7 @@ def run_functionalized_fw_and_collect_metadata(f):
     @wraps(f)
     def inner(*args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, torch.Tensor) or type(a) in KNOWN_TYPES for a in args)
+        assert all(a is None or isinstance(a, torch.Tensor) or type(a) in KNOWN_TYPES for a in args)
 
         collect_mutated_input_info: List[MutationType] = []
         collect_requires_grad_out_info: List[bool] = []
@@ -300,9 +300,10 @@ def run_functionalized_fw_and_collect_metadata(f):
         maybe_inputs_with_mutated_metadata: List[Optional[torch.Tensor]] = []
         for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
             if not isinstance(arg, Tensor):
-                continue
-            torch._sync(f_arg)
-            new_arg = torch._from_functional_tensor(f_arg)
+                new_arg = arg
+            else:
+                torch._sync(f_arg)
+                new_arg = torch._from_functional_tensor(f_arg)
             if arg is not new_arg:
                 # Note [Input mutation handling in aot autograd]
                 # We use functionalization to detect two types in input mutations:
@@ -428,7 +429,8 @@ def run_functionalized_fw_and_collect_metadata(f):
             # This will be more complicated when you have multiple _base tensors aliasing the same
             # underlying storage, when we eventually handle that.
             # We'll need to ensure that we generate the view off of the right base.
-            inp_storage_refs = {StorageWeakRef(inpt._storage()): idx for idx, inpt in enumerate(flat_f_args)}
+            inp_storage_refs = {
+                StorageWeakRef(inpt._storage()): idx for idx, inpt in enumerate(flat_f_args) if isinstance(inpt, torch.Tensor)}
             inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, torch.Tensor)}
             inp_storage_refs_set = set(inp_storage_refs)
 
@@ -1058,12 +1060,14 @@ def merge_view_inputs(
 ) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, Tuple[Any]]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
+    base_args = []
+    other_args = []
     for i, inpt in enumerate(fwd_inputs):
         if isinstance(inpt, Tensor):
             storage_ref = StorageWeakRef(inpt._storage())
             storage_ref_to_idx[storage_ref].append(i)
-    base_args = []
-    other_args = []
+        else:
+            other_args.append(inpt)
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)

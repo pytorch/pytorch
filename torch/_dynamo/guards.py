@@ -430,11 +430,11 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict[str, object]] = None,
         f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
+        guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
@@ -531,8 +531,6 @@ class CheckFunctionManager:
         # shape variables to sources from GraphArgs.  This must happen after
         # tensor checks.
         # NB: self.output_graph can be None in the debug_nops tests
-        # TODO: What about grapharg pruning?  This could be problematic if we
-        # guarded on a tensor that isn't actually used as an input in the end.
         if self.output_graph and self.output_graph.shape_env:
             expr_as_str = self.output_graph.shape_env.codegen_guards(
                 [a.fake_tensor for a in graphargs if a.is_tensor],
