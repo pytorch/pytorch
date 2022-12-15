@@ -64,13 +64,13 @@ void OptimizerParamState::serialize(
 double OptimizerOptions::get_lr() const {
   TORCH_CHECK(
       false,
-      "double get_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double get_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 void OptimizerOptions::set_lr(const double lr) {
   TORCH_CHECK(
       false,
-      "double set_lr() has not been overidden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
+      "double set_lr() has not been overridden and implemented in subclass of torch::optim::OptimizerOptions, you must override it in your subclass.");
 }
 
 std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {

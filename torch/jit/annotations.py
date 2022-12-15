@@ -1,4 +1,5 @@
 import ast
+import dis
 import enum
 import inspect
 import re
@@ -144,6 +145,15 @@ def check_fn(fn, loc):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
 
 
+def _eval_no_call(stmt, glob, loc):
+    """Evaluate statement as long as it does not contain any method/function calls"""
+    bytecode = compile(stmt, "", mode="eval")
+    for insn in dis.get_instructions(bytecode):
+        if "CALL" in insn.opname:
+            raise RuntimeError(f"Type annotation should not contain calls, but '{stmt}' does")
+    return eval(bytecode, glob, loc)  # type: ignore[arg-type] # noqa: P204
+
+
 def parse_type_line(type_line, rcb, loc):
     """Parses a type annotation specified as a comment.
 
@@ -154,7 +164,7 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
+        arg_ann = _eval_no_call(arg_ann_str, {}, EvalEnv(rcb))
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
@@ -162,7 +172,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore[arg-type] # noqa: P204
+        ret_ann = _eval_no_call(ret_ann_str, {}, EvalEnv(rcb))
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation") from e
 

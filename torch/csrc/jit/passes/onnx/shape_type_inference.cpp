@@ -76,16 +76,13 @@ std::pair<TypePtr, bool> MergeInferredType(
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
-    TypePtr inferred_type,
-    bool set_constant_value_map) {
+    TypePtr inferred_type) {
   TypePtr mergedType;
   bool inferred;
   std::tie(mergedType, inferred) =
       MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
-  if (set_constant_value_map) {
-    ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
-  }
+  ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
 
 namespace {
@@ -230,6 +227,28 @@ bool IsValidONNXNode(const Node* n) {
   }
 
   return true;
+}
+
+bool CustomSettype(Node* node) {
+  // This is a helper function to decide if the non-ONNX node actually has
+  // custom setType from user
+  // Go through every symbolic_sizes and if any one of them is static, we say
+  // this is set by user. On the other hand, if all of them are * (dynamic), we
+  // take this node does not have given type, since unreliable nodes have *
+  // shape anyway.
+  auto all_output_has_type = [](Value* output) {
+    if (auto output_type = output->type()->cast<TensorType>()) {
+      if (auto sizes = output_type->symbolic_sizes().sizes()) {
+        return std::any_of(std::begin(*sizes), std::end(*sizes), [](auto size) {
+          return size.is_static();
+        });
+      }
+    }
+    return false;
+  };
+
+  return std::all_of(
+      node->outputs().begin(), node->outputs().end(), all_output_has_type);
 }
 
 Value* CloneValueFromListConstruct(
@@ -409,7 +428,7 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
         n, inputTensorValues, opset_version);
   } catch (const std::exception& ex) {
     auto ex_str = std::string(ex.what());
-    ex_str = ex_str.substr(0, ex_str.find("\n"));
+    ex_str = ex_str.substr(0, ex_str.find('\n'));
     TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
     return c10::nullopt;
   }
@@ -1879,7 +1898,8 @@ static std::unordered_set<std::string> nodeTypeReliableForTracer = {
 
 void UpdateReliable(
     torch::jit::Value* output,
-    const std::pair<bool, bool>& inferred_type_reliable) {
+    const std::pair<bool, bool>& inferred_type_reliable,
+    bool no_type_warning) {
   auto inferred =
       ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
   auto isTypeReliableForTracer =
@@ -1887,7 +1907,9 @@ void UpdateReliable(
           output->node()->kind().toDisplayString()) !=
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
-      !output->node()->kind().is_onnx()) {
+      !output->node()->kind().is_onnx() && no_type_warning) {
+    // TODO(84661): This warning comes before setType in symbolic_fn.
+    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),
@@ -1897,7 +1919,7 @@ void UpdateReliable(
     diagnostics::Diagnose(
         diagnostics::Rule::kNodeMissingOnnxShapeInference,
         diagnostics::Level::kWarning,
-        {output->node()->kind().toDisplayString()});
+        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {
@@ -1949,6 +1971,7 @@ void ONNXShapeTypeInference(
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
+
   if (IsValidONNXNode(n)) {
     // Create a Graph containing only the single node n.
     // This graph is later converted to ONNX to run shape inference.
@@ -2041,6 +2064,15 @@ void ONNXShapeTypeInference(
       GRAPH_DEBUG(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
+  } else if (CustomSettype(n)) {
+    // If the node is not ONNX standard, go through every output to check if
+    // they all have shape. If they all do, this should be reliable even if the
+    // Op is not from ONNX.
+    for (auto node_output : n->outputs()) {
+      // Custom setType output should get in here if it's set correctly. They
+      // will be updated to inferred for later updatereliable function.
+      ConstantValueMap::SetUseInferredType(node_output->debugName(), true);
+    }
   }
 
   SpecialPostProcess(n);
@@ -2082,20 +2114,7 @@ void ONNXShapeTypeInference(
   // reliable shape but its shape is not in ConstantValueMap. So we need this
   // logic to update ConstantValueMap.
   for (auto node_output : n->outputs()) {
-    if (ConstantValueMap::HasTypeReliable(node_output->debugName())) {
-      auto reliable =
-          ConstantValueMap::GetTypeReliable(node_output->debugName())
-              .value_or(false);
-      if (reliable && !ConstantValueMap::HasShape(node_output->debugName())) {
-        // TODO: ListType case
-        if (auto output_tensor_type = node_output->type()->cast<TensorType>()) {
-          if (output_tensor_type->dim()) {
-            auto symbolic_sizes = output_tensor_type->symbolic_sizes();
-            UpdateShapeConstantValueMap(node_output, symbolic_sizes);
-          }
-        }
-      }
-    }
+    UpdateShapeConstantIfReliable(node_output);
   }
 
   GRAPH_DEBUG(
@@ -2228,7 +2247,7 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence with mixed elment types in model outputs. "
+              "Unsupported sequence with mixed element types in model outputs. "
               "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()
@@ -2280,10 +2299,10 @@ size_t ONNXAssignOutputShape(
     // Tracing:
     //    Ignore None, since it is not captured in IR graph as output.
     // Scripting:
-    //    Ignore None, if observing a fixed `None` node in IR graph. Because it
-    //    is meaningless to include it as graph output as it carries no
-    //    data/information. Plus that static `None` is not supported in ONNX IR.
-    //    Otherwise, the output should have type `Optional`, and should be
+    //    Ignore None, if observing a fixed `None` node in IR graph. Because
+    //    it is meaningless to include it as graph output as it carries no
+    //    data/information. Plus that static `None` is not supported in ONNX
+    //    IR. Otherwise, the output should have type `Optional`, and should be
     //    converted to ONNX `Optional`.
 
     // More context:
@@ -2341,6 +2360,22 @@ void ONNXShapeTypeInference(
   SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
   ConstantValueMap::ClearMaps();
+}
+
+void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
+  if (ConstantValueMap::HasTypeReliable(node_output->debugName())) {
+    auto reliable = ConstantValueMap::GetTypeReliable(node_output->debugName())
+                        .value_or(false);
+    if (reliable && !ConstantValueMap::HasShape(node_output->debugName())) {
+      // TODO: ListType case
+      if (auto output_tensor_type = node_output->type()->cast<TensorType>()) {
+        if (output_tensor_type->dim()) {
+          auto symbolic_sizes = output_tensor_type->symbolic_sizes();
+          UpdateShapeConstantValueMap(node_output, symbolic_sizes);
+        }
+      }
+    }
+  }
 }
 
 } // namespace jit

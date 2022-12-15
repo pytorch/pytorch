@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -466,6 +467,16 @@ void initDispatchBindings(PyObject* module) {
       [](c10::DispatchKey dispatch_key) {
         return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
       });
+  m.def(
+      "_dispatch_tls_set_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key, bool desired_state) {
+        c10::impl::tls_set_dispatch_key_included(dispatch_key, desired_state);
+      });
+  m.def(
+      "_dispatch_tls_is_dispatch_key_included",
+      [](c10::DispatchKey dispatch_key) {
+        return c10::impl::tls_is_dispatch_key_included(dispatch_key);
+      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
@@ -479,14 +490,28 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
+  py::enum_<c10::DispatchKey>(m, "DispatchKey")
+      // clang-format off
+      DEF_ONE(Undefined)
       DEF_ONE(CompositeExplicitAutogradNonFunctional)
-          DEF_ONE(CompositeExplicitAutograd)
-              DEF_ONE(CompositeImplicitAutogradNestedTensor)
-                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
-                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
-                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
-                              DEF_ONE(Python)
+      DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+      DEF_ONE(CompositeImplicitAutograd)
+      DEF_ONE(AutogradOther)
+      DEF_ONE(Autograd)
+      DEF_ONE(BackendSelect)
+      DEF_ONE(ADInplaceOrView)
+      DEF_ONE(PythonTLSSnapshot)
+      DEF_ONE(Python)
+      DEF_ONE(FuncTorchDynamicLayerFrontMode)
+      DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(PythonDispatcher)
+      DEF_ONE(Functionalize)
+      DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastXPU)
+      DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastCUDA)
+  // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
 #define DEF_MULTIPLE(fullname, prefix)              \
@@ -495,11 +520,13 @@ void initDispatchBindings(PyObject* module) {
   C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
   DEF_SINGLE(, EndOf##fullname##Backends)
 
-                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+      // clang-format off
+  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+  // clang-format on
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-                                      ;
+          ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())
@@ -538,6 +565,9 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_dispatch_tls_local_exclude_set", []() {
     return c10::impl::tls_local_dispatch_key_set().excluded_;
+  });
+  m.def("_functionalization_reapply_views_tls", []() {
+    return at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   });
   m.def(
       "_dispatch_is_included_in_alias",

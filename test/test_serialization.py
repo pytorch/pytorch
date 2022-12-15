@@ -297,6 +297,9 @@ class SerializationMixin(object):
                 self.assertEqual(x, y["tensor"])
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
+        _test_serialization(lambda x: x.to_sparse_csc())
+        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
@@ -333,35 +336,59 @@ class SerializationMixin(object):
                     "size is inconsistent with indices"):
                 y = torch.load(f)
 
-    def test_serialization_sparse_csr_invalid(self):
+    def _test_serialization_sparse_compressed_invalid(self,
+                                                      conversion,
+                                                      get_compressed_indices,
+                                                      get_plain_indices):
         x = torch.zeros(3, 3)
         x[1][1] = 1
-        x = x.to_sparse_csr()
+        x = conversion(x)
 
         class TensorSerializationSpoofer(object):
             def __init__(self, tensor):
                 self.tensor = tensor
 
             def __reduce_ex__(self, proto):
-                invalid_crow_indices = self.tensor.crow_indices().clone()
-                invalid_crow_indices[0] = 3
+                invalid_compressed_indices = get_compressed_indices(self.tensor).clone()
+                invalid_compressed_indices[0] = 3
                 return (
                     torch._utils._rebuild_sparse_tensor,
                     (
                         self.tensor.layout,
                         (
-                            invalid_crow_indices,
-                            self.tensor.col_indices(),
+                            invalid_compressed_indices,
+                            get_plain_indices(self.tensor),
                             self.tensor.values(),
                             self.tensor.size())))
+
+        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices_name = 'crow_indices'
+        else:
+            compressed_indices_name = 'ccol_indices'
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
             f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "rebuilding sparse tensor for layout torch.sparse_csr"):
+                    f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
                 y = torch.load(f)
+
+    def test_serialization_sparse_csr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csr, torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_csc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csc, torch.Tensor.ccol_indices, torch.Tensor.row_indices)
+
+    def test_serialization_sparse_bsr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsr(1, 1), torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_bsc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsc(1, 1), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -585,6 +612,15 @@ class SerializationMixin(object):
         with self.assertRaises(TypeError):
             # Tries to serialize str into tensor with wrong callable write property
             torch.save('foo', x)
+        s_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        s = torch.CharStorage(s_data)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize list into CharStorage
+            torch.save(s_data, s)
+        x = torch.randint(10, (3, 3), dtype=torch.float).cpu().numpy()
+        with self.assertRaises(AttributeError):
+            # Tries to serialize ndarray into ndarray
+            torch.save(x, x)
 
 
     def test_serialization_storage_slice(self):
@@ -639,6 +675,8 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    # FIXME: See https://github.com/pytorch/pytorch/issues/90497
+    @unittest.expectedFailure
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
         if torch.cuda.is_available():
@@ -896,6 +934,28 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
+    def test_serialization_python_attr(self):
+        def _test_save_load_attr(t):
+            t.foo = 'foo'
+            t.pi = 3.14
+
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                loaded_t = torch.load(f)
+
+            self.assertEqual(t, loaded_t)
+            self.assertEqual(t.foo, loaded_t.foo)
+            self.assertEqual(t.pi, loaded_t.pi)
+
+        t = torch.zeros(3, 3)
+        _test_save_load_attr(t)
+        # This should start failing once Parameter
+        # supports saving Python Attribute.
+        err_msg = "'Parameter' object has no attribute"
+        with self.assertRaisesRegex(AttributeError, err_msg):
+            _test_save_load_attr(torch.nn.Parameter(t))
+
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
@@ -910,6 +970,48 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
                 torch.load(f, weights_only=True)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_math_bits(self, weights_only):
+        t = torch.randn(1, dtype=torch.cfloat)
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        t_conj = torch.conj(t)
+        _save_load_check(t_conj)
+
+        t_neg = torch._neg_view(t)
+        _save_load_check(t_neg)
+
+        t_n_c = torch._neg_view(torch.conj(t))
+        _save_load_check(t_n_c)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_efficient_zerotensor(self, weights_only):
+        # We don't support serializing `ZeroTensor` as it is not public
+        # facing yet.
+        # If in future, `ZeroTensor` serialization is supported, this test
+        # should start failing!
+        t = torch._efficientzerotensor((4, 5))
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
+        #       as nullptr storage is disabled.
+        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
+                   ' are currently unsafe and thus disabled')
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            _save_load_check(t)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
