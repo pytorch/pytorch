@@ -159,12 +159,46 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
+def dry_compile_so_and_load(lib_code: str, compile_fn: Callable, vec_isa):
+    _py_load_lib = """
+import torch
+from ctypes import cdll
+cdll.LoadLibrary("__lib_path__")
+"""
+
+    key, input_path = write(lib_code, "cpp", extra="")
+    from filelock import FileLock
+
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_path = input_path[:-3] + "so"
+        build_fn = cpp_compile_command if compile_fn is None else compile_fn
+        build_cmd = build_fn(
+            input_path, output_path, warning_all=False, vec_isa=vec_isa
+        ).split(" ")
+        try:
+            # Check build result
+            subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
+            subprocess.check_call(
+                [
+                    "python",
+                    "-c",
+                    _py_load_lib.replace("__lib_path__", output_path),
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            return False
+
+        return True
+
+
 class VecISA(object):
     _bit_width: int = 0
     _macro: str = ""
     _arch_flags: str = ""
     _dtype_nelements: Dict[torch.dtype, int] = {}
-    _build_fn: Callable = None
 
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
     # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
@@ -216,32 +250,7 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
-        key, input_path = write(self._avx_code, "cpp", extra="")
-        from filelock import FileLock
-
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            output_path = input_path[:-3] + "so"
-            build_fn = cpp_compile_command if self._build_fn is None else self._build_fn
-            build_cmd = build_fn(
-                input_path, output_path, warning_all=False, vec_isa=self
-            ).split(" ")
-            try:
-                # Check build result
-                subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
-                subprocess.check_call(
-                    [
-                        "python",
-                        "-c",
-                        self._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception as e:
-                return False
-
-            return True
+        return dry_compile_so_and_load(self._avx_code, cpp_compile_command, self)
 
 
 @dataclasses.dataclass
@@ -340,8 +349,7 @@ def is_omp_valid():
     def _opt_flags_getter_fn():
         return "-fopenmp"
 
-    _omp = VecISA()
-    _omp._avx_code = """
+    _omp_code = """
 #include <omp.h>
 
 #define N_ELEMENTS (32)
@@ -359,15 +367,12 @@ extern "C" void __avx_chk_kernel() {
         _inc_link_path_getter_fn = functools.partial(
             get_include_and_linking_paths, require_omp=True
         )
-        _omp._build_fn = functools.partial(
+        _compile_fn = functools.partial(
             cpp_compile_command,
             inc_link_path_getter_fn=_inc_link_path_getter_fn,
             opt_flags_getter_fn=_opt_flags_getter_fn,
         )
-        if _omp:
-            return True
-        else:
-            return False
+        return dry_compile_so_and_load(_omp_code, _compile_fn, invalid_vec_isa)
 
 
 @functools.lru_cache(None)
@@ -375,8 +380,7 @@ def is_arch_native_valid():
     def _opt_flags_getter_fn():
         return "-march=native"
 
-    _arch_native = VecISA()
-    _arch_native._avx_code = """
+    _arch_native_code = """
 #define N_ELEMENTS (32)
 float in_out_ptr0[N_ELEMENTS] = {0.0};
 
@@ -390,15 +394,12 @@ extern "C" void __avx_chk_kernel() {
         _inc_link_path_getter_fn = functools.partial(
             get_include_and_linking_paths, require_omp=False
         )
-        _arch_native._build_fn = functools.partial(
+        _compile_fn = functools.partial(
             cpp_compile_command,
             inc_link_path_getter_fn=_inc_link_path_getter_fn,
             opt_flags_getter_fn=_opt_flags_getter_fn,
         )
-        if _arch_native:
-            return True
-        else:
-            return False
+        return dry_compile_so_and_load(_arch_native_code, _compile_fn, invalid_vec_isa)
 
 
 @functools.lru_cache(None)
@@ -410,9 +411,6 @@ def optimization_flags():
 
     if is_arch_native_enabled:
         opt_flags += " -march=native"
-    else:
-        vec_isa = pick_vec_isa()
-        opt_flags += vec_isa.build_arch_flags()
 
     return opt_flags
 
