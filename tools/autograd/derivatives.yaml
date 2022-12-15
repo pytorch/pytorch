@@ -1514,12 +1514,12 @@
   self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 
-- name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
   # pointwise (variance) + sum + sqrt
   result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
-- name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
   result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
   # linear
@@ -1663,10 +1663,22 @@
   self: to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
-  self: grad.to_dense()
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
-  self: grad.to_dense()
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csr(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_csc(Tensor self) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsr(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
+
+- name: to_sparse_bsc(Tensor self, int[2] blocksize) -> Tensor
+  self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
@@ -1723,12 +1735,12 @@
   self: grad.squeeze(dim)
   result: auto_linear
 
-- name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
+- name: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
   # pointwise + sum
   result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
-- name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
+- name: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
   result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
   # linear
@@ -2623,11 +2635,11 @@
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
   output_differentiability: [True, False]
-  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal)
+  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, is_causal))
 
 - name:  _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
   output_differentiability: [True, False]
-  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal)
+  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, causal))
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

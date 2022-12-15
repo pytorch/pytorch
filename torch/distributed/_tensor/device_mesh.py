@@ -270,11 +270,11 @@ class DeviceMesh(object):
         scatter a list of tensors to a device mesh dimension. We by default
         use the first rank of the mesh dimension as the source of truth, i.e
         for a 2d mesh [[0, 1], [2, 3]], if we scatter on mesh_dim = 1, we will
-        scatter the tensor list on rank 0 to rank 0/1, and tensor lista on rank
+        scatter the tensor list on rank 0 to rank 0/1, and tensor list on rank
         2 to rank 2/3.
 
         Args:
-            tensor (torch.Tensor): the tensor to receive the scattered list.
+            output (torch.Tensor): the tensor to receive the scattered list.
             scatter_list (List[torch.Tensor]): the tensor list to be scattered.
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on, we by default choose the first rank on the
