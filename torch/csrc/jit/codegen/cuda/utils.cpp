@@ -24,12 +24,14 @@ auto parseEnvOptions(
       available_options.size() == static_cast<int>(OptionEnum::EndOfOption),
       "Invalid available option map");
 
-  std::unordered_set<OptionEnum> options;
+  std::unordered_map<OptionEnum, std::vector<std::string>> options;
 
   if (const char* dump_options = std::getenv(option_env_name)) {
     c10::string_view options_view(dump_options);
     while (!options_view.empty()) {
-      const auto end_pos = options_view.find_first_of(',');
+      const auto comma_pos = options_view.find_first_of(',');
+      const auto lparentheses_pos = options_view.find_first_of('(');
+      auto end_pos = std::min(comma_pos, lparentheses_pos);
       const auto token = options_view.substr(0, end_pos);
 
       auto option_it = available_options.find(std::string(token));
@@ -52,11 +54,42 @@ auto parseEnvOptions(
             toDelimitedString(option_values));
       }
 
-      options.insert(option_it->second);
-
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
           : "";
+
+      std::vector<std::string> arguments;
+      if (lparentheses_pos < comma_pos) {
+        bool closed = false;
+        while (!closed) {
+          const auto comma_pos = options_view.find_first_of(',');
+          const auto rparentheses_pos = options_view.find_first_of(')');
+          TORCH_CHECK(
+              rparentheses_pos != c10::string_view::npos,
+              "Parsing ",
+              option_env_name,
+              " failed when parsing arguments for ",
+              token,
+              ". Syntax error: unclosed '('");
+          auto end_pos = std::min(comma_pos, rparentheses_pos);
+          arguments.emplace_back(options_view.substr(0, end_pos));
+
+          options_view = options_view.substr(end_pos + 1);
+          closed = (rparentheses_pos < comma_pos);
+        }
+        if (options_view.size() > 0) {
+          TORCH_CHECK(
+              options_view[0] == ',',
+              "Parsing ",
+              option_env_name,
+              " failed when parsing arguments for ",
+              token,
+              ". Syntax error: expect a ',' after ')'");
+          options_view = options_view.substr(1);
+        }
+      }
+
+      options[option_it->second] = std::move(arguments);
     }
   }
 
@@ -100,6 +133,11 @@ auto parseDebugDumpOptions() {
   return parseEnvOptions("PYTORCH_NVFUSER_DUMP", available_options);
 }
 
+const auto& getDebugDumpOptions() {
+  static const auto options = parseDebugDumpOptions();
+  return options;
+}
+
 auto parseDisableOptions() {
   const std::unordered_map<std::string, DisableOption> available_options = {
       {"arch_check", DisableOption::ArchCheck},
@@ -123,6 +161,11 @@ auto parseDisableOptions() {
   return options;
 }
 
+const auto& getDisableOptions() {
+  static const auto options = parseDisableOptions();
+  return options;
+}
+
 auto parseEnableOptions() {
   const std::unordered_map<std::string, EnableOption> available_options = {
       {"complex", EnableOption::Complex},
@@ -132,6 +175,11 @@ auto parseEnableOptions() {
       {"graph_op_fusion", EnableOption::GraphOp}};
 
   return parseEnvOptions("PYTORCH_NVFUSER_ENABLE", available_options);
+}
+
+const auto& getEnableOptions() {
+  static const auto options = parseEnableOptions();
+  return options;
 }
 
 } // namespace
@@ -285,18 +333,28 @@ KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs) {
 }
 
 bool isDebugDumpEnabled(DebugDumpOption option) {
-  const static auto dump_options = parseDebugDumpOptions();
-  return dump_options.count(option);
+  return getDebugDumpOptions().count(option);
 }
 
 bool isOptionDisabled(DisableOption option) {
-  const static auto options = parseDisableOptions();
-  return options.count(option);
+  return getDisableOptions().count(option);
 }
 
 bool isOptionEnabled(EnableOption option) {
-  const static auto options = parseEnableOptions();
-  return options.count(option);
+  return getEnableOptions().count(option);
+}
+
+const std::vector<std::string>& getDebugDumpArguments(DebugDumpOption option) {
+  return getDebugDumpOptions().at(option);
+}
+
+const std::vector<std::string>& getDisableOptionArguments(
+    DisableOption option) {
+  return getDisableOptions().at(option);
+}
+
+const std::vector<std::string>& getEnableOptionArguments(EnableOption option) {
+  return getEnableOptions().at(option);
 }
 
 bool useFallback() {

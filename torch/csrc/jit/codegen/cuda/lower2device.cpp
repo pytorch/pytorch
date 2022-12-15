@@ -201,10 +201,19 @@ void assignRNGOffset(Fusion* fusion) {
 // Dump expr string if enable lower_verbose
 void dumpExprsIfEnabled(
     const std::vector<Expr*>& exprs,
-    std::string msg_pre,
+    std::string pass_name,
     bool force_enable = false) {
-  if (isDebugDumpEnabled(DebugDumpOption::LowerVerbose) || force_enable) {
-    std::cout << msg_pre << ":" << std::endl;
+  auto enabled_by_env = [&pass_name]() {
+    if (!isDebugDumpEnabled(DebugDumpOption::LowerVerbose)) {
+      return false;
+    }
+    const auto& args = getDebugDumpArguments(DebugDumpOption::LowerVerbose);
+    return (
+        args.empty() ||
+        std::find(args.begin(), args.end(), pass_name) != args.end());
+  };
+  if (force_enable || enabled_by_env()) {
+    std::cout << "After " << pass_name << ":" << std::endl;
     for (auto exp : exprs) {
       std::cout << exp->toString() << std::endl;
     }
@@ -239,18 +248,20 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   assignRNGOffset(fusion_);
 
   FusionGuard fg(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "initialize lowering");
+
   // prepare for lowering
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateIr");
   validateIr(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateIr");
 
   // Checks if any TIDx dim is marked as padded to a warp. Also checks if we can
   // determine the padding is explicitly a single warp.
-  dumpExprsIfEnabled(fusion_->exprs(), "Before collectPaddedParallelDims");
   collectPaddedParallelDims();
+  dumpExprsIfEnabled(fusion_->exprs(), "collectPaddedParallelDims");
 
   // Replaces integers that are tensor sizes by named scalars as "T0.size[0]"
-  dumpExprsIfEnabled(fusion_->exprs(), "Before replaceSymbolicSizes");
   replaceSymbolicSizes(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "replaceSymbolicSizes");
 
   // Build what's refered to as the compute at map. This map contains the
   // mappings of all iteration domains across the fusion. There are three types
@@ -259,189 +270,189 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   compute_at_map_ = std::make_shared<ComputeAtMap>(fusion_);
 
   resolveComputeWith(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "resolveComputeWith");
 
   if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
     std::cout << compute_at_map_->toString() << std::endl;
   }
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateAndPropagatePType");
   compute_at_map_->validateAndPropagatePType();
+  dumpExprsIfEnabled(fusion_->exprs(), "validateAndPropagatePType");
 
   // Uses compute_at_map, find all splits that are enforced to be divisible
-  dumpExprsIfEnabled(fusion_->exprs(), "Before getAllDivisibleSplits");
   divisible_splits_ = getAllDivisibleSplits(fusion_, compute_at_map_.get());
+  dumpExprsIfEnabled(fusion_->exprs(), "getAllDivisibleSplits");
 
   // Used in parallel dimension map
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build parallelDimensionMap");
   concretized_broadcast_domains_ =
       std::make_shared<const ConcretizedBroadcastDomains>(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build ConcretizedBroadcastDomains");
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
     std::cout << "Parallel dimension map:" << std::endl;
     std::cout << parallel_dimension_map_.toString() << std::endl;
   }
+  dumpExprsIfEnabled(fusion_->exprs(), "build parallelDimensionMap");
 
   // Validate mma data format and compatibility if any on the fusion.
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateMma");
   validateMma(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateMma");
 
   // Validate swizzle usage on the fusion schedule.
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateSwizzle");
   validateSwizzle(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateSwizzle");
 
   // Compute thread predicates. Depends on parallel_dimension_map_
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build thread_pred_map_");
   thread_pred_map_.build(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build thread_pred_map_");
 
   // Fuse cetain patterns of reductions, such as a grid reduction
   // followed by a grid broadcast. Only depends on parallelization and
   // thread predicate map.
-  dumpExprsIfEnabled(fusion_->exprs(), "Before fuseReductionsAndBroadcasts");
   fuseReductionsAndBroadcasts(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "fuseReductionsAndBroadcasts");
 
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build HaloInfo");
   halo_info_ = std::make_shared<HaloInfo>(fusion_, compute_at_map_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build HaloInfo");
 
   // Want to run this after parallel map and halo info map are
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.
-  dumpExprsIfEnabled(
-      fusion_->exprs(), "Before validateAndCollectVectorizeInfo");
   validateAndCollectVectorizeInfo(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateAndCollectVectorizeInfo");
 
   // Depends on ComputeAtMap and HaloInfo.
-  dumpExprsIfEnabled(
-      fusion_->exprs(), "Before validateAndConvertIterDomainGrouping");
   validateAndConvertIterDomainGrouping(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateAndConvertIterDomainGrouping");
 
   // Assumes all grouped reductions are convered to
   // GroupedReductionOp, which is done by
   // validateAndConvertIterDomainGrouping
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateGroupedReductions");
   validateGroupedReductions(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateGroupedReductions");
 
   // all of the lookup TVs are fusion inputs
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validateLookupTV");
   validateLookupTV(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validateLookupTV");
 
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
-  dumpExprsIfEnabled(fusion_->exprs(), "Before SyncMap");
   sync_map_ = std::make_shared<const SyncMap>(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::SyncMap)) {
     std::cout << sync_map_->toString() << std::endl;
   }
+  dumpExprsIfEnabled(fusion_->exprs(), "SyncMap");
 
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build partialSplitMap");
   partialSplitMap().build(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build partialSplitMap");
 
-  dumpExprsIfEnabled(fusion_->exprs(), "Before validatePartialSplit");
   validatePartialSplit(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "validatePartialSplit");
 
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build nonDivisibleSplitInfo");
   nonDivisibleSplitInfo().build(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build nonDivisibleSplitInfo");
 
   // Detects all exprssions that don't need predicates. Depends on
   // nonDivisibleSplitInfo.
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build predicateElimination");
   pred_elimination_ = std::make_unique<PredicateElimination>(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build predicateElimination");
 
-  dumpExprsIfEnabled(fusion_->exprs(), "Before build doubleBufferInfo");
   doubleBufferInfo().build(fusion_);
+  dumpExprsIfEnabled(fusion_->exprs(), "build doubleBufferInfo");
 
-  dumpExprsIfEnabled(fusion_->exprs(), "Before allocateIndexVariables()");
   compute_at_map_->allocateIndexVariables();
+  dumpExprsIfEnabled(fusion_->exprs(), "allocateIndexVariables");
   // Run our passes keeping the lowered expressions and forwarding
   // them
 
   // Reorder expressions for loop-nest generation respecting computeAt
   // relationships
   const auto exprs_sorted = reorderExprsForComputeAt();
+  dumpExprsIfEnabled(exprs_sorted, "reorderExprsForComputeAt");
 
   // Generate loop-nests and place each expression at its
   // corresponding loop
-  dumpExprsIfEnabled(exprs_sorted, "Before LoopNestGenerator::loweredExprs");
   const auto exprs_lowered = LoopNestGenerator::loweredExprs(exprs_sorted);
+  dumpExprsIfEnabled(exprs_sorted, "LoopNestGenerator");
 
   // Replace squeezes, Transpose, Shift, Gather, and View ops with
   // unary ops since they're not separately processed in lowering.
-  dumpExprsIfEnabled(exprs_lowered, "Before unarySetOpInserter");
   const auto exprs_unary_replaced = unarySetOpInserter(exprs_lowered);
+  dumpExprsIfEnabled(exprs_lowered, "unarySetOpInserter");
 
   // Insert allocations
-  dumpExprsIfEnabled(exprs_unary_replaced, "Before insertAllocations");
   const auto exprs_alloced = insertAllocations(exprs_unary_replaced);
+  dumpExprsIfEnabled(exprs_unary_replaced, "insertAllocations");
 
   // Insert read after write smem syncs
-  dumpExprsIfEnabled(exprs_alloced, "Before insertRawThreadSynchronization");
   const auto exprs_raw_sync = insertRawThreadSynchronization(exprs_alloced);
+  dumpExprsIfEnabled(exprs_alloced, "insertRawThreadSynchronization");
 
   // Reuse memory locations
-  dumpExprsIfEnabled(exprs_raw_sync, "Before reuseMemoryAllocations");
   const auto exprs_reuse_mem = reuseMemoryAllocations(exprs_raw_sync);
+  dumpExprsIfEnabled(exprs_raw_sync, "reuseMemoryAllocations");
 
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  dumpExprsIfEnabled(exprs_reuse_mem, "Before insertWarThreadSynchronization");
   const auto exprs_war_sync = insertWarThreadSynchronization(exprs_reuse_mem);
+  dumpExprsIfEnabled(exprs_reuse_mem, "insertWarThreadSynchronization");
 
-  dumpExprsIfEnabled(exprs_war_sync, "Before DoubleBufferPass");
   const auto exprs_double_buffered = DoubleBufferPass::run(exprs_war_sync);
+  dumpExprsIfEnabled(exprs_war_sync, "DoubleBufferPass");
 
   // This pass inserts predicates as well as branches in the code. Up until now
   // the code is explicitly single shot for loop based. Need to be careful in
   // later passes when doing any kind of insertions in loop nest structure as
   // insertions could be on if then or else instead of directly on a for loop.
-  dumpExprsIfEnabled(exprs_double_buffered, "Before UnrollPass");
   const auto exprs_unrolled_loops =
       UnrollPass::runPass(fusion_, exprs_double_buffered);
+  dumpExprsIfEnabled(exprs_double_buffered, "UnrollPass");
 
   commonScalarMap().initialize(exprs_unrolled_loops);
 
-  dumpExprsIfEnabled(
-      exprs_unrolled_loops, "Before processMisalignedVectorization");
   const auto exprs_unrolled_mv_loops =
       processMisalignedVectorization(exprs_unrolled_loops);
+  dumpExprsIfEnabled(exprs_unrolled_loops, "processMisalignedVectorization");
 
-  dumpExprsIfEnabled(exprs_unrolled_mv_loops, "Before IndexLowering");
   const auto exprs_indexed_loops =
       IndexLowering::getIndexedExprs(exprs_unrolled_mv_loops);
+  dumpExprsIfEnabled(exprs_unrolled_mv_loops, "IndexLowering");
 
   // TODO: It seems this type of optimization would be far easier to implement
   // on fusion ir than kernel ir. We should likely refactor this to at least run
   // before allocation insertion.
-  dumpExprsIfEnabled(exprs_indexed_loops, "Before fuseWarpReduce");
   const auto exprs_with_fused_broadcast = fuseWarpReduce(exprs_indexed_loops);
+  dumpExprsIfEnabled(exprs_indexed_loops, "fuseWarpReduce");
 
-  dumpExprsIfEnabled(
-      exprs_with_fused_broadcast, "Before generateConditionalFromPredicate");
   const auto exprs_conditional_loops =
       generateConditionalFromPredicate(exprs_with_fused_broadcast);
+  dumpExprsIfEnabled(
+      exprs_with_fused_broadcast, "generateConditionalFromPredicate");
 
-  dumpExprsIfEnabled(exprs_conditional_loops, "Before allocateCommonScalars");
   const auto exprs_common_index_allocated =
       allocateCommonScalars(exprs_conditional_loops);
+  dumpExprsIfEnabled(exprs_conditional_loops, "allocateCommonScalars");
 
   std::vector<Expr*> exprs_welford_vectorized;
   if (!isOptionDisabled(DisableOption::WelfordVectorization)) {
-    dumpExprsIfEnabled(exprs_common_index_allocated, "Before vectorizeWelford");
     exprs_welford_vectorized = vectorizeWelford(exprs_common_index_allocated);
+    dumpExprsIfEnabled(exprs_common_index_allocated, "vectorizeWelford");
   } else {
     exprs_welford_vectorized = exprs_common_index_allocated;
   }
 
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse
-  dumpExprsIfEnabled(exprs_common_index_allocated, "Before insertMagicZero");
   const auto exprs_register_adjusted =
       insertMagicZero(exprs_welford_vectorized);
+  dumpExprsIfEnabled(exprs_common_index_allocated, "insertMagicZero");
 
-  dumpExprsIfEnabled(exprs_register_adjusted, "Before KIRCleaner");
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
+  dumpExprsIfEnabled(exprs_register_adjusted, "KIRCleaner");
 
-  dumpExprsIfEnabled(exprs_cleaned_up_loops, "Before instrumentKernel");
   const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
+  dumpExprsIfEnabled(exprs_cleaned_up_loops, "instrumentKernel");
 
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from

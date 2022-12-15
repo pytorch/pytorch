@@ -9,6 +9,7 @@
 #include <string>
 #include <type_traits>
 #include <typeinfo>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -72,6 +73,8 @@ enum class DebugDumpOption {
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
+TORCH_CUDA_CU_API const std::vector<std::string>& getDebugDumpArguments(
+    DebugDumpOption option);
 
 //! Types of features to disable
 //!
@@ -93,6 +96,8 @@ enum class DisableOption {
 };
 
 TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);
+TORCH_CUDA_CU_API const std::vector<std::string>& getDisableOptionArguments(
+    DisableOption option);
 
 //! Types of features to enable
 //!
@@ -108,6 +113,8 @@ enum class EnableOption {
 };
 
 TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);
+TORCH_CUDA_CU_API const std::vector<std::string>& getEnableOptionArguments(
+    EnableOption option);
 
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.
