@@ -101,6 +101,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
               DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
+  no_reset_rnn_state_.clear();
 }
 
 /**
@@ -113,6 +114,7 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
   seed_ = seed;
   philox_offset_per_thread_ = 0;
+  no_reset_rnn_state_.clear();
 }
 
 #define CAPTURE_DEFAULT_GENS_MSG \
