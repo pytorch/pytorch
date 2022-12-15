@@ -1116,7 +1116,7 @@ class TestAutogradFunction(TestCase):
 
 class TestAutogradFunctionVmapAPI(TestCase):
     @_set_autograd_function_extension_enabled()
-    def test_no_vmap_staticmethod(self, device):
+    def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
             def forward(input):
@@ -1134,6 +1134,33 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, 'does not have a vmap rule defined'):
+            vmap(NumpyCube.apply)(x)
+
+    @_set_autograd_function_extension_enabled()
+    def test_has_vmap_staticmethod_and_has_generate_vmap_rule(self, device):
+        class NumpyCube(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(input):
+                input_np = to_numpy(input)
+                dinput = torch.tensor(3 * input_np ** 2, device=input.device)
+                return torch.tensor(input_np ** 3, device=input.device), dinput
+
+            @staticmethod
+            def setup_context(ctx, outputs, input):
+                ctx.save_for_backward(input, outputs[1])
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_saved):
+                raise RuntimeError("foobar")
+
+            @staticmethod
+            def vmap(infos, in_dims, x):
+                raise RuntimeError("foobar")
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'generate_vmap_rule=True and a vmap staticmethod'):
             vmap(NumpyCube.apply)(x)
 
     @_set_autograd_function_extension_enabled()
