@@ -1625,6 +1625,16 @@ Tensor asarray(
       tensor = tensor_from_numpy(arr, /*warn_if_not_writeable=*/false);
       should_warn_numpy_not_writable =
           !PyArray_ISWRITEABLE((PyArrayObject*)arr);
+
+      if (is_numpy_scalar) {
+        // Uses a newly cloned storage, instead of the shared one.
+        // The THPObjectPtr will delete the previous storage in the
+        // end of the previous scope.
+        tensor = tensor.clone();
+
+        // No need to clone again, later.
+        force_copy = false;
+      }
     }
   }
 #endif
