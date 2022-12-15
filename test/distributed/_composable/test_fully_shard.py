@@ -482,7 +482,6 @@ class TestFSDPModelCheckpointing(FSDPTest):
         print(f"sd keys: {list(sd.keys())}")
         load_composable.load_state_dict(sd)
         self._check_model_parity(load_composable, save_composable)
-        dist.barrier()
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_save_load_submodule_fully_shard(self):
@@ -517,59 +516,61 @@ class TestFSDPModelCheckpointing(FSDPTest):
         self._check_model_parity(load_composable, save_composable)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("ignore_modules", [True, False])
     def test_state_dict_save_load_flow(self):
         """
         E2E test of save + load with rank0_only + CPU offload for TransformerWithSharedParams
         on the composable path.
         """
-        local_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
-        )
+        # TODO refactor to use self.run_subtests
+        for ignore_modules in [True, False]:
+            with self.subTest(ignore_modules=ignore_modules):
+                local_model = TransformerWithSharedParams.init(
+                    self.process_group,
+                    FSDPInitMode.NO_FSDP,
+                    CUDAInitMode.CUDA_BEFORE,
+                    deterministic=True,
+                )
 
-        ignored_modules = (
-            TransformerWithSharedParams.get_ignored_modules()
-            if ignore_modules else []
-        )
-        save_model = fully_shard(
-            copy.deepcopy(local_model),
-            policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer}),
-            ignored_modules=ignored_modules
-        )
+                # force model parameters and buffers to be nonzero
+                for tensor in itertools.chain(
+                    local_model.parameters(), local_model.buffers()
+                ):
+                    if torch.count_nonzero(tensor) == 0:
+                        with torch.no_grad():
+                            tensor.add_(torch.ones_like(tensor))
 
-        # Force model parameters and buffers to be nonzero
-        with FSDP.summon_full_params(save_model):
-            for tensor in itertools.chain(
-                save_model.parameters(), save_model.buffers()
-            ):
-                if torch.count_nonzero(tensor) == 0:
-                    with torch.no_grad():
-                        tensor.add_(
-                            torch.ones_like(tensor)
-                        )
+                save_model = copy.deepcopy(local_model)
+                save_model = fully_shard(
+                    save_model,
+                    policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer}),
+                    ignored_modules=(
+                        [mod for mod in save_model.get_ignored_modules()]
+                        if ignore_modules else []
+                    )
+                )
 
-        # TODO: test state_dict_type after https://github.com/pytorch/pytorch/issues/90954 is resolved
-        state_dict = save_model.state_dict()
-        local_state_dict = local_model.state_dict()
+                # TODO: test state_dict_type after https://github.com/pytorch/pytorch/issues/90954 is resolved
+                state_dict = save_model.state_dict()
+                local_state_dict = local_model.state_dict()
 
-        self._check_state_dict_parity(local_model.state_dict(), state_dict)
+                self._check_state_dict_parity(local_model.state_dict(), state_dict)
 
-        load_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-        )
-        _zero_model(load_model, zero_buffers=True)
-        fully_shard(
-            load_model,
-            policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
-            ignored_modules=ignored_modules,
-        )
-        load_model.load_state_dict(state_dict)
-        self._check_model_parity(load_model, save_model)
+                load_model = TransformerWithSharedParams.init(
+                    self.process_group,
+                    FSDPInitMode.NO_FSDP,
+                    CUDAInitMode.CUDA_BEFORE,
+                )
+                _zero_model(load_model, zero_buffers=True)
+                fully_shard(
+                    load_model,
+                    policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
+                    ignored_modules=(
+                        [mod for mod in load_model.get_ignored_modules()]
+                        if ignore_modules else []
+                    )
+                )
+                load_model.load_state_dict(state_dict)
+                self._check_model_parity(load_model, save_model)
 
     def _check_state_dict_parity(self, local_sd: Dict, composable_sd: Dict):
         """Checks that ``local_sd`` and ``composable_sd`` are the same."""
@@ -586,13 +587,6 @@ class TestFSDPModelCheckpointing(FSDPTest):
             v1 = composable_sd[k]
             v2 = local_sd[k]
             self.assertEqual(v1, v2, f"Param mismatch for {k}: {v1} vs {v2}")
-        # Check that all values match
-        # for v1, v2 in zip(composable_sd.values(), local_sd.values()):
-        #     self.assertEqual(v1.shape, v2.shape)
-        # # Check that all keys and values are aligned
-        # for (k1, v1), (k2, v2) in zip(composable_sd.items(), local_sd.items()):
-        #     self.assertEqual(k1, k2)
-        #     self.assertEqual(v1, v2)
 
     def _check_model_parity(self, m1: nn.Module, m2: nn.Module):
         """
