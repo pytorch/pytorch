@@ -1053,8 +1053,8 @@ def _new_process_group_helper(
                                 to aid collective desynchronization debugging."""
                     )
                 else:
-                    backend = _create_process_group_wrapper(
-                        wrapped_pg=backend,
+                    backend_class = _create_process_group_wrapper(
+                        wrapped_pg=backend_class,
                         store_prefix=group_name,
                         store=backend_prefix_store,
                         rank=group_rank,
