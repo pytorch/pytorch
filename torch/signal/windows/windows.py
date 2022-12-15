@@ -739,7 +739,7 @@ def general_hamming(M,
 Computes the minimum 4-term Blackman-Harris window according to Nuttall.
 
 .. math::
-    w_n = \sum_{n=0}^{M - 1} 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
+    w_n = 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
 
 where ``z_n = 2 π n/ M``.
     """,
