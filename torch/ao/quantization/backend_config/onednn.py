@@ -24,7 +24,6 @@ from .backend_config import (
 )
 from ..fuser_method_mappings import (
     _sequential_wrapper2,
-    _reverse3,
 )
 
 
@@ -124,13 +123,13 @@ def _add_eltwise_fusion_configs(configs, root_module, root_op, post_module, post
                                 ref_quant_module):
     # 1 base module + op module fusion config
     configs.append(
-        BackendPatternConfig((post_module, root_module))
+        BackendPatternConfig((root_module, post_module))
             .set_dtype_configs(dtype_configs)  # noqa: E131
             .set_fuser_method(fuser_method)
             .set_fused_module(fused_module))
     # base module + functional post op
     configs.append(
-        BackendPatternConfig((post_op, root_module))
+        BackendPatternConfig((root_module, post_op))
             .set_dtype_configs(dtype_configs)  # noqa: E131
             .set_fuser_method(fuser_method)
             .set_fused_module(fused_module))
@@ -145,11 +144,11 @@ def _add_eltwise_fusion_configs(configs, root_module, root_op, post_module, post
 
     # 3 functional base op + post op configs
     configs.append(
-        BackendPatternConfig((post_module, root_op))
+        BackendPatternConfig((root_op, post_module))
             .set_observation_type(observation_type)  # noqa: E131
             .set_dtype_configs(dtype_configs))
     configs.append(
-        BackendPatternConfig((post_op, root_op))
+        BackendPatternConfig((root_op, post_op))
             .set_observation_type(observation_type)  # noqa: E131
             .set_dtype_configs(dtype_configs))
 
@@ -161,9 +160,9 @@ _add_eltwise_fusion_configs(linear_configs, nn.Linear, F.linear,
 
 # Configs for linear module + batchnorm + leaky_relu
 linear_configs.append(
-    BackendPatternConfig((nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)))
+    BackendPatternConfig((nn.Linear, nn.BatchNorm1d, nn.LeakyReLU))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
-        .set_fuser_method(_reverse3(_fuse_linear_bn_leaky_relu))
+        .set_fuser_method(_fuse_linear_bn_leaky_relu)
         .set_fused_module(nni.LinearLeakyReLU))
 
 # Configs for linear + tanh fusion
