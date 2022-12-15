@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.nn.functional as F
 import torch.nn.quantized._reference as nnqr
 from ._common_operator_config_utils import (
@@ -23,7 +23,7 @@ from .backend_config import (
     ObservationType,
 )
 from ..fuser_method_mappings import (
-    _reverse_sequential_wrapper2,
+    _sequential_wrapper2,
     _reverse3,
 )
 
@@ -126,13 +126,13 @@ linear_configs = _get_linear_configs(linear_dtype_configs)
 linear_configs.append(
     BackendPatternConfig((nn.LeakyReLU, nn.Linear))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
-        .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearLeakyReLU))
+        .set_fuser_method(_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + functional leaky_relu
 linear_configs.append(
     BackendPatternConfig((F.leaky_relu, nn.Linear))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
-        .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearLeakyReLU))
+        .set_fuser_method(_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + BN + leaky_relu
 linear_configs.append(
