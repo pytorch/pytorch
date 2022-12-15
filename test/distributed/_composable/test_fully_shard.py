@@ -12,17 +12,13 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    FullStateDictConfig,
-    StateDictType,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _FSDPState,
     _is_fsdp_flattened,
 )
-from torch.testing._internal.common_fsdp import _zero_model, _broadcast_state_dict
+from torch.testing._internal.common_fsdp import _zero_model
 from torch.distributed.fsdp.api import MixedPrecision
 from torch.distributed.fsdp.flat_param import _HandlesKey, FlatParamHandle
 from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
@@ -521,6 +517,7 @@ class TestFSDPModelCheckpointing(FSDPTest):
         self._check_model_parity(load_composable, save_composable)
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("ignore_modules", [True, False])
     def test_state_dict_save_load_flow(self):
         """
         E2E test of save + load with rank0_only + CPU offload for TransformerWithSharedParams
@@ -533,9 +530,14 @@ class TestFSDPModelCheckpointing(FSDPTest):
             deterministic=True,
         )
 
+        ignored_modules = (
+            TransformerWithSharedParams.get_ignored_modules()
+            if ignore_modules else []
+        )
         save_model = fully_shard(
             copy.deepcopy(local_model),
-            policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer})
+            policy=ModuleWrapPolicy({TransformerEncoderLayer, TransformerDecoderLayer}),
+            ignored_modules=ignored_modules
         )
 
         # Force model parameters and buffers to be nonzero
@@ -563,7 +565,8 @@ class TestFSDPModelCheckpointing(FSDPTest):
         _zero_model(load_model, zero_buffers=True)
         fully_shard(
             load_model,
-            policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer})
+            policy=ModuleWrapPolicy({TransformerDecoderLayer, TransformerEncoderLayer}),
+            ignored_modules=ignored_modules,
         )
         load_model.load_state_dict(state_dict)
         self._check_model_parity(load_model, save_model)

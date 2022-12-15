@@ -363,7 +363,7 @@ class TestFSDPStateDict(FSDPTest):
             new_model.load_state_dict(state_dict)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_orig_params", [True])
+    @parametrize("use_orig_params", [False, True])
     def test_state_dict_rank0_offload_save_load_flow(self, use_orig_params: bool):
         """Tests saving a model checkpoint only on rank 0 and loading it only
         on rank 0 with ``sync_module_states=True`` to emulate the workflow to
