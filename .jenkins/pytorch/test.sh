@@ -391,6 +391,7 @@ test_libtorch() {
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$TORCH_BIN_DIR"/nvfuser_tests --gtest_output=xml:$TEST_REPORTS_DIR/nvfuser_tests.xml
     else
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
