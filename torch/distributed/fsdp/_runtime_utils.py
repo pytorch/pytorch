@@ -1,15 +1,6 @@
 import functools
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -315,6 +306,7 @@ def _pre_forward(
         )
     return args, kwargs
 
+
 @no_type_check
 def _pre_forward_unshard(
     state: _FSDPState,
@@ -384,7 +376,7 @@ def _post_forward_reshard(
 
     free_unsharded_flat_params = [
         not state._is_root
-        and handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        and handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
         for handle in handles
     ]
     _reshard(state, handles, free_unsharded_flat_params)
@@ -594,9 +586,9 @@ def _post_backward_hook(
                 )
             if (
                 not _low_precision_hook_enabled(state)
-                and flat_param.grad.dtype != handle._config.reduce_dtype
+                and flat_param.grad.dtype != handle._reduce_dtype
             ):
-                flat_param.grad.data = flat_param.grad.to(handle._config.reduce_dtype)
+                flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
@@ -621,7 +613,7 @@ def _post_backward_hook(
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                if handle._config.sharding_strategy in (
+                if handle._sharding_strategy in (
                     HandleShardingStrategy.HYBRID_SHARD,
                     HandleShardingStrategy._HYBRID_SHARD_ZERO2,
                 ):
@@ -652,7 +644,7 @@ def _post_backward_hook(
                     _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
                 grad_to_offload = flat_param.grad.data
 
-            if handle._config.offload_params:
+            if handle._offload_params:
                 # Offload the gradient to CPU to ensure parameters and
                 # gradients are on the same device as required by the optimizer
                 # TODO: Investigate why `NO_SHARD` breaks correctness when
@@ -700,7 +692,7 @@ def _should_free_in_backward(
     # For NO_SHARD we don't need to free full parameters, for ZeRO-2 strategies, we skip
     # freeing in backward.
     return free_unsharded or (
-        handle._config.sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
+        handle._sharding_strategy in RESHARD_AFTER_FORWARD_STRATEGIES
     )
 
 
@@ -982,9 +974,7 @@ def _register_pre_forward_hooks(
                 _pre_forward, state, module_param_handles, unshard_fn
             )
             state._pre_forward_handles.append(
-                module.register_forward_pre_hook(
-                    hook, prepend=True, with_kwargs=True
-                )
+                module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
             )
 
 
