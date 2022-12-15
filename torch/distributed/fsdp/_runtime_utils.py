@@ -191,6 +191,7 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
+    has_hybrid_sharding_strategy = False
     for fsdp_state in _get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             p_assert(
@@ -205,6 +206,7 @@ def _share_state_and_init_handle_attrs(
             HandleShardingStrategy.HYBRID_SHARD,
             HandleShardingStrategy._HYBRID_SHARD_ZERO2,
         ):
+            has_hybrid_sharding_strategy = True
             # Share the all-reduce state across FSDP units. This is not strictly necessary
             # as each one already uses the same process group, but can slightly save memory
             # since other FSDP units allreduce state can be garbage collected.
@@ -233,6 +235,8 @@ def _share_state_and_init_handle_attrs(
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
+        if has_hybrid_sharding_strategy and attr_name == "process_group":
+            continue
         if len(attr_values) != 1:
             raise ValueError(
                 f"Expects one homogeneous value for {attr_name} but got {attr_values}"
