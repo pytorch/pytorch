@@ -1,6 +1,5 @@
-from torch.ao.nn.intrinsic.quantized import LinearReLU, LinearLeakyReLU
+from torch.ao.nn.intrinsic.quantized import LinearReLU
 
 __all__ = [
     'LinearReLU',
-    'LinearLeakyReLU',
 ]
