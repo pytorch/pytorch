@@ -715,7 +715,7 @@ def _register_state_dict_pre_hooks(state: _FSDPState) -> None:
         )
         return
     for handle in state._handles:
-        handle._comm_module.register_state_dict_pre_hook(
+        handle._fully_sharded_module.register_state_dict_pre_hook(
             functools.partial(_pre_state_dict_hook, state)
         )
 
@@ -727,7 +727,7 @@ def _register_state_dict_hooks(state: _FSDPState) -> None:
         state._register_state_dict_hook(functools.partial(_post_state_dict_hook, state))
         return
     for handle in state._handles:
-        handle._comm_module._register_state_dict_hook(
+        handle._fully_sharded_module._register_state_dict_hook(
             functools.partial(_post_state_dict_hook, state)
         )
 
@@ -741,7 +741,7 @@ def _register_load_state_dict_pre_hooks(state: _FSDPState) -> None:
         )
         return
     for handle in state._handles:
-        handle._comm_module._register_load_state_dict_pre_hook(
+        handle._fully_sharded_module._register_load_state_dict_pre_hook(
             functools.partial(_pre_load_state_dict_hook, state), with_module=True
         )
 
@@ -755,6 +755,6 @@ def _register_load_state_dict_post_hooks(state: _FSDPState) -> None:
         )
         return
     for handle in state._handles:
-        handle._comm_module.register_load_state_dict_post_hook(
+        handle._fully_sharded_module.register_load_state_dict_post_hook(
             functools.partial(_post_load_state_dict_hook, state)
         )
