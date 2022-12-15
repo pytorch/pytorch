@@ -238,7 +238,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
     }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const Tensor& grad_y, const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt, const Tensor& z_state, const Tensor& cell_state_fwd, const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(
+    const Tensor& grad_y,
+    const c10::optional<Tensor>& grad_hy_opt,
+    const c10::optional<Tensor>& grad_cy_opt,
+    const Tensor& z_state,
+    const Tensor& cell_state_fwd,
+    const Tensor& input,
+    TensorList hx,
+    TensorList params,
+    bool has_biases,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional,
+    bool batch_first
+) {
     using namespace mps;
     const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
     const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
@@ -332,6 +347,17 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                     NSMutableArray<MPSGraphTensor*>* gradStateArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
                     NSMutableArray<MPSGraphTensor*>* gradCellStateArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
 
+                    if(batch_first) {
+                        inputTensor = [mpsGraph transposeTensor:inputTensor
+                                                        dimension:0
+                                                        withDimension:1
+                                                        name:nil];
+                        gradientTensor_ = [mpsGraph transposeTensor:gradientTensor_
+                                                        dimension:0
+                                                        withDimension:1
+                                                        name:nil];
+                    }
+
                     for (int i = num_layers - 1; i >= 0; i--) {
                         MPSGraphTensor* zState = [mpsGraph sliceTensor:zStateTensor
                                                                 dimension:0
@@ -393,14 +419,29 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
 
 
                         gradientTensor_ = [outputs objectAtIndex:0];
-                        [gradOutputArray addObject:[outputs objectAtIndex:0]];
+                        MPSGraphTensor* gradientOutputTensor_ = [outputs objectAtIndex:0];
+                        if (batch_first) {
+                            gradientOutputTensor_ = [mpsGraph transposeTensor:gradientOutputTensor_
+                                                        dimension:0
+                                                    withDimension:1
+                                                                name:nil];
+                        }
+                        [gradOutputArray addObject:gradientOutputTensor_];
                         [gradRecWeightsArray addObject:[outputs objectAtIndex:1]];
                         [gradWeightsArray addObject:[outputs objectAtIndex:2]];
                         [gradBiasArray addObject:[outputs objectAtIndex:3]];
                         [gradStateArray addObject:[outputs objectAtIndex:4]];
                         [gradCellStateArray addObject:[outputs objectAtIndex:5]];
                     }
-                    std::vector<MPSGraphTensor*> outputTensors = {[outputs objectAtIndex:0],[outputs objectAtIndex:1],[outputs objectAtIndex:2],[outputs objectAtIndex:3], [outputs objectAtIndex:4], [outputs objectAtIndex:5]};
+                    
+                    std::vector<MPSGraphTensor*> outputTensors = {
+                        gradOutputArray.lastObject,
+                        [outputs objectAtIndex:1],
+                        [outputs objectAtIndex:2],
+                        [outputs objectAtIndex:3],
+                        [outputs objectAtIndex:4],
+                        [outputs objectAtIndex:5]
+                    };
                     newCachedGraph->outputTensors_ = outputTensors;
                     newCachedGraph->gradOutput_ = gradOutputArray;
                     newCachedGraph->gradRecWeights_ = gradRecWeightsArray;

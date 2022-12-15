@@ -7984,7 +7984,7 @@ class TestAdvancedIndexing(TestCase):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
 class TestRNNMPS(TestCase):
-    def test_lstm_1(self, device="mps", dtype=torch.float32):
+    def test_lstm_forward(self, device="mps", dtype=torch.float32):
 
         rnn = nn.LSTM(1, 4, 2, device="cpu")
         input = torch.randn(2, 3, 1, device="cpu")
@@ -8021,7 +8021,7 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_cn, cn)
 
     @unittest.skipIf(True, "Backward of lstm returns wrong result")
-    def test_lstm_2(self, device="mps", dtype=torch.float32):
+    def test_lstm_backward(self, device="mps", dtype=torch.float32):
         def get_results(device):
             rnn = nn.LSTM(1, 4, 1, device=device)
             inp = torch.randn(2, 3, 1, device=device, requires_grad=True)
@@ -8043,6 +8043,32 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_output, mps_output)
         self.assertEqual(cpu_input_grad, mps_input_grad)
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
+
+    def test_lstm_backward_batch_first_shape(self, device="mps", dtype=torch.float32):
+        # TODO: 
+        # This test can be incorporated into `test_lstm_backward` once the numeric correctness 
+        # issue of lstm has been resolved.
+        def get_results(device):
+            rnn = nn.LSTM(1, 4, 1, device=device, batch_first=True)
+            inp = torch.randn(3, 2, 1, device=device, requires_grad=True)
+            hx = torch.zeros(1, 3, 4, device=device)
+            cx = torch.zeros(1, 3, 4, device=device)
+
+            output, _ = rnn(inp, (hx, cx))
+            output.sum().backward()
+
+            weight_grad = rnn.weight_ih_l0.grad.clone()
+            input_grad = inp.grad.clone()
+
+            return output, weight_grad, input_grad
+
+
+        cpu_output, cpu_weight_grad, cpu_input_grad = get_results("cpu")
+        mps_output, mps_weight_grad, mps_input_grad = get_results("mps")
+
+        self.assertEqual(cpu_output.shape, mps_output.shape)
+        self.assertEqual(cpu_input_grad.shape, mps_input_grad.shape)
+        self.assertEqual(cpu_weight_grad.shape, mps_weight_grad.shape)
 
 class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
