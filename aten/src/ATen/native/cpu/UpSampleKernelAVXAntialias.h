@@ -293,6 +293,10 @@ uint32_t* ImagingResampleInner(
 // [ Weights computation for uint8_t and multiplication trick ]
 // For details on how the AVX kernels are implemented, see
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
+// See also [ Support for antialias=False as a subcase of antilias=True ] to
+// learn more about how the antialias=False case is computed. The same holds
+// here: all these kernels are general enough to handle an arbitrary number of
+// weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
 void upsample_avx_bilinear_or_bicubic(
     const at::Tensor& input,

@@ -26,6 +26,9 @@ using scale_t = std::vector<c10::optional<double>>;
 
 // TODO: this file could benefit from a global renaming of its functions /
 // classes and terms, as well as from adding more comments. In particular:
+// - It's not obvious that despite their names (and the file name), all these
+//   kernels don't just do upsampling: they do general interpolation, i.e. they
+//   also all support downscaling.
 // - the term "horizontal" or "within dims" or "contiguous dim" refers to the
 //   last dimension.
 //   It's not specific to 2D images and applies to 3D (and 1D??) inputs as well.
@@ -35,6 +38,12 @@ using scale_t = std::vector<c10::optional<double>>;
 // - the terms "zero-stride" and "non-zero strides" refer to the weights and
 //   indices, not to the contiguity of input or output
 // - It's not always clear which kernel is vectorized and which one isn't.
+// - The functions like _use_vectorized_kernel_cond() should be renamed and
+//   their description updated, because they're not the only "fork" in the
+//   code-path where a choice is made between a vectorized kernel vs a
+//   non-vectorized one. See e.g. upsample_bilinear2d_kernel_impl() where we
+//   already make a similar check, before the one in
+//   _use_vectorized_kernel_cond().
 // - It's not always clear which code is part of a "separable interpolation"
 //   code-path.
 // - Some names need to be more specific. For example
@@ -46,6 +55,14 @@ using scale_t = std::vector<c10::optional<double>>;
 //   `Interpolate` struct being used for cpu_upsample_linear:
 //   cpu_upsample_linear doesn't exist anymore, and these structs are used for
 //   various modes, *not* just linear.
+// - It'd be useful to document how interpolation works in general, and in particular state explicitly:
+//   - that the weights and indices across a given dimension are the same for
+//     all pixels (hence the benefit of pre-computing them)
+//   - that it can be "separated", i.e. we can do the horizontal pass and the
+//     vertical pass independently (and that some kernels are written this way,
+//     while some aren't.)
+// - we can probably remove the template over index_t, because it's always
+//   hard-coded as int64_t
 
 
 // Helper structs and methods for cpu_upsample_linear
@@ -756,6 +773,16 @@ struct HelperInterpBase {
     }
   }
 
+  // Note [ Support for antialias=False as a subcase of antilias=True ]
+  // This function was originally written with the hard assumption that
+  // antialias=True (hence the aa in the name). It was later extended to support
+  // antialias=False. The only difference between aa and no-aa is in how the
+  // weights and indices are computed (and their number). In aa their number is
+  // variable but with no-aa, they're fixed to interp_size. The same "filters"
+  // can be used otherwise. HOWEVER, support for antialias=False here may not be
+  // optimally optimized: the code assumes an arbitrary number of weights and
+  // indices, but this can be optimized further when aa=False since we know
+  // their actual dimensions.
   template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
   static inline std::tuple<std::vector<Tensor>, int> _compute_indices_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
