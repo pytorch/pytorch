@@ -37,7 +37,6 @@ TORCH_API extern const EllipsisIndexType Ellipsis;
 
 struct TORCH_API Slice final {
  public:
-  // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
   Slice(
       c10::optional<c10::SymInt> start_index = c10::nullopt,
       c10::optional<c10::SymInt> stop_index = c10::nullopt,
@@ -51,9 +50,13 @@ struct TORCH_API Slice final {
       // with -INDEX_MAX.  This doesn't affect the semantics, and it
       // guards against later undefined behaviour resulting from code that
       // does "step = -step" as part of a slice reversal.
-      if (step_ < -INDEX_MAX) {
-        step_ = c10::SymInt(-INDEX_MAX);
-      }
+
+      // TODO (tmanlaibaatar) figure out what to do with this.
+      // Right now it doesn't work because INDEX_MAX is outside of
+      // symint range.
+      // if (step_ < -INDEX_MAX) {
+      //   step_ = c10::SymInt(-INDEX_MAX);
+      // }
     }
 
     if (!start_index.has_value()) {

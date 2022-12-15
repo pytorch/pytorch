@@ -2143,7 +2143,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_dynamic_slicing(self):
         def f(x):
-            return x[: x.shape[0] - 2, x.shape[1] - 1 ::2]
+            return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
 
         gm_aten_mode, _ = torch._dynamo.export(
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
