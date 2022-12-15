@@ -1374,9 +1374,9 @@ def _gather_orig_param_state(
     This API should only be used when ``use_orig_params`` is True.
     """
     fsdp_state = fsdp_param_info.state
-    assert fsdp_state._use_orig_params, (
-        "_gather_orig_param_state only support use_orig_params=True case"
-    )
+    assert (
+        fsdp_state._use_orig_params
+    ), "_gather_orig_param_state only support use_orig_params=True case"
     flat_param = fsdp_param_info.flat_param
     param_idx = fsdp_param_info.param_indices[fqn]
     if (
