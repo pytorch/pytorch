@@ -266,9 +266,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -289,9 +288,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -312,9 +310,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -336,9 +333,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -722,7 +718,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
 
-        dynamo_result = out_graph(inp)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -743,9 +739,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -766,9 +761,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -790,9 +784,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps)
         out_graph = exported[0]
-        
 
-        dynamo_result = out_graph(*flat_input)
+        dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
@@ -842,7 +835,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         exported = torch._dynamo.export(func, *inps, aten_graph=True)
         out_graph = exported[0]
-        
+
         dynamo_result = out_graph(*inps_rand)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
