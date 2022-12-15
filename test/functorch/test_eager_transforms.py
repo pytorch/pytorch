@@ -2416,6 +2416,117 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], yt.movedim(2, 0))
 
 
+# Use for testing miscellaneous helper functions
+class TestHelpers(TestCase):
+    def test_CtxWithSavedTensors_error_if_name_collision(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_inner_ctx = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        class B(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx._pt_new_saved_tensors = 1
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, (y,))
+                return gy
+
+        out = A.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+        out = B.apply(x)
+        with self.assertRaisesRegex(RuntimeError, 'name collision'):
+            out.backward()
+
+    def test_CtxWithSavedTensors_nesting(self, device):
+        CtxWithSavedTensors = torch._functorch.autograd_function.CtxWithSavedTensors
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+        z = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                ctx_y = CtxWithSavedTensors(ctx, (y,))
+                self.assertEqual(ctx_y.saved_tensors, (y,))
+
+                wrapped = CtxWithSavedTensors(ctx_y, (z,))
+                self.assertEqual(wrapped.saved_tensors, (z,))
+                self.assertEqual(ctx_y.saved_tensors, (y,))
+
+                return gy * wrapped.saved_tensors[0]
+
+        out = A.apply(x)
+        out.backward()
+        self.assertEqual(x.grad, z)
+
+    def test_CtxWithSavedTensors_overrides_saved_tensors(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gy):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+                self.assertEqual(wrapped.saved_tensors, override)
+                return gy
+
+        out = A.apply(x)
+        out.backward()
+
+    def test_CtxWithSavedTensors_passthrough(self, device):
+        x = torch.randn([], device=device, requires_grad=True)
+        y = torch.randn([], device=device)
+
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, gz):
+                # The override can be literally anything
+                override = (1, 2, 3)
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(ctx, override)
+
+                self.assertEqual(wrapped.needs_input_grad[0], ctx.needs_input_grad[0])
+                self.assertEqual(wrapped.needs_input_grad[1], ctx.needs_input_grad[1])
+                wrapped.foo = 'bar'
+                self.assertEqual(wrapped.foo, 'bar')
+                self.assertEqual(ctx.foo, 'bar')
+                return gz, gz
+
+        out = A.apply(x, y)
+        out.backward()
+
+
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
@@ -3976,6 +4087,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestAutogradFunctionVmapAPI,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestHelpers,
     globals(),
     only_for=only_for,
 )
