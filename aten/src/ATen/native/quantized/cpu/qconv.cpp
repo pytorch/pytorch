@@ -1353,18 +1353,15 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       ideep::convolution_transpose_forward::compute(
           pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
-      DeconvParams params;
-      ideep::convolution_transpose_forward::prepare(
-          params, src, weights, b, dst_dims, dst,
-          strides, padding_l, padding_r, dilates, groups(),
-          src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+      ideep::convolution_transpose_forward::compute_v2((
+          src, weights, b, dst_dims, dst,
+          strides, padding_l, padding_r, dilates,
+          groups(), src_scales, weights_scales,
+          ideep::scale_t(scale_size, inv_output_scale),
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
-      onednn_utils::try_reorder(
-          weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
-      ideep::convolution_transpose_forward::compute(params, src, weights, b, dst);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
