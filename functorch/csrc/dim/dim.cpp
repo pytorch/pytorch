@@ -1158,7 +1158,7 @@ struct EnableAllLayers {
         }
     }
 private:
-    int64_t levels_start_;
+    int64_t levels_start_{};
     Slice<py::hdl<Dim>> levels_to_dim_;
 };
 
@@ -2687,7 +2687,7 @@ static PyObject* py_stack(PyObject *_,
         auto d = _wrap_dim(dim, ndim, false);
         auto idx = result_levels.index(d);
         if (!idx) {
-            py::raise_error(PyExc_TypeError, "Dimension %R does not exist in inputs", dim);
+            py::raise_error(PyExc_TypeError, "Dimension %R does not exist in inputs", dim.ptr());
         }
         rawdim = *idx;
     }

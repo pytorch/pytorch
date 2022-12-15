@@ -2,10 +2,13 @@
 from typing import cast
 
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.ops.common_rules import linear_pointwise_rule, pointwise_rule
-from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, _Partial
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
+from torch.distributed._tensor.ops.common_rules import (
+    linear_pointwise_rule,
+    pointwise_rule,
+)
 from torch.distributed._tensor.ops.utils import register_prop_rule
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Replicate
 
 # leave the remaining pointwise_ops list here for convenience,
 # Below ops are some pointwise ops that are yet to be supported,

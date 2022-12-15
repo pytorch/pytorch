@@ -40,7 +40,9 @@ inline bool check_tensor_dtype(
          allowed_dtypes.end()))) {
     TORCH_CHECK(
         !debug,
-        "Expected query, key and value to be of dtype float16 or bfloat16 but got Query dtype: ",
+        "Expected query, key and value to all be of dtype: {",
+        c10::Join(", ", allowed_dtypes), "}. Got ",
+        "Query dtype: ",
         params.query.dtype(),
         ", Key dtype: ",
         params.key.dtype(),
@@ -56,7 +58,7 @@ inline bool check_for_attn_weights(sdp_params params, bool debug) {
   // This can be returned form flash attention but care is needed
   // to convert from flash_attn format to attn_weights
   if (params.need_attn_weights) {
-    TORCH_CHECK(!debug, "Flash Attention does not support need attn weights");
+    TORCH_CHECK(!debug, "Both fused kernels do not support need_attn_weights=True.");
     return false;
   }
   return true;
@@ -118,7 +120,7 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
 
 inline bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
-    TORCH_CHECK(!debug, "Flash Attention does not support attention mask.");
+    TORCH_CHECK(!debug, "Both fused kernels do not support non-null attn_mask.");
     return false;
   }
   return true;
@@ -144,12 +146,65 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
 
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
-  if (!(query_size_last == params.key.size(-1) &&
-        query_size_last == params.value.size(-1) && query_size_last % 8 == 0 &&
-        query_size_last <= 128)) {
+  const int64_t value_size_last = params.value.size(-1);
+  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
+        query_size_last <= 128 && value_size_last % 8 == 0 &&
+        value_size_last <= 128)) {
     TORCH_CHECK(
         !debug,
         "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
+        "Got Query.size(-1): ",
+        query_size_last,
+        ", Key.size(-1): ",
+        params.key.size(-1),
+        ", Value.size(-1): ",
+        params.value.size(-1),
+        " instead.");
+    return false;
+  }
+  return true;
+}
+
+inline bool use_tensor_cores(
+    sdp_params params,
+    cudaDeviceProp* dprops,
+    bool is_half) {
+  if (dprops->major >= 8) {
+    return true;
+  }
+  if (dprops->major >= 7) {
+    return is_half;
+  }
+  return false;
+}
+inline int64_t minimum_gemm_alignment(sdp_params params) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+  bool use_tc = use_tensor_cores(params, dprops, is_half);
+  int64_t matmul_alignment_mn = 1;
+  if (dprops->major >= 8) {
+    matmul_alignment_mn = 4;
+  }
+  int64_t bits_per_scalar = is_half ? 16 : 32;
+  if (use_tc) {
+    matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
+  }
+  return matmul_alignment_mn;
+}
+
+inline bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
+  const int64_t query_size_last = params.query.size(-1);
+  const int64_t value_size_last = params.value.size(-1);
+  const int64_t alignment = minimum_gemm_alignment(params);
+  if (!(query_size_last == params.key.size(-1) &&
+        query_size_last % alignment == 0 && query_size_last > 0 &&
+        value_size_last % alignment == 0 && value_size_last > 0)) {
+    TORCH_CHECK(
+        !debug,
+        "Mem efficient attention requires last dimension of inputs to be divisible by ",
+        alignment,
+        ". ",
         "Got Query.size(-1): ",
         query_size_last,
         ", Key.size(-1): ",
@@ -259,13 +314,14 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
+      check_head_dim_size_mem_efficient,
       check_for_seq_len_1_nested_tensor,
       check_for_non_zero_dropout}};
   for (auto& constraint : constraints) {

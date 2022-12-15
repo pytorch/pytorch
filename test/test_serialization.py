@@ -297,6 +297,9 @@ class SerializationMixin(object):
                 self.assertEqual(x, y["tensor"])
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
+        _test_serialization(lambda x: x.to_sparse_csc())
+        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
@@ -333,35 +336,59 @@ class SerializationMixin(object):
                     "size is inconsistent with indices"):
                 y = torch.load(f)
 
-    def test_serialization_sparse_csr_invalid(self):
+    def _test_serialization_sparse_compressed_invalid(self,
+                                                      conversion,
+                                                      get_compressed_indices,
+                                                      get_plain_indices):
         x = torch.zeros(3, 3)
         x[1][1] = 1
-        x = x.to_sparse_csr()
+        x = conversion(x)
 
         class TensorSerializationSpoofer(object):
             def __init__(self, tensor):
                 self.tensor = tensor
 
             def __reduce_ex__(self, proto):
-                invalid_crow_indices = self.tensor.crow_indices().clone()
-                invalid_crow_indices[0] = 3
+                invalid_compressed_indices = get_compressed_indices(self.tensor).clone()
+                invalid_compressed_indices[0] = 3
                 return (
                     torch._utils._rebuild_sparse_tensor,
                     (
                         self.tensor.layout,
                         (
-                            invalid_crow_indices,
-                            self.tensor.col_indices(),
+                            invalid_compressed_indices,
+                            get_plain_indices(self.tensor),
                             self.tensor.values(),
                             self.tensor.size())))
+
+        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            compressed_indices_name = 'crow_indices'
+        else:
+            compressed_indices_name = 'ccol_indices'
 
         with tempfile.NamedTemporaryFile() as f:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
             f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "rebuilding sparse tensor for layout torch.sparse_csr"):
+                    f"`{compressed_indices_name}[[]..., 0[]] == 0` is not satisfied."):
                 y = torch.load(f)
+
+    def test_serialization_sparse_csr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csr, torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_csc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            torch.Tensor.to_sparse_csc, torch.Tensor.ccol_indices, torch.Tensor.row_indices)
+
+    def test_serialization_sparse_bsr_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsr(1, 1), torch.Tensor.crow_indices, torch.Tensor.col_indices)
+
+    def test_serialization_sparse_bsc_invalid(self):
+        self._test_serialization_sparse_compressed_invalid(
+            lambda x: x.to_sparse_bsc(1, 1), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -648,6 +675,8 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    # FIXME: See https://github.com/pytorch/pytorch/issues/90497
+    @unittest.expectedFailure
     def test_save_different_dtype_unallocated(self):
         devices = ['cpu']
         if torch.cuda.is_available():
