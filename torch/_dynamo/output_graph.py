@@ -198,7 +198,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graphargs: List[GraphArg] = []
         fake_mode = torch._subclasses.FakeTensorMode(
             throw_on_data_dependent_ops=True,
-            shape_env=ShapeEnv(),
+            shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         # Although we prune unused graphargs before sending graphs to
