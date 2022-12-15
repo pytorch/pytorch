@@ -35,7 +35,7 @@ class LoadingNvfuserLibrary {
       library_name = path;
     }
 #if defined(_WIN32)
-    library_name += "libnvfuser_codegen.dll";
+    library_name += "nvfuser_codegen.dll";
 #elif defined(__APPLE__)
     library_name += "libnvfuser_codegen.dylib";
 #else
