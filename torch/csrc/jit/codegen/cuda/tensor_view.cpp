@@ -143,9 +143,8 @@ TensorView::TensorView(
 NVFUSER_DEFINE_CLONE(TensorView)
 
 std::string TensorView::toString(int indent_size) const {
-  static constexpr char* prefix = "T";
   std::stringstream ss;
-  ss << prefix << ir_utils::varName(this);
+  ss << ir_utils::varName(this);
   switch (getMemoryType()) {
     case MemoryType::Global:
       ss << "_g";
@@ -174,7 +173,7 @@ std::string TensorView::toString(int indent_size) const {
         if (!first) {
           ss << ", ";
         }
-        ss << prefix << ir_utils::varName(consumer);
+        ss << ir_utils::varName(consumer);
         first = false;
       }
       ss << ", ";

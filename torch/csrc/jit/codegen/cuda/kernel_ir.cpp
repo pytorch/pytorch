@@ -92,7 +92,7 @@ TensorIndex::TensorIndex(
 
 std::string TensorIndex::toString(int indent_size) const {
   std::stringstream ss;
-  ss << "T" << ir_utils::varName(this);
+  ss << ir_utils::varName(this);
   switch (view()->getMemoryType()) {
     case MemoryType::Global:
       ss << "_g";
@@ -109,7 +109,7 @@ std::string TensorIndex::toString(int indent_size) const {
   ss << "[";
   ss << index()->toInlineString(indent_size);
   ss << "]";
-  ss << " view( T" << ir_utils::varName(view()) << " )";
+  ss << " view( " << ir_utils::varName(view()) << " )";
   return ss.str();
 }
 

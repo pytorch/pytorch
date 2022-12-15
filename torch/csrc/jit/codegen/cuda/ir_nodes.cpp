@@ -1804,7 +1804,7 @@ std::string IterDomain::toString(int indent_size) const {
   std::stringstream ss;
   ss << getIterType();
   ss << getParallelType();
-  ss << ir_utils::varName(this);
+  ss << name();
   ss << "{";
   if (!start()->isZeroInt()) {
     ss << start()->toInlineString() << " : ";

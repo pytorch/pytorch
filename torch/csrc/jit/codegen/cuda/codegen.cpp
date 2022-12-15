@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -182,7 +183,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     for (auto i : c10::irange(params.size())) {
       std::stringstream var_name_ss;
       if (params[i]->isA<TensorView>()) {
-        var_name_ss << varName(params[i]->as<TensorView>());
+        var_name_ss << ir_utils::varName(params[i]->as<TensorView>());
       } else {
         var_name_ss << gen(params[i]);
       }
@@ -226,7 +227,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           maybe_rfactor_domain.end(),
           [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
-            << varName(tv);
+            << ir_utils::varName(tv);
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments
@@ -357,20 +358,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return tmp_code.str();
   }
 
-  std::string varName(const Val* val) {
-    if (val->isA<kir::TensorIndex>()) {
-      return varName(val->as<kir::TensorIndex>()->view());
-    }
-    std::stringstream name;
-    if (val->isA<TensorView>()) {
-      name << "T";
-    } else {
-      name << typePrefix(val->dtype());
-    }
-    name << val->name();
-    return name.str();
-  }
-
   std::string genInline(const Statement* stmt) {
     const bool saved_inline = print_inline_;
     print_inline_ = true;
@@ -393,7 +380,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else if (pred->isConst()) {
       code_ << (*pred->value() ? "true" : "false");
     } else {
-      code_ << varName(pred);
+      code_ << ir_utils::varName(pred);
     }
   }
 
@@ -419,7 +406,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         code_ << val;
       }
     } else {
-      code_ << varName(d);
+      code_ << ir_utils::varName(d);
     }
   }
 
@@ -439,7 +426,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else if (i->isConst()) {
       code_ << *i->value();
     } else {
-      code_ << varName(i);
+      code_ << ir_utils::varName(i);
     }
   }
 
@@ -451,7 +438,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else if (c->isConst()) {
       code_ << "std::complex<double>" << *c->value();
     } else {
-      code_ << varName(c);
+      code_ << ir_utils::varName(c);
     }
   }
 
@@ -479,7 +466,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
-    code_ << varName(ti->view()) << "[" << genInline(ti->index()) << "]";
+    code_ << ir_utils::varName(ti->view()) << "[" << genInline(ti->index())
+          << "]";
   }
 
   void handle(const ViewAsScalar* sv) final {
@@ -613,7 +601,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           if (out_tv->getMemoryType() == MemoryType::Local &&
               !(out_tv->isDoubleBuffered() || out_tv->isCircularBuffered())) {
             // Vectorized initialization
-            indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
+            indent() << ir_utils::varName(out_tv) << ".set(" << gen(uop->in())
+                     << ");\n";
           } else {
             // Note: currently arraySet option is not vectorized, so it will
             //  rely on auto vectorization pass of cuda compiler.
@@ -1053,14 +1042,16 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputARegisterSize(options.macro) << ","
              << getInputARegisterSize(options.macro) << ">*>(&"
-             << varName(mma->inA()->as<kir::TensorIndex>()->view()) << ")["
-             << genInline(mma->inA()->as<kir::TensorIndex>()->index()) << "])"
+             << ir_utils::varName(mma->inA()->as<kir::TensorIndex>()->view())
+             << ")[" << genInline(mma->inA()->as<kir::TensorIndex>()->index())
+             << "])"
              << ",\n";
     indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputBRegisterSize(options.macro) << ","
              << getInputBRegisterSize(options.macro) << ">*>(&"
-             << varName(mma->inB()->as<kir::TensorIndex>()->view()) << ")["
-             << genInline(mma->inB()->as<kir::TensorIndex>()->index()) << "])";
+             << ir_utils::varName(mma->inB()->as<kir::TensorIndex>()->view())
+             << ")[" << genInline(mma->inB()->as<kir::TensorIndex>()->index())
+             << "])";
   }
 
   void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {
@@ -1496,7 +1487,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       auto buffer = kernel_->profile().getBuffer();
       TORCH_INTERNAL_ASSERT(buffer != nullptr);
       for (const auto& index : buffer_indices) {
-        func_args.arg(varName(buffer)).append("[").append(index).append("]");
+        func_args.arg(ir_utils::varName(buffer))
+            .append("[")
+            .append(index)
+            .append("]");
       }
     }
   }
@@ -1539,8 +1533,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(gen(grop->out()));
     func_args.arg(gen(grop->in()));
     func_args.arg(genReductionOp(op_type, out->dtype()));
-    func_args.arg("&").append(varName(work_buffer)).append("[0]");
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(work_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
     func_args.arg(genCall("static_cast", ptrType(data_type), "shared_mem"));
     // read and write predicates
     TORCH_INTERNAL_ASSERT(
@@ -1565,7 +1559,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   std::string genFusedReductionName(const TensorView* reduction_out) {
-    return varName(reduction_out) + "_reduction";
+    return ir_utils::varName(reduction_out) + "_reduction";
   }
 
   void generateGridAllreduce(const kir::GridReduction* grop) {
@@ -1604,9 +1598,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(genCall("ConstRefTuple", data_type, gen(grop->in())));
     // global_work_buffer
     func_args.arg(genCall(
-        "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+        "VolatilePtrTuple",
+        data_type,
+        "&" + ir_utils::varName(work_buffer) + "[0]"));
     // global_sync_buffer
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
     // shared_buf
     func_args.arg(genCall(
         "PtrTuple",
@@ -1682,11 +1678,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(genReductionOp(
           grouped_grop->getReductionOpType(i),
           grouped_grop->output(i)->dtype()));
-      func_args.arg("&").append(varName(work_buffer)).append("[0]");
+      func_args.arg("&").append(ir_utils::varName(work_buffer)).append("[0]");
     }
 
     // The rest of the arguments are common between the reductions
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
     func_args.arg("shared_mem");
     // read and write predicates
     TORCH_INTERNAL_ASSERT(
@@ -1870,7 +1866,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             : (genInline(grouped_grop->buffer_stride()) + " * " +
                std::to_string(group_index));
         work_bufs.arg("&")
-            .append(varName(work_buffer))
+            .append(ir_utils::varName(work_buffer))
             .append("[")
             .append(work_buffer_offset)
             .append("]");
@@ -1909,7 +1905,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // global_sync_buffer
     const auto sync_buffer =
         grouped_grop->sync_buffer()->buffer()->as<TensorView>();
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
 
     // shared_buf
     func_args.arg("shared_mem");
@@ -1998,7 +1994,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                                        ->as<TensorView>();
           work_bufs[i]
               .arg("&")
-              .append(varName(work_buffer))
+              .append(ir_utils::varName(work_buffer))
               .append("[")
               .append(work_buffer_offset)
               .append("]");
@@ -2045,7 +2041,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // global_sync_buffer
     const auto sync_buffer =
         grouped_gwop->sync_buffer()->buffer()->as<TensorView>();
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
 
     // shared_buf
     ArgumentBuilder smem_buffer_args;
@@ -2120,13 +2116,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     ArgumentBuilder func_args;
 
     // outputs
-    func_args.arg(varName(output.get(0)));
-    func_args.arg(varName(output.get(1)));
-    func_args.arg(varName(output.get(2)));
+    func_args.arg(ir_utils::varName(output.get(0)));
+    func_args.arg(ir_utils::varName(output.get(1)));
+    func_args.arg(ir_utils::varName(output.get(2)));
     // inputs
-    func_args.arg(varName(input.get(0)));
-    func_args.arg(varName(input.get(1)));
-    func_args.arg(varName(input.get(2))).append("[0]");
+    func_args.arg(ir_utils::varName(input.get(0)));
+    func_args.arg(ir_utils::varName(input.get(1)));
+    func_args.arg(ir_utils::varName(input.get(2))).append("[0]");
 
     // global buf
     for (const auto i : c10::irange(3)) {
@@ -2135,7 +2131,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                                    ->buffer()
                                    ->as<TensorView>();
       func_args.arg("&")
-          .append(varName(work_buffer))
+          .append(ir_utils::varName(work_buffer))
           .append("[")
           .append(0)
           .append("]");
@@ -2148,7 +2144,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // sync buf
     const auto sync_buffer =
         grouped_gwop->sync_buffer()->buffer()->as<TensorView>();
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
 
     ArgumentBuilder func_template_args;
     func_template_args.arg(num_grouped_iterations);
@@ -2201,8 +2197,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << "grid_broadcast::broadcast<" << flags_str.str() << ">(\n";
     indent() << kTab << gen(bop->out()) << ",\n";
     indent() << kTab << gen(bop->in()) << ",\n";
-    indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
-    indent() << kTab << varName(sync_buffer) << ",\n";
+    indent() << kTab << "&" << ir_utils::varName(work_buffer) << "[0],\n";
+    indent() << kTab << ir_utils::varName(sync_buffer) << ",\n";
     TORCH_INTERNAL_ASSERT(
         grop->predicate() != nullptr && grop->predicate()->hasValue());
     indent() << kTab << genInline(grop->predicate()) << ");\n";
@@ -2258,10 +2254,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       indent() << kTab << "(" << wop->outN()->dtype() << ")" << gen(wop->inN())
                << ",\n";
     }
-    indent() << kTab << "&" << varName(avg_buffer) << "[0],\n";
-    indent() << kTab << "&" << varName(var_buffer) << "[0],\n";
-    indent() << kTab << "&" << varName(n_buffer) << "[0],\n";
-    indent() << kTab << varName(sync_buffer) << ",\n";
+    indent() << kTab << "&" << ir_utils::varName(avg_buffer) << "[0],\n";
+    indent() << kTab << "&" << ir_utils::varName(var_buffer) << "[0],\n";
+    indent() << kTab << "&" << ir_utils::varName(n_buffer) << "[0],\n";
+    indent() << kTab << ir_utils::varName(sync_buffer) << ",\n";
     indent() << kTab << "reinterpret_cast<" << data_type
              << "*>(shared_mem_avg),\n";
     indent() << kTab << "reinterpret_cast<" << data_type
@@ -2337,13 +2333,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     ArgumentBuilder work_buffer_args;
     work_buffer_args.arg("&")
-        .append(varName(gwop->avg_buffer()->buffer()->as<TensorView>()))
+        .append(
+            ir_utils::varName(gwop->avg_buffer()->buffer()->as<TensorView>()))
         .append("[0]");
     work_buffer_args.arg("&")
-        .append(varName(gwop->var_buffer()->buffer()->as<TensorView>()))
+        .append(
+            ir_utils::varName(gwop->var_buffer()->buffer()->as<TensorView>()))
         .append("[0]");
     work_buffer_args.arg("&")
-        .append(varName(gwop->N_buffer()->buffer()->as<TensorView>()))
+        .append(ir_utils::varName(gwop->N_buffer()->buffer()->as<TensorView>()))
         .append("[0]");
 
     ArgumentBuilder smem_buffer_args;
@@ -2363,7 +2361,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(
         genCall("VolatilePtrTuple", data_type_args, work_buffer_args));
     // global_sync_buffer
-    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("&").append(ir_utils::varName(sync_buffer)).append("[0]");
     // shared_buf
     func_args.arg(genCall("PtrTuple", data_type_args, smem_buffer_args));
     // read and write predicates
@@ -2611,14 +2609,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       // Allocate alias another Allocate stmt
       const auto alias_tv = alloc->alias()->buffer()->as<TensorView>();
       indent() << "// Alias Allocation - " << alloc->memoryType() << "\n";
-      indent() << "auto& " << varName(tv) << " = " << varName(alias_tv)
-               << ";\n";
+      indent() << "auto& " << ir_utils::varName(tv) << " = "
+               << ir_utils::varName(alias_tv) << ";\n";
 
     } else {
       // Standard Memory Allocation
       switch (tv->getMemoryType()) {
         case MemoryType::Global:
-          indent() << "// Allocate global tensor " << varName(tv) << "\n";
+          indent() << "// Allocate global tensor " << ir_utils::varName(tv)
+                   << "\n";
           break;
         case MemoryType::Shared:
           // Align Offset Position
@@ -2626,7 +2625,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                    // Always align to 128b / 16B
                    << 16 << ");\n";
           // Shared Memory Pointer
-          indent() << buffer_dtype << "* " << varName(tv)
+          indent() << buffer_dtype << "* " << ir_utils::varName(tv)
                    << " = reinterpret_cast<" << buffer_dtype << "*>"
                    << "(array + smem_offset);\n";
           // Increment Offset Position
@@ -2637,9 +2636,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           auto va = kernel_->summary().vectorized_accesses;
           if (va.find(tv) != va.end()) {
             indent() << "Array<" << buffer_dtype << ", " << genInline(size)
-                     << ", " << va.at(tv) << "> " << varName(tv) << ";\n";
+                     << ", " << va.at(tv) << "> " << ir_utils::varName(tv)
+                     << ";\n";
           } else {
-            indent() << buffer_dtype << " " << varName(tv) << "["
+            indent() << buffer_dtype << " " << ir_utils::varName(tv) << "["
                      << genInline(size) << "];\n";
           }
         } break;
@@ -2694,7 +2694,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         ArgumentBuilder().arg("gridDim"));
 
     ArgumentBuilder sync_call_args;
-    sync_call_args.arg(varName(sync->syncBuffer()))
+    sync_call_args.arg(ir_utils::varName(sync->syncBuffer()))
         .append("[")
         .append(sync_idx)
         .append("]");

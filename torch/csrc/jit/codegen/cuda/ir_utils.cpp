@@ -772,13 +772,17 @@ IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(const TensorView* tv) {
 }
 
 std::string varName(const Val* val) {
-  std::stringstream value_name;
-  if (val == nullptr) {
-    value_name << "$nullptr";
-  } else {
-    value_name << val->name();
+  if (val->isA<kir::TensorIndex>()) {
+    return varName(val->as<kir::TensorIndex>()->view());
   }
-  return value_name.str();
+  std::stringstream name;
+  if (val->isA<TensorView>()) {
+    name << "T";
+  } else {
+    name << typePrefix(val->dtype());
+  }
+  name << val->name();
+  return name.str();
 }
 
 } // namespace ir_utils

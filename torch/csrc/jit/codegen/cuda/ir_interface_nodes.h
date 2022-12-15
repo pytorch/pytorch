@@ -88,7 +88,7 @@ class TORCH_CUDA_CU_API Scalar : public Val {
   std::string toString(int indent_size = 0) const override {
     std::stringstream ss;
     if (isSymbolic()) {
-      ss << typePrefix(getDataType().value()) << ir_utils::varName(this);
+      ss << ir_utils::varName(this);
       return ss.str();
     }
     if (*getDataType() == DataType::Bool) {
