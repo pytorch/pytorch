@@ -8045,8 +8045,8 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
     def test_lstm_backward_batch_first_shape(self, device="mps", dtype=torch.float32):
-        # TODO: 
-        # This test can be incorporated into `test_lstm_backward` once the numeric correctness 
+        # TODO:
+        # This test can be incorporated into `test_lstm_backward` once the numeric correctness
         # issue of lstm has been resolved.
         def get_results(device):
             rnn = nn.LSTM(1, 4, 1, device=device, batch_first=True)

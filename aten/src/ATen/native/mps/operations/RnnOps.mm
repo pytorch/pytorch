@@ -433,7 +433,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(
                         [gradStateArray addObject:[outputs objectAtIndex:4]];
                         [gradCellStateArray addObject:[outputs objectAtIndex:5]];
                     }
-                    
+
                     std::vector<MPSGraphTensor*> outputTensors = {
                         gradOutputArray.lastObject,
                         [outputs objectAtIndex:1],
