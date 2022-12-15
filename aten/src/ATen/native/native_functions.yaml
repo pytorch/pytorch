@@ -13226,12 +13226,6 @@
   tags: view_copy
   autogen: _test_autograd_multiple_dispatch_view_copy.out
 
-# Note: this function is only for testing.
-- func: _test_inductor_realize(Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA, Meta: _test_inductor_realize
-
 - func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
@@ -13722,10 +13716,13 @@
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
 
-- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
 
+- func: _chunk_grad_outputs_efficient_attention(Tensor query, Tensor key, Tensor value, bool is_causal=False) -> bool
+  dispatch:
+    CUDA: _chunk_grad_outputs_efficient_attention
 # Returns ouput, softmax_logsumexp, softmax
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, bool return_softmax, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -13738,7 +13735,7 @@
   dispatch:
     CUDA: _efficient_attention_forward
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _efficient_attention_backward
