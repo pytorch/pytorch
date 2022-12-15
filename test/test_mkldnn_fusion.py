@@ -368,10 +368,10 @@ class TestMkldnnFusion(JitTestCase):
                             packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
                                 mod.conv_transpose.weight.to_mkldnn(),
                                 mod.conv_transpose.padding,
+                                mod.conv_transpose.output_padding,
                                 mod.conv_transpose.stride,
                                 mod.conv_transpose.dilation,
                                 mod.conv_transpose.groups,
-                                mod.conv_transpose.output_padding,
                                 x.size())
                             mod.conv_transpose.weight = torch.nn.Parameter(
                                 packed_weight,
@@ -383,10 +383,10 @@ class TestMkldnnFusion(JitTestCase):
                             mod.conv_transpose.weight,
                             mod.conv_transpose.bias,
                             mod.conv_transpose.padding,
+                            mod.conv_transpose.output_padding,
                             mod.conv_transpose.stride,
                             mod.conv_transpose.dilation,
                             mod.conv_transpose.groups,
-                            mod.conv_transpose.output_padding,
                             attr,
                             scalars,
                             algorithm)
