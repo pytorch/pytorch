@@ -9,6 +9,7 @@
 #include <torch/types.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <cstdint>
 #include <memory>
@@ -157,8 +158,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     // key values, this will result in a runtime error if we have two submodules
     // of the same type, e.g.:
     // `Sequential sequential(Linear(3, 4), ReLU(), Linear(4, 1), ReLU())`
-    std::vector<std::string> registered_names = children_.keys();
-    for (std::size_t i = 0; i < modules_.size(); ++i) {
+    const std::vector<std::string> registered_names = children_.keys();
+    for (const auto& i : c10::irange(modules_.size())) {
       clone->push_back(registered_names[i], modules_[i].clone(device));
     }
     return clone;
