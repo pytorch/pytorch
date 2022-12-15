@@ -1138,35 +1138,21 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which disappears after retry
-            # TODO: revisit this after switching to new Triton runtime
-            retries = 2 if self.args.ci else 0
-            for i in range(retries + 1):
-                reset_rng_state()
-                torch._dynamo.reset()
-                try:
-                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                    new_result = optimized_model_iter_fn(
-                        deepcopy_and_maybe_ddp(model), example_inputs
-                    )
-                    break
-                except Exception as e:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    log.exception(e)
-                    if i < retries and (
-                        (
-                            isinstance(e, RuntimeError)
-                            and str(e).startswith("Internal Triton PTX codegen error")
-                        )
-                        or (isinstance(e, KeyError) and str(e) == "'cubin'")
-                    ):
-                        time.sleep((i + 1) * 30)
-                        print("Retrying...")
-                    else:
-                        accuracy_status = "fail_to_run"
-                        return record_status(accuracy_status)
+            reset_rng_state()
+            torch._dynamo.reset()
+            try:
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+
+                new_result = optimized_model_iter_fn(
+                    deepcopy_and_maybe_ddp(model), example_inputs
+                )
+            except Exception as e:
+                accuracy_status = "fail_to_run"
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                log.exception(e)
+                return record_status(accuracy_status)
 
             if not same(
                 correct_result,
