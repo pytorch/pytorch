@@ -16,7 +16,6 @@ def compile(func, example_inputs):
     return inductor_compile_fx(graph, example_inputs)
 
 def eager_all_reduce(x):
-    # return nccl.all_reduce([x])
     return dist.all_reduce(x, async_op=False)
 
 if __name__ == '__main__':
