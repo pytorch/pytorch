@@ -24,7 +24,6 @@ from .backend_config import (
 )
 from ..fuser_method_mappings import (
     _sequential_wrapper2,
-    _reverse3,
 )
 
 
