@@ -36,12 +36,13 @@ module wrapping a fully sharded module, and for the non-wrapper code path,
 ``_FSDPState`` is an object that gets embedded on a fully sharded module.
 See [Note: Fully Sharded Module] for the definition.
 
-A common idiom is, given a root module, traverse the module's tree and get all
-``_FSDPState`` s in the tree. This should be done via ``_get_fsdp_states()``.
-Another idiom is, given a root module, traverse the module's tree and get only
-the local FSDP roots. This should be done via ``_get_fsdp_root_states()``.
+There are three common traversal idioms. Given a root module,
+- ``_get_fsdp_states()`` returns all ``_FSDPState`` s in the tree.
+- ``get_fsdp_root_states()`` returns all local root ``_FSDPState`` s in the
+tree.
+- ``_get_fsdp_handles()``returns all ``FlatParamHandle`` s in the tree.
 
-Both of these methods must take in the root module (i.e. an ``nn.Module``) and
+ALl of these methods must take in the root module (i.e. an ``nn.Module``) and
 not a general ``_FSDPState`` because ``_FSDPState`` does not support a graph
 traversal, whereas ``nn.Module`` has ``nn.Module.modules()`` for traversal.
 """
