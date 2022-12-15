@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager
+from typing import ContextManager, Optional
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -185,7 +185,17 @@ class MetaConverter:
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t, shape_env=None, callback=lambda t: t()):
+    # NB: name here is used in a conventional way by Dynamo; it corresponds
+    # precisely to the Source.name() of the tensor we're fakeifying and
+    # corresponds to a valid Python expression.  When we construct sub-names
+    # as part of this process, we will maintain this invariant!  (Even though
+    # other users of this may not need it this property to be upheld.)
+    def meta_tensor(
+        self, t, shape_env=None, callback=lambda t: t(), sname: Optional[str] = None
+    ):
+        if sname is None:
+            sname = f"__unknown_tensor{len(self.tensor_memo)}"
+
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
         # will perform operations on them which need fake tensor mode to
@@ -228,7 +238,9 @@ class MetaConverter:
 
         def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(t)
+                return shape_env.create_symbolic_sizes_strides_storage_offset(
+                    t, sname=sname
+                )
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -288,7 +300,9 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    base = self.meta_tensor(t._base, shape_env, callback)
+                    base = self.meta_tensor(
+                        t._base, shape_env, callback, sname=f"{sname}._base"
+                    )
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
@@ -442,7 +456,9 @@ class MetaConverter:
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if safe_grad(t) is not None:
-                    r.grad = self.meta_tensor(safe_grad(t), shape_env, callback)
+                    r.grad = self.meta_tensor(
+                        safe_grad(t), shape_env, callback, sname=f"{sname}.grad"
+                    )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
@@ -452,7 +468,13 @@ class MetaConverter:
         return self.get_tensor_memo(t)
 
     def __call__(
-        self, t, shape_env=None, *, callback=lambda t: t(), ignore_subclass=False
+        self,
+        t,
+        shape_env=None,
+        *,
+        callback=lambda t: t(),
+        ignore_subclass=False,
+        sname=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -500,7 +522,9 @@ class MetaConverter:
                 if ignore_subclass:
                     ctx = torch._C.DisableTorchFunction()
                 with ctx:
-                    r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
+                    r = self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, sname=sname
+                    )
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)

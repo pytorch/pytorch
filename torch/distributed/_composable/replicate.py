@@ -68,15 +68,15 @@ class _ReplicateState:
         return self._ddp.post_forward(output)
 
 
-@contract
+@contract()
 def replicate(
     module: nn.Module,  # NOTE: contract now supports single module only
     **kwargs,
 ) -> nn.Module:
-    r"""Replicates module(s)
+    r"""Replicates a module
 
     Args:
-        modules (torch.nn.Module): modules to replicate
+        module (torch.nn.Module): module to replicate
 
     Example::
         >>> module = nn.Linear(3, 3)
