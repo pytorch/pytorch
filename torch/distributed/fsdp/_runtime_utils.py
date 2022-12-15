@@ -456,16 +456,9 @@ def _cast_fp_inputs_to_dtype(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
-        # Cast this in-place to ensure that gradients propagate to `x` if it
-        # requires gradient
-        if x.requires_grad:
-            x.data = x.to(dtype)
-            return x
-        # Otherwise, cast this out-of-place
         return x.to(dtype)
 
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
