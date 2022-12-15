@@ -10,10 +10,10 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float
+from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
@@ -423,12 +423,15 @@ def forward(self, x_1):
         def f(a, b):
             return torch.allclose(a, b)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)(
                 torch.zeros(3), torch.zeros(3)
             )
-        )
+
+        if self.tracing_mode == "symbolic":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -454,7 +457,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2])
             blowup = val.repeat(1000)
-            return blowup.sum().item()
+            return bool(blowup.sum().item() == 2)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -465,7 +468,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2.0])
             val.normal_()
-            return val.item()
+            return bool(val.item() == 2.1)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -725,7 +728,7 @@ class TestFakeProxyTensor(TestCase):
 
         def f():
             return torch.ops.aten.t.default(x)
-        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
 
         class A(torch.Tensor):
             pass
@@ -795,7 +798,19 @@ class TestSymbolicTracing(TestCase):
             rx, ry = traced_f(*input), fn(*input)
             if assert_eq:
                 self.assertEqual(rx, ry)
-        return traced_f.shape_env
+        return traced_f
+
+
+    def test_resize_from_zero(self):
+        def f(x, y):
+            x.resize_(y.size(0))
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
+    return None""")
 
 
     def test_unary(self):
@@ -805,12 +820,12 @@ class TestSymbolicTracing(TestCase):
         test_inputs = []
         test_inputs.append([(2, 5)])
         test_inputs.append([(6, 8)])
-        shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
-        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
-        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
+        gm = self._test_dynamic(f, [(3, 4)], test_inputs)
+        self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
+        self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         # TODO: There should eventually be guards for contiguity, but they're
         # not currently being done yet
-        assert len(shape_env.guards) == 1, "\n" + shape_env.format_guards()
+        assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
 
     def test_binary_broadcast(self):
         def f(a, b):
@@ -820,7 +835,7 @@ class TestSymbolicTracing(TestCase):
         test_inputs = []
         test_inputs.append([(1, 5), (3, 1)])
         test_inputs.append([(1, 4), (4, 1)])
-        shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
+        shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs).shape_env
         assert len(shape_env.guards) == 0
 
     def test_multiply_shape(self):
@@ -834,6 +849,18 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
+
+    def test_item(self):
+        def f(a):
+            r = a.item()
+            return r * a
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1)
+    mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
+    return mul""")
 
 
     def test_neg_shape(self):
@@ -892,16 +919,16 @@ def forward(self, a_1):
         test_inputs = []
         test_inputs.append([(1, 5), (6, 1)])
         test_inputs.append([(1, 4), (3, 1)])
-        shape_env = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
-        self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
-        self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
-        assert len(shape_env.guards) == 1
+        gm = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
+        self.assertTrue(eval_guards(gm, torch.randn(1, 10), torch.randn(6, 1)))
+        self.assertFalse(eval_guards(gm, torch.randn(1, 2), torch.randn(4, 1)))
+        assert len(gm.shape_env.guards) == 1
 
     def test_new_empty(self):
         def f(a, b):
             return a.new_empty(b.shape[0], b.shape[1] * 2)
 
-        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
+        self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False).shape_env
 
     def test_size_with_tensor(self):
         def f(tensor):
@@ -984,10 +1011,12 @@ def forward(self, a_1):
     def test_mega_guard(self):
         def f(a, b):
             assert a.shape[0] == b.shape[0] * 2
-            assert b.shape[0] == 8
             return a.cos()
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
-        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()), """Eq(s5, 8) & Eq(s1, 2*s5)""")
+        self.assertExpectedInline(
+            fx_g.shape_env.codegen_guards(fx_placeholder_vals(fx_g), ["a", "b"]),
+            """a.size()[0] == 2*b.size()[0] and a.stride()[0] == 1 and a.storage_offset() == 0 and b.stride()[0] == 1 and b.storage_offset() == 0 and b.size()[0] != 0 and b.size()[0] != 1"""  # noqa: B950
+        )
 
     def test_sym_storage_offset(self):
         def f(x, y):
@@ -1121,7 +1150,6 @@ symbolic_tensor_failures = {
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
@@ -1264,7 +1292,6 @@ symbolic_tensor_failures = {
     xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('outer', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition

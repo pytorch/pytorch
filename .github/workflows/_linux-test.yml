@@ -28,6 +28,11 @@ on:
         default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      use-gha:
+        required: false
+        type: string
+        default: ""
+        description: If set to any value, upload to GHA. Otherwise upload to S3.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -133,7 +138,7 @@ jobs:
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.jenkins/caffe2/test.sh
+            TEST_COMMAND=.jenkins/onnx/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
@@ -219,6 +224,7 @@ jobs:
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          use-gha: ${{ inputs.use-gha }}
 
       - name: Collect backtraces from coredumps (if any)
         if: always()

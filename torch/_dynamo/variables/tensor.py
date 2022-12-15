@@ -188,7 +188,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
@@ -337,6 +337,24 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif (
+            name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
+        ):
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, args + [kwargs["alpha"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
+        elif (
+            name == "addcdiv_"
+            and len(args) == 2
+            and len(kwargs) == 1
+            and "value" in kwargs
+        ):
+            result = TorchVariable(torch.div, **options).call_function(tx, args, {})
+            result = TorchVariable(torch.mul, **options).call_function(
+                tx, [result, kwargs["value"]], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -445,6 +463,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         # insert unwrapped version of self as the first argument
+        # TODO: This is wrong!  When you call the internal __torch_function__,
+        # you still get the wrapped version of self, and if you call functions
+        # inside __torch_function__, they should come back here.  If we unwrap
+        # the tensor immediately, that will not happen.
+        # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
         args.insert(0, self.tensor_variable)
         func_var = GetAttrVariable(self.tensor_variable, name)

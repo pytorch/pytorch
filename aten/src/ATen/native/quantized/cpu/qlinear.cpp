@@ -283,6 +283,162 @@ at::Tensor& PackedLinearWeight::apply_relu_out(
   return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32(
+  at::Tensor input,
+  double input_scale,
+  int64_t input_zero_point) {
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_with_input_q_dq_qweight_dq_output_fp32 is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32 to be full precision.");
+
+  return apply_with_input_q_dq_qweight_dq_output_fp32_impl<false>(input, input_scale, input_zero_point);
+}
+
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_relu_output_fp32(
+  at::Tensor input,
+  double input_scale,
+  int64_t input_zero_point) {
+  TORCH_CHECK(!input.is_quantized(), "Input tensor for apply_with_input_q_dq_qweight_dq_output_fp32 is quantized; "
+  "Expected input tensor in PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32 to be full precision.");
+
+  return apply_with_input_q_dq_qweight_dq_output_fp32_impl<true>(input, input_scale, input_zero_point);
+}
+
+
+template <bool ReluFused>
+at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl(
+    const at::Tensor& input,
+    double input_scale,
+    int64_t input_zero_point) {
+  TORCH_CHECK(
+      fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+
+  auto input_contig = input.expect_contiguous();
+  const auto* input_ptr = input_contig->data_ptr<float>();
+
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "The dimension of input tensor should be larger than or equal to 2");
+  int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+
+  auto packB = w.get();
+
+  int64_t N = static_cast<int64_t>(packB->numCols());
+  int64_t K = input.sizes()[input.dim() - 1];
+  TORCH_CHECK(
+      K == static_cast<int64_t>(packB->numRows()),
+      "The number of rows in the packB should be equal to K: " +
+          std::to_string(K));
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  float input_scale_float = input_scale;
+  int32_t input_zero_point_int32 = input_zero_point;
+
+  TORCH_CHECK(
+      w_scale.size() == w_zp.size(),
+      "Weight scales and zero points vectors should have the same size.");
+
+  const float* bias_ptr = nullptr;
+  c10::MaybeOwned<at::Tensor> bias_contig;
+  if (this->bias_.has_value()) {
+    auto& bias = this->bias_.value();
+    bias_contig = bias.expect_contiguous();
+    TORCH_CHECK(bias_contig->dim() == 1, "bias should be a vector (1D Tensor)");
+    TORCH_CHECK(
+        bias_contig->sizes()[0] == N, "bias should have N elements: " + std::to_string(N));
+    bias_ptr = bias_contig->data_ptr<float>();
+  }
+
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
+  // Allocate output Tensor and a buffer for fbgemmPacked to use
+  auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
+  auto buffer = at::empty_like(
+      output,
+      output.options().dtype(at::kInt),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
+        /*trans=*/fbgemm::matrix_op_t::NoTranspose,
+        /*nRow=*/M,
+        /*nCol=*/K,
+        /*smat=*/input_ptr,
+        /*ld=*/K,
+        /*pmat=*/nullptr,
+        /*scale=*/input_scale_float,
+        /*zero_pt=*/input_zero_point_int32);
+
+    fbgemm::DoNothing<float, float> doNothingObj{};
+    for (const auto task_id : c10::irange(begin, end)) {
+      if (q_scheme == c10::kPerTensorAffine) {
+        // Process the per tensor quantization.
+        //
+        // After the uint8 * int8 matrix multiplication is performed, this
+        // operation does:
+        //  1) Add in row and column offsets to the rows and columns,
+        //  respectively.
+        //  2) Add in the bias term.
+        fbgemm::ReQuantizeForFloat<ReluFused>
+            outputProcObj(
+                doNothingObj,
+                input_scale_float,
+                w_scale.data(),
+                input_zero_point_int32,
+                w_zp.data(),
+                packA.getRowOffsetBuffer(),
+                col_offsets.data(),
+                bias_ptr,
+                N /* nCol */);
+
+        // Do the GEMM
+        fbgemm::fbgemmPacked(
+            /*packA=*/packA,
+            /*packB=*/*packB,
+            /*C=*/output.data_ptr<float>(),
+            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*ldc=*/N,
+            /*outProcess=*/outputProcObj,
+            /*thread_id=*/task_id,
+            /*num_threads=*/num_tasks);
+      } else if (q_scheme == c10::kPerChannelAffine) {
+        // Process the per channel quantization.
+        //
+        // After the uint8 * int8 matrix multiplication is performed, this
+        // operation does:
+        //  1) Add in row and column offsets to the rows and columns,
+        //  respectively.
+        //  2) Add in the bias term.
+        fbgemm::ReQuantizeForFloat<
+            ReluFused,
+            fbgemm::QuantizationGranularity::OUT_CHANNEL>
+            outputProcObj(
+                doNothingObj,
+                input_scale_float,
+                w_scale.data(),
+                input_zero_point_int32,
+                w_zp.data(),
+                packA.getRowOffsetBuffer(),
+                col_offsets.data(),
+                bias_ptr,
+                N /* nCol */);
+
+        // Do the GEMM
+        fbgemm::fbgemmPacked(
+            /*packA=*/packA,
+            /*packB=*/*packB,
+            /*C=*/output.data_ptr<float>(),
+            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*ldc=*/N,
+            /*outProcess=*/outputProcObj,
+            /*thread_id=*/task_id,
+            /*num_threads=*/num_tasks);
+      }
+    }
+  });
+  return output;
+}
+
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -780,14 +936,39 @@ class QLinearLeakyReluInt8 final {
   }
 };
 
+template <bool ReluFused>
+class QLinearInt8FusedQDQ final {
+ public:
+  static at::Tensor run(
+      at::Tensor input,
+      double input_scale,
+      int64_t input_zero_point,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
+    if (ReluFused) {
+      return packed_weight->apply_with_input_q_dq_qweight_dq_relu_output_fp32(
+          std::move(input), input_scale, input_zero_point);
+    } else {
+      return packed_weight->apply_with_input_q_dq_qweight_dq_output_fp32(
+          std::move(input), input_scale, input_zero_point);
+    }
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
+}
+
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_with_input_q_dq_qweight_dq_relu_output_fp32"), TORCH_FN(QLinearInt8FusedQDQ<true>::run));
 }
 
 } // namespace
