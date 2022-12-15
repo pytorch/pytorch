@@ -46,7 +46,10 @@ class ReplicateStateDictTest(MultiProcessTestCase):
             self.assertEqual(v1, v2)
 
     def test_replicate_single_module_save_load(self):
-        pass
+        """
+        Tests that replicate() on a single module state_dict
+        matches local module state_dict.
+        """
         model = Net()
         replicate_model = replicate(deepcopy(model))
         local_sd = model.state_dict()
@@ -54,6 +57,10 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         self._check_state_dict_parity(local_sd, ddp_sd)
 
     def test_replicate_non_root_multiple_save_load(self):
+        """
+        Tests tha replicate() on multiple submodules matches
+        local module state_dict.
+        """
         model = Net()
         replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
