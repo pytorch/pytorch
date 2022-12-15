@@ -56,8 +56,8 @@ class ConstantVariable(VariableTracker):
         try:
             options = VariableTracker.propagate([self])
             return [ConstantVariable(x, **options) for x in self.as_python_constant()]
-        except TypeError:
-            raise NotImplementedError()
+        except TypeError as e:
+            raise NotImplementedError from e
 
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)

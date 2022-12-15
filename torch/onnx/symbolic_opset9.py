@@ -2728,11 +2728,29 @@ def native_layer_norm(
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
+
+    # Cast it to eps dtype to avoid precision loss
+    is_type_half = (
+        _type_utils.JitScalarType.from_value(numerator)
+        == _type_utils.JitScalarType.HALF
+    )
+    if is_type_half:
+        eps_dtype = _type_utils.JitScalarType.from_value(eps_cst)
+        numerator = g.op(
+            "Cast", numerator, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
+        )
+
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    denominator = sqrt(g, add(g, variance, eps_cst))
-
+    denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
+
+    # Cast back to input type as eps related ops are all done
+    if is_type_half:
+        input_dtype = _type_utils.JitScalarType.from_value(input)
+        normalized = g.op(
+            "Cast", normalized, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
@@ -2740,7 +2758,16 @@ def native_layer_norm(
         normalized = add(g, normalized, bias)
 
     # rdenominator := 1 / sqrt(variance + eps)
-    rdenominator = reciprocal(g, denominator)
+    # According to aten::native_layer_norm, rdenominator should have the same dtype as input,
+    # mean and normalized, so we need to Cast it back
+    if is_type_half:
+        denominator = g.op(
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
+        rdenominator = g.op("Reciprocal", denominator)
+    else:
+        rdenominator = reciprocal(g, denominator)
+
     return normalized, mean, rdenominator
 
 
