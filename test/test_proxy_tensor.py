@@ -10,13 +10,13 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, fx_placeholder_vals
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
 from torch import nn
 import re
@@ -368,6 +368,12 @@ def forward(self, x_1):
         for f in [f_grad, f_backward]:
             self._test(f, [torch.randn(3, requires_grad=True)])
 
+    def test_pickle_issue89626(self):
+        import pickle
+        x = torch.randn(2)
+        make_fx(lambda x: x * 2, tracing_mode=self.tracing_mode)(x)
+        pickle.dumps(x)
+
     def test_inplace_metadata(self):
         def f(x):
             x = x.clone()
@@ -423,12 +429,15 @@ def forward(self, x_1):
         def f(a, b):
             return torch.allclose(a, b)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)(
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)(
                 torch.zeros(3), torch.zeros(3)
             )
-        )
+
+        if self.tracing_mode == "symbolic":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_proxy_tensor_mut(self):
         def f():
@@ -454,7 +463,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2])
             blowup = val.repeat(1000)
-            return blowup.sum().item()
+            return bool(blowup.sum().item() == 2)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -465,7 +474,7 @@ def forward(self, x_1):
         def f():
             val = torch.tensor([2.0])
             val.normal_()
-            return val.item()
+            return bool(val.item() == 2.1)
 
         self.assertRaisesRegex(
             RuntimeError, "data-dependent",
@@ -656,19 +665,6 @@ def forward(self, x_1):
         for a, b in zip(out_graph.nodes, out_graph2.nodes):
             self.assertEqual(a.op, b.op)
 
-    def test_has_proxy(self):
-        foo = torch.randn(5)
-
-        def f(x):
-            self.assertFalse(has_proxy(foo))
-            self.assertTrue(has_proxy(x))
-            y = x.cos()
-            self.assertTrue(has_proxy(y))
-            return y
-
-        self.assertFalse(has_proxy(torch.randn(5)))
-        make_fx(f)(torch.randn(5))
-
     def test_strides(self):
         def f(x):
             self.assertTrue(x.is_contiguous())
@@ -725,7 +721,7 @@ class TestFakeProxyTensor(TestCase):
 
         def f():
             return torch.ops.aten.t.default(x)
-        self.assertRaisesRegex(Exception, "non-Fake Tensor", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(Exception, "Please convert all Tensors", lambda: make_fx(f, tracing_mode="fake")())
 
         class A(torch.Tensor):
             pass
@@ -798,6 +794,18 @@ class TestSymbolicTracing(TestCase):
         return traced_f
 
 
+    def test_resize_from_zero(self):
+        def f(x, y):
+            x.resize_(y.size(0))
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
+    return None""")
+
+
     def test_unary(self):
         def f(x):
             assert x.shape[0] < 20
@@ -834,6 +842,18 @@ def forward(self, a_1):
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
+
+    def test_item(self):
+        def f(a):
+            r = a.item()
+            return r * a
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1)
+    mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
+    return mul""")
 
 
     def test_neg_shape(self):
@@ -1123,7 +1143,6 @@ symbolic_tensor_failures = {
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
@@ -1266,7 +1285,6 @@ symbolic_tensor_failures = {
     xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('outer', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition

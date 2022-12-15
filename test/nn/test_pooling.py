@@ -1,5 +1,6 @@
 # Owner(s): ["module: nn"]
 from functools import reduce
+from functools import partial
 from itertools import repeat
 import unittest
 import subprocess
@@ -11,6 +12,7 @@ import math
 
 from torch._six import inf, nan
 import torch
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, set_default_dtype, \
     instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -370,6 +372,41 @@ class TestPoolingNNDeviceType(NNTestCase):
         inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
         _test_module_empty_input(self, mod, inp, check_size=False)
+
+    # The tests are used to verify the functions raises errors for backward propagation
+    # when output_size = 0, in adaptive_{avg, max}_pool and its variants.
+    # These tests are explicitly written because ErrorInputs does not support backward calls
+    # Issue: https://github.com/pytorch/pytorch/issues/78868
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_adaptive_pooling_empty_output_size(self, dtype, device):
+        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        input = make_arg((1, 64, 10, 9))
+        output_size = 0
+
+        fns = (
+            nn.functional.adaptive_avg_pool2d,
+            nn.functional.adaptive_avg_pool3d,
+            nn.functional.adaptive_max_pool2d,
+            nn.functional.adaptive_max_pool3d,
+        )
+
+        for fn in fns:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input, output_size).sum().backward()
+
+        fns2 = (
+            nn.functional.adaptive_avg_pool1d,
+            nn.functional.adaptive_max_pool1d,
+        )
+        input2 = make_arg((1, 64))
+
+        for fn in fns2:
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                fn(input2, output_size).sum().backward()
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
