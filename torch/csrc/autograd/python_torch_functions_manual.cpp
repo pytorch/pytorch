@@ -1,6 +1,9 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -405,12 +408,30 @@ static PyObject* THPVariable__to_functional_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+      {"_to_functional_tensor(Tensor t, *, bool mirror_autograd_meta=False)"},
+      /*traceable=*/true);
 
-  ParsedArgs<1> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
+  auto mirror_autograd_meta = r.toBool(1);
   auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  if (mirror_autograd_meta) {
+    // Here, we unsafely set the grad function on the wrapper to be the same as
+    // the inner. We expect this grad_fn to NEVER be used. It's needed so that
+    // .is_leaf metadata is accurate on the wrapper
+    auto inner_autograd_meta = impl::get_autograd_meta(self_);
+    if (inner_autograd_meta) {
+      wrapped.set_requires_grad(self_.requires_grad());
+      if (wrapped.requires_grad()) {
+        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+            new torch::autograd::Error(
+                "Cannot backprop through mirrored meta, file a bug in PyTorch"),
+            torch::autograd::deleteNode);
+        torch::autograd::set_history(wrapped, new_grad_fn);
+      }
+    }
+  }
   return wrap(wrapped);
   END_HANDLE_TH_ERRORS
 }
@@ -692,7 +713,7 @@ static PyObject* THPVariable_numel(
   }
 
   if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
+    return py::cast(r.tensor(0).sym_numel()).release().ptr();
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

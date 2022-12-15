@@ -1321,7 +1321,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -std=c++14)
+    list(APPEND HIP_CXX_FLAGS -std=c++17)
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1585,6 +1585,9 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
+    if(NOT MSVC)
+      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
+    endif()
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi EXCLUDE_FROM_ALL)
 
@@ -1687,7 +1690,7 @@ if(NOT INTERN_BUILD_MOBILE)
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+    set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
   endif()
 
   # use cub in a safe manner, see:
@@ -1952,6 +1955,7 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        ${CUDA_SOURCE_DIR}/lib
         ${CUDA_SOURCE_DIR}/lib64
         NO_DEFAULT_PATH)
 
@@ -2014,6 +2018,11 @@ if(USE_KINETO)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
   if(LIBKINETO_NOCUPTI)
     string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
+  endif()
+  if(LIBKINETO_NOROCTRACER)
+    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
+  endif()
+  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER)
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")

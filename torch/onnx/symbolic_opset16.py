@@ -15,7 +15,7 @@ Updated operators:
     PRelu
     RoiAlign
     Scan
-    ScatterElemenets
+    ScatterElements
     ScatterND
     Where
     GreaterOrEqual
@@ -27,6 +27,7 @@ Updated operators:
 
 import functools
 
+import torch
 from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
@@ -75,11 +76,20 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     src_sizes = symbolic_helper._get_tensor_sizes(src)
     index_sizes = symbolic_helper._get_tensor_sizes(index)
 
-    if src_sizes != index_sizes:
+    if len(src_sizes) != len(index_sizes):
         return symbolic_helper._unimplemented(
             "scatter_add",
             f"`index` ({index_sizes}) should have the same dimensionality as `src` ({src_sizes})",
         )
+
+    # PyTorch only allows index shape <= src shape, so we can only consider
+    # taking index as subset size to src, like PyTorch does. When sizes for src
+    # and index are not matched or there are dynamic axes, we take index shape to
+    # slice src to accommodate.
+    if src_sizes != index_sizes or None in index_sizes:
+        adjusted_shape = g.op("Shape", index)
+        starts = g.op("Constant", value_t=torch.tensor([0] * len(index_sizes)))
+        src = g.op("Slice", src, starts, adjusted_shape)
 
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):

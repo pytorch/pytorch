@@ -20,6 +20,7 @@ if hasattr(torch._C, "_nvfuser"):
         torch.bfloat16: DataType.BFloat16,
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
+        torch.uint8: DataType.Int32,
         torch.bool: DataType.Bool,
         # Python scalars
         complex: DataType.ComplexDouble,
@@ -149,19 +150,30 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             raise RuntimeError(msg)
 
 
-def check_significant_strides(
-    a: TensorLikeType, b: TensorLikeType
+def _check_strides_helper(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
 ) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
     # and for tensors with more than one element
-    if (a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
+    if (not only_cuda or a.device.type == "cuda" or b.device.type == "cuda") and a.numel() > 0:
         for idx in range(a.ndim):
-            if a.stride()[idx] != b.stride()[idx] and a.shape[idx] > 1:
+            check = not significant_only or a.shape[idx] > 1
+            if a.stride()[idx] != b.stride()[idx] and check:
                 return False, idx
 
     return True, None
+
+def check_significant_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
+
+def check_all_strides(
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
+) -> Tuple[bool, Optional[int]]:
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
@@ -290,6 +302,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     A tensor is non-overlapping and dense when there exists a permutation of
     its dimensions that is contiguous.
     """
+
+    if a.is_sparse:
+        return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
     if is_contiguous(a) or is_channels_last_contiguous(a):
@@ -470,8 +485,9 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing dims to be
-# specified using negative indices. For scalar tensors with rank 0, then idx
-# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
+# specified using negative indices. If `wrap_scalar` is true then scalar
+# tensors of rank 0 will allow dimensions in the range [-1, 0]. Otherwise,
+# idx should be in the range [-rank, rank-1].
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"
@@ -504,20 +520,20 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
     pass
 
 
 @overload
-def canonicalize_dims(rank: int, indices: int) -> int:
+def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
 
-def canonicalize_dims(rank, indices):
+def canonicalize_dims(rank, indices, wrap_scalar=True):
     if isinstance(indices, Dim):
-        return canonicalize_dim(rank, indices)
+        return canonicalize_dim(rank, indices, wrap_scalar)
 
-    return tuple(canonicalize_dim(rank, x) for x in indices)
+    return tuple(canonicalize_dim(rank, x, wrap_scalar) for x in indices)
 
 
 def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
@@ -717,12 +733,14 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         check(
             newsize != 0,
-            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-            f"unspecified dimension size -1 can be any value and is ambiguous",
+            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                     f"unspecified dimension size -1 can be any value and is ambiguous"),
         )
-        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 
@@ -837,10 +855,11 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     if typ is bool:
         return torch.bool
-    if typ is int:
+    if typ in [int, torch.SymInt]:
         return torch.long
-    if typ is float:
+    if typ in [float, torch.SymFloat]:
         return torch.get_default_dtype()
+    # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
@@ -1337,15 +1356,17 @@ def reduction_dtypes(
         result_dtype = torch.bool
     return computation_dtype, result_dtype
 
-
+# This function's logic is borrowed from the following functions defined in C++:
+# batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
 ) -> Tuple[int, ...]:
     """
-    Returns the strides of a contriguous tensor if row_major
+    Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
     This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
     """
+    # contiguous_strides from c10/util/strides.h
     validate_shape(shape)
     if not shape:
         return ()
@@ -1359,6 +1380,7 @@ def make_contiguous_strides_for(
 
     result = tuple(reversed(strides))
 
+    # batched_matrix_contiguous_strides from aten/src/ATen/native/LinearAlgebraUtils.h
     if row_major:
         return result
     else:
@@ -1461,6 +1483,44 @@ def set_correction(
     return correction
 
 
+def compute_required_storage_length(
+    shape: ShapeType, strides: StrideType, storage_offset: int
+) -> int:
+    """Computes the minimum storage size to hold the given tensor geometry.
+
+    Example
+    =======
+
+    This is the size of a newly allocated tensor's storage, in units of elements
+
+    >>> t = torch.empty((10, 20))
+    >>> compute_required_storage_length(t.shape, t.stride(), t.storage_offset())
+    200
+
+    >>> t2 = torch.empty_strided((1, 2, 3), (5, 7, 11))
+    >>> size = compute_required_storage_length(t2.shape, t2.stride(), t2.storage_offset())
+    >>> size == t.storage().size()
+    True
+
+    A valid tensor may have a larger storage size, but never smaller
+
+    >>> slice = torch.empty(100)[20:40]
+    >>> slice.storage().size()
+    100
+
+    >>> compute_required_storage_length(slice.shape, slice.stride(), slice.storage_offset())
+    40
+
+    """
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape, 1) == 0:
+        return 0
+
+    max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
+    # +1 to account for the first element which offsets are taken from
+    return 1 + storage_offset + max_offset
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -1468,17 +1528,8 @@ def check_in_bounds_for_storage(
     Determines if the given shape, strides, and offset are valid for the given storage.
     """
 
-    # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
-        return
-
-    length = a.size() - storage_offset
-    max_offset = 0
-    for x, y in zip(shape, strides):
-        max_offset = max_offset + (x - 1) * y
-
-    if max_offset >= length:
-        required_length = max_offset + storage_offset
+    required_length = compute_required_storage_length(shape, strides, storage_offset)
+    if a.size() < required_length:
         msg = (
             "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
             "which requires a storage of size {4}".format(
@@ -1574,6 +1625,27 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
+
+
+def get_aten_op(fn: Callable, name: str):
+    """
+    Given the __module__ of reference and its name, it returns
+    (our best guess of) the ATen name of the associated operation
+
+    Note: In ATen, the __name__ of a function within a module often
+    starts by the module name. E.g. linalg_eigh, or special_zeta
+    """
+    module = fn.__module__
+    prefix = "torch._refs"
+    assert(module.startswith(prefix))
+    module = module[len(prefix):]
+    # We want to go from .special / .nn.functional
+    # to special and special_ / nn_functional_
+    if module:
+        module = module[1:]
+        module = module.replace(".", "_")
+        module = module + "_"
+    return getattr(torch.ops.aten, f"{module}{name}")
 
 
 def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:

@@ -78,6 +78,16 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            To forward remote desktop on your local machine ssh as follows:
+              ssh -L 3389:localhost:3389 %%username%%@%%hostname%%
+            And then change password using `passwd` command.
+
+            To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
+            Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
+              call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
 
       - name: Start monitoring script
         id: monitor-script
@@ -124,7 +134,8 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
-          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
+          PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 

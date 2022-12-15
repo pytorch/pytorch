@@ -47,7 +47,11 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
         for qconfig, node in configs:
             qconfig_dict = {"": qconfig}
-            m = prepare_fx(model, qconfig_dict)
+            m = prepare_fx(
+                model,
+                qconfig_dict,
+                example_inputs=torch.randint(low=0, high=10, size=(20,)),
+            )
             m = convert_fx(m)
             self._compare_script_and_mobile(m, input=indices)
 
@@ -65,7 +69,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
 
         m = M().eval()
         qconfig_dict = {"": default_qconfig, "module_name": [("conv1", None)]}
-        m = prepare_fx(m, qconfig_dict)
+        m = prepare_fx(m, qconfig_dict, example_inputs=torch.randn(1, 1, 1, 1))
         data = torch.randn(1, 1, 1, 1)
         m = convert_fx(m)
         # first conv is quantized, second conv is not quantized
@@ -84,7 +88,11 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
                 "": torch.ao.quantization.get_default_qconfig("qnnpack"),
                 **config,
             }
-            model = prepare_fx(model, qconfig_dict)
+            model = prepare_fx(
+                model,
+                qconfig_dict,
+                example_inputs=torch.randn(5, 5),
+            )
             quant = convert_fx(model)
 
             x = torch.randn(5, 5)

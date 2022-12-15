@@ -31,6 +31,11 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       PY_VERS: ${{ matrix.py_vers }}
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
@@ -38,11 +43,6 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: "pytorch-triton-${{ matrix.py_vers }}"
+          name: "pytorch-triton-wheel-${{ matrix.py_vers }}"
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
@@ -110,27 +110,27 @@ jobs:
       - name: Download Build Artifacts (3.7)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.7"
+          name: "pytorch-triton-wheel-3.7"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.8)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.8"
+          name: "pytorch-triton-wheel-3.8"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.9)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.9"
+          name: "pytorch-triton-wheel-3.9"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.10)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.10"
+          name: "pytorch-triton-wheel-3.10"
           path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.11)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-3.11"
+          name: "pytorch-triton-wheel-3.11"
           path: "${{ runner.temp }}/artifacts/"
       - name: Upload binaries
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/master' || github.event.ref == 'refs/heads/main') }}
@@ -147,3 +147,71 @@ jobs:
             for pkg in "${PKG_DIR}/"*.whl; do
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
+  build-conda:
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.7", "3.8", "3.9", "3.10" ]
+    timeout-minutes: 40
+    env:
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      PY_VERS: ${{ matrix.py_vers }}
+      ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+      - name: Build Triton conda package
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            -e ANACONDA_API_TOKEN \
+            "${DOCKER_IMAGE}" \
+          )
+
+          docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
+          docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}"
+
+      - name: Upload artifacts to Anaconda
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/master' || github.event.ref == 'refs/heads/main') }}
+        run: |
+          container_name=$(docker container ps --format '{{.ID}}')
+          docker exec -t "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
+
+      - name: Chown artifacts
+        run: |
+          container_name=$(docker container ps --format '{{.ID}}')
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: "pytorch-triton-conda-${{ matrix.py_vers }}"
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

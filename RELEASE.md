@@ -21,6 +21,7 @@
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
     - [Triage](#triage)
+    - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
@@ -234,6 +235,18 @@ Patch releases should be considered if a regression meets the following criteria
 3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions if found to be within the [Patch Release Criteria](#patch-release-criteria)
     * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 
+### Issue Tracker for Patch releases
+
+For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority Github issue or a CI failure from previous RC. An example of this would look like:
+* https://github.com/pytorch/pytorch/issues/51886
+
+Only following issues are accepted:
+1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
+2. Critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
+3. Fixes to new features being introduced in this release
+4. Documentation improvements
+5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
+
 ### Building a release schedule / cherry picking
 
 > Main POC: Patch Release Managers
@@ -281,7 +294,7 @@ need to support these particular versions of software.
 
 In the event a submodule cannot be fast forwarded and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository under the pytorch Github organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* (preferred) Fork the said repository under the pytorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us
 
 Editing submodule remotes can be easily done with: (running from the root of the git repository)
