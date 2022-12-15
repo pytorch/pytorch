@@ -34,13 +34,7 @@ class LoadingNvfuserLibrary {
     if (const char* path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
       library_name = path;
     }
-#if defined(_WIN32)
-    library_name += "libnvfuser_codegen.dll";
-#elif defined(__APPLE__)
-    library_name += "libnvfuser_codegen.dylib";
-#else
     library_name += "libnvfuser_codegen.so";
-#endif
     try {
       nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
     } catch (const c10::DynamicLibraryError& e) {
